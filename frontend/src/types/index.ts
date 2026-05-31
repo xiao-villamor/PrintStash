@@ -1,6 +1,8 @@
 export type {
   MetadataRead,
   FileRead,
+  FileRevisionStatus,
+  FileRevisionUpdate,
   ModelRead,
   ModelListItem,
   ModelUpdate,

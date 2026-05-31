@@ -15,6 +15,7 @@ for real home use.
 
 - Publish clearer install docs and contribution paths
 - Collect real-world feedback from Docker/NAS/homelab installs
+- Ship practical G-code revisions: outcome labels, notes, recommended version, and metadata compare
 - Add parser fixtures from more slicers and printer profiles
 - Improve first-run setup and error messages where new users get stuck
 - Tag the first release once install/upgrade notes are repeatable
@@ -43,9 +44,9 @@ Goal: make backup, restore, upgrades, and monitoring less scary.
 
 Goal: make the vault better as a daily-use 3D print library.
 
-- Better bulk editing for tags/categories
+- Better bulk editing for tags/categories and revision labels
 - Saved filters or views for common searches
-- Cleaner model/version comparison
+- Cleaner model/version comparison beyond the initial G-code metadata compare
 - More useful model detail pages for repeated reprints
 - Import/export paths for people migrating from folders or other tools
 

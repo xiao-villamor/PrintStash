@@ -26,6 +26,13 @@ class FileType(str, Enum):
     OBJ = "obj"
 
 
+class FileRevisionStatus(str, Enum):
+    KNOWN_GOOD = "known_good"
+    NEEDS_TEST = "needs_test"
+    FAILED = "failed"
+    ARCHIVED = "archived"
+
+
 # Mapping from filesystem suffix to ``FileType``. Used by ingest routers.
 SUFFIX_TO_FILE_TYPE: dict[str, FileType] = {
     ".stl": FileType.STL,
@@ -112,6 +119,9 @@ class File(SQLModel, table=True):
     version: int = Field(default=1)
     size_bytes: int
     sha256: str = Field(index=True, max_length=64)
+    revision_status: Optional[FileRevisionStatus] = Field(default=None, index=True)
+    revision_notes: Optional[str] = None
+    is_recommended: bool = Field(default=False, index=True)
 
     uploaded_at: datetime = Field(default_factory=utcnow)
     deleted_at: Optional[datetime] = Field(default=None, index=True)

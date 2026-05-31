@@ -45,6 +45,7 @@ What works today:
 - OrcaSlicer post-processing hook with no Python dependencies
 - Metadata extraction from G-code, including slicer settings and filament info
 - Content-hash deduplication and model version history
+- G-code revision notes, outcome labels, recommended version, and metadata compare
 - Categories, tags, search, thumbnails, and an in-browser STL viewer
 - First-run setup wizard, API key auth for scripts, JWT login for the UI
 - Moonraker/Klipper printer integration with live status and send-to-print
@@ -121,6 +122,7 @@ Common endpoints:
 | `GET` | `/api/v1/models` | List and search models |
 | `GET` | `/api/v1/models/{id}` | Read one model with files and metadata |
 | `PATCH` | `/api/v1/models/{id}` | Update name, description, category, tags |
+| `PATCH` | `/api/v1/models/{id}/files/{file_id}/revision` | Update G-code revision status, notes, recommended marker |
 | `GET` | `/api/v1/files/{id}/raw` | Download a stored file |
 | `GET` | `/api/v1/printers` | List registered printers |
 | `POST` | `/api/v1/printers/{id}/send` | Send vault G-code to a printer |
@@ -219,7 +221,7 @@ The repository keeps most decisions documented in [CONTEXT.md](./CONTEXT.md) and
 
 The living roadmap is in [docs/roadmap.md](./docs/roadmap.md). The short version:
 
-- Finish provider maturity, especially Bambu LAN upload/send support
+- Polish G-code revision history and provider maturity, especially Bambu LAN upload/send support
 - Harden backup/restore and operational monitoring
 - Improve printer-farm workflows and scheduling
 - Keep cloud-style features optional, not required for home installs

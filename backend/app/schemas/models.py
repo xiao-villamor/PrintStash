@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 
-from app.db.models import FileType
+from app.db.models import FileRevisionStatus, FileType
 
 
 class MetadataRead(BaseModel):
@@ -38,8 +38,17 @@ class FileRead(BaseModel):
     version: int
     size_bytes: int
     sha256: str
+    revision_status: Optional[FileRevisionStatus] = None
+    revision_notes: Optional[str] = None
+    is_recommended: bool = False
     uploaded_at: datetime
     metadata: Optional[MetadataRead] = None
+
+
+class FileRevisionUpdate(BaseModel):
+    revision_status: Optional[FileRevisionStatus] = None
+    revision_notes: Optional[str] = None
+    is_recommended: Optional[bool] = None
 
 
 class ModelRead(BaseModel):

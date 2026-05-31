@@ -29,6 +29,7 @@ Stage 4 is now active. See AGENTS.md roadmap and `docs/stage4.md` for the execut
 - **Frontend types split** — domain files under `types/`; `index.ts` is a barrel re-export.
 - **First-run setup expanded** — setup now captures local vs S3/R2 storage plus backup retention/off-site backup settings.
 - **External print sentinel rows are lazy** — `__external__` model/file rows are created only when the printer hub captures a non-vault print job.
+- **G-code revisions** — `File` rows for G-code can carry an outcome label, notes, and a per-model recommended marker. Comparison remains metadata-first; no raw G-code diffs or delta storage in 1.0.
 
 ---
 
@@ -139,6 +140,14 @@ model/file rows are created lazily at that moment, not during first startup.
 | `/api/v1/printers/{id}/status` | GET | — | One-shot snapshot |
 | `/api/v1/printers/{id}/jobs` | GET | — | Print history |
 | `/api/v1/printers/{id}/ws` | WS | — | Live status stream |
+| `/api/v1/models/{model_id}/files/{file_id}/revision` | PATCH | yes | Update G-code revision status, notes, recommended marker |
+
+### G-code revision fields
+
+On `files`:
+- `revision_status`: nullable (`known_good`, `needs_test`, `failed`, `archived`)
+- `revision_notes`: nullable text
+- `is_recommended`: boolean; only one live G-code file per model should be marked recommended
 
 ---
 

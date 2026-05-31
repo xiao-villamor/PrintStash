@@ -5,6 +5,7 @@ import {
   sendJson,
 } from "@/lib/api/request";
 import {
+  FileRevisionUpdate,
   IngestJobStatus,
   IngestResponse,
   ListModelsParams,
@@ -43,6 +44,20 @@ export function updateModel(
 
 export function deleteModel(id: number, apiKey?: string): Promise<void> {
   return sendAction(`/api/v1/models/${id}`, "DELETE", apiKey);
+}
+
+export function updateFileRevision(
+  modelId: number,
+  fileId: number,
+  payload: FileRevisionUpdate,
+  apiKey?: string,
+): Promise<ModelRead> {
+  return sendJson<ModelRead>(
+    `/api/v1/models/${modelId}/files/${fileId}/revision`,
+    "PATCH",
+    payload,
+    apiKey,
+  );
 }
 
 export function ingestOrca(

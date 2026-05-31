@@ -12,10 +12,11 @@ from sqlmodel import Session, delete, select
 
 from app.core.security import require_auth
 from app.core.time import utcnow
-from app.db.models import Category, File, Metadata, Model, ModelTagLink, Tag
+from app.db.models import Category, File, FileType, Metadata, Model, ModelTagLink, Tag
 from app.db.session import get_session
 from app.schemas.models import (
     FileRead,
+    FileRevisionUpdate,
     MetadataRead,
     ModelListItem,
     ModelRead,
@@ -141,6 +142,7 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
         select(File, Metadata)
         .where(File.model_id == model_id)
         .outerjoin(Metadata, Metadata.file_id == File.id)
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
     ).all()
     file_reads = [
         FileRead(
@@ -151,6 +153,9 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
             version=f.version,
             size_bytes=f.size_bytes,
             sha256=f.sha256,
+            revision_status=f.revision_status,
+            revision_notes=f.revision_notes,
+            is_recommended=f.is_recommended,
             uploaded_at=f.uploaded_at,
             metadata=MetadataRead(**md.model_dump()) if md else None,
         )
@@ -216,6 +221,62 @@ def update_model(
                 session.add(ModelTagLink(model_id=model_id, tag_id=t.id))
 
     m.updated_at = utcnow()
+    session.add(m)
+    session.commit()
+    return _build_model_read(session, model_id)
+
+
+@router.patch(
+    "/{model_id}/files/{file_id}/revision",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Update G-code revision status, notes, or recommended marker",
+    description=(
+        "Updates 1.0 G-code revision fields for a file under a model. Only G-code "
+        "files are supported. Marking a file recommended clears the marker from "
+        "other G-code files on the same model."
+    ),
+)
+def update_file_revision(
+    model_id: int,
+    file_id: int,
+    payload: FileRevisionUpdate,
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    m = _live_model(session, model_id)
+    file_row = session.get(File, file_id)
+    if (
+        file_row is None
+        or file_row.model_id != model_id
+        or file_row.deleted_at is not None
+    ):
+        raise HTTPException(status_code=404, detail="file_not_found")
+    if file_row.file_type != FileType.GCODE:
+        raise HTTPException(status_code=400, detail="revision_not_supported")
+
+    fields = payload.model_fields_set
+    if "revision_status" in fields:
+        file_row.revision_status = payload.revision_status
+    if "revision_notes" in fields:
+        notes = payload.revision_notes
+        file_row.revision_notes = notes.strip() if notes and notes.strip() else None
+    if "is_recommended" in fields:
+        file_row.is_recommended = bool(payload.is_recommended)
+        if file_row.is_recommended:
+            other_gcode = session.exec(
+                select(File).where(
+                    File.model_id == model_id,
+                    File.id != file_id,
+                    File.file_type == FileType.GCODE,
+                    File.deleted_at.is_(None),  # type: ignore[union-attr]
+                )
+            ).all()
+            for other in other_gcode:
+                other.is_recommended = False
+                session.add(other)
+
+    m.updated_at = utcnow()
+    session.add(file_row)
     session.add(m)
     session.commit()
     return _build_model_read(session, model_id)

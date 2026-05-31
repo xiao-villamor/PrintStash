@@ -18,6 +18,12 @@ export interface MetadataRead {
   triangle_count: number | null;
 }
 
+export type FileRevisionStatus =
+  | "known_good"
+  | "needs_test"
+  | "failed"
+  | "archived";
+
 export interface FileRead {
   id: number;
   model_id: number;
@@ -26,8 +32,17 @@ export interface FileRead {
   version: number;
   size_bytes: number;
   sha256: string;
+  revision_status: FileRevisionStatus | null;
+  revision_notes: string | null;
+  is_recommended: boolean;
   uploaded_at: string;
   metadata: MetadataRead | null;
+}
+
+export interface FileRevisionUpdate {
+  revision_status?: FileRevisionStatus | null;
+  revision_notes?: string | null;
+  is_recommended?: boolean;
 }
 
 export interface ModelRead {
