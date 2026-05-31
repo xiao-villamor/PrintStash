@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import File, FileType, Model
+from app.db.models import File, FileType, Model, Printer, PrinterFile
 
 
 def _model(db_session: Session, *, slug: str = "bracket") -> Model:
@@ -64,6 +64,40 @@ def test_update_revision_status_notes_and_recommended(
     assert revision["is_recommended"] is True
 
 
+def test_model_printer_files_lists_printers_for_gcode(
+    client: TestClient, db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
+    db_session.add(printer)
+    db_session.commit()
+    db_session.refresh(printer)
+    db_session.add(
+        PrinterFile(
+            printer_id=printer.id,
+            file_id=file_row.id,
+            remote_filename="file-1.gcode",
+            matched_by="upload_history",
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/api/v1/models/{model.id}/printer-files")
+    assert resp.status_code == 200
+    assert resp.json() == [
+        {
+            "file_id": file_row.id,
+            "printer_id": printer.id,
+            "printer_name": "Ender",
+            "remote_filename": "file-1.gcode",
+            "matched_by": "upload_history",
+            "last_seen_at": resp.json()[0]["last_seen_at"],
+            "missing_since": None,
+        }
+    ]
+
+
 def test_update_revision_can_clear_status_notes_and_recommended(
     client: TestClient, auth_headers: dict[str, str], db_session: Session
 ) -> None:
@@ -92,9 +126,7 @@ def test_update_revision_can_clear_status_notes_and_recommended(
     assert revision["is_recommended"] is False
 
 
-def test_update_revision_requires_auth(
-    client: TestClient, db_session: Session
-) -> None:
+def test_update_revision_requires_auth(client: TestClient, db_session: Session) -> None:
     model = _model(db_session)
     file_row = _file(db_session, model)
 

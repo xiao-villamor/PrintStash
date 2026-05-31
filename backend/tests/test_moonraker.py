@@ -39,6 +39,19 @@ class TestMoonrakerClientHTTP:
             with pytest.raises(MoonrakerError, match="moonraker 500"):
                 asyncio.run(client.info())
 
+    def test_info_rejects_redirect_status(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 302
+        mock_resp.text = "Found"
+
+        with patch("httpx.AsyncClient") as MockClient:
+            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
+                return_value=mock_resp
+            )
+            with pytest.raises(MoonrakerError, match="moonraker 302"):
+                asyncio.run(client.info())
+
     def test_query_status_builds_correct_params(self):
         client = MoonrakerClient("http://printer.local:7125")
         mock_resp = MagicMock()
@@ -57,6 +70,23 @@ class TestMoonrakerClientHTTP:
             assert "/printer/objects/query?" in url
             assert "print_stats=" in url
             assert result == {"result": {"status": {}}}
+
+    def test_list_gcode_files_uses_gcodes_root(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": [{"path": "part.gcode", "size": 100}]}
+
+        with patch("httpx.AsyncClient") as MockClient:
+            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
+                return_value=mock_resp
+            )
+            result = asyncio.run(client.list_gcode_files())
+            url = MockClient.return_value.__aenter__.return_value.request.call_args[0][
+                1
+            ]
+            assert url.endswith("/server/files/list?root=gcodes")
+            assert result["result"][0]["path"] == "part.gcode"
 
     def test_upload_gcode(self, tmp_path: Path):
         gcode_path = tmp_path / "test.gcode"

@@ -9,6 +9,7 @@ import {
   FileRead,
   FileRevisionStatus,
   ModelRead,
+  ModelPrinterFileRead,
   PrinterRead,
   TagRead,
 } from "@/types";
@@ -21,6 +22,7 @@ import {
   createTag,
   deleteModel,
   getAssetUrl,
+  getModelPrinterFiles,
   listCategories,
   listPrinters,
   listTags,
@@ -128,7 +130,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [revisionRecommended, setRevisionRecommended] = useState(false);
   const [compareLeftId, setCompareLeftId] = useState<number>(initialGcodeFiles.at(-1)?.id ?? 0);
   const [compareRightId, setCompareRightId] = useState<number>(initialGcodeFiles.at(-2)?.id ?? initialGcodeFiles.at(-1)?.id ?? 0);
+  const [printerFiles, setPrinterFiles] = useState<ModelPrinterFileRead[]>([]);
   const viewerControls = useRef<STLViewerControls | null>(null);
+
+  useEffect(() => {
+    getModelPrinterFiles(model.id).then(setPrinterFiles).catch(() => {});
+  }, [model.id]);
 
   async function doDelete() {
     if (!confirm("Delete this model? This cannot be undone.")) return;
@@ -244,6 +251,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const compareLeft = gcodeFiles.find((f) => f.id === compareLeftId) ?? gcodeFiles[gcodeFiles.length - 1] ?? null;
   const compareRight = gcodeFiles.find((f) => f.id === compareRightId) ?? gcodeFiles[gcodeFiles.length - 2] ?? null;
   const thumbUrl = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
+  const printerFilesByFileId = useMemo(() => {
+    const grouped = new Map<number, ModelPrinterFileRead[]>();
+    for (const row of printerFiles) {
+      if (row.missing_since) continue;
+      grouped.set(row.file_id, [...(grouped.get(row.file_id) ?? []), row]);
+    }
+    return grouped;
+  }, [printerFiles]);
 
   function startRevisionEdit(file: FileRead) {
     if (!auth.isAuthenticated) {
@@ -622,6 +637,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 {gcodeFiles.map((f) => {
                   const isEditingRevision = editingRevisionId === f.id;
                   const fileMeta = f.metadata;
+                  const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
                   return (
                     <div key={f.id} className="p-3 border border-[var(--primary)]/30 bg-[var(--primary-fixed)]/15 rounded space-y-3">
                       <div className="flex items-start justify-between gap-3">
@@ -638,6 +654,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                                 <Star className="h-3 w-3 fill-current" /> Recommended
                               </span>
                             )}
+                            {uploadedTo.map((row) => (
+                              <span key={`${row.printer_id}-${row.remote_filename}`} className="inline-flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                                <Wifi className="h-3 w-3" /> {row.printer_name}
+                              </span>
+                            ))}
                           </div>
                           <p className="text-sm text-[var(--on-surface)] font-medium truncate">
                             {f.original_filename}
@@ -794,7 +815,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           {/* Klipper Sync Panel */}
           <div className="p-4 md:p-6 border-t border-[var(--outline-variant)] bg-[var(--surface-container-low)] shrink-0 space-y-3">
             {hasGcode && (
-              <SendToButtons modelId={model.id} gcodeFiles={gcodeFiles} />
+              <SendToButtons modelId={model.id} gcodeFiles={gcodeFiles} printerFiles={printerFiles} />
             )}
             {!hasGcode && (
               <div className="space-y-3">
@@ -899,9 +920,11 @@ function RevisionCompare({ left, right }: { left: FileRead; right: FileRead }) {
 function SendToButtons({
   modelId,
   gcodeFiles,
+  printerFiles,
 }: {
   modelId: number;
   gcodeFiles: Pick<FileRead, "id" | "original_filename" | "version" | "is_recommended">[];
+  printerFiles: ModelPrinterFileRead[];
 }) {
   const auth = useRequireAuth();
   const [showSend, setShowSend] = useState(false);
@@ -915,16 +938,24 @@ function SendToButtons({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!showSend) return;
     let alive = true;
     setPrintersLoading(true);
     listPrinters()
       .then((p) => {
         if (!alive) return;
         setPrinters(p);
-        if (p.length > 0) setPrinterId(p[0].id);
+        setPrinterId((current) => {
+          if (p.length === 0) return null;
+          if (current && p.some((printer) => printer.id === current)) return current;
+          return p[0].id;
+        });
       })
-      .catch((e) => alive && setError(e.message))
+      .catch((e) => {
+        if (!alive) return;
+        const message =
+          e instanceof Error ? e.message : "Failed to load printers";
+        setError(message);
+      })
       .finally(() => alive && setPrintersLoading(false));
     return () => {
       alive = false;
@@ -933,6 +964,12 @@ function SendToButtons({
 
   const selectedPrinter = printers.find((p) => p.id === printerId) ?? null;
   const online = selectedPrinter && selectedPrinter.status !== "offline" && selectedPrinter.status !== "unknown";
+  const selectedUpload = printerFiles.find(
+    (row) =>
+      row.file_id === selectedFile &&
+      row.printer_id === printerId &&
+      !row.missing_since,
+  );
 
   async function send() {
     if (!selectedFile || !printerId) return;
@@ -980,6 +1017,11 @@ function SendToButtons({
           )}
         </div>
       </div>
+      {error && !showSend && (
+        <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
+          {error}
+        </div>
+      )}
 
       {showSend ? (
         <div className="space-y-3">
@@ -1007,6 +1049,11 @@ function SendToButtons({
             <input type="checkbox" checked={startPrint} onChange={(e) => setStartPrint(e.target.checked)} className="rounded" />
             Start print immediately
           </label>
+          {selectedUpload && (
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-2 text-[11px] text-emerald-600 font-mono break-words">
+              Already on {selectedUpload.printer_name} as {selectedUpload.remote_filename}
+            </div>
+          )}
           {error && (
             <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
               {error}

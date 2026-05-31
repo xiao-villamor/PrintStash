@@ -82,6 +82,8 @@ default path; Postgres and S3 stay optional adapters for larger installs.
 - [x] Add Bambu LAN local credentials fields + additive DB migration
 - [x] Add Bambu LAN status + pause/resume/cancel support (send/upload deferred)
 - [x] Add provider-focused unit/API coverage and preserve Moonraker regressions green
+- [x] Fix Moonraker idle-state mapping to use `webhooks.state` fallback so configured printers no longer stick on `unknown` when `print_stats.state` is absent
+- [x] Add Moonraker printer file inventory tracking with persisted sync, model badges, and printer file listings
 
 ---
 

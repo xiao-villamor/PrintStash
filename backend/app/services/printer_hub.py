@@ -46,6 +46,32 @@ _STATE_MAP: Dict[str, PrinterStatus] = {
     "failed": PrinterStatus.ERROR,
 }
 
+_WEBHOOK_STATE_MAP: Dict[str, PrinterStatus] = {
+    "ready": PrinterStatus.READY,
+    "shutdown": PrinterStatus.OFFLINE,
+    "error": PrinterStatus.ERROR,
+}
+
+
+def _derive_printer_status(snapshot: Dict[str, Any]) -> tuple[str, PrinterStatus]:
+    """Derive coarse printer status from snapshot data.
+
+    Prefer `print_stats.state` because it reflects active print lifecycle.
+    Fall back to `webhooks.state` for idle/ready/offline/error states when
+    Moonraker does not populate print_stats.
+    """
+    print_state = str(snapshot.get("print_stats", {}).get("state") or "").lower()
+    if print_state:
+        return print_state, _STATE_MAP.get(print_state, PrinterStatus.UNKNOWN)
+
+    webhook_state = str(snapshot.get("webhooks", {}).get("state") or "").lower()
+    if webhook_state:
+        return webhook_state, _WEBHOOK_STATE_MAP.get(
+            webhook_state, PrinterStatus.UNKNOWN
+        )
+
+    return "", PrinterStatus.UNKNOWN
+
 
 class PrinterHub:
     def __init__(self) -> None:
@@ -164,6 +190,24 @@ class PrinterHub:
             async def on_status(status: Dict[str, Any]) -> None:
                 await self._handle_status(printer_id, status)
 
+            # Bootstrap with a one-shot status query so we can:
+            # 1) seed current state quickly on startup/reconfigure
+            # 2) mark clear offline/error if transport/auth is broken
+            try:
+                initial = await client.query_status()
+                initial_status = initial.get("result", {}).get("status", {})
+                if isinstance(initial_status, dict) and initial_status:
+                    await self._handle_status(printer_id, initial_status)
+            except Exception as exc:  # noqa: BLE001 - provider-specific failures
+                self._mark_status(printer_id, PrinterStatus.OFFLINE, error=str(exc))
+                logger.warning(
+                    "printer worker[%s] initial status query failed: %s",
+                    printer_id,
+                    exc,
+                )
+                await asyncio.sleep(5.0)
+                continue
+
             try:
                 await client.subscribe_status(on_status, stop_event=stop)
             except Exception as exc:  # noqa: BLE001 — last-ditch
@@ -188,8 +232,7 @@ class PrinterHub:
 
         # Compute coarse PrinterStatus + filename for DB writeback.
         print_stats = snap.get("print_stats", {})
-        ms_state = (print_stats.get("state") or "").lower()
-        vault_status = _STATE_MAP.get(ms_state, PrinterStatus.UNKNOWN)
+        ms_state, vault_status = _derive_printer_status(snap)
         progress = float(snap.get("virtual_sdcard", {}).get("progress") or 0.0)
         filename = print_stats.get("filename") or None
 

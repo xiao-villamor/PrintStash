@@ -7,6 +7,7 @@ import {
 import {
   Dashboard,
   PrintJobRead,
+  PrinterFileRead,
   PrinterCreate,
   PrinterRead,
   PrinterStatusResponse,
@@ -86,6 +87,22 @@ export function cancelPrinter(id: number, apiKey?: string): Promise<void> {
 
 export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
   return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`);
+}
+
+export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {
+  return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`);
+}
+
+export function syncPrinterFiles(
+  id: number,
+  apiKey?: string,
+): Promise<PrinterFileRead[]> {
+  return sendJson<PrinterFileRead[]>(
+    `/api/v1/printers/${id}/files/sync`,
+    "POST",
+    {},
+    apiKey,
+  );
 }
 
 export function listPrinterJobs(

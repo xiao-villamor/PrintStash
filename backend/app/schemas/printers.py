@@ -16,6 +16,7 @@ class PrinterCapabilities(BaseModel):
     can_cancel: bool
     can_live_status: bool
     can_upload: bool
+    can_list_files: bool = False
 
 
 class PrinterCreate(BaseModel):
@@ -92,5 +93,24 @@ class PrintJobRead(BaseModel):
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PrinterFileRead(BaseModel):
+    id: int
+    printer_id: int
+    printer_name: Optional[str] = None
+    file_id: Optional[int] = None
+    model_id: Optional[int] = None
+    model_name: Optional[str] = None
+    original_filename: Optional[str] = None
+    remote_filename: str
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = None
+    matched_by: str
+    modified_at: Optional[datetime] = None
+    last_seen_at: datetime
+    missing_since: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

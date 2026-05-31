@@ -38,6 +38,7 @@ _init_test_db()
 
 
 _TRUNCATE_TABLES_ORDER = [
+    "printer_files",
     "print_jobs",
     "printers",
     "files",

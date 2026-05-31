@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   PrintJobRead,
+  PrinterFileRead,
   PrinterRead,
   PrinterSnapshot,
   PrinterStatus,
@@ -11,19 +12,23 @@ import {
 import {
   cancelPrinter,
   getPrinter,
+  listPrinterFiles,
   listPrinterJobs,
   openPrinterWS,
   pausePrinter,
   resumePrinter,
+  syncPrinterFiles,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import {
   ArrowLeft,
+  FileText,
   Loader2,
   Pause,
   Play,
   Square,
+  RefreshCcw,
   Thermometer,
   Wifi,
   WifiOff,
@@ -46,6 +51,16 @@ function formatDuration(s?: number | null): string {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${sec}s`;
   return `${sec}s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
@@ -74,9 +89,11 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
   const [printer, setPrinter] = useState<PrinterRead | null>(null);
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
   const [jobs, setJobs] = useState<PrintJobRead[]>([]);
+  const [printerFiles, setPrinterFiles] = useState<PrinterFileRead[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
+  const [syncingFiles, setSyncingFiles] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,6 +102,14 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
       setJobs(await listPrinterJobs(printerId));
     } catch (e) {
       console.warn("Failed to load jobs:", e);
+    }
+  }
+
+  async function loadPrinterFiles() {
+    try {
+      setPrinterFiles(await listPrinterFiles(printerId));
+    } catch (e) {
+      console.warn("Failed to load printer files:", e);
     }
   }
 
@@ -129,6 +154,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
   useEffect(() => {
     loadPrinter();
     loadJobs();
+    loadPrinterFiles();
     connect();
     return () => {
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
@@ -149,6 +175,22 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
       toast.error(e);
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function syncFiles() {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    setSyncingFiles(true);
+    setError(null);
+    try {
+      setPrinterFiles(await syncPrinterFiles(printerId));
+      await loadPrinter();
+      toast.success("Printer files synced");
+    } catch (e) {
+      toast.error(e);
+      await loadPrinter();
+    } finally {
+      setSyncingFiles(false);
     }
   }
 
@@ -308,6 +350,95 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </div>
         </section>
       </div>
+
+      <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+        <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-[var(--on-surface-variant)]" />
+            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+              Printer files
+            </h2>
+          </div>
+          <button
+            onClick={syncFiles}
+            disabled={syncingFiles || !auth.isAuthenticated}
+            title={auth.blockReason ?? "Sync printer files"}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {syncingFiles ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" />
+            )}
+            {syncingFiles ? "Syncing" : "Sync"}
+          </button>
+        </div>
+        {printer.last_error && printer.status === "offline" && (
+          <div className="border-b border-[var(--outline-variant)] bg-[var(--error-container)]/20 px-6 py-3 text-[11px] text-[var(--error)] font-mono break-words">
+            {printer.last_error}
+          </div>
+        )}
+        {printerFiles.length === 0 ? (
+          <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+            No printer files synced yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] border-b border-[var(--surface-variant)]">
+                  <th className="py-3 px-4 font-medium">Remote file</th>
+                  <th className="py-3 px-4 font-medium">Vault match</th>
+                  <th className="py-3 px-4 font-medium text-right">Size</th>
+                  <th className="py-3 px-4 font-medium">Status</th>
+                  <th className="py-3 px-4 font-medium">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {printerFiles.map((f) => (
+                  <tr
+                    key={f.id}
+                    className="border-b border-[var(--surface-variant)] last:border-0 hover:bg-[var(--surface-container-low)] transition-colors"
+                  >
+                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface)] max-w-[320px] truncate" title={f.remote_filename}>
+                      {f.remote_filename}
+                    </td>
+                    <td className="py-3 px-4">
+                      {f.model_id ? (
+                        <Link
+                          href={`/models/${f.model_id}`}
+                          className="text-[var(--on-surface)] hover:text-[var(--primary)] hover:underline font-mono text-xs"
+                        >
+                          {f.model_name ?? f.original_filename}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+                          External
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-xs text-[var(--on-surface)] whitespace-nowrap">
+                      {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={`font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${
+                        f.missing_since
+                          ? "bg-amber-500/10 text-amber-600"
+                          : "bg-emerald-500/10 text-emerald-600"
+                      }`}>
+                        {f.missing_since ? "missing" : f.matched_by}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
+                      {new Date(f.last_seen_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* History */}
       <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">

@@ -30,6 +30,25 @@ export interface PrinterRead {
   updated_at: string;
 }
 
+export interface PrinterFileRead {
+  id: number;
+  printer_id: number;
+  printer_name: string | null;
+  file_id: number | null;
+  model_id: number | null;
+  model_name: string | null;
+  original_filename: string | null;
+  remote_filename: string;
+  size_bytes: number | null;
+  sha256: string | null;
+  matched_by: string;
+  modified_at: string | null;
+  last_seen_at: string;
+  missing_since: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PrinterCreate {
   name: string;
   moonraker_url: string;

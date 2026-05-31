@@ -10,6 +10,7 @@ import {
   IngestResponse,
   ListModelsParams,
   ModelListItem,
+  ModelPrinterFileRead,
   ModelRead,
   ModelUpdate,
 } from "@/types";
@@ -32,6 +33,10 @@ export async function listModels(
 
 export function getModel(id: number): Promise<ModelRead> {
   return getJson<ModelRead>(`/api/v1/models/${id}`);
+}
+
+export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]> {
+  return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`);
 }
 
 export function updateModel(

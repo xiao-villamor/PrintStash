@@ -370,6 +370,24 @@ class PrintJob(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class PrinterFile(SQLModel, table=True):
+    __tablename__ = "printer_files"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    printer_id: int = Field(foreign_key="printers.id", index=True)
+    file_id: Optional[int] = Field(default=None, foreign_key="files.id", index=True)
+
+    remote_filename: str = Field(max_length=512)
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = Field(default=None, max_length=64, index=True)
+    matched_by: str = Field(default="external", max_length=32, index=True)
+    modified_at: Optional[datetime] = None
+    last_seen_at: datetime = Field(default_factory=utcnow, index=True)
+    missing_since: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class AuditLog(SQLModel, table=True):
     __tablename__ = "audit_logs"
 

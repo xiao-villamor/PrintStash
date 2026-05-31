@@ -60,6 +60,16 @@ export interface ModelRead {
   files: FileRead[];
 }
 
+export interface ModelPrinterFileRead {
+  file_id: number;
+  printer_id: number;
+  printer_name: string;
+  remote_filename: string;
+  matched_by: string;
+  last_seen_at: string;
+  missing_since: string | null;
+}
+
 export interface ModelListItem {
   id: number;
   name: string;

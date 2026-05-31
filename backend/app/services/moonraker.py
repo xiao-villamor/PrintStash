@@ -62,7 +62,7 @@ class MoonrakerClient:
                 )
             except httpx.HTTPError as exc:
                 raise MoonrakerError(f"transport error: {exc}") from exc
-        if resp.status_code >= 400:
+        if resp.status_code < 200 or resp.status_code >= 300:
             raise MoonrakerError(f"moonraker {resp.status_code}: {resp.text[:200]}")
         try:
             return resp.json()
@@ -79,6 +79,9 @@ class MoonrakerClient:
         )
         return await self._request("GET", f"/printer/objects/query?{params}")
 
+    async def list_gcode_files(self) -> Dict[str, Any]:
+        return await self._request("GET", "/server/files/list?root=gcodes")
+
     async def upload_gcode(
         self, local_path: Path, remote_filename: str, *, start_print: bool = False
     ) -> Dict[str, Any]:
@@ -94,7 +97,7 @@ class MoonrakerClient:
                     )
                 except httpx.HTTPError as exc:
                     raise MoonrakerError(f"upload transport error: {exc}") from exc
-        if resp.status_code >= 400:
+        if resp.status_code < 200 or resp.status_code >= 300:
             raise MoonrakerError(f"upload failed {resp.status_code}: {resp.text[:200]}")
         return resp.json()
 

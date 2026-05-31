@@ -64,6 +64,40 @@ class TestPrinterHubLifecycle:
         assert p.id in hub.tasks
         asyncio.run(hub.remove_printer(p.id))
 
+    def test_run_printer_marks_offline_on_initial_query_failure(self, hub, db_session):
+        from unittest.mock import patch
+
+        p = Printer(name="Test", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        stop = asyncio.Event()
+
+        class FakeClient:
+            async def query_status(self):
+                raise RuntimeError("query blocked")
+
+            async def subscribe_status(self, _on_status, *, stop_event=None):
+                return None
+
+        async def _run():
+            async def _sleep(_seconds: float) -> None:
+                stop.set()
+
+            with (
+                patch(
+                    "app.services.printer_hub.get_provider_client",
+                    return_value=FakeClient(),
+                ),
+                patch("app.services.printer_hub.asyncio.sleep", side_effect=_sleep),
+            ):
+                await hub._run_printer(p.id, stop)
+
+        asyncio.run(_run())
+        db_session.refresh(p)
+        assert p.status == PrinterStatus.OFFLINE
+        assert p.last_error is not None
+
 
 class TestPrinterHubMarkStatus:
     def test_mark_status_updates_db(self, hub, db_session):
@@ -142,7 +176,7 @@ class TestPrinterHubHandleStatus:
 
 class TestStateMapping:
     def test_state_map_values(self):
-        from app.services.printer_hub import _STATE_MAP
+        from app.services.printer_hub import _STATE_MAP, _WEBHOOK_STATE_MAP
 
         assert _STATE_MAP["standby"] == PrinterStatus.READY
         assert _STATE_MAP["printing"] == PrinterStatus.PRINTING
@@ -153,6 +187,20 @@ class TestStateMapping:
         assert _STATE_MAP["cancelled"] == PrinterStatus.READY
         assert _STATE_MAP["running"] == PrinterStatus.PRINTING
         assert _STATE_MAP["idle"] == PrinterStatus.READY
+        assert _WEBHOOK_STATE_MAP["ready"] == PrinterStatus.READY
+        assert _WEBHOOK_STATE_MAP["shutdown"] == PrinterStatus.OFFLINE
+        assert _WEBHOOK_STATE_MAP["error"] == PrinterStatus.ERROR
+
+    def test_derive_status_uses_webhook_state_when_print_stats_missing(self):
+        from app.services.printer_hub import _derive_printer_status
+
+        status = {
+            "webhooks": {"state": "ready", "state_message": "Printer is ready"},
+            "virtual_sdcard": {"progress": 0.0},
+        }
+        ms_state, vault_status = _derive_printer_status(status)
+        assert ms_state == "ready"
+        assert vault_status == PrinterStatus.READY
 
 
 class TestPrinterHubSyncActiveJob:

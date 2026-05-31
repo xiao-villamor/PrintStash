@@ -20,11 +20,21 @@ from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import require_auth
 from app.core.time import utcnow
-from app.db.models import File, FileType, PrintJob, PrintJobState, Printer, PrinterProvider
+from app.db.models import (
+    File,
+    FileType,
+    Model,
+    PrintJob,
+    PrintJobState,
+    Printer,
+    PrinterFile,
+    PrinterProvider,
+)
 from app.db.session import get_session
 from app.schemas.printers import (
     PrinterCapabilities,
     PrinterCreate,
+    PrinterFileRead,
     PrinterRead,
     PrinterUpdate,
     PrintJobRead,
@@ -35,6 +45,11 @@ from app.services.printer_provider import (
     ProviderError,
     capabilities_for_provider,
     get_provider_client,
+)
+from app.services.printer_files import (
+    list_printer_files,
+    sync_printer_files,
+    upsert_printer_file,
 )
 from app.services.storage_backend import get_backend
 
@@ -74,6 +89,33 @@ def _to_read(p: Printer) -> PrinterRead:
         last_error=p.last_error,
         created_at=p.created_at,
         updated_at=p.updated_at,
+    )
+
+
+def _to_printer_file_read(
+    row: PrinterFile,
+    *,
+    printer_name: str | None = None,
+    file_row: File | None = None,
+    model_row: Model | None = None,
+) -> PrinterFileRead:
+    return PrinterFileRead(
+        id=row.id,  # type: ignore[arg-type]
+        printer_id=row.printer_id,
+        printer_name=printer_name,
+        file_id=row.file_id,
+        model_id=file_row.model_id if file_row else None,
+        model_name=model_row.name if model_row else None,
+        original_filename=file_row.original_filename if file_row else None,
+        remote_filename=row.remote_filename,
+        size_bytes=row.size_bytes,
+        sha256=row.sha256,
+        matched_by=row.matched_by,
+        modified_at=row.modified_at,
+        last_seen_at=row.last_seen_at,
+        missing_since=row.missing_since,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
     )
 
 
@@ -333,7 +375,17 @@ async def send_to_printer(
     session.add(job)
     session.commit()
     session.refresh(job)
-    return PrintJobRead(**job.model_dump())
+    out = PrintJobRead(**job.model_dump())
+    upsert_printer_file(
+        session,
+        printer_id=printer_id,
+        file_id=f.id,  # type: ignore[arg-type]
+        remote_filename=remote_name,
+        size_bytes=f.size_bytes,
+        sha256=f.sha256,
+        matched_by="upload_history",
+    )
+    return out
 
 
 async def _printer_control(printer_id: int, session: Session, action: str) -> dict:
@@ -411,6 +463,73 @@ def printer_status(
         "printer": _to_read(p).model_dump(mode="json"),
         "snapshot": hub.snapshots.get(printer_id, {}),
     }
+
+
+@router.get(
+    "/{printer_id}/files",
+    response_model=List[PrinterFileRead],
+    summary="List files known to exist on a printer",
+)
+def list_files_on_printer(
+    printer_id: int,
+    session: Session = Depends(get_session),
+) -> List[PrinterFileRead]:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    out: list[PrinterFileRead] = []
+    for row in list_printer_files(session, printer_id=printer_id):
+        file_row = session.get(File, row.file_id) if row.file_id else None
+        model_row = session.get(Model, file_row.model_id) if file_row else None
+        out.append(
+            _to_printer_file_read(
+                row,
+                printer_name=p.name,
+                file_row=file_row,
+                model_row=model_row,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/{printer_id}/files/sync",
+    response_model=List[PrinterFileRead],
+    dependencies=[Depends(require_auth)],
+    summary="Sync the printer's remote G-code file inventory",
+)
+async def sync_files_on_printer(
+    printer_id: int,
+    session: Session = Depends(get_session),
+) -> List[PrinterFileRead]:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    provider = get_provider_client(p)
+    if not provider.capabilities.can_list_files:
+        raise HTTPException(
+            status_code=409,
+            detail="operation_not_supported_for_provider",
+        )
+    try:
+        remote_files = await provider.list_files()
+    except ProviderError as exc:
+        p.last_error = exc.detail
+        p.updated_at = utcnow()
+        session.add(p)
+        session.commit()
+        raise HTTPException(status_code=502, detail=exc.code)
+
+    rows = sync_printer_files(session, printer_id=printer_id, remote_files=remote_files)
+    out: list[PrinterFileRead] = []
+    for row in rows:
+        file_row = session.get(File, row.file_id) if row.file_id else None
+        model_row = session.get(Model, file_row.model_id) if file_row else None
+        out.append(
+            _to_printer_file_read(
+                row,
+                printer_name=p.name,
+                file_row=file_row,
+                model_row=model_row,
+            )
+        )
+    return out
 
 
 @router.get(

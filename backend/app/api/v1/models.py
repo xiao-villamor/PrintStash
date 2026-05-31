@@ -12,12 +12,23 @@ from sqlmodel import Session, delete, select
 
 from app.core.security import require_auth
 from app.core.time import utcnow
-from app.db.models import Category, File, FileType, Metadata, Model, ModelTagLink, Tag
+from app.db.models import (
+    Category,
+    File,
+    FileType,
+    Metadata,
+    Model,
+    ModelTagLink,
+    Printer,
+    PrinterFile,
+    Tag,
+)
 from app.db.session import get_session
 from app.schemas.models import (
     FileRead,
     FileRevisionUpdate,
     MetadataRead,
+    ModelPrinterFileRead,
     ModelListItem,
     ModelRead,
     ModelUpdate,
@@ -185,6 +196,40 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
 )
 def get_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
     return _build_model_read(session, model_id)
+
+
+@router.get(
+    "/{model_id}/printer-files",
+    response_model=List[ModelPrinterFileRead],
+    summary="List printers where this model's G-code files are present",
+)
+def get_model_printer_files(
+    model_id: int, session: Session = Depends(get_session)
+) -> List[ModelPrinterFileRead]:
+    _live_model(session, model_id)
+    rows = session.exec(
+        select(PrinterFile, Printer)
+        .join(File, File.id == PrinterFile.file_id)
+        .join(Printer, Printer.id == PrinterFile.printer_id)
+        .where(
+            File.model_id == model_id,
+            File.file_type == FileType.GCODE,
+            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
+        )
+        .order_by(Printer.name.asc(), PrinterFile.remote_filename.asc())  # type: ignore[attr-defined]
+    ).all()
+    return [
+        ModelPrinterFileRead(
+            file_id=row.file_id,  # type: ignore[arg-type]
+            printer_id=printer.id,  # type: ignore[arg-type]
+            printer_name=printer.name,
+            remote_filename=row.remote_filename,
+            matched_by=row.matched_by,
+            last_seen_at=row.last_seen_at,
+            missing_since=row.missing_since,
+        )
+        for row, printer in rows
+    ]
 
 
 @router.patch(

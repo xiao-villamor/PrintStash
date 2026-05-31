@@ -66,6 +66,16 @@ class ModelRead(BaseModel):
     files: List[FileRead] = []
 
 
+class ModelPrinterFileRead(BaseModel):
+    file_id: int
+    printer_id: int
+    printer_name: str
+    remote_filename: str
+    matched_by: str
+    last_seen_at: datetime
+    missing_since: Optional[datetime] = None
+
+
 class ModelListItem(BaseModel):
     id: int
     name: str

@@ -34,6 +34,7 @@ class ProviderCapabilities:
     can_cancel: bool
     can_live_status: bool
     can_upload: bool
+    can_list_files: bool = False
 
 
 class PrinterProviderClient(Protocol):
@@ -42,6 +43,8 @@ class PrinterProviderClient(Protocol):
     async def info(self) -> dict[str, Any]: ...
 
     async def query_status(self) -> dict[str, Any]: ...
+
+    async def list_files(self) -> list[dict[str, Any]]: ...
 
     async def start(self, remote_filename: str) -> dict[str, Any]: ...
 
@@ -67,6 +70,7 @@ class MoonrakerProvider:
         can_cancel=True,
         can_live_status=True,
         can_upload=True,
+        can_list_files=True,
     )
 
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
@@ -83,6 +87,14 @@ class MoonrakerProvider:
             return await self.client.query_status()
         except MoonrakerError as exc:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        try:
+            body = await self.client.list_gcode_files()
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        result = body.get("result", [])
+        return result if isinstance(result, list) else []
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         try:
@@ -128,6 +140,7 @@ class BambuLanProvider:
         can_cancel=True,
         can_live_status=True,
         can_upload=False,
+        can_list_files=False,
     )
 
     def __init__(self, host: str, serial: str, access_code: str) -> None:
@@ -148,7 +161,9 @@ class BambuLanProvider:
             client = self._mqtt_client()
             client.connect(self.host, 8883, keepalive=30)
             client.loop_start()
-            client.publish(self._request_topic, json.dumps(payload), qos=1, retain=False)
+            client.publish(
+                self._request_topic, json.dumps(payload), qos=1, retain=False
+            )
             client.loop_stop()
             client.disconnect()
 
@@ -175,7 +190,13 @@ class BambuLanProvider:
         }
 
     async def info(self) -> dict[str, Any]:
-        return {"result": {"provider": "bambu_lan", "host": self.host, "serial": self.serial}}
+        return {
+            "result": {
+                "provider": "bambu_lan",
+                "host": self.host,
+                "serial": self.serial,
+            }
+        }
 
     async def query_status(self) -> dict[str, Any]:
         url = f"https://{self.host}:6000/api/v1/status"
@@ -194,6 +215,12 @@ class BambuLanProvider:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
         return {"result": {"status": self._normalize_status(body)}}
 
+    async def list_files(self) -> list[dict[str, Any]]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
     async def start(self, remote_filename: str) -> dict[str, Any]:
         raise ProviderError(
             "operation_not_supported_for_provider",
@@ -211,7 +238,9 @@ class BambuLanProvider:
         )
 
     async def cancel(self) -> dict[str, Any]:
-        return await self._send_command({"print": {"sequence_id": "0", "command": "stop"}})
+        return await self._send_command(
+            {"print": {"sequence_id": "0", "command": "stop"}}
+        )
 
     async def subscribe_status(
         self,
@@ -247,7 +276,11 @@ def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities
 
 def get_provider_client(printer: Printer) -> PrinterProviderClient:
     if printer.provider == PrinterProvider.BAMBU_LAN:
-        if not printer.bambu_host or not printer.bambu_serial or not printer.bambu_access_code:
+        if (
+            not printer.bambu_host
+            or not printer.bambu_serial
+            or not printer.bambu_access_code
+        ):
             raise ProviderError(
                 "provider_credentials_missing",
                 code="provider_credentials_missing",

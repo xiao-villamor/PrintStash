@@ -63,7 +63,13 @@ class TestBambuLanProvider:
     def test_normalize_status_maps_expected_shape(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         out = provider._normalize_status(
-            {"print": {"gcode_state": "RUNNING", "mc_percent": 45, "subtask_name": "cube.gcode"}}
+            {
+                "print": {
+                    "gcode_state": "RUNNING",
+                    "mc_percent": 45,
+                    "subtask_name": "cube.gcode",
+                }
+            }
         )
         assert out["print_stats"]["state"] == "running"
         assert out["print_stats"]["filename"] == "cube.gcode"
