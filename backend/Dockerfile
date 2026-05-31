@@ -48,6 +48,8 @@ COPY --from=rust-builder /wheels/*.whl /tmp/
 RUN uv pip install --python .venv/bin/python /tmp/nexus3d_rust-*.whl && rm /tmp/*.whl
 
 COPY app ./app
+COPY alembic.ini ./alembic.ini
+COPY alembic ./alembic
 
 ENV VAULT_DATA_DIR=/data/files \
     VAULT_THUMB_DIR=/data/thumbs \

@@ -1,5 +1,3 @@
-"use client";
-
 import { getApiKey } from "@/lib/auth-store";
 
 export {

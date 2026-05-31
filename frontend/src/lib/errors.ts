@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Structured API error with server-detail extraction.
  *

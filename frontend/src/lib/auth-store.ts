@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * Single module that owns all localStorage reads and writes for auth state.
  *

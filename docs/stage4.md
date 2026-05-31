@@ -72,6 +72,7 @@ default path; Postgres and S3 stay optional adapters for larger installs.
 - [x] Expand first-run setup to choose local/S3 storage and backup settings
 - [x] Lazy-create external print sentinel rows only when an external job is captured
 - [x] Fix authenticated frontend GET requests so admin pages do not falsely report expired tokens
+- [x] Fix local thumbnail serving after upload by using the storage backend existence check and add STL/G-code ingest regression coverage
 
 ### Phase 4f — Provider abstraction (printer backends)
 

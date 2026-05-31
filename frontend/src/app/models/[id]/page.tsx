@@ -17,8 +17,15 @@ export default async function ModelPage({
   let model;
   try {
     model = await getModel(id);
-  } catch {
-    notFound();
+  } catch (err) {
+    const status =
+      typeof err === "object" && err !== null && "status" in err
+        ? err.status
+        : null;
+    if (status === 404) {
+      notFound();
+    }
+    throw err;
   }
 
   return <ModelDetail model={model} />;

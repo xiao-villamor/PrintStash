@@ -109,7 +109,7 @@ def download_direct(file_id: int, session: Session = Depends(get_session)):
 def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
     f = get_or_404(session, File, file_id, "file_not_found")  # noqa: F841
     thumb_key = storage.thumbnail_path_for(file_id)
-    if not storage.file_exists(thumb_key):
+    if not get_backend().exists(thumb_key):
         raise HTTPException(status_code=404, detail="thumbnail_not_found")
     return _serve_file(thumb_key, f"{file_id}.png", "image/png")
 
@@ -197,7 +197,7 @@ def rebuild_missing_thumbnails(
             skipped.append(m.id)
             continue
 
-        if not storage.file_exists(mesh_file.path):
+        if not get_backend().exists(mesh_file.path):
             skipped.append(m.id)
             continue
 
