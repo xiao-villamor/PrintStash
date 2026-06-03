@@ -19,7 +19,7 @@ from app.db.models import (
     ModelTagLink,
 )
 from app.db.session import SessionFactory
-from app.services import gcode_parser, gcode_rust, storage, taxonomy, thumbnail
+from app.services import gcode_parser, storage, taxonomy, thumbnail
 from app.services.hashing import sha256_file
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
@@ -209,25 +209,6 @@ def run_ingestion_pipeline(
 
 def _gcode_strategy() -> IngestionStrategy:
     def process(path: Path) -> tuple[dict[str, Any], bytes | None]:
-        # Combined Rust scanner: metadata + thumbnail in a single file pass.
-        fast = gcode_rust.gcode_scan(path)
-        if fast is not None:
-            meta = {
-                "slicer_name": fast.get("slicer_name"),
-                "slicer_version": fast.get("slicer_version"),
-                "printer_model": fast.get("printer_model"),
-                "nozzle_diameter_mm": fast.get("nozzle_diameter_mm"),
-                "layer_height_mm": fast.get("layer_height_mm"),
-                "infill_percent": fast.get("infill_percent"),
-                "estimated_time_s": fast.get("estimated_time_s"),
-                "filament_weight_g": fast.get("filament_weight_g"),
-                "filament_length_mm": fast.get("filament_length_mm"),
-                "filament_cost": fast.get("filament_cost"),
-                "material_type": fast.get("material_type"),
-            }
-            return meta, fast.get("thumbnail_png")
-
-        # Pure-Python fallback.
         meta = gcode_parser.parse(path)
         thumb_bytes = thumbnail.extract(path)
         return meta, thumb_bytes

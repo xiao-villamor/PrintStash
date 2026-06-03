@@ -8,8 +8,8 @@ Lighting model (view-space, camera at -Z looking toward +Z):
   - Rim light:  grazing angle (edge on)        → silhouette separation
   - Ambient:    constant floor                 → no pure-black faces
 
-The ``_nexus3d_rust`` module is intentionally bypassed: its rasterise()
-implementation has a triangle-coverage bug that produces corrupted images.
+This is intentionally Python-only for 1.0 so source installs and Docker builds
+do not need a Rust toolchain.
 """
 
 from __future__ import annotations

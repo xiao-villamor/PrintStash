@@ -46,6 +46,48 @@ class TestParse:
         assert result["filament_cost"] == 0.35
         assert result["material_type"] == "PLA"
 
+    def test_parse_prusaslicer_fixture(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "prusaslicer_sample.gcode"
+        result = parse(fixture)
+        assert result["slicer_name"] == "PrusaSlicer"
+        assert result["printer_model"] == "MK4 Input Shaper 0.4 nozzle"
+        assert result["infill_percent"] == 20.0
+        assert result["estimated_time_s"] == 3372
+        assert result["filament_length_mm"] == 3350.2
+        assert result["filament_weight_g"] == 9.7
+        assert result["material_type"] == "PETG"
+
+    def test_parse_bambu_studio_fixture(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "bambu_studio_sample.gcode"
+        result = parse(fixture)
+        assert result["slicer_name"] == "BambuStudio"
+        assert result["printer_model"] == "Bambu Lab P1S 0.4 nozzle"
+        assert result["layer_height_mm"] == 0.16
+        assert result["estimated_time_s"] == 7445
+        assert result["material_type"] == "PLA"
+
+    def test_parse_cura_fixture(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "cura_sample.gcode"
+        result = parse(fixture)
+        assert result["slicer_name"] == "Cura"
+        assert result["slicer_version"] == "Cura_SteamEngine 5.6.0"
+        assert result["printer_model"] == "Voron Switchwire"
+        assert result["nozzle_diameter_mm"] == 0.6
+        assert result["layer_height_mm"] == 0.28
+        assert result["infill_percent"] == 35.0
+        assert result["estimated_time_s"] == 3661
+        assert result["filament_length_mm"] == 1234.0
+        assert result["material_type"] == "TPU"
+
+    def test_parse_klipper_orca_fixture(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "klipper_orca_sample.gcode"
+        result = parse(fixture)
+        assert result["slicer_name"] == "OrcaSlicer"
+        assert result["printer_model"] == "Voron 2.4 350 Klipper"
+        assert result["nozzle_diameter_mm"] == 0.4
+        assert result["layer_height_mm"] == 0.24
+        assert result["estimated_time_s"] == 11520
+
     def test_parse_missing_file_returns_defaults(self, tmp_path: Path) -> None:
         result = parse(tmp_path / "nonexistent.gcode")
         assert result["slicer_name"] is None

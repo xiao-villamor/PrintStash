@@ -18,7 +18,17 @@ or contact the maintainer privately through GitHub with:
 
 ## Supported Versions
 
-Until tagged releases exist, the supported version is the current `main` branch.
+Security support follows tagged stable releases. The currently supported stable
+line is:
+
+| Version | Supported |
+| --- | --- |
+| `1.0.x` | Yes |
+| `< 1.0` | No |
+
+The `main` branch is development work and may contain unreleased fixes or
+regressions. If you report a vulnerability, include the exact tag or commit you
+are running.
 
 ## Deployment Notes
 

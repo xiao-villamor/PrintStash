@@ -64,6 +64,10 @@ function formatBytes(bytes: number): string {
   return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function providerLabel(provider: PrinterRead["provider"]): string {
+  return provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
+}
+
 function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
   const out: any = { ...a };
   for (const k of Object.keys(b)) {
@@ -268,6 +272,14 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           <h1 className="text-2xl font-semibold text-[var(--on-surface)]">
             {printer.name}
           </h1>
+          <span className="rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+            {providerLabel(printer.provider)}
+          </span>
+          {printer.capabilities.support_level === "beta" && (
+            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-amber-600">
+              Beta
+            </span>
+          )}
           <span className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded">
             <span
               className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-[var(--outline)]"}`}
@@ -278,9 +290,17 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </span>
         </div>
         <p className="font-mono text-xs text-[var(--on-surface-variant)] break-all">
-          {printer.provider === "moonraker" ? printer.moonraker_url : printer.provider}
+          {printer.provider === "moonraker"
+            ? printer.moonraker_url
+            : printer.bambu_host || "Bambu LAN"}
         </p>
       </div>
+
+      {printer.capabilities.support_notes.length > 0 && (
+        <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3 text-xs leading-5 text-[var(--on-surface-variant)]">
+          {printer.capabilities.support_notes.join(" ")}
+        </div>
+      )}
 
       {error && (
         <div className="rounded border border-[var(--error)]/40 bg-[var(--error-container)]/30 p-3 text-sm text-[var(--error)] font-mono">
@@ -427,7 +447,9 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
         )}
         {printerFiles.length === 0 ? (
           <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
-            No printer files synced yet.
+            {printer.capabilities.can_list_files
+              ? "No printer files synced yet."
+              : "Printer file inventory is not supported by this provider."}
           </div>
         ) : (
           <div className="overflow-x-auto">

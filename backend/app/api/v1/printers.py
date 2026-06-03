@@ -53,6 +53,7 @@ from app.services.printer_provider import (
     ProviderError,
     capabilities_for_provider,
     get_provider_client,
+    provider_diagnostic_summary,
 )
 from app.services.printer_files import (
     list_printer_files,
@@ -187,6 +188,87 @@ def farm_dashboard(session: Session = Depends(get_session)) -> dict:
             {"name": name, "count": sum(counts.values()), "status_counts": counts}
             for name, counts in sorted(group_counts.items())
         ],
+    }
+
+
+@router.get(
+    "/{printer_id}/diagnostics",
+    summary="Check provider configuration and connectivity",
+    description=(
+        "Returns provider support level, configured capabilities, and live "
+        "configuration/connectivity checks without exposing stored secrets. "
+        "Bambu LAN is reported as beta/status-control-only until upload/send "
+        "support is implemented."
+    ),
+)
+async def printer_diagnostics(
+    printer_id: int, session: Session = Depends(get_session)
+) -> dict:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    if p.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="printer_not_found")
+
+    summary = provider_diagnostic_summary(p.provider)
+    checks: list[dict[str, object]] = []
+
+    try:
+        provider = get_provider_client(p)
+        checks.append({"name": "configuration", "ok": True})
+    except ProviderError as exc:
+        checks.append(
+            {
+                "name": "configuration",
+                "ok": False,
+                "code": exc.code,
+                "detail": exc.detail,
+            }
+        )
+        return {
+            "printer_id": p.id,
+            "provider": p.provider.value,
+            "support_level": summary["support_level"],
+            "capabilities": summary["capabilities"],
+            "unsupported_actions": summary["unsupported_actions"],
+            "notes": summary["notes"],
+            "checks": checks,
+            "ok": False,
+        }
+
+    try:
+        await provider.info()
+        checks.append({"name": "provider_info", "ok": True})
+    except ProviderError as exc:
+        checks.append(
+            {
+                "name": "provider_info",
+                "ok": False,
+                "code": exc.code,
+                "detail": exc.detail,
+            }
+        )
+
+    try:
+        await provider.query_status()
+        checks.append({"name": "live_status", "ok": True})
+    except ProviderError as exc:
+        checks.append(
+            {
+                "name": "live_status",
+                "ok": False,
+                "code": exc.code,
+                "detail": exc.detail,
+            }
+        )
+
+    return {
+        "printer_id": p.id,
+        "provider": p.provider.value,
+        "support_level": summary["support_level"],
+        "capabilities": summary["capabilities"],
+        "unsupported_actions": summary["unsupported_actions"],
+        "notes": summary["notes"],
+        "checks": checks,
+        "ok": all(bool(check["ok"]) for check in checks),
     }
 
 

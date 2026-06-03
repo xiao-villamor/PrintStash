@@ -63,6 +63,22 @@ def test_default_cors_rejects_unconfigured_origin(client: TestClient) -> None:
     assert "access-control-allow-origin" not in response.headers
 
 
+def test_health_reports_release_components(client: TestClient) -> None:
+    response = client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "PrintStash"
+    assert body["version"] == "1.0.0"
+    assert body["components"]["database"]["ok"] is True
+    assert body["components"]["storage"]["backend"] == "local"
+    assert body["components"]["backup"]["s3_configured"] is False
+    providers = body["components"]["printer_providers"]["providers"]
+    bambu = next(p for p in providers if p["provider"] == "bambu_lan")
+    assert bambu["support_level"] == "beta"
+    assert "send" in bambu["unsupported_actions"]
+
+
 def test_write_payloads_reject_unknown_fields(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:

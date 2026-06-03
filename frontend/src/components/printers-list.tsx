@@ -18,6 +18,16 @@ const STATUS_COLORS: Record<string, string> = {
   error: "bg-[var(--error)]",
 };
 
+function providerLabel(p: PrinterRead): string {
+  return p.provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
+}
+
+function providerAddress(p: PrinterRead): string {
+  return p.provider === "bambu_lan"
+    ? p.bambu_host || "Bambu LAN"
+    : p.moonraker_url;
+}
+
 export function PrintersPage() {
   const auth = useRequireAuth();
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
@@ -122,9 +132,21 @@ export function PrintersPage() {
               className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-[var(--primary)] transition-all duration-200 p-5 flex flex-col gap-3 group"
             >
               <div className="flex items-start justify-between gap-2">
-                <h3 className="text-[15px] font-semibold text-[var(--on-surface)] truncate">
-                  {p.name}
-                </h3>
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-semibold text-[var(--on-surface)] truncate">
+                    {p.name}
+                  </h3>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <span className="rounded border border-[var(--outline-variant)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                      {providerLabel(p)}
+                    </span>
+                    {p.capabilities.support_level === "beta" && (
+                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber-600">
+                        Beta
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
                   <span
                     className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-[var(--outline)]"}`}
@@ -136,8 +158,14 @@ export function PrintersPage() {
               </div>
 
               <p className="text-[13px] text-[var(--on-surface-variant)] font-mono truncate">
-                {p.moonraker_url}
+                {providerAddress(p)}
               </p>
+
+              {p.capabilities.support_notes.length > 0 && (
+                <p className="text-[11px] leading-5 text-[var(--on-surface-variant)]">
+                  {p.capabilities.support_notes[0]}
+                </p>
+              )}
 
               {p.last_error && (
                 <div className="rounded bg-[var(--error-container)]/30 border border-[var(--error)]/20 p-2 text-xs text-[var(--error)] font-mono truncate">

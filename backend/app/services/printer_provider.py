@@ -35,6 +35,9 @@ class ProviderCapabilities:
     can_live_status: bool
     can_upload: bool
     can_list_files: bool = False
+    support_level: str = "stable"
+    support_notes: tuple[str, ...] = ()
+    unsupported_actions: tuple[str, ...] = ()
 
 
 class PrinterProviderClient(Protocol):
@@ -71,6 +74,10 @@ class MoonrakerProvider:
         can_live_status=True,
         can_upload=True,
         can_list_files=True,
+        support_level="stable",
+        support_notes=(
+            "Primary 1.0 provider. Supports Moonraker/Klipper status, upload, start, pause, resume, cancel, and remote file inventory.",
+        ),
     )
 
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
@@ -141,6 +148,12 @@ class BambuLanProvider:
         can_live_status=True,
         can_upload=False,
         can_list_files=False,
+        support_level="beta",
+        support_notes=(
+            "Bambu LAN support is beta in 1.0 and limited to local status plus pause/resume/cancel controls.",
+            "Vault upload, send-to-print, start existing files, and printer file inventory are not implemented for this provider yet.",
+        ),
+        unsupported_actions=("upload", "send", "start", "list_files"),
     )
 
     def __init__(self, host: str, serial: str, access_code: str) -> None:
@@ -272,6 +285,25 @@ def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities
     if provider == PrinterProvider.BAMBU_LAN:
         return BambuLanProvider.capabilities
     return MoonrakerProvider.capabilities
+
+
+def provider_diagnostic_summary(provider: PrinterProvider) -> dict[str, object]:
+    caps = capabilities_for_provider(provider)
+    return {
+        "provider": provider.value,
+        "support_level": caps.support_level,
+        "capabilities": {
+            "can_start": caps.can_start,
+            "can_pause": caps.can_pause,
+            "can_resume": caps.can_resume,
+            "can_cancel": caps.can_cancel,
+            "can_live_status": caps.can_live_status,
+            "can_upload": caps.can_upload,
+            "can_list_files": caps.can_list_files,
+        },
+        "unsupported_actions": list(caps.unsupported_actions),
+        "notes": list(caps.support_notes),
+    }
 
 
 def get_provider_client(printer: Printer) -> PrinterProviderClient:

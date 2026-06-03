@@ -1,4 +1,4 @@
-# CONTEXT.md — Nexus3D Vault
+# CONTEXT.md — PrintStash
 
 Domain vocabulary for this project. Use these terms when naming modules, writing
 docs, or discussing architecture. Add new terms here when a concept crystallises
@@ -20,7 +20,7 @@ during architecture reviews.
   hashes it, deduplicates against existing Models, versions it, extracts metadata
   and thumbnail, resolves taxonomy, and persists everything. Runs as a background task.
 - **G-code parser** — extracts slicer metadata from G-code file headers and footers.
-  Pure Python with optional Rust acceleration.
+  Pure Python.
 - **Thumbnail** — a PNG preview extracted from G-code (base64-embedded) or rendered
   from a 3D mesh (software rasteriser).
 - **Dedup** — the process of matching an incoming file's hash against existing Models

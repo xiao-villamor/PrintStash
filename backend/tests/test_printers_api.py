@@ -226,6 +226,8 @@ class TestBambuPrinter:
         assert body["provider"] == "bambu_lan"
         assert body["capabilities"]["can_upload"] is False
         assert body["capabilities"]["can_pause"] is True
+        assert body["capabilities"]["support_level"] == "beta"
+        assert "send" in body["capabilities"]["unsupported_actions"]
 
     def test_create_bambu_missing_fields_422(self, client: TestClient, auth_headers):
         resp = client.post(
@@ -300,6 +302,39 @@ class TestBambuPrinter:
             resp = client.post(f"/api/v1/printers/{p.id}/pause", headers=auth_headers)
             assert resp.status_code == 200
             assert resp.json() == {"ok": True}
+
+    def test_bambu_diagnostics_reports_beta_without_send_parity(
+        self, client: TestClient, db_session: Session
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+        ) as mock_status:
+            mock_status.return_value = {"result": {"status": {}}}
+            resp = client.get(f"/api/v1/printers/{p.id}/diagnostics")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["support_level"] == "beta"
+        assert "send" in body["unsupported_actions"]
+        assert body["ok"] is True
+        assert [check["name"] for check in body["checks"]] == [
+            "configuration",
+            "provider_info",
+            "live_status",
+        ]
 
 
 class TestPrinterStatus:

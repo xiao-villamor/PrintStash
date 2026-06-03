@@ -12,8 +12,6 @@ See the [root README](../README.md) for the big picture.
 - Python 3.11+, FastAPI, SQLModel, Uvicorn
 - SQLite by default, optional Postgres for larger installs
 - Trimesh for mesh geometry and STL export
-- Optional Rust acceleration module (rayon-parallel thumbnail rendering,
-  single-pass G-code scanner)
 
 ## Quick start (development)
 
@@ -91,12 +89,6 @@ python scripts/sqlite_to_postgres.py \
 backend/
 ├── pyproject.toml
 ├── Dockerfile
-├── rust/                  ← optional native acceleration (Rust + PyO3)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs         ← PyO3 bindings: gcode_scan, rasterise
-│       ├── gcode.rs       ← combined sha256 + metadata + thumbnail
-│       └── raster.rs      ← parallel triangle rasteriser
 └── app/
     ├── main.py            ← FastAPI app, lifespan, Starlette
     ├── core/              ← config, security, logging, time, http helpers
@@ -124,29 +116,6 @@ backend/
 > `/setup` — there is no env-driven default account. Storage paths above are
 > the defaults; the wizard can override `data_dir` / `thumb_dir` per install
 > and persists them in the `system_config` table.
-
-## Building the Rust module
-
-The backend works fine without it (everything falls back to pure Python).
-If you want the speed boost for large meshes and G-code:
-
-```bash
-# one-time setup
-sudo apt install build-essential python3-dev
-pip install maturin
-
-cd backend/rust
-maturin build --release
-pip install target/wheels/nexus3d_rust-*.whl
-```
-
-The Python wrappers in `app/services/gcode_rust.py` and
-`app/services/raster_rust.py` detect the module at import time. If it's
-there, the fast path activates automatically. If it's not, the pure-Python
-code runs as usual.
-
-This is all handled at build time in the Docker image (see the
-`rust-builder` stage in the Dockerfile).
 
 ## Docker
 

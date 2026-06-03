@@ -18,6 +18,8 @@ default path; Postgres and S3 stay optional adapters for larger installs.
 
 - [x] Refresh public-facing docs for a self-hosted release: README, roadmap, contribution guidance, issue templates, and GitHub discussion surface.
 - [x] Add practical G-code revisions for 1.0: outcome labels, notes, recommended version, and metadata compare.
+- [x] Add 1.0 release notes, upgrade guide, disaster recovery runbook, provider support notes, and release validation checklist.
+- [x] Mark Bambu LAN as beta/status-control-only across capabilities, diagnostics, docs, and UI.
 
 ### Phase 4a — Schema and upgrade safety
 

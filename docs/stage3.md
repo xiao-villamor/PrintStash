@@ -5,8 +5,8 @@
 
 ## Goal
 
-Add Moonraker/Klipper bidirectional integration and multi-printer farm support to the
-Nexus3D Vault. Users can register their 3D printers (Moonraker endpoints), send g-code
+Add Moonraker/Klipper bidirectional integration and multi-printer farm support to
+PrintStash. Users can register their 3D printers (Moonraker endpoints), send g-code
 files directly from the vault to any printer, control prints (pause/resume/cancel),
 monitor live printer state through the web UI, and get a farm-wide health dashboard.
 

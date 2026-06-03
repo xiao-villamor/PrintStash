@@ -20,11 +20,14 @@ class TestCapabilities:
         caps = capabilities_for_provider(PrinterProvider.MOONRAKER)
         assert caps.can_upload is True
         assert caps.can_pause is True
+        assert caps.support_level == "stable"
 
     def test_bambu_capabilities(self):
         caps = capabilities_for_provider(PrinterProvider.BAMBU_LAN)
         assert caps.can_upload is False
         assert caps.can_pause is True
+        assert caps.support_level == "beta"
+        assert "upload" in caps.unsupported_actions
 
 
 class TestProviderFactory:

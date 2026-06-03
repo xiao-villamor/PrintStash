@@ -8,17 +8,17 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Now: Open Self-Hosted Beta
+## Now: 1.0 Stable Self-Hosted Release
 
-Goal: make the current app easy to try, easy to report against, and safe enough
-for real home use.
+Goal: keep the stable self-hosted release easy to install, easy to upgrade, and
+safe enough for real home use.
 
-- Publish clearer install docs and contribution paths
+- Publish tagged release notes and Docker image guidance
 - Collect real-world feedback from Docker/NAS/homelab installs
 - Ship practical G-code revisions: outcome labels, notes, recommended version, and metadata compare
 - Add parser fixtures from more slicers and printer profiles
 - Improve first-run setup and error messages where new users get stuck
-- Tag the first release once install/upgrade notes are repeatable
+- Keep install/upgrade notes repeatable across tagged releases
 
 ## R1: Provider Maturity
 

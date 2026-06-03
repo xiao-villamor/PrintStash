@@ -45,6 +45,9 @@ export interface PrinterCapabilities {
   can_live_status: boolean;
   can_upload: boolean;
   can_list_files: boolean;
+  support_level: "stable" | "beta" | string;
+  support_notes: string[];
+  unsupported_actions: string[];
 }
 
 export interface PrinterFileRead {

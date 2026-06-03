@@ -68,5 +68,8 @@ jobs:
       - name: Typecheck frontend
         run: pnpm exec tsc --noEmit
 
+      - name: Lint frontend
+        run: pnpm lint
+
       - name: Build frontend
         run: pnpm build

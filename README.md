@@ -15,7 +15,7 @@ metadata, material, printer, and print history.
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&style=flat-square)
 ![Next.js 14](https://img.shields.io/badge/next.js-14-black?logo=next.js&style=flat-square)
 ![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&style=flat-square)
-![Status](https://img.shields.io/badge/status-active%20self--hosted%20beta-f59e0b?style=flat-square)
+![Status](https://img.shields.io/badge/status-1.0%20stable%20self--hosted-16a34a?style=flat-square)
 
 ## Why this exists
 
@@ -34,10 +34,9 @@ run at home.
 
 ## Current State
 
-This is usable, but still young. Docker Compose is the main install path. SQLite
-and local disk are the default. Postgres, S3-compatible storage, and printer-farm
-features exist for bigger setups, but you should expect sharp edges and report
-them.
+This is the 1.0 stable self-hosted release. Docker Compose is the main install
+path. SQLite and local disk are the default. Postgres, S3-compatible storage,
+and printer-farm features exist for bigger setups, but stay optional.
 
 What works today:
 
@@ -49,14 +48,14 @@ What works today:
 - Categories, tags, search, thumbnails, and an in-browser STL viewer
 - First-run setup wizard, API key auth for scripts, JWT login for the UI
 - Moonraker/Klipper printer integration with live status and send-to-print
-- Early Bambu LAN support for status and basic print controls
+- Beta Bambu LAN support for status and basic print controls
 - Optional Postgres, S3/R2 storage, backup archives, and audit logs
 
 Known rough spots:
 
-- Bambu LAN upload/send parity is not done yet
+- Bambu LAN upload/send parity is not done yet; Bambu support is beta and
+  status/control-only in 1.0
 - Printer integrations need more real-world hardware testing
-- There is no packaged release channel yet; build from the repo for now
 - The UI is functional, but workflow polish is still in progress
 
 ## Quick Start
@@ -83,6 +82,17 @@ Open:
 
 On first launch, the web UI walks you through creating the first admin account.
 There is no default username or password.
+
+Tagged releases publish Docker images to GitHub Container Registry:
+
+| Image | Purpose |
+| --- | --- |
+| `ghcr.io/xiao-villamor/printstash-api:<version>` | FastAPI backend |
+| `ghcr.io/xiao-villamor/printstash-frontend:<version>` | Next.js frontend |
+
+The checked-in Compose file builds locally by default so contributors can run
+from source. Self-hosted release installs can pin the GHCR images in a small
+Compose override.
 
 ## OrcaSlicer Hook
 
@@ -157,6 +167,12 @@ Most installs only need to edit secrets in `.env`.
 See [.env.example](./.env.example) for the full list, including S3/R2, backups,
 MinIO, Postgres, and lifecycle settings.
 
+## Upgrades and Recovery
+
+Read [UPGRADE.md](./UPGRADE.md) before upgrading an existing install. Backup and
+restore recovery steps live in [docs/disaster-recovery.md](./docs/disaster-recovery.md).
+Release smoke checks are listed in [docs/release-validation.md](./docs/release-validation.md).
+
 ## Development
 
 Backend:
@@ -207,7 +223,7 @@ Next.js UI + FastAPI API
           |
           +-- ingestion, metadata extraction, thumbnails
           +-- taxonomy, search, auth, audit, backup
-          +-- printer providers: Moonraker now, Bambu LAN in progress
+          +-- printer providers: Moonraker stable, Bambu LAN beta
           |
           v
 SQLite + local files by default

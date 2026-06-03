@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nexus3d_orca_push.py — OrcaSlicer post-processing hook for PrintStash.
+PrintStash OrcaSlicer post-processing hook.
 
 Configure in OrcaSlicer:
     Process → Others → Post-processing scripts:
@@ -14,7 +14,7 @@ OrcaSlicer appends the exported .gcode path automatically as the final argv.
 Design rules (do not break):
   * stdlib only — no `pip install requests` for end users.
   * Always exit 0 — a vault outage MUST NEVER block the slicing/export flow.
-  * Logs to ~/.nexus3d_orca_push.log for debugging.
+  * Logs to ~/.printstash_orca_push.log for debugging.
 """
 from __future__ import annotations
 
@@ -29,18 +29,18 @@ from pathlib import Path
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 
-LOG_PATH = Path.home() / ".nexus3d_orca_push.log"
+LOG_PATH = Path.home() / ".printstash_orca_push.log"
 logging.basicConfig(
     filename=str(LOG_PATH),
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-log = logging.getLogger("nexus3d_orca_push")
+log = logging.getLogger("printstash_orca_push")
 
 
 def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
     """Build a multipart/form-data body using stdlib only."""
-    boundary = f"----Nexus3D{uuid.uuid4().hex}"
+    boundary = f"----PrintStash{uuid.uuid4().hex}"
     crlf = "\r\n"
     body = bytearray()
 
@@ -74,7 +74,7 @@ def push(url: str, api_key: str, gcode: Path, fields: dict, retries: int = 3) ->
         req = urlrequest.Request(endpoint, data=body, method="POST")
         req.add_header("Content-Type", content_type)
         req.add_header("X-API-Key", api_key)
-        req.add_header("User-Agent", "Nexus3D-OrcaHook/1.0")
+        req.add_header("User-Agent", "PrintStash-OrcaHook/1.0")
         try:
             with urlrequest.urlopen(req, timeout=30) as resp:
                 payload = resp.read().decode("utf-8", errors="replace")

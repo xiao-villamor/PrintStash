@@ -1,13 +1,13 @@
-# AGENTS.md — Nexus3D Vault
+# AGENTS.md — PrintStash
 
-This document guides AI coding agents (and humans) contributing to the **Nexus3D Vault**
+This document guides AI coding agents (and humans) contributing to the **PrintStash**
 project. Read this in full before making changes.
 
 ---
 
 ## 1. Project Identity
 
-**Nexus3D Vault** is a self-hosted, Plex-style asset management platform for 3D printing
+**PrintStash** is a self-hosted, Plex-style asset management platform for 3D printing
 workflows. It ingests source meshes (STL / 3MF) and sliced jobs (G-Code) — primarily via
 an OrcaSlicer post-processing hook — extracts technical metadata, deduplicates assets,
 and exposes everything via a clean REST API.

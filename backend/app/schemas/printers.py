@@ -30,6 +30,9 @@ class PrinterCapabilities(BaseModel):
     can_live_status: bool
     can_upload: bool
     can_list_files: bool = False
+    support_level: str = "stable"
+    support_notes: list[str] = Field(default_factory=list)
+    unsupported_actions: list[str] = Field(default_factory=list)
 
 
 class PrinterCreate(BaseModel):
