@@ -15,7 +15,7 @@ metadata, material, printer, and print history.
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&style=flat-square)
 ![Next.js 14](https://img.shields.io/badge/next.js-14-black?logo=next.js&style=flat-square)
 ![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&style=flat-square)
-![Status](https://img.shields.io/badge/status-1.0%20stable%20self--hosted-16a34a?style=flat-square)
+![Status](https://img.shields.io/badge/status-0.1%20initial%20self--hosted-f59e0b?style=flat-square)
 
 ## Why this exists
 
@@ -34,9 +34,10 @@ run at home.
 
 ## Current State
 
-This is the 1.0 stable self-hosted release. Docker Compose is the main install
+This is the 0.1 initial self-hosted release. Docker Compose is the main install
 path. SQLite and local disk are the default. Postgres, S3-compatible storage,
-and printer-farm features exist for bigger setups, but stay optional.
+and printer-farm features exist for bigger setups, but stay optional while the
+project matures.
 
 What works today:
 
@@ -54,7 +55,7 @@ What works today:
 Known rough spots:
 
 - Bambu LAN upload/send parity is not done yet; Bambu support is beta and
-  status/control-only in 1.0
+  status/control-only in 0.1
 - Printer integrations need more real-world hardware testing
 - The UI is functional, but workflow polish is still in progress
 

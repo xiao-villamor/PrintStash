@@ -1,6 +1,6 @@
-# PrintStash 1.0 Upgrade Guide
+# PrintStash 0.1 Upgrade Guide
 
-This guide covers upgrading an existing self-hosted install to the 1.0 stable
+This guide covers upgrading an existing self-hosted install to the 0.1 initial
 release. SQLite and local disk remain the recommended default path.
 
 ## Before You Upgrade

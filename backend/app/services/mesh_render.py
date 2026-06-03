@@ -8,7 +8,7 @@ Lighting model (view-space, camera at -Z looking toward +Z):
   - Rim light:  grazing angle (edge on)        → silhouette separation
   - Ambient:    constant floor                 → no pure-black faces
 
-This is intentionally Python-only for 1.0 so source installs and Docker builds
+This is intentionally Python-only for 0.1 so source installs and Docker builds
 do not need a Rust toolchain.
 """
 

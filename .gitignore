@@ -23,6 +23,8 @@ node_modules/
 backend/rust/target/
 backend/rust/.maturin/
 .next/
+frontend/.next/
+frontend/tsconfig.tsbuildinfo
 frontend/out/
 frontend/dist/
 

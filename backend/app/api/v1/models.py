@@ -421,7 +421,7 @@ def update_model(
     dependencies=[Depends(require_auth)],
     summary="Update G-code revision status, notes, or recommended marker",
     description=(
-        "Updates 1.0 G-code revision fields for a file under a model. Only G-code "
+        "Updates G-code revision fields for a file under a model. Only G-code "
         "files are supported. Marking a file recommended clears the marker from "
         "other G-code files on the same model."
     ),

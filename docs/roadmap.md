@@ -8,9 +8,9 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Now: 1.0 Stable Self-Hosted Release
+## Now: 0.1 Initial Self-Hosted Release
 
-Goal: keep the stable self-hosted release easy to install, easy to upgrade, and
+Goal: keep the initial self-hosted release easy to install, easy to upgrade, and
 safe enough for real home use.
 
 - Publish tagged release notes and Docker image guidance

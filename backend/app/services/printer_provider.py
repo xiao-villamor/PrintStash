@@ -147,7 +147,7 @@ class BambuLanProvider:
         can_list_files=False,
         support_level="beta",
         support_notes=(
-            "Bambu LAN support is beta in 1.0 and limited to local status plus pause/resume/cancel controls.",
+            "Bambu LAN support is beta in 0.1 and limited to local status plus pause/resume/cancel controls.",
             "Vault upload, send-to-print, start existing files, and printer file inventory are not implemented for this provider yet.",
         ),
         unsupported_actions=("upload", "send", "start", "list_files"),

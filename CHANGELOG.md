@@ -1,8 +1,8 @@
 # Changelog
 
-## 1.0.0 - Stable Self-Hosted Release
+## 0.1.0 - Initial Self-Hosted Release
 
-PrintStash 1.0 is the first stable self-hosted release. It is focused on the
+PrintStash 0.1 is the first tagged self-hosted release. It is focused on the
 local-first library workflow: ingest STL/3MF/G-code, extract slicer metadata,
 keep model revisions searchable, and integrate with Moonraker/Klipper printers.
 
@@ -15,9 +15,9 @@ keep model revisions searchable, and integrate with Moonraker/Klipper printers.
   vault outages.
 - G-code revisions support labels, outcome status, notes, recommended versions,
   and metadata comparison.
-- Moonraker/Klipper is the stable 1.0 printer provider.
+- Moonraker/Klipper is the primary supported printer provider.
 - Bambu LAN is available as beta status/control support only. Upload, send, start,
-  and file inventory parity are intentionally not part of 1.0.
+  and file inventory parity are intentionally not part of 0.1.
 - Postgres, S3/R2 storage, cloud backups, and audit logs are optional adapters for
   larger self-hosted installs.
 

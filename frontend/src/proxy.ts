@@ -20,7 +20,7 @@ const API_BASE =
 
 const SETUP_COOKIE = "nexus3d.setup";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   // Check the short-lived cookie first to avoid hitting the API on every nav.
   const cookie = request.cookies.get(SETUP_COOKIE);
   if (cookie?.value === "1") {

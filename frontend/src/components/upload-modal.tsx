@@ -662,7 +662,7 @@ function FileSlot({
   file: File | null;
   setFile: (f: File | null) => void;
   placeholder: string;
-  inputRef: React.RefObject<HTMLInputElement>;
+  inputRef: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <div>
