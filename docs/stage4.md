@@ -85,6 +85,11 @@ default path; Postgres and S3 stay optional adapters for larger installs.
 - [x] Fix Moonraker idle-state mapping to use `webhooks.state` fallback so configured printers no longer stick on `unknown` when `print_stats.state` is absent
 - [x] Add Moonraker printer file inventory tracking with persisted sync, model badges, and printer file listings
 
+### Phase 4g — API hardening audit
+
+- [x] Add stable JSON handlers for request validation and unhandled errors, tighten CORS defaults, move upload staging/storage downloads off the FastAPI event loop, and harden printer send payload validation without changing successful response contracts.
+- [x] Improve the Moonraker/Klipper printer status page with focused tabs, remote-file start actions, Vault printer filters, and a cleaner G-code revision upload/label flow.
+
 ---
 
 ## Deferred beyond first stable release

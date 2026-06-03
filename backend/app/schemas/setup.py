@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SetupStatus(BaseModel):
@@ -34,6 +34,8 @@ class SetupStatus(BaseModel):
 
 class SetupRequest(BaseModel):
     """Payload for ``POST /api/v1/setup`` — only accepted while unconfigured."""
+
+    model_config = ConfigDict(extra="forbid")
 
     username: str = Field(min_length=3, max_length=128)
     password: str = Field(min_length=8, max_length=256)

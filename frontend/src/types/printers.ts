@@ -6,6 +6,8 @@ export type PrinterStatus =
   | "paused"
   | "error";
 
+export type PrinterProvider = "moonraker" | "bambu_lan";
+
 export type PrintJobState =
   | "queued"
   | "uploading"
@@ -19,8 +21,13 @@ export type PrintJobState =
 export interface PrinterRead {
   id: number;
   name: string;
+  provider: PrinterProvider;
   moonraker_url: string;
   has_api_key: boolean;
+  bambu_host?: string | null;
+  bambu_serial?: string | null;
+  has_bambu_access_code?: boolean;
+  capabilities: PrinterCapabilities;
   notes: string | null;
   group: string | null;
   status: PrinterStatus;
@@ -28,6 +35,16 @@ export interface PrinterRead {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface PrinterCapabilities {
+  can_start: boolean;
+  can_pause: boolean;
+  can_resume: boolean;
+  can_cancel: boolean;
+  can_live_status: boolean;
+  can_upload: boolean;
+  can_list_files: boolean;
 }
 
 export interface PrinterFileRead {
@@ -51,16 +68,24 @@ export interface PrinterFileRead {
 
 export interface PrinterCreate {
   name: string;
+  provider?: PrinterProvider;
   moonraker_url: string;
   api_key?: string;
+  bambu_host?: string;
+  bambu_serial?: string;
+  bambu_access_code?: string;
   notes?: string;
   group?: string;
 }
 
 export interface PrinterUpdate {
+  provider?: PrinterProvider;
   name?: string;
   moonraker_url?: string;
   api_key?: string;
+  bambu_host?: string;
+  bambu_serial?: string;
+  bambu_access_code?: string;
   notes?: string;
   group?: string;
 }
@@ -85,6 +110,11 @@ export interface SendToPrinter {
   file_id: number;
   start_print?: boolean;
   remote_filename?: string;
+}
+
+export interface StartPrinterFile {
+  remote_filename: string;
+  file_id?: number | null;
 }
 
 export interface Dashboard {

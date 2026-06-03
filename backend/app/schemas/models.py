@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import FileRevisionStatus, FileType
 
@@ -36,8 +36,10 @@ class FileRead(BaseModel):
     original_filename: str
     file_type: FileType
     version: int
+    gcode_revision_number: Optional[int] = None
     size_bytes: int
     sha256: str
+    revision_label: Optional[str] = None
     revision_status: Optional[FileRevisionStatus] = None
     revision_notes: Optional[str] = None
     is_recommended: bool = False
@@ -46,8 +48,11 @@ class FileRead(BaseModel):
 
 
 class FileRevisionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision_label: Optional[str] = Field(default=None, max_length=128)
     revision_status: Optional[FileRevisionStatus] = None
-    revision_notes: Optional[str] = None
+    revision_notes: Optional[str] = Field(default=None, max_length=4096)
     is_recommended: Optional[bool] = None
 
 
@@ -76,6 +81,12 @@ class ModelPrinterFileRead(BaseModel):
     missing_since: Optional[datetime] = None
 
 
+class ModelPrinterPresenceRead(BaseModel):
+    printer_id: int
+    printer_name: str
+    file_count: int
+
+
 class ModelListItem(BaseModel):
     id: int
     name: str
@@ -85,14 +96,17 @@ class ModelListItem(BaseModel):
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
     file_count: int
+    printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
 
 
 class ModelUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    category: Optional[str] = None  # path string; will be resolved/created
-    tags: Optional[List[str]] = None  # replaces existing set
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=4096)
+    category: Optional[str] = Field(default=None, max_length=1024)
+    tags: Optional[List[str]] = Field(default=None, max_length=100)
 
 
 class CategoryRead(BaseModel):
@@ -105,12 +119,16 @@ class CategoryRead(BaseModel):
 
 
 class CategoryCreate(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
     parent_id: Optional[int] = None
 
 
 class TagCreate(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
 
 
 class TagRead(BaseModel):

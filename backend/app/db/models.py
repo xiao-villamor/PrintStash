@@ -119,6 +119,7 @@ class File(SQLModel, table=True):
     version: int = Field(default=1)
     size_bytes: int
     sha256: str = Field(index=True, max_length=64)
+    revision_label: Optional[str] = Field(default=None, max_length=128)
     revision_status: Optional[FileRevisionStatus] = Field(default=None, index=True)
     revision_notes: Optional[str] = None
     is_recommended: bool = Field(default=False, index=True)

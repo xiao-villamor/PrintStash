@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.core.security import require_superuser
@@ -38,6 +38,8 @@ class VaultConfigRead(BaseModel):
 
 
 class VaultConfigUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     storage_backend: Optional[str] = None
     data_dir: Optional[str] = None
     thumb_dir: Optional[str] = None

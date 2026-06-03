@@ -23,6 +23,8 @@ export async function listModels(
   if (params?.q) search.set("q", params.q);
   if (params?.limit) search.set("limit", String(params.limit));
   if (params?.offset) search.set("offset", String(params.offset));
+  if (params?.printer_id) search.set("printer_id", String(params.printer_id));
+  if (params?.printer_presence) search.set("printer_presence", params.printer_presence);
   for (const tag of params?.tag ?? []) {
     search.append("tag", tag);
   }
@@ -61,6 +63,18 @@ export function updateFileRevision(
     `/api/v1/models/${modelId}/files/${fileId}/revision`,
     "PATCH",
     payload,
+    apiKey,
+  );
+}
+
+export function addGcodeRevision(
+  modelId: number,
+  formData: FormData,
+  apiKey?: string,
+): Promise<ModelRead> {
+  return sendForm<ModelRead>(
+    `/api/v1/models/${modelId}/gcode-revisions`,
+    formData,
     apiKey,
   );
 }

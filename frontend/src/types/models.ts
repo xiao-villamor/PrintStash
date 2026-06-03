@@ -30,8 +30,10 @@ export interface FileRead {
   original_filename: string;
   file_type: "stl" | "3mf" | "gcode" | "obj";
   version: number;
+  gcode_revision_number?: number | null;
   size_bytes: number;
   sha256: string;
+  revision_label?: string | null;
   revision_status: FileRevisionStatus | null;
   revision_notes: string | null;
   is_recommended: boolean;
@@ -40,6 +42,7 @@ export interface FileRead {
 }
 
 export interface FileRevisionUpdate {
+  revision_label?: string | null;
   revision_status?: FileRevisionStatus | null;
   revision_notes?: string | null;
   is_recommended?: boolean;
@@ -70,6 +73,12 @@ export interface ModelPrinterFileRead {
   missing_since: string | null;
 }
 
+export interface ModelPrinterPresenceRead {
+  printer_id: number;
+  printer_name: string;
+  file_count: number;
+}
+
 export interface ModelListItem {
   id: number;
   name: string;
@@ -79,6 +88,7 @@ export interface ModelListItem {
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
+  printer_presence: ModelPrinterPresenceRead[];
   updated_at: string;
 }
 
@@ -109,6 +119,8 @@ export interface ListModelsParams {
   category?: string;
   tag?: string[];
   q?: string;
+  printer_id?: number;
+  printer_presence?: "any" | "none";
   limit?: number;
   offset?: number;
 }

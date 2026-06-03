@@ -493,6 +493,106 @@ class TestPrinterFiles:
         assert resp.status_code == 409
         assert resp.json()["detail"] == "operation_not_supported_for_provider"
 
+    def test_start_matched_printer_file_creates_vault_job(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.db.models import PrinterFile
+
+        m, f = self._setup_file(db_session)
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        db_session.add(
+            PrinterFile(
+                printer_id=p.id,
+                file_id=f.id,
+                remote_filename="folder/bracket.gcode",
+                matched_by="upload_history",
+            )
+        )
+        db_session.commit()
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.start",
+            new_callable=AsyncMock,
+        ) as mock_start:
+            mock_start.return_value = {"result": "ok"}
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "folder/bracket.gcode"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["file_id"] == f.id
+        assert data["model_id"] == m.id
+        assert data["source"] == "vault"
+        assert data["state"] == "started"
+        mock_start.assert_awaited_once_with("folder/bracket.gcode")
+
+    def test_start_external_printer_file_creates_external_job(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.db.models import File, SENTINEL_FILE_HASH, PrinterFile
+
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        db_session.add(
+            PrinterFile(
+                printer_id=p.id,
+                remote_filename="external.gcode",
+                matched_by="external",
+            )
+        )
+        db_session.commit()
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.start",
+            new_callable=AsyncMock,
+        ) as mock_start:
+            mock_start.return_value = {"result": "ok"}
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "external.gcode"},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["source"] == "external"
+        sentinel_file = db_session.get(File, data["file_id"])
+        assert sentinel_file is not None
+        assert sentinel_file.sha256 == SENTINEL_FILE_HASH
+        mock_start.assert_awaited_once_with("external.gcode")
+
+    def test_start_unsupported_provider(
+        self, client: TestClient, db_session: Session, auth_headers
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/start",
+            json={"remote_filename": "part.gcode"},
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+
 
 class TestSendToPrinter:
     def test_send_requires_auth(self, client: TestClient, db_session: Session):
@@ -563,6 +663,71 @@ class TestSendToPrinter:
             headers=auth_headers,
         )
         assert resp.status_code == 404
+
+    def test_send_rejects_path_traversal_remote_filename(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers/1/send",
+            json={"file_id": 1, "remote_filename": "../escape.gcode"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["detail"] == "request_validation_failed"
+
+    def test_send_provider_crash_returns_stable_error(
+        self, client: TestClient, auth_headers, db_session: Session, tmp_path
+    ):
+        from app.db.models import File, Model
+
+        local = tmp_path / "bracket.gcode"
+        local.write_text("G28\n")
+        m = Model(name="Bracket", slug="send-crash-bracket", hash="t" * 64)
+        db_session.add(m)
+        db_session.commit()
+        db_session.refresh(m)
+        f = File(
+            model_id=m.id,
+            path="/data/bracket.gcode",
+            original_filename="bracket.gcode",
+            file_type="gcode",
+            version=1,
+            size_bytes=4,
+            sha256="u" * 64,
+        )
+        db_session.add(f)
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(f)
+        db_session.refresh(p)
+
+        class FakeBackend:
+            def exists(self, _path):
+                return True
+
+            def download_to_path(self, _path, _target):
+                return local
+
+        with (
+            patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
+            patch(
+                "app.services.moonraker.MoonrakerClient.upload_gcode",
+                new_callable=AsyncMock,
+            ) as mock_upload,
+        ):
+            mock_upload.side_effect = RuntimeError("secret provider stack")
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "provider_error"
+        assert "secret provider stack" not in resp.text
+        job = db_session.exec(select(PrintJob).where(PrintJob.printer_id == p.id)).one()
+        assert job.state == PrintJobState.FAILED
 
     def test_send_records_printer_file_inventory(
         self, client: TestClient, auth_headers, db_session: Session, tmp_path

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Callable
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -165,6 +166,34 @@ def test_ingest_orca_gcode_creates_db_blob_and_thumbnail(
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text
     assert thumbnail.content.startswith(PNG_MAGIC)
+
+
+def test_ingest_orca_stages_upload_in_threadpool(
+    tmp_path: Path,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    _configure_storage(tmp_path)
+    called: dict[str, str] = {}
+
+    async def fake_threadpool(
+        func: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
+        called["func"] = func.__name__
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr("app.api.v1.ingest.run_in_threadpool", fake_threadpool)
+
+    response = client.post(
+        "/api/v1/ingest/orca",
+        headers=auth_headers,
+        files={"file": ("sample.gcode", b"G28\n", "text/plain")},
+        data={"model_name": "Threadpool Check"},
+    )
+
+    assert response.status_code == 202
+    assert called == {"func": "_stage_upload"}
 
 
 def test_ingest_stl_creates_db_blob_and_thumbnail(

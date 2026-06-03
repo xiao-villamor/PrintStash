@@ -5,6 +5,7 @@ export type {
   FileRevisionUpdate,
   ModelRead,
   ModelPrinterFileRead,
+  ModelPrinterPresenceRead,
   ModelListItem,
   ModelUpdate,
   IngestResponse,
@@ -18,6 +19,8 @@ export type {
 
 export type {
   PrinterStatus,
+  PrinterProvider,
+  PrinterCapabilities,
   PrintJobState,
   PrinterRead,
   PrinterFileRead,
@@ -25,6 +28,7 @@ export type {
   PrinterUpdate,
   PrintJobRead,
   SendToPrinter,
+  StartPrinterFile,
   Dashboard,
   DashboardGroup,
   PrinterSnapshot,

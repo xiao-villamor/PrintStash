@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CategoryRead, TagRead } from "@/types";
+import { CategoryRead, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ChevronRight, Search, X } from "lucide-react";
 
@@ -109,10 +109,15 @@ function CategoryNodeRow({
 export function FilterSidebarContent({
   categories,
   tags,
+  printers,
   selectedCategory,
   selectedTags,
+  selectedPrinterId,
+  selectedPrinterPresence,
   onCategoryChange,
   onTagsChange,
+  onPrinterChange,
+  onPrinterPresenceChange,
   loading,
 }: FilterSidebarProps) {
   const tree = useMemo(() => buildTree(categories), [categories]);
@@ -215,6 +220,76 @@ export function FilterSidebarContent({
         </div>
       </div>
 
+      {/* Printer availability */}
+      <div>
+        <h3 className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+          Printer
+        </h3>
+        <div className="flex flex-col gap-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              onPrinterChange(null);
+              onPrinterPresenceChange(null);
+            }}
+            className={`flex items-center justify-between px-3 py-1.5 rounded-lg font-mono text-[13px] transition-colors ${
+              selectedPrinterId === null && selectedPrinterPresence === null
+                ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
+                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+            }`}
+          >
+            <span>Any location</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onPrinterChange(null);
+              onPrinterPresenceChange("any");
+            }}
+            className={`flex items-center justify-between px-3 py-1.5 rounded-lg font-mono text-[13px] transition-colors ${
+              selectedPrinterPresence === "any"
+                ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
+                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+            }`}
+          >
+            <span>On a printer</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onPrinterChange(null);
+              onPrinterPresenceChange("none");
+            }}
+            className={`flex items-center justify-between px-3 py-1.5 rounded-lg font-mono text-[13px] transition-colors ${
+              selectedPrinterPresence === "none"
+                ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
+                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+            }`}
+          >
+            <span>Vault only</span>
+          </button>
+          {printers.map((printer) => (
+            <button
+              key={printer.id}
+              type="button"
+              onClick={() => {
+                onPrinterChange(printer.id);
+                onPrinterPresenceChange(null);
+              }}
+              className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg font-mono text-[13px] transition-colors ${
+                selectedPrinterId === printer.id
+                  ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
+                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+              }`}
+              title={printer.name}
+            >
+              <span className="truncate">{printer.name}</span>
+              <span className="h-2 w-2 rounded-full bg-[var(--primary)]" />
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Tags */}
       {tags.length > 0 && (
         <>
@@ -296,10 +371,15 @@ export function FilterSidebarContent({
 export interface FilterSidebarProps {
   categories: CategoryRead[];
   tags: TagRead[];
+  printers: PrinterRead[];
   selectedCategory: string | null;
   selectedTags: string[];
+  selectedPrinterId: number | null;
+  selectedPrinterPresence: "any" | "none" | null;
   onCategoryChange: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
+  onPrinterChange: (printerId: number | null) => void;
+  onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
   loading?: boolean;
 }
 

@@ -4,11 +4,14 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
+from pydantic import Field
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class TokenResponse(BaseModel):
@@ -19,11 +22,15 @@ class TokenResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: str = Field(min_length=1, max_length=512)
 
 
 class LogoutRequest(BaseModel):
-    refresh_token: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+    refresh_token: Optional[str] = Field(default=None, max_length=512)
 
 
 class UserRead(BaseModel):
@@ -39,6 +46,8 @@ class UserRead(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str
-    password: str
-    email: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=128)
+    password: str = Field(min_length=8, max_length=256)
+    email: Optional[str] = Field(default=None, max_length=255)

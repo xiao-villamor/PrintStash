@@ -103,7 +103,7 @@ class MoonrakerClient:
 
     async def start_print(self, remote_filename: str) -> Dict[str, Any]:
         return await self._request(
-            "POST", f"/printer/print/start?filename={remote_filename}"
+            "POST", "/printer/print/start", params={"filename": remote_filename}
         )
 
     async def pause_print(self) -> Dict[str, Any]:

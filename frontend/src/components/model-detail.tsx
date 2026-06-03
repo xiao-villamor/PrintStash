@@ -29,6 +29,7 @@ import {
   sendToPrinter,
   updateFileRevision,
   updateModel,
+  addGcodeRevision,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -125,6 +126,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [catLoaded, setCatLoaded] = useState(false);
   const [revisionSaving, setRevisionSaving] = useState<number | null>(null);
   const [editingRevisionId, setEditingRevisionId] = useState<number | null>(null);
+  const [addRevisionOpen, setAddRevisionOpen] = useState(false);
+  const [revisionLabel, setRevisionLabel] = useState("");
   const [revisionStatus, setRevisionStatus] = useState<FileRevisionStatus | "">("");
   const [revisionNotes, setRevisionNotes] = useState("");
   const [revisionRecommended, setRevisionRecommended] = useState(false);
@@ -266,6 +269,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       return;
     }
     setEditingRevisionId(file.id);
+    setRevisionLabel(file.revision_label ?? "");
     setRevisionStatus(file.revision_status ?? "");
     setRevisionNotes(file.revision_notes ?? "");
     setRevisionRecommended(file.is_recommended);
@@ -275,6 +279,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     setRevisionSaving(file.id);
     try {
       const updated = await updateFileRevision(model.id, file.id, {
+        revision_label: revisionLabel,
         revision_status: revisionStatus || null,
         revision_notes: revisionNotes,
         is_recommended: revisionRecommended,
@@ -291,6 +296,17 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
   return (
     <div className="flex flex-col h-full">
+      {addRevisionOpen && (
+        <AddGcodeRevisionModal
+          modelId={model.id}
+          onClose={() => setAddRevisionOpen(false)}
+          onUploaded={(updated) => {
+            setModel(updated);
+            setAddRevisionOpen(false);
+            toast.success("G-code revision added");
+          }}
+        />
+      )}
       {/* Detail Header */}
       <header className="h-auto md:h-16 flex flex-wrap items-center justify-between px-4 md:px-6 py-3 md:py-0 gap-2 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] shrink-0">
         <div className="flex items-center gap-4">
@@ -625,9 +641,23 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
             {/* G-code Revisions */}
             <section>
-              <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
-                G-code Revisions
-              </h2>
+              <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--outline-variant)] pb-1">
+                <h2 className="text-lg font-semibold text-[var(--on-surface)]">
+                  G-code Revisions
+                </h2>
+                <button
+                  onClick={() => {
+                    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+                    setAddRevisionOpen(true);
+                  }}
+                  disabled={!auth.isAuthenticated}
+                  title={auth.blockReason ?? "Add G-code revision"}
+                  className="inline-flex items-center gap-1.5 rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container-low)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add
+                </button>
+              </div>
               <div className="space-y-3">
                 {gcodeFiles.length === 0 && (
                   <p className="font-mono text-xs text-[var(--on-surface-variant)]">
@@ -644,8 +674,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-1.5 mb-1">
                             <span className="font-mono text-[11px] text-[var(--primary)] font-bold uppercase tracking-wider">
-                              v{f.version}
+                              Rev {f.gcode_revision_number ?? f.version}
                             </span>
+                            {f.revision_label && (
+                              <span className="border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                                {f.revision_label}
+                              </span>
+                            )}
                             <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(f.revision_status)}`}>
                               {revisionStatusLabel(f.revision_status)}
                             </span>
@@ -696,6 +731,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
                       {isEditingRevision && (
                         <div className="space-y-2 border-t border-[var(--outline-variant)] pt-3">
+                          <input
+                            value={revisionLabel}
+                            onChange={(e) => setRevisionLabel(e.target.value)}
+                            maxLength={128}
+                            placeholder="Revision label"
+                            className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                          />
                           <select
                             value={revisionStatus}
                             onChange={(e) => setRevisionStatus(e.target.value as FileRevisionStatus | "")}
@@ -761,7 +803,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                       className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded px-2 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     >
                       {gcodeFiles.map((f) => (
-                        <option key={f.id} value={f.id}>v{f.version}</option>
+                        <option key={f.id} value={f.id}>Rev {f.gcode_revision_number ?? f.version}</option>
                       ))}
                     </select>
                     <select
@@ -770,7 +812,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                       className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded px-2 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
                     >
                       {gcodeFiles.map((f) => (
-                        <option key={f.id} value={f.id}>v{f.version}</option>
+                        <option key={f.id} value={f.id}>Rev {f.gcode_revision_number ?? f.version}</option>
                       ))}
                     </select>
                   </div>
@@ -847,6 +889,106 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   );
 }
 
+function AddGcodeRevisionModal({
+  modelId,
+  onClose,
+  onUploaded,
+}: {
+  modelId: number;
+  onClose: () => void;
+  onUploaded: (model: ModelRead) => void;
+}) {
+  const [file, setFile] = useState<File | null>(null);
+  const [label, setLabel] = useState("");
+  const [notes, setNotes] = useState("");
+  const [recommended, setRecommended] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      if (label.trim()) form.append("revision_label", label.trim());
+      if (notes.trim()) form.append("revision_notes", notes.trim());
+      form.append("revision_status", "needs_test");
+      form.append("is_recommended", String(recommended));
+      onUploaded(await addGcodeRevision(modelId, form));
+    } catch (e: any) {
+      setError(e.message);
+      toast.error(e);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      <form
+        onSubmit={submit}
+        className="relative w-full max-w-md rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-5 shadow-lg space-y-4"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-[var(--on-surface)]">
+            Add G-code revision
+          </h3>
+          <button type="button" onClick={onClose} className="rounded p-1 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {error && (
+          <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-xs text-[var(--error)]">
+            {error}
+          </div>
+        )}
+        <input
+          type="file"
+          accept=".gcode,.g,.gco"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="w-full rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--on-surface)]"
+        />
+        <input
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          maxLength={128}
+          placeholder="Revision label"
+          className="w-full rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+        />
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={3}
+          placeholder="What changed in this slice?"
+          className="w-full rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-3 py-2 font-mono text-xs text-[var(--on-surface)] resize-none focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+        />
+        <label className="flex items-center gap-2 font-mono text-xs text-[var(--on-surface-variant)]">
+          <input
+            type="checkbox"
+            checked={recommended}
+            onChange={(e) => setRecommended(e.target.checked)}
+            className="rounded"
+          />
+          Mark as recommended
+        </label>
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} disabled={submitting} className="flex-1 rounded border border-[var(--outline-variant)] py-2 font-mono text-xs uppercase tracking-wider text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={!file || submitting} className="flex-1 rounded bg-[var(--primary)] py-2 font-mono text-xs uppercase tracking-wider text-[var(--primary-foreground)] hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-1.5">
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            {submitting ? "Adding..." : "Add revision"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function RevisionCompare({ left, right }: { left: FileRead; right: FileRead }) {
   const leftSlicer =
     [left.metadata?.slicer_name, left.metadata?.slicer_version]
@@ -898,8 +1040,8 @@ function RevisionCompare({ left, right }: { left: FileRead; right: FileRead }) {
     <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded overflow-hidden">
       <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
         <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">Field</span>
-        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">v{left.version}</span>
-        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">v{right.version}</span>
+        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">Rev {left.gcode_revision_number ?? left.version}</span>
+        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">Rev {right.gcode_revision_number ?? right.version}</span>
       </div>
       {rows.map(([label, leftValue, rightValue], index) => (
         <div
@@ -923,7 +1065,7 @@ function SendToButtons({
   printerFiles,
 }: {
   modelId: number;
-  gcodeFiles: Pick<FileRead, "id" | "original_filename" | "version" | "is_recommended">[];
+  gcodeFiles: Pick<FileRead, "id" | "original_filename" | "version" | "gcode_revision_number" | "revision_label" | "is_recommended">[];
   printerFiles: ModelPrinterFileRead[];
 }) {
   const auth = useRequireAuth();
@@ -1042,7 +1184,11 @@ function SendToButtons({
             className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
           >
             {gcodeFiles.map((f) => (
-              <option key={f.id} value={f.id}>{f.original_filename} (v{f.version}{f.is_recommended ? ", recommended" : ""})</option>
+              <option key={f.id} value={f.id}>
+                Rev {f.gcode_revision_number ?? f.version}
+                {f.revision_label ? `, ${f.revision_label}` : ""}
+                {f.is_recommended ? ", recommended" : ""}
+              </option>
             ))}
           </select>
           <label className="flex items-center gap-2 text-xs font-mono text-[var(--on-surface-variant)]">

@@ -5,13 +5,21 @@ import asyncio
 
 from fastapi import FastAPI
 from fastapi import Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette import status
 
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import get_session_factory, init_db
-from app.services.audit import clear_audit_context, install_audit_listeners, set_audit_context
+from app.services.audit import (
+    clear_audit_context,
+    install_audit_listeners,
+    set_audit_context,
+)
 from app.services.lifecycle import gc_soft_deleted
 from app.services.printer_hub import PrinterHub
 from app.services.runtime_config import apply_overlay, is_configured
@@ -73,13 +81,51 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+def _parse_cors_origins(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+_cors_origins = _parse_cors_origins(settings.cors_origins) or [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+_allow_all_cors = "*" in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=not _allow_all_cors,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content=jsonable_encoder(
+            {"detail": "request_validation_failed", "errors": exc.errors()}
+        ),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(
+    _request: Request, exc: Exception
+) -> JSONResponse:
+    logger.exception("unhandled request error")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "internal_server_error"},
+    )
 
 
 @app.middleware("http")
@@ -95,10 +141,13 @@ async def bind_audit_context(request: Request, call_next):
                 actor_id = int(payload["sub"])
             except (TypeError, ValueError):
                 actor_id = None
-    set_audit_context(actor_id=actor_id, ip=request.client.host if request.client else None)
+    set_audit_context(
+        actor_id=actor_id, ip=request.client.host if request.client else None
+    )
     try:
         return await call_next(request)
     finally:
         clear_audit_context()
+
 
 app.include_router(api_router)

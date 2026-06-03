@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { memo } from "react";
 import { ModelListItem } from "@/types";
-import { FileText, MoreVertical } from "lucide-react";
+import { FileText, MoreVertical, Printer } from "lucide-react";
 import { getAssetUrl } from "@/lib/api";
 
 const MAX_VISIBLE_TAGS = 3;
@@ -32,6 +32,7 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
 
   const visibleTags = model.tags.slice(0, MAX_VISIBLE_TAGS);
   const hiddenCount = model.tags.length - MAX_VISIBLE_TAGS;
+  const printerPresence = model.printer_presence ?? [];
 
   return (
     <Link
@@ -78,6 +79,26 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
             </h3>
             <MoreVertical className="h-[18px] w-[18px] text-[var(--on-surface-variant)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
           </div>
+
+          {printerPresence.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {printerPresence.slice(0, 2).map((presence) => (
+                <span
+                  key={presence.printer_id}
+                  className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-emerald-600"
+                  title={`${presence.file_count} file${presence.file_count === 1 ? "" : "s"} on ${presence.printer_name}`}
+                >
+                  <Printer className="h-3 w-3" />
+                  {presence.printer_name}
+                </span>
+              ))}
+              {printerPresence.length > 2 && (
+                <span className="rounded border border-[var(--outline-variant)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                  +{printerPresence.length - 2}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* 3. Footer — margin-top: auto anchors to card bottom */}
           <div className="mt-auto pt-2 flex items-center justify-between gap-2 border-t border-[var(--surface-variant)] min-w-0">

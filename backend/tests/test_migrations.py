@@ -25,6 +25,7 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     assert "refresh_tokens" in tables
 
     files_columns = {col["name"]: col for col in inspector.get_columns("files")}
+    assert "revision_label" in files_columns
     assert "revision_status" in files_columns
     assert "revision_notes" in files_columns
     assert "is_recommended" in files_columns

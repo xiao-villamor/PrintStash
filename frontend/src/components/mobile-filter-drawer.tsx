@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { CategoryRead, TagRead } from "@/types";
+import { CategoryRead, PrinterRead, TagRead } from "@/types";
 import { FilterSidebarContent } from "@/components/filter-sidebar";
 
 interface MobileFilterDrawerProps {
@@ -10,10 +10,15 @@ interface MobileFilterDrawerProps {
   onClose: () => void;
   categories: CategoryRead[];
   tags: TagRead[];
+  printers: PrinterRead[];
   selectedCategory: string | null;
   selectedTags: string[];
+  selectedPrinterId: number | null;
+  selectedPrinterPresence: "any" | "none" | null;
   onCategoryChange: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
+  onPrinterChange: (printerId: number | null) => void;
+  onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
   loading?: boolean;
 }
 

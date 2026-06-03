@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CategoryRead, ModelListItem, TagRead } from "@/types";
+import { CategoryRead, ModelListItem, PrinterRead, TagRead } from "@/types";
 import { ModelCard } from "@/components/model-card";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
@@ -16,8 +16,9 @@ import {
   Upload,
   FileText,
   MoreVertical,
+  Printer,
 } from "lucide-react";
-import { listCategories, listModels, listTags } from "@/lib/api";
+import { listCategories, listModels, listPrinters, listTags } from "@/lib/api";
 import Link from "next/link";
 import { getAssetUrl } from "@/lib/api";
 
@@ -81,8 +82,11 @@ export function ModelBrowser() {
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [categories, setCategories] = useState<CategoryRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
+  const [printers, setPrinters] = useState<PrinterRead[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
+  const [selectedPrinterPresence, setSelectedPrinterPresence] = useState<"any" | "none" | null>(null);
   const [sortBy, setSortBy] = useState<SortKey>("date-desc");
   const [sortOpen, setSortOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -115,10 +119,15 @@ export function ModelBrowser() {
     let alive = true;
     (async () => {
       try {
-        const [c, t] = await Promise.all([listCategories(), listTags()]);
+        const [c, t, p] = await Promise.all([
+          listCategories(),
+          listTags(),
+          listPrinters(),
+        ]);
         if (!alive) return;
         setCategories(c);
         setTags(t);
+        setPrinters(p);
       } catch (e: any) {
         if (alive) setError(e.message);
       } finally {
@@ -141,6 +150,8 @@ export function ModelBrowser() {
           category: selectedCategory ?? undefined,
           tag: selectedTags.length ? selectedTags : undefined,
           q: query.trim() || undefined,
+          printer_id: selectedPrinterId ?? undefined,
+          printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
         });
         if (!alive) return;
         setModels(data);
@@ -156,7 +167,7 @@ export function ModelBrowser() {
       alive = false;
       clearTimeout(handle);
     };
-  }, [selectedCategory, selectedTags, query, reloadKey]);
+  }, [selectedCategory, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey]);
 
   async function loadMore() {
     if (loadingMore || !hasMore) return;
@@ -168,6 +179,8 @@ export function ModelBrowser() {
         category: selectedCategory ?? undefined,
         tag: selectedTags.length ? selectedTags : undefined,
         q: query.trim() || undefined,
+        printer_id: selectedPrinterId ?? undefined,
+        printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
       });
       setModels((prev) => [...prev, ...data]);
       setHasMore(data.length === PAGE_SIZE);
@@ -198,10 +211,15 @@ export function ModelBrowser() {
         onClose={closeDrawer}
         categories={categories}
         tags={tags}
+        printers={printers}
         selectedCategory={selectedCategory}
         selectedTags={selectedTags}
+        selectedPrinterId={selectedPrinterId}
+        selectedPrinterPresence={selectedPrinterPresence}
         onCategoryChange={setSelectedCategory}
         onTagsChange={setSelectedTags}
+        onPrinterChange={setSelectedPrinterId}
+        onPrinterPresenceChange={setSelectedPrinterPresence}
         loading={facetsLoading}
       />
 
@@ -211,10 +229,15 @@ export function ModelBrowser() {
           <FilterSidebar
             categories={categories}
             tags={tags}
+            printers={printers}
             selectedCategory={selectedCategory}
             selectedTags={selectedTags}
+            selectedPrinterId={selectedPrinterId}
+            selectedPrinterPresence={selectedPrinterPresence}
             onCategoryChange={setSelectedCategory}
             onTagsChange={setSelectedTags}
+            onPrinterChange={setSelectedPrinterId}
+            onPrinterPresenceChange={setSelectedPrinterPresence}
             loading={facetsLoading}
           />
 
@@ -330,6 +353,8 @@ export function ModelBrowser() {
                 </p>
                 <p className="text-sm mt-1">
                   {query || selectedCategory || selectedTags.length
+                    || selectedPrinterId
+                    || selectedPrinterPresence
                     ? "Try clearing some filters."
                     : "Upload your first model to get started."}
                 </p>
@@ -372,6 +397,7 @@ function ModelListRow({ model }: { model: ModelListItem }) {
   const thumb = model.thumbnail_url
     ? getAssetUrl(model.thumbnail_url)
     : null;
+  const printerPresence = model.printer_presence ?? [];
 
   return (
     <Link
@@ -405,6 +431,19 @@ function ModelListRow({ model }: { model: ModelListItem }) {
                 className="bg-[var(--surface-container)] text-[var(--on-surface)] px-1 py-px rounded font-mono text-[9px] uppercase tracking-wider"
               >
                 {tag}
+              </span>
+            ))}
+          </div>
+        )}
+        {printerPresence.length > 0 && (
+          <div className="flex gap-1 mt-1">
+            {printerPresence.slice(0, 2).map((presence) => (
+              <span
+                key={presence.printer_id}
+                className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-emerald-600"
+              >
+                <Printer className="h-3 w-3" />
+                {presence.printer_name}
               </span>
             ))}
           </div>

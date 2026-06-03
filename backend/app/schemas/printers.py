@@ -3,10 +3,23 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
-from pydantic import model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import PrintJobState, PrinterProvider, PrinterStatus
+
+
+def validate_remote_filename_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return value
+    cleaned = value.strip()
+    if not cleaned:
+        return cleaned
+    parts = cleaned.replace("\\", "/").split("/")
+    if cleaned.startswith("/") or any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("remote_filename_invalid")
+    if any(ord(char) < 32 for char in cleaned):
+        raise ValueError("remote_filename_invalid")
+    return cleaned
 
 
 class PrinterCapabilities(BaseModel):
@@ -20,15 +33,17 @@ class PrinterCapabilities(BaseModel):
 
 
 class PrinterCreate(BaseModel):
-    name: str
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
     provider: PrinterProvider = PrinterProvider.MOONRAKER
-    moonraker_url: Optional[str] = None
-    api_key: Optional[str] = None
-    bambu_host: Optional[str] = None
-    bambu_serial: Optional[str] = None
-    bambu_access_code: Optional[str] = None
-    notes: Optional[str] = None
-    group: Optional[str] = None
+    moonraker_url: Optional[str] = Field(default=None, max_length=512)
+    api_key: Optional[str] = Field(default=None, max_length=512)
+    bambu_host: Optional[str] = Field(default=None, max_length=255)
+    bambu_serial: Optional[str] = Field(default=None, max_length=255)
+    bambu_access_code: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+    group: Optional[str] = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "PrinterCreate":
@@ -45,15 +60,17 @@ class PrinterCreate(BaseModel):
 
 
 class PrinterUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     provider: Optional[PrinterProvider] = None
-    name: Optional[str] = None
-    moonraker_url: Optional[str] = None
-    api_key: Optional[str] = None
-    bambu_host: Optional[str] = None
-    bambu_serial: Optional[str] = None
-    bambu_access_code: Optional[str] = None
-    notes: Optional[str] = None
-    group: Optional[str] = None
+    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    moonraker_url: Optional[str] = Field(default=None, max_length=512)
+    api_key: Optional[str] = Field(default=None, max_length=512)
+    bambu_host: Optional[str] = Field(default=None, max_length=255)
+    bambu_serial: Optional[str] = Field(default=None, max_length=255)
+    bambu_access_code: Optional[str] = Field(default=None, max_length=255)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+    group: Optional[str] = Field(default=None, max_length=128)
 
 
 class PrinterRead(BaseModel):
@@ -76,9 +93,31 @@ class PrinterRead(BaseModel):
 
 
 class SendToPrinter(BaseModel):
-    file_id: int
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: int = Field(gt=0)
     start_print: bool = False
-    remote_filename: Optional[str] = None
+    remote_filename: Optional[str] = Field(default=None, max_length=512)
+
+    @field_validator("remote_filename")
+    @classmethod
+    def validate_remote_filename(cls, value: Optional[str]) -> Optional[str]:
+        return validate_remote_filename_value(value)
+
+
+class StartPrinterFile(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    remote_filename: str = Field(min_length=1, max_length=512)
+    file_id: Optional[int] = Field(default=None, gt=0)
+
+    @field_validator("remote_filename")
+    @classmethod
+    def validate_remote_filename(cls, value: str) -> str:
+        cleaned = validate_remote_filename_value(value)
+        if not cleaned:
+            raise ValueError("remote_filename_invalid")
+        return cleaned
 
 
 class PrintJobRead(BaseModel):

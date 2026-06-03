@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "changeme_jwt_secret_please_change"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
+    cors_origins: str = ""
 
     max_upload_mb: int = 512
     log_level: str = "INFO"

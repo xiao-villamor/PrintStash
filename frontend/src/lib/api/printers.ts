@@ -13,6 +13,7 @@ import {
   PrinterStatusResponse,
   PrinterUpdate,
   SendToPrinter,
+  StartPrinterFile,
 } from "@/types";
 
 export function listPrinters(group?: string): Promise<PrinterRead[]> {
@@ -59,6 +60,19 @@ export function sendToPrinter(
 ): Promise<PrintJobRead> {
   return sendJson<PrintJobRead>(
     `/api/v1/printers/${id}/send`,
+    "POST",
+    payload,
+    apiKey,
+  );
+}
+
+export function startPrinterFile(
+  id: number,
+  payload: StartPrinterFile,
+  apiKey?: string,
+): Promise<PrintJobRead> {
+  return sendJson<PrintJobRead>(
+    `/api/v1/printers/${id}/start`,
     "POST",
     payload,
     apiKey,

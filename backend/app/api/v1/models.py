@@ -3,18 +3,31 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+import uuid
+from typing import Literal, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    File as UploadFileParam,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import Response
 from sqlalchemy import func
 from sqlmodel import Session, delete, select
+from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.security import require_auth
 from app.core.time import utcnow
 from app.db.models import (
     Category,
     File,
+    FileRevisionStatus,
     FileType,
     Metadata,
     Model,
@@ -28,14 +41,19 @@ from app.schemas.models import (
     FileRead,
     FileRevisionUpdate,
     MetadataRead,
+    ModelPrinterPresenceRead,
     ModelPrinterFileRead,
     ModelListItem,
     ModelRead,
     ModelUpdate,
 )
+from app.services import storage
+from app.services.ingestion import add_gcode_revision_to_model
 from app.services import taxonomy
 
 router = APIRouter(prefix="/models", tags=["models"])
+
+_GCODE_SUFFIXES = {".gcode", ".g", ".gco"}
 
 
 def _tag_names_for(session: Session, model_id: int) -> List[str]:
@@ -68,12 +86,55 @@ def _thumb_url(model: Model) -> Optional[str]:
     return None
 
 
+def _stage_gcode_upload(upload: UploadFile, suffix: str) -> Path:
+    staged = settings.incoming_dir / f"{uuid.uuid4().hex}{suffix}"
+    written = storage.stream_to_path(upload.file, staged)
+    if written > settings.max_upload_bytes:
+        staged.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="upload_too_large",
+        )
+    return staged
+
+
 def _live_model(session: Session, model_id: int) -> Model:
     """Like ``get_or_404`` but also rejects soft-deleted rows."""
     m = session.get(Model, model_id)
     if m is None or m.deleted_at is not None:
         raise HTTPException(status_code=404, detail="model_not_found")
     return m
+
+
+def _printer_presence_for(
+    session: Session, model_id: int
+) -> list[ModelPrinterPresenceRead]:
+    rows = session.exec(
+        select(
+            Printer.id,
+            Printer.name,
+            func.count(PrinterFile.id),
+        )
+        .join(PrinterFile, PrinterFile.printer_id == Printer.id)
+        .join(File, File.id == PrinterFile.file_id)
+        .where(
+            File.model_id == model_id,
+            File.file_type == FileType.GCODE,
+            File.deleted_at.is_(None),  # type: ignore[union-attr]
+            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
+            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+        )
+        .group_by(Printer.id, Printer.name)
+        .order_by(Printer.name.asc())  # type: ignore[attr-defined]
+    ).all()
+    return [
+        ModelPrinterPresenceRead(
+            printer_id=int(printer_id),
+            printer_name=printer_name,
+            file_count=int(file_count or 0),
+        )
+        for printer_id, printer_name, file_count in rows
+    ]
 
 
 @router.get(
@@ -94,11 +155,29 @@ def list_models(
         None, description="Tag slug; repeat for AND-filter"
     ),
     q: Optional[str] = Query(None, description="Substring match on name"),
+    printer_id: Optional[int] = Query(
+        None, description="Only models with a live G-code match on this printer"
+    ),
+    printer_presence: Optional[Literal["any", "none"]] = Query(
+        None, description="Filter models by whether they exist on any printer"
+    ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> List[ModelListItem]:
     stmt = select(Model).where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
+
+    present_model_ids = (
+        select(File.model_id)
+        .join(PrinterFile, PrinterFile.file_id == File.id)
+        .join(Printer, Printer.id == PrinterFile.printer_id)
+        .where(
+            File.file_type == FileType.GCODE,
+            File.deleted_at.is_(None),  # type: ignore[union-attr]
+            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
+            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+        )
+    )
 
     if category:
         cat_path = category.strip().strip("/").lower()
@@ -122,6 +201,15 @@ def list_models(
                 )
             )
 
+    if printer_id is not None:
+        stmt = stmt.where(
+            Model.id.in_(present_model_ids.where(PrinterFile.printer_id == printer_id))  # type: ignore[union-attr]
+        )
+    elif printer_presence == "any":
+        stmt = stmt.where(Model.id.in_(present_model_ids))  # type: ignore[union-attr]
+    elif printer_presence == "none":
+        stmt = stmt.where(Model.id.not_in(present_model_ids))  # type: ignore[attr-defined]
+
     stmt = stmt.order_by(Model.updated_at.desc()).offset(offset).limit(limit)  # type: ignore[attr-defined]
     rows = session.exec(stmt).all()
 
@@ -140,6 +228,7 @@ def list_models(
                 tags=_tag_names_for(session, m.id),  # type: ignore[arg-type]
                 thumbnail_url=_thumb_url(m),
                 file_count=int(file_count or 0),
+                printer_presence=_printer_presence_for(session, m.id),  # type: ignore[arg-type]
                 updated_at=m.updated_at,
             )
         )
@@ -152,9 +241,16 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
     files_with_meta = session.exec(
         select(File, Metadata)
         .where(File.model_id == model_id)
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
         .outerjoin(Metadata, Metadata.file_id == File.id)
         .order_by(File.version.asc())  # type: ignore[attr-defined]
     ).all()
+    gcode_revision_numbers: dict[int, int] = {}
+    gcode_index = 1
+    for f, _md in files_with_meta:
+        if f.file_type == FileType.GCODE and f.id is not None:
+            gcode_revision_numbers[f.id] = gcode_index
+            gcode_index += 1
     file_reads = [
         FileRead(
             id=f.id,  # type: ignore[arg-type]
@@ -162,8 +258,10 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
             original_filename=f.original_filename,
             file_type=f.file_type,
             version=f.version,
+            gcode_revision_number=gcode_revision_numbers.get(f.id),
             size_bytes=f.size_bytes,
             sha256=f.sha256,
+            revision_label=f.revision_label,
             revision_status=f.revision_status,
             revision_notes=f.revision_notes,
             is_recommended=f.is_recommended,
@@ -195,6 +293,52 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
     summary="Get model detail with files and metadata",
 )
 def get_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
+    return _build_model_read(session, model_id)
+
+
+@router.post(
+    "/{model_id}/gcode-revisions",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Add a G-code revision to an existing model",
+    description=(
+        "Uploads a new sliced G-code artifact directly onto the target model. "
+        "Manual revisions default to needs_test unless another status is provided."
+    ),
+)
+async def add_gcode_revision(
+    model_id: int,
+    file: UploadFile = UploadFileParam(..., description="The .gcode revision file"),
+    revision_label: Optional[str] = Form(None, max_length=128),
+    revision_status: Optional[FileRevisionStatus] = Form(FileRevisionStatus.NEEDS_TEST),
+    revision_notes: Optional[str] = Form(None, max_length=4096),
+    is_recommended: bool = Form(False),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model = _live_model(session, model_id)
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="filename_required")
+
+    original_filename = Path(file.filename).name
+    suffix = Path(original_filename).suffix.lower() or ".gcode"
+    if suffix not in _GCODE_SUFFIXES:
+        raise HTTPException(status_code=400, detail="unsupported_file_type")
+
+    staged = await run_in_threadpool(_stage_gcode_upload, file, suffix)
+    try:
+        add_gcode_revision_to_model(
+            session=session,
+            model=model,
+            staged_path=staged,
+            original_filename=original_filename,
+            revision_label=revision_label,
+            revision_status=revision_status,
+            revision_notes=revision_notes,
+            is_recommended=is_recommended,
+        )
+    except Exception:
+        staged.unlink(missing_ok=True)
+        raise
     return _build_model_read(session, model_id)
 
 
@@ -300,6 +444,9 @@ def update_file_revision(
         raise HTTPException(status_code=400, detail="revision_not_supported")
 
     fields = payload.model_fields_set
+    if "revision_label" in fields:
+        label = payload.revision_label
+        file_row.revision_label = label.strip() if label and label.strip() else None
     if "revision_status" in fields:
         file_row.revision_status = payload.revision_status
     if "revision_notes" in fields:

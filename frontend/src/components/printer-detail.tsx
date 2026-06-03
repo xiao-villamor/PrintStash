@@ -17,6 +17,7 @@ import {
   openPrinterWS,
   pausePrinter,
   resumePrinter,
+  startPrinterFile,
   syncPrinterFiles,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
@@ -93,6 +94,8 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
+  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs">("status");
+  const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -194,10 +197,31 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
     }
   }
 
+  async function startRemoteFile(file: PrinterFileRead) {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    setStartingFileId(file.id);
+    setError(null);
+    try {
+      const job = await startPrinterFile(printerId, {
+        remote_filename: file.remote_filename,
+        file_id: file.file_id,
+      });
+      await loadJobs();
+      toast.success(`Print started (job #${job.id})`);
+      setActiveTab("status");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setStartingFileId(null);
+    }
+  }
+
   const ps = snapshot.print_stats || {};
   const vs = snapshot.virtual_sdcard || {};
   const ext = snapshot.extruder || {};
   const bed = snapshot.heater_bed || {};
+  const toolhead = snapshot.toolhead || {};
+  const webhook = snapshot.webhooks || {};
   const progress = typeof vs.progress === "number" ? vs.progress * 100 : null;
 
   if (!printer) {
@@ -254,7 +278,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </span>
         </div>
         <p className="font-mono text-xs text-[var(--on-surface-variant)] break-all">
-          {printer.moonraker_url}
+          {printer.provider === "moonraker" ? printer.moonraker_url : printer.provider}
         </p>
       </div>
 
@@ -264,6 +288,26 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
         </div>
       )}
 
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatusMetric label="Klipper" value={webhook.state || printer.status} />
+        <StatusMetric label="File" value={ps.filename || "Idle"} truncate />
+        <StatusMetric label="Progress" value={progress != null ? `${progress.toFixed(1)}%` : "—"} />
+        <StatusMetric label="Homed" value={toolhead.homed_axes || "—"} />
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-b border-[var(--outline-variant)]">
+        <TabButton active={activeTab === "status"} onClick={() => setActiveTab("status")}>
+          Status
+        </TabButton>
+        <TabButton active={activeTab === "files"} onClick={() => setActiveTab("files")}>
+          Files
+        </TabButton>
+        <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>
+          Jobs
+        </TabButton>
+      </div>
+
+      {activeTab === "status" && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Current print */}
         <section className="lg:col-span-2 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
@@ -302,14 +346,14 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
               <div className="flex flex-wrap gap-2">
                 <ControlButton
                   onClick={() => control("pause", () => pausePrinter(printerId))}
-                  disabled={!auth.isAuthenticated || ps.state !== "printing" || busy !== null}
+                  disabled={!auth.isAuthenticated || !printer.capabilities.can_pause || ps.state !== "printing" || busy !== null}
                   busy={busy === "pause"}
                   icon={Pause}
                   label={auth.isAuthenticated ? "Pause" : "Sign in"}
                 />
                 <ControlButton
                   onClick={() => control("resume", () => resumePrinter(printerId))}
-                  disabled={!auth.isAuthenticated || ps.state !== "paused" || busy !== null}
+                  disabled={!auth.isAuthenticated || !printer.capabilities.can_resume || ps.state !== "paused" || busy !== null}
                   busy={busy === "resume"}
                   icon={Play}
                   label={auth.isAuthenticated ? "Resume" : "Sign in"}
@@ -318,6 +362,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
                   onClick={() => control("cancel", () => cancelPrinter(printerId))}
                   disabled={
                     !auth.isAuthenticated ||
+                    !printer.capabilities.can_cancel ||
                     (ps.state !== "printing" && ps.state !== "paused") ||
                     busy !== null
                   }
@@ -350,7 +395,9 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </div>
         </section>
       </div>
+      )}
 
+      {activeTab === "files" && (
       <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
         <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -361,7 +408,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </div>
           <button
             onClick={syncFiles}
-            disabled={syncingFiles || !auth.isAuthenticated}
+            disabled={syncingFiles || !auth.isAuthenticated || !printer.capabilities.can_list_files}
             title={auth.blockReason ?? "Sync printer files"}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -392,6 +439,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
                   <th className="py-3 px-4 font-medium text-right">Size</th>
                   <th className="py-3 px-4 font-medium">Status</th>
                   <th className="py-3 px-4 font-medium">Last seen</th>
+                  <th className="py-3 px-4 font-medium text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -432,6 +480,26 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
                     <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
                       {new Date(f.last_seen_at).toLocaleString()}
                     </td>
+                    <td className="py-3 px-4 text-right">
+                      <button
+                        onClick={() => startRemoteFile(f)}
+                        disabled={
+                          !auth.isAuthenticated ||
+                          !!f.missing_since ||
+                          !printer.capabilities.can_start ||
+                          startingFileId !== null
+                        }
+                        title={auth.blockReason ?? "Start this printer file"}
+                        className="inline-flex items-center gap-1.5 rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container-low)] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {startingFileId === f.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Play className="h-3 w-3" />
+                        )}
+                        Start
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -439,8 +507,10 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </div>
         )}
       </section>
+      )}
 
       {/* History */}
+      {activeTab === "jobs" && (
       <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
         <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between">
           <h2 className="text-sm font-semibold text-[var(--on-surface)]">
@@ -512,6 +582,55 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
           </div>
         )}
       </section>
+      )}
+    </div>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`border-b-2 px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
+        active
+          ? "border-[var(--primary)] text-[var(--primary)]"
+          : "border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatusMetric({
+  label,
+  value,
+  truncate,
+}: {
+  label: string;
+  value: string;
+  truncate?: boolean;
+}) {
+  return (
+    <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+        {label}
+      </div>
+      <div
+        className={`mt-1 font-mono text-sm font-semibold text-[var(--on-surface)] ${truncate ? "truncate" : ""}`}
+        title={value}
+      >
+        {value}
+      </div>
     </div>
   );
 }

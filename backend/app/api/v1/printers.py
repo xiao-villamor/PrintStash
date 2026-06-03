@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 from typing import List, Optional
 
 from fastapi import (
@@ -15,6 +16,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from sqlmodel import Session, select
+from starlette.concurrency import run_in_threadpool
 
 from app.core.http import get_or_404
 from app.core.logging import get_logger
@@ -39,8 +41,14 @@ from app.schemas.printers import (
     PrinterUpdate,
     PrintJobRead,
     SendToPrinter,
+    StartPrinterFile,
 )
-from app.services.printer_hub import PrinterHub, get_hub, get_hub_from_ws
+from app.services.printer_hub import (
+    PrinterHub,
+    _get_sentinel_ids,
+    get_hub,
+    get_hub_from_ws,
+)
 from app.services.printer_provider import (
     ProviderError,
     capabilities_for_provider,
@@ -315,12 +323,23 @@ async def send_to_printer(
     f = get_or_404(session, File, payload.file_id, "file_not_found")
     if f.file_type != FileType.GCODE:
         raise HTTPException(status_code=400, detail="file_not_gcode")
-    if not get_backend().exists(f.path):
+    backend = get_backend()
+    blob_exists = await run_in_threadpool(backend.exists, f.path)
+    if not blob_exists:
         raise HTTPException(status_code=410, detail="file_blob_missing")
-    local = get_backend().download_to_path(
-        f.path,
-        Path(f"/tmp/print-{f.id}{Path(f.original_filename).suffix}"),
+    temp_file = tempfile.NamedTemporaryFile(
+        prefix=f"print-{f.id}-",
+        suffix=Path(f.original_filename).suffix,
+        delete=False,
     )
+    temp_target = Path(temp_file.name)
+    temp_file.close()
+    try:
+        local = await run_in_threadpool(backend.download_to_path, f.path, temp_target)
+    except Exception:
+        temp_target.unlink(missing_ok=True)
+        logger.exception("failed to stage print upload file=%s", f.id)
+        raise HTTPException(status_code=502, detail="storage_error")
 
     remote_name = (payload.remote_filename or f.original_filename).strip()
     if not remote_name.lower().endswith((".gcode", ".g", ".gco")):
@@ -356,16 +375,24 @@ async def send_to_printer(
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=f"provider_error: {exc}")
+        raise HTTPException(status_code=502, detail=exc.code)
     except HTTPException:
         raise
     except Exception as exc:
+        logger.exception(
+            "send_to_printer failed for printer=%s file=%s", printer_id, f.id
+        )
         job.state = PrintJobState.FAILED
         job.error = str(exc)
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=f"provider_error: {exc}")
+        raise HTTPException(status_code=502, detail="provider_error")
+    finally:
+        try:
+            temp_target.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("failed to remove temp print upload %s", temp_target)
 
     # Moonraker accepts print=true on upload but returns immediately; the
     # print_stats subscription will move the job into PRINTING. We mark
@@ -388,6 +415,98 @@ async def send_to_printer(
     return out
 
 
+@router.post(
+    "/{printer_id}/start",
+    response_model=PrintJobRead,
+    dependencies=[Depends(require_auth)],
+    summary="Start a G-code file already present on the printer",
+    description=(
+        "Asks the provider to start a remote G-code file already in the printer's "
+        "file store. When the remote file is matched to a vault File, the job is "
+        "linked to that model; otherwise it is recorded as an external job."
+    ),
+)
+async def start_printer_file(
+    printer_id: int,
+    payload: StartPrinterFile,
+    session: Session = Depends(get_session),
+) -> PrintJobRead:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    provider = get_provider_client(p)
+    if not provider.capabilities.can_start:
+        raise HTTPException(
+            status_code=409,
+            detail="operation_not_supported_for_provider",
+        )
+
+    file_row: File | None = None
+    source = "external"
+    if payload.file_id is not None:
+        candidate = get_or_404(session, File, payload.file_id, "file_not_found")
+        if candidate.file_type != FileType.GCODE:
+            raise HTTPException(status_code=400, detail="file_not_gcode")
+        file_row = candidate
+        source = "vault"
+    else:
+        printer_file = session.exec(
+            select(PrinterFile).where(
+                PrinterFile.printer_id == printer_id,
+                PrinterFile.remote_filename == payload.remote_filename,
+                PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+            )
+        ).first()
+        if printer_file and printer_file.file_id is not None:
+            candidate = session.get(File, printer_file.file_id)
+            if candidate and candidate.deleted_at is None:
+                file_row = candidate
+                source = "vault"
+
+    if file_row is not None:
+        file_id = int(file_row.id)
+        model_id = file_row.model_id
+    else:
+        file_id, model_id = _get_sentinel_ids(session)
+
+    job = PrintJob(
+        printer_id=printer_id,
+        file_id=file_id,
+        model_id=model_id,
+        remote_filename=payload.remote_filename,
+        state=PrintJobState.STARTED,
+        source=source,
+        started_at=utcnow(),
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    try:
+        await provider.start(payload.remote_filename)
+    except ProviderError as exc:
+        job.state = PrintJobState.FAILED
+        job.error = exc.detail
+        job.finished_at = utcnow()
+        job.updated_at = utcnow()
+        session.add(job)
+        session.commit()
+        raise HTTPException(status_code=502, detail=exc.code)
+    except Exception:
+        logger.exception(
+            "printer start failed printer=%s remote=%s",
+            printer_id,
+            payload.remote_filename,
+        )
+        job.state = PrintJobState.FAILED
+        job.error = "provider_error"
+        job.finished_at = utcnow()
+        job.updated_at = utcnow()
+        session.add(job)
+        session.commit()
+        raise HTTPException(status_code=502, detail="provider_error")
+
+    return PrintJobRead(**job.model_dump())
+
+
 async def _printer_control(printer_id: int, session: Session, action: str) -> dict:
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     client = get_provider_client(p)
@@ -406,8 +525,11 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
         await getattr(client, action)()
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.code)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception:
+        logger.exception(
+            "printer control failed action=%s printer=%s", action, printer_id
+        )
+        raise HTTPException(status_code=502, detail="provider_error")
     return {"ok": True}
 
 

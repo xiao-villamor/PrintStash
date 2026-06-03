@@ -134,6 +134,11 @@ class TestMoonrakerClientHTTP:
             )
             result = asyncio.run(client.start_print("my_print.gcode"))
             assert result == {"result": "ok"}
+            call_args = (
+                MockClient.return_value.__aenter__.return_value.request.call_args
+            )
+            assert call_args[0][1].endswith("/printer/print/start")
+            assert call_args[1]["params"] == {"filename": "my_print.gcode"}
 
     def test_pause_resume_cancel(self):
         client = MoonrakerClient("http://printer.local:7125")

@@ -16,6 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -88,7 +89,7 @@ async def ingest_orca(
     if suffix not in _GCODE_SUFFIXES:
         raise HTTPException(status_code=400, detail="unsupported_file_type")
 
-    staged = _stage_upload(file, suffix)
+    staged = await run_in_threadpool(_stage_upload, file, suffix)
     job_id = registry.create()
     background_tasks.add_task(
         ingest_orca_gcode,
@@ -136,7 +137,7 @@ async def ingest_model(
     if suffix not in _MESH_SUFFIXES:
         raise HTTPException(status_code=400, detail="unsupported_file_type")
 
-    staged = _stage_upload(file, suffix)
+    staged = await run_in_threadpool(_stage_upload, file, suffix)
     job_id = registry.create()
     background_tasks.add_task(
         ingest_mesh,

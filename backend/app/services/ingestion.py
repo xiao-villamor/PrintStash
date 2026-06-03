@@ -10,7 +10,14 @@ from sqlmodel import Session, select
 
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import File, FileType, Metadata, Model, ModelTagLink
+from app.db.models import (
+    File,
+    FileRevisionStatus,
+    FileType,
+    Metadata,
+    Model,
+    ModelTagLink,
+)
 from app.db.session import SessionFactory
 from app.services import gcode_parser, gcode_rust, storage, taxonomy, thumbnail
 from app.services.hashing import sha256_file
@@ -296,3 +303,75 @@ def ingest_mesh(
         strategy=_mesh_strategy(file_type),
         session_factory=session_factory,
     )
+
+
+def add_gcode_revision_to_model(
+    *,
+    session: Session,
+    model: Model,
+    staged_path: Path,
+    original_filename: str,
+    revision_label: str | None,
+    revision_status: FileRevisionStatus | None,
+    revision_notes: str | None,
+    is_recommended: bool,
+) -> File:
+    """Attach a staged G-code file as a new revision of an existing model."""
+    assert model.id is not None
+    blob_hash = sha256_file(staged_path)
+    meta, thumb_bytes = _gcode_strategy().process(staged_path)
+    version = _next_version_for_model(session, model.id)
+    dest_key = storage.canonical_blob_path(model.slug, version, original_filename)
+
+    storage.move_file(staged_path, dest_key)
+    size_bytes = get_backend().stat_size(dest_key)
+
+    file_row = File(
+        model_id=model.id,
+        path=dest_key,
+        original_filename=original_filename,
+        file_type=FileType.GCODE,
+        version=version,
+        size_bytes=size_bytes,
+        sha256=blob_hash,
+        revision_label=revision_label.strip()
+        if revision_label and revision_label.strip()
+        else None,
+        revision_status=revision_status,
+        revision_notes=revision_notes.strip()
+        if revision_notes and revision_notes.strip()
+        else None,
+        is_recommended=is_recommended,
+    )
+    session.add(file_row)
+    session.commit()
+    session.refresh(file_row)
+    assert file_row.id is not None
+
+    if is_recommended:
+        other_gcode = session.exec(
+            select(File).where(
+                File.model_id == model.id,
+                File.id != file_row.id,
+                File.file_type == FileType.GCODE,
+                File.deleted_at.is_(None),  # type: ignore[union-attr]
+            )
+        ).all()
+        for other in other_gcode:
+            other.is_recommended = False
+            session.add(other)
+
+    if thumb_bytes:
+        thumb_key = storage.thumbnail_path_for(file_row.id)
+        get_backend().write_bytes(thumb_bytes, thumb_key)
+        if not model.thumbnail_path:
+            model.thumbnail_path = thumb_key
+            model.thumbnail_file_id = file_row.id
+
+    md = Metadata(file_id=file_row.id, **meta)
+    model.updated_at = utcnow()
+    session.add(md)
+    session.add(model)
+    session.commit()
+    session.refresh(file_row)
+    return file_row
