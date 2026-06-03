@@ -230,8 +230,8 @@ SQLite + local files by default
 Postgres + S3/R2 optional
 ```
 
-The repository keeps most decisions documented in [CONTEXT.md](./CONTEXT.md) and
-[docs/adr](./docs/adr).
+The repository keeps architecture decisions documented in [docs/adr](./docs/adr),
+with release and operations notes in [docs](./docs).
 
 ## Roadmap
 

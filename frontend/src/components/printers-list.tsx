@@ -161,12 +161,6 @@ export function PrintersPage() {
                 {providerAddress(p)}
               </p>
 
-              {p.capabilities.support_notes.length > 0 && (
-                <p className="text-[11px] leading-5 text-[var(--on-surface-variant)]">
-                  {p.capabilities.support_notes[0]}
-                </p>
-              )}
-
               {p.last_error && (
                 <div className="rounded bg-[var(--error-container)]/30 border border-[var(--error)]/20 p-2 text-xs text-[var(--error)] font-mono truncate">
                   {p.last_error}

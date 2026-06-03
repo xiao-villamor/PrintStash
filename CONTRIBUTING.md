@@ -60,5 +60,5 @@ pnpm lint
 - Heavy mesh dependencies must stay lazy-loaded.
 - The OrcaSlicer hook must never block an export because the server is down.
 
-See [AGENTS.md](./AGENTS.md), [CONTEXT.md](./CONTEXT.md), and [docs/adr](./docs/adr)
-for the deeper architecture notes.
+See [README.md](./README.md) and [docs/adr](./docs/adr) for the deeper
+architecture notes.

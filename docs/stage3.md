@@ -70,7 +70,6 @@ monitor live printer state through the web UI, and get a farm-wide health dashbo
 
 - [x] **Documentation**
   - `docs/stage3.md` — this file
-  - `.opencode/skills/nexus3d-vault/SKILL.md` — architecture reference + development guide
 
 ### Carried into Stage 4
 

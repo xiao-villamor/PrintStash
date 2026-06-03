@@ -75,9 +75,6 @@ class MoonrakerProvider:
         can_upload=True,
         can_list_files=True,
         support_level="stable",
-        support_notes=(
-            "Primary 1.0 provider. Supports Moonraker/Klipper status, upload, start, pause, resume, cancel, and remote file inventory.",
-        ),
     )
 
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
