@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, KeyRound, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, KeyRound } from "lucide-react";
 import {
   clearStoredApiKey,
   getStoredApiKey,
@@ -9,14 +9,10 @@ import {
   setStoredApiKey,
 } from "@/lib/auth";
 
-type TestState = "idle" | "testing" | "ok" | "fail";
-
 export function ApiKeyCard() {
   const [key, setKey] = useState("");
   const [stored, setStored] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [test, setTest] = useState<TestState>("idle");
-  const [testMsg, setTestMsg] = useState<string | null>(null);
 
   useEffect(() => {
     setStored(getStoredApiKey());
@@ -26,40 +22,10 @@ export function ApiKeyCard() {
   function save() {
     setStoredApiKey(key);
     setKey("");
-    setTest("idle");
-    setTestMsg(null);
   }
 
   function clear() {
     clearStoredApiKey();
-    setTest("idle");
-    setTestMsg(null);
-  }
-
-  async function runTest() {
-    setTest("testing");
-    setTestMsg(null);
-    try {
-      const probe = await fetch("/api/v1/categories", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": stored || "",
-        },
-        body: JSON.stringify({ name: "" }),
-      });
-      // 422 = key accepted, body rejected. 401 = bad key.
-      if (probe.status === 401) {
-        setTest("fail");
-        setTestMsg("Key rejected by server (401).");
-      } else {
-        setTest("ok");
-        setTestMsg("Key accepted.");
-      }
-    } catch (e: any) {
-      setTest("fail");
-      setTestMsg(e.message || "Network error");
-    }
   }
 
   const masked = stored
@@ -104,17 +70,6 @@ export function ApiKeyCard() {
               </button>
               <button
                 type="button"
-                onClick={runTest}
-                disabled={test === "testing"}
-                className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] transition-colors disabled:opacity-50 flex items-center gap-1"
-              >
-                {test === "testing" ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : null}
-                Test
-              </button>
-              <button
-                type="button"
                 onClick={clear}
                 className="font-mono text-[10px] uppercase tracking-wider text-[var(--error)] hover:opacity-80 transition-opacity"
               >
@@ -125,25 +80,6 @@ export function ApiKeyCard() {
         ) : (
           <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 font-mono">
             No key stored. Write operations will fail until one is saved.
-          </div>
-        )}
-
-        {test !== "idle" && testMsg && (
-          <div
-            className={`flex items-center gap-2 text-xs font-mono ${
-              test === "ok"
-                ? "text-emerald-600 dark:text-emerald-400"
-                : test === "fail"
-                ? "text-[var(--error)]"
-                : "text-[var(--on-surface-variant)]"
-            }`}
-          >
-            {test === "ok" ? (
-              <CheckCircle2 className="h-3.5 w-3.5" />
-            ) : test === "fail" ? (
-              <XCircle className="h-3.5 w-3.5" />
-            ) : null}
-            {testMsg}
           </div>
         )}
 

@@ -32,6 +32,7 @@ import {
   addGcodeRevision,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useRouter } from "next/navigation";
 import {
@@ -908,6 +909,12 @@ function AddGcodeRevisionModal({
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!file || submitting) return;
+    const taskId = createTask({
+      title: `Upload revision ${file.name}`,
+      detail: "Uploading G-code revision",
+      status: "running",
+      progress: 20,
+    });
     setSubmitting(true);
     setError(null);
     try {
@@ -917,9 +924,24 @@ function AddGcodeRevisionModal({
       if (notes.trim()) form.append("revision_notes", notes.trim());
       form.append("revision_status", "needs_test");
       form.append("is_recommended", String(recommended));
+      updateTask(taskId, {
+        detail: "Adding revision to model",
+        status: "running",
+        progress: 70,
+      });
       onUploaded(await addGcodeRevision(modelId, form));
+      updateTask(taskId, {
+        detail: "Revision uploaded",
+        status: "completed",
+        progress: 100,
+      });
     } catch (e: any) {
       setError(e.message);
+      updateTask(taskId, {
+        detail: e.message || "Revision upload failed",
+        status: "failed",
+        progress: 100,
+      });
       toast.error(e);
     } finally {
       setSubmitting(false);
@@ -1074,7 +1096,7 @@ function SendToButtons({
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
   const [startPrint, setStartPrint] = useState(false);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
-  const [printerId, setPrinterId] = useState<number | null>(null);
+  const [selectedPrinterIds, setSelectedPrinterIds] = useState<number[]>([]);
   const [printersLoading, setPrintersLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1086,10 +1108,13 @@ function SendToButtons({
       .then((p) => {
         if (!alive) return;
         setPrinters(p);
-        setPrinterId((current) => {
-          if (p.length === 0) return null;
-          if (current && p.some((printer) => printer.id === current)) return current;
-          return p[0].id;
+        setSelectedPrinterIds((current) => {
+          const capableIds = p
+            .filter((printer) => printer.capabilities.can_upload)
+            .map((printer) => printer.id);
+          if (capableIds.length === 0) return [];
+          const kept = current.filter((id) => capableIds.includes(id));
+          return kept.length > 0 ? kept : [capableIds[0]];
         });
       })
       .catch((e) => {
@@ -1104,28 +1129,94 @@ function SendToButtons({
     };
   }, [showSend]);
 
-  const selectedPrinter = printers.find((p) => p.id === printerId) ?? null;
-  const online = selectedPrinter && selectedPrinter.status !== "offline" && selectedPrinter.status !== "unknown";
-  const selectedUpload = printerFiles.find(
+  const selectedPrinters = useMemo(
+    () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
+    [printers, selectedPrinterIds],
+  );
+  const availablePrinters = useMemo(
+    () => printers.filter((printer) => printer.capabilities.can_upload),
+    [printers],
+  );
+  const onlineCount = selectedPrinters.filter(
+    (printer) => printer.status !== "offline" && printer.status !== "unknown",
+  ).length;
+  const selectedUploads = printerFiles.filter(
     (row) =>
       row.file_id === selectedFile &&
-      row.printer_id === printerId &&
+      selectedPrinterIds.includes(row.printer_id) &&
       !row.missing_since,
   );
 
+  function togglePrinter(id: number) {
+    setSelectedPrinterIds((current) =>
+      current.includes(id)
+        ? current.filter((currentId) => currentId !== id)
+        : [...current, id],
+    );
+  }
+
   async function send() {
-    if (!selectedFile || !printerId) return;
+    if (!selectedFile || selectedPrinters.length === 0) return;
+    const file = gcodeFiles.find((candidate) => candidate.id === selectedFile);
+    const taskId = createTask({
+      title: `Send ${file?.original_filename ?? "G-code"}`,
+      detail: `Sending to ${selectedPrinters.length} printer${selectedPrinters.length === 1 ? "" : "s"}`,
+      status: "running",
+      progress: 5,
+    });
     setSending(true);
     setError(null);
     try {
-      const job = await sendToPrinter(printerId, {
-        file_id: selectedFile,
-        start_print: startPrint,
-      });
-      setShowSend(false);
-      toast.success(startPrint ? `Print started (job #${job.id})` : `Sent to printer (job #${job.id})`);
+      let completed = 0;
+      const results = await Promise.allSettled(
+        selectedPrinters.map(async (printer) => {
+          const job = await sendToPrinter(printer.id, {
+            file_id: selectedFile,
+            start_print: startPrint,
+          });
+          completed += 1;
+          updateTask(taskId, {
+            detail: `${completed}/${selectedPrinters.length} printers completed`,
+            status: "running",
+            progress: 10 + (completed / selectedPrinters.length) * 85,
+          });
+          return { printer, job };
+        }),
+      );
+
+      const successes = results.filter((result) => result.status === "fulfilled");
+      const failures = results.filter((result) => result.status === "rejected");
+
+      if (failures.length > 0) {
+        const message = `${successes.length}/${selectedPrinters.length} printers succeeded`;
+        setError(message);
+        updateTask(taskId, {
+          detail: message,
+          status: successes.length > 0 ? "completed" : "failed",
+          progress: 100,
+        });
+        toast.warning("Some sends failed", message);
+      } else {
+        updateTask(taskId, {
+          detail: startPrint ? "Print started on selected printers" : "Sent to selected printers",
+          status: "completed",
+          progress: 100,
+        });
+        setShowSend(false);
+        toast.success(
+          startPrint
+            ? `Print started on ${successes.length} printer${successes.length === 1 ? "" : "s"}`
+            : `Sent to ${successes.length} printer${successes.length === 1 ? "" : "s"}`,
+        );
+      }
     } catch (e: any) {
-      setError(e.message);
+      const message = e.message || "Send failed";
+      setError(message);
+      updateTask(taskId, {
+        detail: message,
+        status: "failed",
+        progress: 100,
+      });
     } finally {
       setSending(false);
     }
@@ -1146,15 +1237,19 @@ function SendToButtons({
               <WifiOff className="h-3 w-3 text-[var(--on-surface-variant)]" />
               <span className="font-mono text-xs text-[var(--on-surface-variant)]">No printers</span>
             </>
-          ) : online ? (
+          ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
             <>
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="font-mono text-xs font-bold text-emerald-500 tracking-wider capitalize">{selectedPrinter?.status}</span>
+              <span className="font-mono text-xs font-bold text-emerald-500 tracking-wider">
+                {onlineCount}/{selectedPrinters.length} online
+              </span>
             </>
           ) : (
             <>
               <WifiOff className="h-3 w-3 text-amber-500" />
-              <span className="font-mono text-xs text-amber-500 capitalize">{selectedPrinter?.status ?? "offline"}</span>
+              <span className="font-mono text-xs text-amber-500 capitalize">
+                No selected printer online
+              </span>
             </>
           )}
         </div>
@@ -1167,16 +1262,41 @@ function SendToButtons({
 
       {showSend ? (
         <div className="space-y-3">
-          {printers.length > 1 && (
-            <select
-              value={printerId ?? ""}
-              onChange={(e) => setPrinterId(Number(e.target.value))}
-              className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
-            >
-              {printers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} — {p.status}</option>
-              ))}
-            </select>
+          {printers.length > 0 && (
+            <div className="space-y-1.5 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-2">
+              {printers.map((printer) => {
+                const disabled = !printer.capabilities.can_upload;
+                return (
+                  <label
+                    key={printer.id}
+                    className={`flex items-center justify-between gap-3 rounded px-2 py-1.5 font-mono text-xs ${
+                      disabled
+                        ? "text-[var(--on-surface-variant)]/60"
+                        : "text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]"
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selectedPrinterIds.includes(printer.id)}
+                        onChange={() => togglePrinter(printer.id)}
+                        disabled={disabled || sending}
+                        className="rounded"
+                      />
+                      <span className="truncate">{printer.name}</span>
+                    </span>
+                    <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                      {disabled ? "Unsupported" : printer.status}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {availablePrinters.length === 0 && (
+            <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-600 font-mono">
+              No configured printer supports Vault upload/send.
+            </div>
           )}
           <select
             value={selectedFile}
@@ -1195,9 +1315,12 @@ function SendToButtons({
             <input type="checkbox" checked={startPrint} onChange={(e) => setStartPrint(e.target.checked)} className="rounded" />
             Start print immediately
           </label>
-          {selectedUpload && (
+          {selectedUploads.length > 0 && (
             <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-2 text-[11px] text-emerald-600 font-mono break-words">
-              Already on {selectedUpload.printer_name} as {selectedUpload.remote_filename}
+              Already on{" "}
+              {selectedUploads
+                .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
+                .join(", ")}
             </div>
           )}
           {error && (
@@ -1207,7 +1330,7 @@ function SendToButtons({
           )}
           <div className="flex gap-2">
             <button onClick={() => setShowSend(false)} disabled={sending} className="flex-1 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors disabled:opacity-50">Cancel</button>
-            <button onClick={send} disabled={sending || !printerId} className="flex-1 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
+            <button onClick={send} disabled={sending || selectedPrinters.length === 0} className="flex-1 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {sending ? "Sending…" : startPrint ? "Send & Print" : "Send"}
             </button>

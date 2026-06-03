@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { memo } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { ModelListItem } from "@/types";
-import { FileText, MoreVertical, Printer } from "lucide-react";
+import { ArrowRight, FileText, MoreVertical, Printer } from "lucide-react";
 import { getAssetUrl } from "@/lib/api";
 
 const MAX_VISIBLE_TAGS = 3;
@@ -26,6 +26,8 @@ function timeAgo(dateStr: string): string {
 }
 
 function ModelCardInner({ model }: { model: ModelListItem }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const thumb = model.thumbnail_url
     ? getAssetUrl(model.thumbnail_url)
     : null;
@@ -34,13 +36,33 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
   const hiddenCount = model.tags.length - MAX_VISIBLE_TAGS;
   const printerPresence = model.printer_presence ?? [];
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
   return (
-    <Link
-      href={`/models/${model.id}`}
-      className="block group active:scale-[0.98] transition-transform duration-150 h-full"
+    <article
+      className="relative group active:scale-[0.98] transition-transform duration-150 h-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-[var(--primary)]"
       style={{ contentVisibility: "auto", containIntrinsicSize: "320px" } as React.CSSProperties}
     >
-      <article className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-[var(--primary)] transition-all duration-200 flex flex-col overflow-hidden h-full">
+      <Link
+        href={`/models/${model.id}`}
+        className="flex flex-col overflow-hidden h-full rounded"
+      >
         {/* 1. Thumbnail — fixed aspect ratio, no padding */}
         <div className="aspect-[16/9] bg-[var(--surface-container-low)] relative overflow-hidden flex-shrink-0">
           {model.file_count > 0 && (
@@ -72,12 +94,11 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
           <div className="flex items-start justify-between gap-2">
             {/* 4. Strict single-line ellipsis */}
             <h3
-              className="text-[15px] font-semibold text-[var(--on-surface)] truncate leading-tight"
+              className="text-[15px] font-semibold text-[var(--on-surface)] truncate leading-tight pr-8"
               title={model.name}
             >
               {model.name}
             </h3>
-            <MoreVertical className="h-[18px] w-[18px] text-[var(--on-surface-variant)] opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 mt-0.5" />
           </div>
 
           {printerPresence.length > 0 && (
@@ -138,8 +159,36 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
             </span>
           </div>
         </div>
-      </article>
-    </Link>
+      </Link>
+
+      <div ref={menuRef} className="absolute left-2 top-2 z-20">
+        <button
+          type="button"
+          onClick={() => setMenuOpen((value) => !value)}
+          className="flex h-7 w-7 items-center justify-center rounded border border-transparent bg-[var(--surface-container-lowest)]/90 text-[var(--on-surface-variant)] opacity-100 shadow-sm transition-colors hover:border-[var(--outline-variant)] hover:text-[var(--on-surface)] sm:opacity-0 sm:group-hover:opacity-100"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={`Open actions for ${model.name}`}
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full mt-1 w-40 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] py-1 shadow-lg"
+          >
+            <Link
+              href={`/models/${model.id}`}
+              role="menuitem"
+              className="flex items-center justify-between px-3 py-2 text-xs font-mono text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]"
+            >
+              Open model
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 

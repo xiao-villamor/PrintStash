@@ -20,6 +20,7 @@ import {
   listTags,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { CategoryRead, TagRead } from "@/types";
 
@@ -153,14 +154,38 @@ export function UploadModal({
     onClose();
   }
 
-  async function pollJob(jid: string): Promise<number> {
+  async function pollJob(
+    jid: string,
+    taskId?: string,
+    progressStart = 40,
+    progressEnd = 90,
+  ): Promise<number> {
     const maxAttempts = 60;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((r) => setTimeout(r, 1000));
       const status = await getJobStatus(jid);
+      if (taskId) {
+        const progress =
+          progressStart + ((i + 1) / maxAttempts) * (progressEnd - progressStart);
+        updateTask(taskId, {
+          status: status.state === "pending" ? "pending" : "running",
+          progress,
+          detail:
+            status.state === "pending"
+              ? "Waiting for the vault to start processing"
+              : "Extracting metadata and thumbnails",
+        });
+      }
       if (status.state === "completed") {
         if (status.model_id == null)
           throw new Error("Job completed but no model_id returned");
+        if (taskId) {
+          updateTask(taskId, {
+            status: progressEnd >= 99 ? "completed" : "running",
+            progress: progressEnd >= 99 ? 100 : progressEnd,
+            detail: progressEnd >= 99 ? "Upload processed" : "Mesh processed",
+          });
+        }
         return status.model_id;
       }
       if (status.state === "failed")
@@ -176,6 +201,12 @@ export function UploadModal({
       auth.showAuthRequiredToast();
       return;
     }
+    const taskId = createTask({
+      title: `Upload ${modelName || meshFile?.name || gcodeFile?.name || "model"}`,
+      detail: "Preparing upload",
+      status: "running",
+      progress: 5,
+    });
     setSubmitting(true);
     setError(null);
     try {
@@ -183,6 +214,11 @@ export function UploadModal({
       if (meshFile) {
         setStep("uploading_mesh");
         setStepLabel("Uploading 3D model…");
+        updateTask(taskId, {
+          detail: `Uploading ${meshFile.name}`,
+          status: "running",
+          progress: 15,
+        });
         const meshFd = new FormData();
         meshFd.append("file", meshFile);
         meshFd.append("model_name", modelName || meshFile.name);
@@ -193,13 +229,23 @@ export function UploadModal({
 
         setStep("processing_mesh");
         setStepLabel("Processing 3D model (meshing, thumbnail)…");
-        const modelId = await pollJob(meshRes.job_id);
+        updateTask(taskId, {
+          detail: "Processing mesh and thumbnail",
+          status: "running",
+          progress: 35,
+        });
+        const modelId = await pollJob(meshRes.job_id, taskId, 35, gcodeFile ? 55 : 95);
 
         // Get the model hash so we can link the G-code to this model.
         if (gcodeFile) {
           const full = await getModel(modelId);
           setStep("uploading_gcode");
           setStepLabel("Uploading G-code…");
+          updateTask(taskId, {
+            detail: `Uploading ${gcodeFile.name}`,
+            status: "running",
+            progress: 60,
+          });
           const gcodeFd = new FormData();
           gcodeFd.append("file", gcodeFile);
           gcodeFd.append("model_name", modelName || gcodeFile.name);
@@ -209,6 +255,13 @@ export function UploadModal({
           gcodeFd.append("source_hash", full.hash);
           const gcodeRes = await ingestOrca(gcodeFd);
           setJobId(gcodeRes.job_id);
+          void pollJob(gcodeRes.job_id, taskId, 70, 98).catch((err) => {
+            updateTask(taskId, {
+              status: "failed",
+              progress: 100,
+              detail: err instanceof Error ? err.message : String(err),
+            });
+          });
         } else {
           setJobId(meshRes.job_id);
         }
@@ -216,6 +269,11 @@ export function UploadModal({
         // ---- G-code only ----
         setStep("uploading_gcode");
         setStepLabel("Uploading G-code…");
+        updateTask(taskId, {
+          detail: `Uploading ${gcodeFile.name}`,
+          status: "running",
+          progress: 25,
+        });
         const fd = new FormData();
         fd.append("file", gcodeFile);
         fd.append("model_name", modelName || gcodeFile.name);
@@ -223,6 +281,13 @@ export function UploadModal({
         if (selectedTags.length) fd.append("tags", selectedTags.join(","));
         const res = await ingestOrca(fd);
         setJobId(res.job_id);
+        void pollJob(res.job_id, taskId, 45, 98).catch((err) => {
+          updateTask(taskId, {
+            status: "failed",
+            progress: 100,
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        });
       }
 
       setStep("done");
@@ -230,6 +295,11 @@ export function UploadModal({
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg);
+      updateTask(taskId, {
+        status: "failed",
+        progress: 100,
+        detail: msg,
+      });
       toast.error(err);
     } finally {
       setSubmitting(false);
