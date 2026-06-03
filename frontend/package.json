@@ -29,16 +29,14 @@
     "three-stdlib": "^2.36.1"
   },
   "devDependencies": {
-    "@tailwindcss/oxide-linux-x64-gnu": "4.3.0",
-    "@tailwindcss/postcss": "^4.3.0",
     "@types/node": "^24.12.4",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.5.0",
+    "autoprefixer": "10.5.0",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.2.7",
-    "postcss": "^8.5.15",
-    "tailwindcss": "^4.3.0",
+    "postcss": "8.5.15",
+    "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3"
   },
   "pnpm": {
