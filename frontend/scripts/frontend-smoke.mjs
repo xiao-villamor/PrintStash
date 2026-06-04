@@ -30,6 +30,23 @@ if (apiDetail.id !== model.id || !Array.isArray(apiDetail.files)) {
   throw new Error("model detail API shape is invalid");
 }
 
+const printersRes = await fetchOk("/api/v1/printers", "application/json");
+const printers = await printersRes.json();
+if (!Array.isArray(printers)) {
+  throw new Error("printer list API shape is invalid");
+}
+if (printers.length > 0) {
+  const printer = printers[0];
+  const printerDetailRes = await fetchOk(`/printers/${printer.id}`, "text/html");
+  const printerDetailHtml = await printerDetailRes.text();
+  if (
+    printerDetailHtml.includes("printerId\":\"$NaN") ||
+    printerDetailHtml.includes("printerId\":null")
+  ) {
+    throw new Error(`/printers/${printer.id} rendered an invalid printer id`);
+  }
+}
+
 if (model.thumbnail_url) {
   await fetchOk(model.thumbnail_url, "image/png");
 }

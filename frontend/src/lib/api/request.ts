@@ -9,9 +9,7 @@ function isBrowser(): boolean {
 }
 
 function browserBase(): string {
-  if (!API_BASE) return "";
-  if (API_BASE.includes("://api:")) return "";
-  return API_BASE;
+  return "";
 }
 
 function serverBase(): string {
