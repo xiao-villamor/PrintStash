@@ -1,0 +1,270 @@
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+
+const now = "2026-06-04T00:24:22.000000";
+
+const metadata = {
+  slicer_name: "OrcaSlicer",
+  slicer_version: "OrcaSlicer 2.3.1",
+  printer_model: "Creality Ender-3 V3 SE",
+  nozzle_diameter_mm: 0.4,
+  layer_height_mm: 0.2,
+  infill_percent: 15,
+  estimated_time_s: 1812,
+  filament_weight_g: 6.8,
+  filament_length_mm: null,
+  filament_cost: 0.14,
+  material_type: "PLA",
+  material_brand: null,
+  bbox_x_mm: null,
+  bbox_y_mm: null,
+  bbox_z_mm: null,
+  volume_mm3: null,
+  triangle_count: null,
+};
+
+const model = {
+  id: 1,
+  name: "skadis_kitchen-roll_screw",
+  slug: "skadis-kitchen-roll-screw",
+  hash: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
+  category: "maraio",
+  category_id: 1,
+  description: null,
+  tags: ["tete"],
+  thumbnail_url: "/api/v1/files/1/thumbnail",
+  created_at: "2026-05-31T10:46:55.658492",
+  updated_at: now,
+  files: [
+    {
+      id: 1,
+      model_id: 1,
+      original_filename: "skadis_kitchen-roll_screw.stl",
+      file_type: "stl",
+      version: 1,
+      gcode_revision_number: null,
+      size_bytes: 1570684,
+      sha256: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
+      revision_label: null,
+      revision_status: null,
+      revision_notes: null,
+      is_recommended: false,
+      uploaded_at: "2026-05-31T10:46:55.705202",
+      metadata: null,
+    },
+    {
+      id: 2,
+      model_id: 1,
+      original_filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+      file_type: "gcode",
+      version: 2,
+      gcode_revision_number: 1,
+      size_bytes: 3115403,
+      sha256: "ae1f6b635c772c0267e9249cbff6fdcef505e336ac3bcf58a996d42b3547d1c4",
+      revision_label: null,
+      revision_status: "known_good",
+      revision_notes: null,
+      is_recommended: true,
+      uploaded_at: "2026-05-31T10:46:56.705262",
+      metadata,
+    },
+  ],
+};
+
+const printer = {
+  id: 3,
+  name: "ender",
+  provider: "moonraker",
+  moonraker_url: "https://moonraker.perrecha.cloud",
+  has_api_key: true,
+  bambu_host: null,
+  bambu_serial: null,
+  has_bambu_access_code: false,
+  capabilities: {
+    can_start: true,
+    can_pause: true,
+    can_resume: true,
+    can_cancel: true,
+    can_live_status: true,
+    can_upload: true,
+    can_list_files: true,
+    support_level: "stable",
+    support_notes: [],
+    unsupported_actions: [],
+  },
+  notes: null,
+  group: null,
+  status: "ready",
+  last_seen_at: now,
+  last_error: null,
+  created_at: "2026-05-31T18:51:39.627384",
+  updated_at: now,
+};
+
+const modelList = [
+  {
+    id: model.id,
+    name: model.name,
+    slug: model.slug,
+    category: model.category,
+    category_id: model.category_id,
+    tags: model.tags,
+    thumbnail_url: model.thumbnail_url,
+    file_count: model.files.length,
+    printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
+    updated_at: model.updated_at,
+  },
+];
+
+const printerFiles = [
+  {
+    id: 1,
+    printer_id: printer.id,
+    printer_name: printer.name,
+    file_id: 2,
+    model_id: model.id,
+    model_name: model.name,
+    original_filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+    remote_filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+    size_bytes: 3115403,
+    sha256: "ae1f6b635c772c0267e9249cbff6fdcef505e336ac3bcf58a996d42b3547d1c4",
+    matched_by: "sha256",
+    modified_at: now,
+    last_seen_at: now,
+    missing_since: null,
+    created_at: now,
+    updated_at: now,
+  },
+];
+
+const snapshot = {
+  print_stats: {
+    state: "complete",
+    filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+    print_duration: 3097,
+    total_duration: 3400,
+  },
+  virtual_sdcard: { progress: 1, file_position: 100, file_size: 100 },
+  extruder: { temperature: 170.8, target: 0 },
+  heater_bed: { temperature: 58.6, target: 0 },
+  toolhead: { position: [0, 0, 0], homed_axes: "xyz" },
+  webhooks: { state: "ready", state_message: "Printer is ready" },
+};
+
+function sendJson(res: ServerResponse, body: unknown, status = 200): void {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "access-control-allow-origin": "*",
+  });
+  res.end(JSON.stringify(body));
+}
+
+function sendPng(res: ServerResponse): void {
+  const pixel = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lx2h4wAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  res.writeHead(200, {
+    "content-type": "image/png",
+    "access-control-allow-origin": "*",
+  });
+  res.end(pixel);
+}
+
+function handle(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      "access-control-allow-headers": "*",
+    });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/api/v1/setup/status") {
+    sendJson(res, { configured: true, has_users: true });
+    return;
+  }
+  if (url.pathname === "/api/v1/models") {
+    sendJson(res, modelList);
+    return;
+  }
+  if (url.pathname === "/api/v1/models/1") {
+    sendJson(res, model);
+    return;
+  }
+  if (url.pathname === "/api/v1/models/1/printer-files") {
+    sendJson(res, [
+      {
+        file_id: 2,
+        printer_id: printer.id,
+        printer_name: printer.name,
+        remote_filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+        matched_by: "sha256",
+        last_seen_at: now,
+        missing_since: null,
+      },
+    ]);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers") {
+    sendJson(res, [printer]);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3") {
+    sendJson(res, printer);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/status") {
+    sendJson(res, { printer, snapshot });
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/files") {
+    sendJson(res, printerFiles);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/jobs") {
+    sendJson(res, [
+      {
+        id: 1,
+        printer_id: printer.id,
+        file_id: 2,
+        model_id: model.id,
+        remote_filename: "skadis_kitchen-roll_screw_PLA_30m12s.gcode",
+        state: "completed",
+        progress: 100,
+        source: "vault",
+        error: null,
+        started_at: "2026-06-04T00:00:00.000000",
+        finished_at: now,
+        created_at: "2026-06-04T00:00:00.000000",
+        updated_at: now,
+      },
+    ]);
+    return;
+  }
+  if (url.pathname === "/api/v1/files/1/thumbnail") {
+    sendPng(res);
+    return;
+  }
+  if (url.pathname === "/api/v1/files/1/stl") {
+    res.writeHead(200, {
+      "content-type": "application/sla",
+      "access-control-allow-origin": "*",
+    });
+    res.end("solid empty\nendsolid empty\n");
+    return;
+  }
+
+  sendJson(res, { detail: "not_found", path: url.pathname }, 404);
+}
+
+export async function startMockApi(port: number): Promise<Server> {
+  const server = createServer(handle);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => resolve());
+  });
+  return server;
+}

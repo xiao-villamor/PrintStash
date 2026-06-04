@@ -1,0 +1,96 @@
+import { test, expect, type Page } from "@playwright/test";
+import type { Server } from "node:http";
+
+import { startMockApi } from "./mock-api";
+
+const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
+
+let api: Server;
+
+test.beforeAll(async () => {
+  api = await startMockApi(apiPort);
+});
+
+test.afterAll(async () => {
+  await new Promise<void>((resolve, reject) => {
+    api.close((error) => (error ? reject(error) : resolve()));
+  });
+});
+
+async function collectPageProblems(page: Page): Promise<string[]> {
+  const problems: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      if (message.text().includes("/api/v1/printers/3/ws")) return;
+      problems.push(`console error: ${message.text()}`);
+    }
+  });
+  page.on("pageerror", (error) => {
+    problems.push(`page error: ${error.message}`);
+  });
+  page.on("requestfailed", (request) => {
+    const url = request.url();
+    if (url.includes("_rsc=")) return;
+    problems.push(`request failed: ${url} ${request.failure()?.errorText ?? ""}`);
+  });
+  page.on("response", (response) => {
+    const url = response.url();
+    if (response.status() >= 400 && !url.includes("_rsc=")) {
+      problems.push(`bad response: ${response.status()} ${url}`);
+    }
+  });
+  return problems;
+}
+
+test("model detail route renders data and hydrates printer integrations", async ({ page }) => {
+  const problems = await collectPageProblems(page);
+
+  await page.goto("/models/1");
+
+  await expect(page.getByRole("heading", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
+  await expect(page.getByText("Creality Ender-3 V3 SE")).toBeVisible();
+  await expect(page.getByText("KNOWN GOOD")).toBeVisible();
+  await expect(page.getByText("1/1 online")).toBeVisible();
+  await expect(page.getByText("ender", { exact: true })).toBeVisible();
+  await expect(page.getByText("This page could not be found")).toHaveCount(0);
+
+  const html = await page.content();
+  expect(html).not.toContain("NEXT_HTTP_ERROR_FALLBACK;404");
+  expect(html).not.toContain("printerId\":\"$NaN");
+  expect(problems).toEqual([]);
+});
+
+test("printer list route loads configured printers through the frontend proxy", async ({ page }) => {
+  const problems = await collectPageProblems(page);
+
+  await page.goto("/printers");
+
+  await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /ender/i })).toBeVisible();
+  await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
+  await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("No printers configured yet.")).toHaveCount(0);
+  await expect(page.getByText("Failed to fetch")).toHaveCount(0);
+  await expect(page.getByText("This page could not be found")).toHaveCount(0);
+  expect(problems).toEqual([]);
+});
+
+test("printer detail route preserves the dynamic id and renders live status", async ({ page }) => {
+  const problems = await collectPageProblems(page);
+
+  await page.goto("/printers/3");
+
+  await expect(page.getByRole("heading", { name: "ender" })).toBeVisible();
+  await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
+  await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Temperatures")).toBeVisible();
+  await page.getByRole("button", { name: "Files" }).click();
+  await expect(page.getByText("skadis_kitchen-roll_screw_PLA_30m12s.gcode")).toBeVisible();
+  await expect(page.getByText("Failed to fetch")).toHaveCount(0);
+  await expect(page.getByText("This page could not be found")).toHaveCount(0);
+  await expect(page).toHaveURL(/\/printers\/3$/);
+
+  const html = await page.content();
+  expect(html).not.toContain("printerId\":\"$NaN");
+  expect(problems).toEqual([]);
+});

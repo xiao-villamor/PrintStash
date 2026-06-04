@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "test:e2e": "playwright test",
     "test:frontend": "node scripts/frontend-smoke.mjs"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "three-stdlib": "^2.36.1"
   },
   "devDependencies": {
+    "@playwright/test": "1.60.0",
     "@types/node": "^24.12.4",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
