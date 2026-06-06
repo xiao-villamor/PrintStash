@@ -4,6 +4,13 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 3210);
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
 const apiBase = `http://127.0.0.1:${apiPort}`;
 const testApiEnv = `NEXT_PUBLIC_API_URL=${apiBase}`;
+const webServerCommand = [
+  `${testApiEnv} ./node_modules/.bin/next build`,
+  "rm -rf .next/standalone/.next/static",
+  "mkdir -p .next/standalone/.next",
+  "cp -R .next/static .next/standalone/.next/static",
+  `${testApiEnv} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
+].join(" && ");
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -21,7 +28,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `${testApiEnv} ./node_modules/.bin/next build && ${testApiEnv} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
+    command: webServerCommand,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
