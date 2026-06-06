@@ -34,10 +34,12 @@ run at home.
 
 ## Current State
 
-This is the 0.1 initial self-hosted release. Docker Compose is the main install
-path. SQLite and local disk are the default. Postgres, S3-compatible storage,
-and printer-farm features exist for bigger setups, but stay optional while the
-project matures.
+This is the 0.1 initial self-hosted release. Stage 4 production hardening is
+implemented, and the current focus is release validation, real-world homelab
+feedback, and printer-provider maturity. Docker Compose is the main install path.
+SQLite and local disk are the default. Postgres, S3-compatible storage, backup
+archives, audit logs, and printer-farm features exist for bigger setups, but stay
+optional while the project matures.
 
 What works today:
 
@@ -48,9 +50,10 @@ What works today:
 - G-code revision notes, outcome labels, recommended version, and metadata compare
 - Categories, tags, search, thumbnails, and an in-browser STL viewer
 - First-run setup wizard, API key auth for scripts, JWT login for the UI
-- Moonraker/Klipper printer integration with live status and send-to-print
-- Beta Bambu LAN support for status and basic print controls
-- Optional Postgres, S3/R2 storage, backup archives, and audit logs
+- Moonraker/Klipper printer integration with live status, send-to-print, remote-file start, controls, and file inventory sync
+- Printer presence badges and filters showing where model G-code already exists
+- Beta Bambu LAN support for status and pause/resume/cancel controls
+- Optional Postgres, S3/R2 storage, backup/restore archives, health probes, and audit logs
 
 Known rough spots:
 

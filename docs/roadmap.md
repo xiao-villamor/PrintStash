@@ -8,15 +8,39 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Now: 0.1 Initial Self-Hosted Release
+## Current App Stage: 0.1 Initial Self-Hosted Release
+
+Stage 4 production hardening is implemented. The app is currently in the 0.1
+initial self-hosted release stage: useful for local-first 3D print library
+workflows, installable through Docker Compose, and ready for real homelab
+feedback. SQLite plus local filesystem storage remain the default path.
+Postgres, S3/R2-compatible storage, cloud backups, and provider adapters are
+available as optional deployment paths.
+
+Developed features in the current app:
+
+- STL, 3MF, and G-code ingestion through the web UI, REST API, and OrcaSlicer post-processing hook
+- G-code parser coverage for OrcaSlicer, PrusaSlicer, Bambu Studio, Cura, and Klipper/Orca samples
+- Content-hash deduplication, logical model grouping, version history, thumbnails, and in-browser STL preview
+- Categories, tags, search, model editing, printer-presence filters, and model-to-printer file badges
+- G-code revision upload, labels, outcome status, notes, recommended marker, and metadata comparison
+- First-run setup wizard, API-key script auth, JWT UI login, refresh/logout flow, role-aware admin access, and audit logs
+- Alembic migrations, optional Postgres support, SQLite-to-Postgres migration script, and documented upgrade flow
+- Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, lifecycle policy configuration, and backup/restore endpoints
+- Operational health output for database, storage, backup, and printer provider readiness
+- Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history
+- Bambu LAN beta provider with local status plus pause/resume/cancel controls; upload/send, remote file inventory, and remote-file start remain unsupported
+- Responsive Next.js UI for the library, model detail, upload, taxonomy management, settings, setup, printer list, and printer detail workflows
+
+## Now: Release Validation and Feedback
 
 Goal: keep the initial self-hosted release easy to install, easy to upgrade, and
 safe enough for real home use.
 
-- Publish tagged release notes and Docker image guidance
+- Publish and validate tagged release notes and Docker image guidance
 - Collect real-world feedback from Docker/NAS/homelab installs
-- Ship practical G-code revisions: outcome labels, notes, recommended version, and metadata compare
-- Add parser fixtures from more slicers and printer profiles
+- Exercise backup/restore, upgrade, and provider diagnostics on fresh installs
+- Add parser fixtures from more slicers and printer profiles as users share samples
 - Improve first-run setup and error messages where new users get stuck
 - Keep install/upgrade notes repeatable across tagged releases
 
@@ -25,7 +49,7 @@ safe enough for real home use.
 Goal: make printer integrations predictable across normal home setups.
 
 - Bambu LAN upload/send parity, with provider-safe guardrails
-- Provider-level health diagnostics endpoint
+- Broader hardware validation for provider-level diagnostics
 - More disconnect/reconnect coverage for mixed fleets
 - Clear UI states for unsupported printer actions
 - Hardware notes for tested Moonraker and Bambu setups
@@ -34,8 +58,8 @@ Goal: make printer integrations predictable across normal home setups.
 
 Goal: make backup, restore, upgrades, and monitoring less scary.
 
-- Backup/restore smoke checks and a disaster-recovery runbook
-- Better health output for database, storage, S3, and printer providers
+- Scheduled release backup/restore smoke checks
+- Better health output for database, storage, S3, and printer providers as installs get more varied
 - Structured metrics for request latency, ingestion, and printer status
 - Background job cleanup that is easier to reason about across restarts
 - Upgrade notes for SQLite and optional Postgres installs

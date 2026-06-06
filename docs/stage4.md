@@ -1,14 +1,32 @@
 # Stage 4 — Production Hardening
 
 **Codename:** Production Hardening
-**Status:** active
+**Status:** implemented
 
 ## Goal
 
-Ship the first tagged self-hosted release. Stage 4 prioritises safe upgrades,
+Ship the first tagged self-hosted release. Stage 4 prioritised safe upgrades,
 predictable recovery, stronger authentication, deletion lifecycle controls,
 and clearer deployment choices. SQLite and local filesystem storage remain the
 default path; Postgres and S3 stay optional adapters for larger installs.
+
+## Current Result
+
+Stage 4 is implemented and the app is in the 0.1 initial self-hosted release
+stage. The remaining work is release validation, real-world install feedback,
+and provider maturity rather than core Stage 4 feature development.
+
+Developed Stage 4 capabilities:
+
+- Alembic-backed schema upgrades, optional Postgres support, and SQLite-to-Postgres migration tooling
+- JWT refresh/logout, API-key script auth, role-aware admin access, and audit logs
+- Soft-delete, restore, hard-delete, scheduled garbage collection, and orphan blob cleanup
+- Local backup/restore, optional cloud backup, disaster-recovery docs, and operational health probes
+- Optional S3/R2 storage with multipart uploads, pre-signed downloads, MinIO dev support, and lifecycle policy configuration
+- First-run setup for admin user, storage choice, and backup settings
+- Provider abstraction for Moonraker/Klipper and Bambu LAN with per-printer capabilities and diagnostics
+- Moonraker file inventory sync, model printer-presence badges, remote-file start, and improved printer detail workflows
+- API hardening for validation errors, unhandled errors, CORS defaults, upload/download blocking work, and printer send payload validation
 
 ---
 
@@ -94,7 +112,7 @@ default path; Postgres and S3 stay optional adapters for larger installs.
 
 ---
 
-## Deferred beyond first stable release
+## Deferred Beyond First Stable Release
 
 - Multi-tenant organizations and workspace routing
 - Automatic tenant scoping on every query
