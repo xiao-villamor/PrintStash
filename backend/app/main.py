@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 import asyncio
+import time
+import uuid
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -9,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.engine.url import make_url
 from starlette import status
 
 from app.api.v1 import api_router
@@ -26,6 +29,13 @@ from app.services.runtime_config import apply_overlay, is_configured
 from app.services.storage_backend import init_backend
 
 logger = get_logger(__name__)
+
+
+def _safe_db_url(value: str) -> str:
+    try:
+        return make_url(value).render_as_string(hide_password=True)
+    except Exception:
+        return "<invalid-db-url>"
 
 
 @asynccontextmanager
@@ -47,7 +57,7 @@ async def lifespan(app: FastAPI):
         settings.storage_backend,
         settings.data_dir,
         settings.thumb_dir,
-        settings.db_url,
+        _safe_db_url(settings.db_url),
     )
     install_audit_listeners()
     hub = PrinterHub()
@@ -119,9 +129,23 @@ async def validation_exception_handler(
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(
-    _request: Request, exc: Exception
+    request: Request, exc: Exception
 ) -> JSONResponse:
-    logger.exception("unhandled request error")
+    if str(settings.log_level).upper() == "DEBUG":
+        logger.exception(
+            "unhandled request error method=%s path=%s request_id=%s",
+            request.method,
+            request.url.path,
+            getattr(request.state, "request_id", "-"),
+        )
+    else:
+        logger.error(
+            "unhandled request error method=%s path=%s request_id=%s error=%s",
+            request.method,
+            request.url.path,
+            getattr(request.state, "request_id", "-"),
+            exc.__class__.__name__,
+        )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "internal_server_error"},
@@ -148,6 +172,37 @@ async def bind_audit_context(request: Request, call_next):
         return await call_next(request)
     finally:
         clear_audit_context()
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        duration_ms = (time.perf_counter() - started) * 1000
+        if request.url.path == "/api/v1/health" and status_code < 500:
+            log_fn = logger.debug
+        elif status_code >= 500:
+            log_fn = logger.error
+        elif status_code >= 400:
+            log_fn = logger.warning
+        else:
+            log_fn = logger.info
+        log_fn(
+            "request method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
+            request.method,
+            request.url.path,
+            status_code,
+            duration_ms,
+            request_id,
+        )
 
 
 app.include_router(api_router)

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 import tempfile
-from typing import List, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -66,6 +67,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/printers", tags=["printers"])
 
+_DIAGNOSTIC_CHECK_TIMEOUT_SECONDS = 5.0
+
 
 def _validate_provider_config(p: Printer) -> None:
     if p.provider == PrinterProvider.MOONRAKER and not p.moonraker_url:
@@ -126,6 +129,32 @@ def _to_printer_file_read(
         created_at=row.created_at,
         updated_at=row.updated_at,
     )
+
+
+async def _diagnostic_check(
+    name: str,
+    action: Callable[[], Awaitable[object]],
+    *,
+    timeout: float | None = None,
+) -> dict[str, object]:
+    timeout = timeout or _DIAGNOSTIC_CHECK_TIMEOUT_SECONDS
+    try:
+        await asyncio.wait_for(action(), timeout=timeout)
+        return {"name": name, "ok": True}
+    except asyncio.TimeoutError:
+        return {
+            "name": name,
+            "ok": False,
+            "code": "provider_timeout",
+            "detail": f"timed out after {timeout:.0f}s",
+        }
+    except ProviderError as exc:
+        return {
+            "name": name,
+            "ok": False,
+            "code": exc.code,
+            "detail": exc.detail,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -234,31 +263,8 @@ async def printer_diagnostics(
             "ok": False,
         }
 
-    try:
-        await provider.info()
-        checks.append({"name": "provider_info", "ok": True})
-    except ProviderError as exc:
-        checks.append(
-            {
-                "name": "provider_info",
-                "ok": False,
-                "code": exc.code,
-                "detail": exc.detail,
-            }
-        )
-
-    try:
-        await provider.query_status()
-        checks.append({"name": "live_status", "ok": True})
-    except ProviderError as exc:
-        checks.append(
-            {
-                "name": "live_status",
-                "ok": False,
-                "code": exc.code,
-                "detail": exc.detail,
-            }
-        )
+    checks.append(await _diagnostic_check("provider_info", provider.info))
+    checks.append(await _diagnostic_check("live_status", provider.query_status))
 
     return {
         "printer_id": p.id,
@@ -420,7 +426,7 @@ async def send_to_printer(
         local = await run_in_threadpool(backend.download_to_path, f.path, temp_target)
     except Exception:
         temp_target.unlink(missing_ok=True)
-        logger.exception("failed to stage print upload file=%s", f.id)
+        logger.warning("failed to stage print upload file=%s", f.id)
         raise HTTPException(status_code=502, detail="storage_error")
 
     remote_name = (payload.remote_filename or f.original_filename).strip()
@@ -453,19 +459,17 @@ async def send_to_printer(
         )
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
-        job.error = str(exc)
+        job.error = exc.code
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
         raise HTTPException(status_code=502, detail=exc.code)
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.exception(
-            "send_to_printer failed for printer=%s file=%s", printer_id, f.id
-        )
+    except Exception:
+        logger.error("send_to_printer failed printer=%s file=%s", printer_id, f.id)
         job.state = PrintJobState.FAILED
-        job.error = str(exc)
+        job.error = "provider_error"
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
@@ -566,18 +570,14 @@ async def start_printer_file(
         await provider.start(payload.remote_filename)
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
-        job.error = exc.detail
+        job.error = exc.code
         job.finished_at = utcnow()
         job.updated_at = utcnow()
         session.add(job)
         session.commit()
         raise HTTPException(status_code=502, detail=exc.code)
     except Exception:
-        logger.exception(
-            "printer start failed printer=%s remote=%s",
-            printer_id,
-            payload.remote_filename,
-        )
+        logger.error("printer start failed printer=%s", printer_id)
         job.state = PrintJobState.FAILED
         job.error = "provider_error"
         job.finished_at = utcnow()
@@ -608,9 +608,7 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
     except ProviderError as exc:
         raise HTTPException(status_code=502, detail=exc.code)
     except Exception:
-        logger.exception(
-            "printer control failed action=%s printer=%s", action, printer_id
-        )
+        logger.error("printer control failed action=%s printer=%s", action, printer_id)
         raise HTTPException(status_code=502, detail="provider_error")
     return {"ok": True}
 

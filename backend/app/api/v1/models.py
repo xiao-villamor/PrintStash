@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 import csv
 import io
 from pathlib import Path
@@ -327,14 +328,93 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
 
 
 def _export_models(session: Session) -> dict:
-    rows = session.exec(
+    model_rows = session.exec(
         select(Model)
         .where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
         .where(Model.hash != SENTINEL_MODEL_HASH)
         .order_by(Model.name.asc())  # type: ignore[attr-defined]
     ).all()
-    models = [_build_model_read(session, m.id).model_dump(mode="json") for m in rows if m.id]
-    file_count = sum(len(model["files"]) for model in models)
+    model_ids = [m.id for m in model_rows if m.id is not None]
+    if not model_ids:
+        models = []
+        file_count = 0
+    else:
+        category_ids = {
+            m.category_id for m in model_rows if m.category_id is not None
+        }
+        categories = {}
+        if category_ids:
+            categories = {
+                c.id: c.path
+                for c in session.exec(
+                    select(Category).where(Category.id.in_(category_ids))  # type: ignore[union-attr]
+                ).all()
+                if c.id is not None
+            }
+
+        tags_by_model: dict[int, list[str]] = defaultdict(list)
+        tag_rows = session.exec(
+            select(ModelTagLink.model_id, Tag.name)
+            .join(Tag, Tag.id == ModelTagLink.tag_id)
+            .where(ModelTagLink.model_id.in_(model_ids))  # type: ignore[union-attr]
+            .order_by(ModelTagLink.model_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+        ).all()
+        for model_id, tag_name in tag_rows:
+            if model_id is not None:
+                tags_by_model[int(model_id)].append(tag_name)
+
+        files_by_model: dict[int, list[dict]] = defaultdict(list)
+        gcode_counts: dict[int, int] = defaultdict(int)
+        file_rows = session.exec(
+            select(File, Metadata)
+            .where(File.model_id.in_(model_ids))  # type: ignore[union-attr]
+            .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+            .outerjoin(Metadata, Metadata.file_id == File.id)
+            .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
+        ).all()
+        for file_row, metadata in file_rows:
+            gcode_revision_number = None
+            if file_row.file_type == FileType.GCODE:
+                gcode_counts[file_row.model_id] += 1
+                gcode_revision_number = gcode_counts[file_row.model_id]
+            files_by_model[file_row.model_id].append(
+                FileRead(
+                    id=file_row.id,  # type: ignore[arg-type]
+                    model_id=file_row.model_id,
+                    original_filename=file_row.original_filename,
+                    file_type=file_row.file_type,
+                    version=file_row.version,
+                    gcode_revision_number=gcode_revision_number,
+                    size_bytes=file_row.size_bytes,
+                    sha256=file_row.sha256,
+                    revision_label=file_row.revision_label,
+                    revision_status=file_row.revision_status,
+                    revision_notes=file_row.revision_notes,
+                    is_recommended=file_row.is_recommended,
+                    uploaded_at=file_row.uploaded_at,
+                    metadata=MetadataRead(**metadata.model_dump()) if metadata else None,
+                ).model_dump(mode="json")
+            )
+
+        models = [
+            {
+                "id": model.id,
+                "name": model.name,
+                "slug": model.slug,
+                "hash": model.hash,
+                "category": categories.get(model.category_id),
+                "category_id": model.category_id,
+                "description": model.description,
+                "tags": tags_by_model.get(model.id or 0, []),
+                "thumbnail_url": _thumb_url(model),
+                "created_at": model.created_at.isoformat(),
+                "updated_at": model.updated_at.isoformat(),
+                "files": files_by_model.get(model.id or 0, []),
+            }
+            for model in model_rows
+        ]
+        file_count = sum(len(model["files"]) for model in models)
+
     return {
         "export_version": 1,
         "app": {"name": settings.app_name, "version": settings.app_version},

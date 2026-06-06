@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -335,6 +336,43 @@ class TestBambuPrinter:
             "provider_info",
             "live_status",
         ]
+
+    def test_diagnostics_timeout_returns_check_failure(
+        self, client: TestClient, db_session: Session, monkeypatch
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        monkeypatch.setattr(
+            "app.api.v1.printers._DIAGNOSTIC_CHECK_TIMEOUT_SECONDS", 0.01
+        )
+
+        async def slow_status(_self):
+            await asyncio.sleep(1)
+            return {"result": {"status": {}}}
+
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new=slow_status,
+        ):
+            resp = client.get(f"/api/v1/printers/{p.id}/diagnostics")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        live_status = next(
+            check for check in body["checks"] if check["name"] == "live_status"
+        )
+        assert body["ok"] is False
+        assert live_status["ok"] is False
+        assert live_status["code"] == "provider_timeout"
 
 
 class TestPrinterStatus:
