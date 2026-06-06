@@ -9,7 +9,7 @@ from sqlmodel import Session
 
 from app.core.config import _overlay
 from app.core.time import utcnow
-from app.db.models import File, FileType, Model, Printer, PrinterFile
+from app.db.models import File, FileType, Metadata, Model, Printer, PrinterFile
 
 
 def _model(db_session: Session, *, slug: str = "bracket") -> Model:
@@ -169,6 +169,65 @@ def test_list_models_can_filter_by_missing_printer_presence(
     ids = {row["id"] for row in resp.json()}
     assert absent_model.id in ids
     assert present_model.id not in ids
+
+
+def test_export_models_json_includes_metadata_only_context(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+    file_row.revision_label = "PETG baseline"
+    file_row.revision_status = "known_good"
+    file_row.is_recommended = True
+    db_session.add(file_row)
+    db_session.add(
+        Metadata(
+            file_id=file_row.id,
+            slicer_name="OrcaSlicer",
+            printer_model="Voron 2.4",
+            layer_height_mm=0.2,
+            material_type="PETG",
+        )
+    )
+    db_session.commit()
+
+    resp = client.get("/api/v1/models/export", headers=auth_headers)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["contents"]["kind"] == "metadata_only"
+    assert body["counts"] == {"models": 1, "files": 1}
+    exported_file = body["models"][0]["files"][0]
+    assert exported_file["revision_label"] == "PETG baseline"
+    assert exported_file["revision_status"] == "known_good"
+    assert exported_file["is_recommended"] is True
+    assert exported_file["metadata"]["slicer_name"] == "OrcaSlicer"
+    assert exported_file["metadata"]["printer_model"] == "Voron 2.4"
+
+
+def test_export_models_csv_flattens_one_row_per_file(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+    db_session.add(
+        Metadata(
+            file_id=file_row.id,
+            slicer_name="PrusaSlicer",
+            infill_percent=20,
+        )
+    )
+    db_session.commit()
+
+    resp = client.get("/api/v1/models/export?format=csv", headers=auth_headers)
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "model_name" in resp.text
+    assert "file_id" in resp.text
+    assert "file_type" in resp.text
+    assert "Bracket" in resp.text
+    assert "PrusaSlicer" in resp.text
 
 
 def test_add_gcode_revision_to_existing_model(

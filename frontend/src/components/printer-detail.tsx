@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   PrintJobRead,
+  PrinterDiagnostics,
   PrinterFileRead,
   PrinterRead,
   PrinterSnapshot,
@@ -11,6 +12,7 @@ import {
 } from "@/types";
 import {
   cancelPrinter,
+  getPrinterDiagnostics,
   getPrinter,
   listPrinterFiles,
   listPrinterJobs,
@@ -24,7 +26,10 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import {
   ArrowLeft,
+  AlertTriangle,
+  CheckCircle2,
   FileText,
+  Info,
   Loader2,
   Pause,
   Play,
@@ -33,6 +38,7 @@ import {
   Thermometer,
   Wifi,
   WifiOff,
+  XCircle,
 } from "lucide-react";
 
 const STATUS_COLORS: Record<PrinterStatus, string> = {
@@ -68,6 +74,14 @@ function providerLabel(provider: PrinterRead["provider"]): string {
   return provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
 }
 
+function checkLabel(name: string): string {
+  return name.replaceAll("_", " ");
+}
+
+function actionLabel(name: string): string {
+  return name.replaceAll("_", " ");
+}
+
 function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
   const out: any = { ...a };
   for (const k of Object.keys(b)) {
@@ -92,15 +106,17 @@ function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
 export function PrinterDetailPage({ printerId }: { printerId: number }) {
   const auth = useRequireAuth();
   const [printer, setPrinter] = useState<PrinterRead | null>(null);
+  const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
   const [jobs, setJobs] = useState<PrintJobRead[]>([]);
   const [printerFiles, setPrinterFiles] = useState<PrinterFileRead[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
-  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "diagnostics">("status");
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
+  const [checkingDiagnostics, setCheckingDiagnostics] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -125,6 +141,17 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
       setPrinter(await getPrinter(printerId));
     } catch (e: any) {
       setError(e.message);
+    }
+  }
+
+  async function loadDiagnostics() {
+    setCheckingDiagnostics(true);
+    try {
+      setDiagnostics(await getPrinterDiagnostics(printerId));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setCheckingDiagnostics(false);
     }
   }
 
@@ -160,6 +187,7 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
 
   useEffect(() => {
     loadPrinter();
+    loadDiagnostics();
     loadJobs();
     loadPrinterFiles();
     connect();
@@ -324,6 +352,9 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
         </TabButton>
         <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>
           Jobs
+        </TabButton>
+        <TabButton active={activeTab === "diagnostics"} onClick={() => setActiveTab("diagnostics")}>
+          Diagnostics
         </TabButton>
       </div>
 
@@ -601,6 +632,143 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </section>
+      )}
+
+      {activeTab === "diagnostics" && (
+      <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+        <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Info className="h-4 w-4 text-[var(--on-surface-variant)]" />
+            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+              Provider diagnostics
+            </h2>
+          </div>
+          <button
+            onClick={loadDiagnostics}
+            disabled={checkingDiagnostics}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {checkingDiagnostics ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" />
+            )}
+            {checkingDiagnostics ? "Checking" : "Refresh"}
+          </button>
+        </div>
+
+        {!diagnostics ? (
+          <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+            Diagnostics have not loaded yet.
+          </div>
+        ) : (
+          <div className="p-4 sm:p-6 space-y-5">
+            <div className={`rounded border p-4 ${
+              diagnostics.ok
+                ? "border-emerald-500/30 bg-emerald-500/10"
+                : "border-amber-500/40 bg-amber-500/10"
+            }`}>
+              <div className="flex items-center gap-2">
+                {diagnostics.ok ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <AlertTriangle className="h-4 w-4 text-amber-600" />
+                )}
+                <span className={`font-mono text-xs uppercase tracking-wider font-semibold ${
+                  diagnostics.ok ? "text-emerald-600" : "text-amber-600"
+                }`}>
+                  {diagnostics.ok ? "Provider reachable" : "Needs attention"}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-[var(--on-surface-variant)]">
+                {providerLabel(diagnostics.provider)} is marked {diagnostics.support_level}.
+              </p>
+            </div>
+
+            {diagnostics.notes.length > 0 && (
+              <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4 space-y-2">
+                {diagnostics.notes.map((note) => (
+                  <p key={note} className="text-sm text-[var(--on-surface-variant)] leading-relaxed">
+                    {note}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded border border-[var(--outline-variant)] overflow-hidden">
+                <div className="border-b border-[var(--outline-variant)] px-4 py-3">
+                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                    Checks
+                  </h3>
+                </div>
+                <div className="divide-y divide-[var(--surface-variant)]">
+                  {diagnostics.checks.map((check) => (
+                    <div key={check.name} className="px-4 py-3 flex items-start gap-3">
+                      {check.ok ? (
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
+                      ) : (
+                        <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--error)]" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="font-mono text-xs uppercase tracking-wider text-[var(--on-surface)]">
+                          {checkLabel(check.name)}
+                        </div>
+                        {!check.ok && (
+                          <div className="mt-1 font-mono text-[11px] text-[var(--error)] break-words">
+                            {check.code ?? "provider_error"}
+                            {check.detail ? `: ${check.detail}` : ""}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded border border-[var(--outline-variant)] overflow-hidden">
+                <div className="border-b border-[var(--outline-variant)] px-4 py-3">
+                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                    Capabilities
+                  </h3>
+                </div>
+                <div className="grid grid-cols-2 gap-px bg-[var(--surface-variant)]">
+                  {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
+                    <div key={name} className="bg-[var(--surface-container-lowest)] px-4 py-3">
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                        {checkLabel(name.replace(/^can_/, ""))}
+                      </div>
+                      <div className={`mt-1 font-mono text-xs font-semibold ${
+                        enabled ? "text-emerald-600" : "text-[var(--on-surface-variant)]"
+                      }`}>
+                        {enabled ? "Supported" : "Unavailable"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {diagnostics.unsupported_actions.length > 0 && (
+              <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-amber-600 font-semibold">
+                  Unsupported in this provider
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {diagnostics.unsupported_actions.map((action) => (
+                    <span
+                      key={action}
+                      className="rounded border border-amber-500/40 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-amber-600"
+                    >
+                      {actionLabel(action)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>

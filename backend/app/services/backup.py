@@ -29,7 +29,10 @@ from app.services.storage_backend import LocalStorageBackend, get_backend
 logger = get_logger(__name__)
 
 MANIFEST_VERSION = "1"
-_BACKUP_S3_PREFIX = "nexus3d-backups/"
+_BACKUP_S3_PREFIX = "printstash-backups/"
+_LEGACY_BACKUP_S3_PREFIX = "nexus3d-backups/"
+_BACKUP_NAME_PREFIX = "printstash-backup-"
+_LEGACY_BACKUP_NAME_PREFIX = "nexus3d-backup-"
 
 
 @dataclass
@@ -160,7 +163,7 @@ def create_backup() -> BackupMeta:
     }
 
     archive_name = (
-        f"nexus3d-backup-{timestamp.strftime('%Y%m%d-%H%M%S')}-{backup_id}.tar.gz"
+        f"{_BACKUP_NAME_PREFIX}{timestamp.strftime('%Y%m%d-%H%M%S')}-{backup_id}.tar.gz"
     )
     archive_path = settings.backup_dir / archive_name
 
@@ -231,7 +234,10 @@ def _list_local_backups() -> list[BackupMeta]:
         return results
 
     for archive in sorted(
-        settings.backup_dir.glob("nexus3d-backup-*.tar.gz"),
+        [
+            *settings.backup_dir.glob(f"{_BACKUP_NAME_PREFIX}*.tar.gz"),
+            *settings.backup_dir.glob(f"{_LEGACY_BACKUP_NAME_PREFIX}*.tar.gz"),
+        ],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):
@@ -255,49 +261,54 @@ def _list_s3_backups() -> list[BackupMeta]:
     results: list[BackupMeta] = []
     try:
         paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(
-            Bucket=settings.backup_s3_bucket, Prefix=_BACKUP_S3_PREFIX
-        ):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                archive_name = key.rsplit("/", 1)[-1]
-                if not archive_name.startswith("nexus3d-backup-"):
-                    continue
-                try:
-                    # Read manifest from S3 without downloading full archive
-                    resp = s3.get_object(Bucket=settings.backup_s3_bucket, Key=key)
-                    with gzip.open(resp["Body"], "rb") as gz:
-                        with tarfile.open(fileobj=gz, mode="r|") as tar:
-                            for member in tar:
-                                if member.name == "manifest.json":
-                                    f = tar.extractfile(member)
-                                    if f:
-                                        manifest = json.loads(f.read().decode("utf-8"))
-                                        backup_id = archive_name.rsplit("-", 1)[
-                                            -1
-                                        ].replace(".tar.gz", "")
-                                        results.append(
-                                            BackupMeta(
-                                                id=backup_id,
-                                                created_at=manifest["created_at"],
-                                                size_bytes=obj.get("Size", 0),
-                                                storage_backend=manifest.get(
-                                                    "storage_backend", "local"
-                                                ),
-                                                file_count=manifest.get(
-                                                    "file_count", 0
-                                                ),
-                                                app_version=manifest.get(
-                                                    "app_version", "unknown"
-                                                ),
-                                                path=key,
-                                                location="s3",
+        for prefix in (_BACKUP_S3_PREFIX, _LEGACY_BACKUP_S3_PREFIX):
+            for page in paginator.paginate(
+                Bucket=settings.backup_s3_bucket, Prefix=prefix
+            ):
+                for obj in page.get("Contents", []):
+                    key = obj["Key"]
+                    archive_name = key.rsplit("/", 1)[-1]
+                    if not archive_name.startswith(
+                        (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
+                    ):
+                        continue
+                    try:
+                        # Read manifest from S3 without downloading full archive
+                        resp = s3.get_object(Bucket=settings.backup_s3_bucket, Key=key)
+                        with gzip.open(resp["Body"], "rb") as gz:
+                            with tarfile.open(fileobj=gz, mode="r|") as tar:
+                                for member in tar:
+                                    if member.name == "manifest.json":
+                                        f = tar.extractfile(member)
+                                        if f:
+                                            manifest = json.loads(
+                                                f.read().decode("utf-8")
                                             )
-                                        )
-                                        break
-                except Exception:
-                    logger.warning("backup: cannot read S3 manifest for %s", key)
-                    continue
+                                            backup_id = archive_name.rsplit("-", 1)[
+                                                -1
+                                            ].replace(".tar.gz", "")
+                                            results.append(
+                                                BackupMeta(
+                                                    id=backup_id,
+                                                    created_at=manifest["created_at"],
+                                                    size_bytes=obj.get("Size", 0),
+                                                    storage_backend=manifest.get(
+                                                        "storage_backend", "local"
+                                                    ),
+                                                    file_count=manifest.get(
+                                                        "file_count", 0
+                                                    ),
+                                                    app_version=manifest.get(
+                                                        "app_version", "unknown"
+                                                    ),
+                                                    path=key,
+                                                    location="s3",
+                                                )
+                                            )
+                                            break
+                    except Exception:
+                        logger.warning("backup: cannot read S3 manifest for %s", key)
+                        continue
     except Exception:
         logger.warning("backup: failed to list S3 backups", exc_info=True)
 

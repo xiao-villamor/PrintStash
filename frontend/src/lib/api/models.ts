@@ -1,5 +1,8 @@
 import {
+  authHeaders,
+  expectOk,
   getJson,
+  getUrl,
   sendAction,
   sendForm,
   sendJson,
@@ -35,6 +38,26 @@ export async function listModels(
 
 export function getModel(id: number): Promise<ModelRead> {
   return getJson<ModelRead>(`/api/v1/models/${id}`);
+}
+
+export async function downloadModelExport(format: "json" | "csv"): Promise<void> {
+  const res = await fetch(getUrl(`/api/v1/models/export?format=${format}`), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  await expectOk(res);
+  const blob = await res.blob();
+  const fallback = `printstash-model-export.${format}`;
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallback;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]> {

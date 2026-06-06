@@ -38,3 +38,8 @@ frontend/dist/
 .opencode/opencode.json
 .opencode/local.settings.json
 .opencode/opencode.json.lock
+
+# Internal/private planning docs
+docs/feature-inventory.md
+docs/internal/
+docs/*-internal.md

@@ -3,8 +3,8 @@
 
 Usage:
     python scripts/sqlite_to_postgres.py \
-        --sqlite sqlite:////data/db/nexus3d.sqlite \
-        --postgres postgresql://user:pass@localhost:5432/nexus3d
+        --sqlite sqlite:////data/db/printstash.sqlite \
+        --postgres postgresql://user:pass@localhost:5432/printstash
 """
 
 from __future__ import annotations

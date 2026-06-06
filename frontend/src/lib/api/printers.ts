@@ -6,6 +6,7 @@ import {
 } from "@/lib/api/request";
 import {
   Dashboard,
+  PrinterDiagnostics,
   PrintJobRead,
   PrinterFileRead,
   PrinterCreate,
@@ -27,6 +28,10 @@ export function getDashboard(): Promise<Dashboard> {
 
 export function getPrinter(id: number): Promise<PrinterRead> {
   return getJson<PrinterRead>(`/api/v1/printers/${id}`);
+}
+
+export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
+  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`);
 }
 
 export function createPrinter(

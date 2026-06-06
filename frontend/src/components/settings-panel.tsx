@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Server, Database, HardDrive, Tag, Folder, User } from "lucide-react";
+import { Server, Database, HardDrive, Tag, Folder, User, Download } from "lucide-react";
 import { TaxonomyManager } from "@/components/taxonomy-manager";
 import { ApiKeyCard } from "@/components/api-key-card";
 import { StorageConfigCard } from "@/components/storage-config-card";
+import { downloadModelExport } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { toast } from "@/lib/toast";
 
 interface HealthResponse {
   status: string;
@@ -18,6 +20,7 @@ export function SettingsPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [categoryCount, setCategoryCount] = useState<number | null>(null);
   const [tagCount, setTagCount] = useState<number | null>(null);
+  const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
 
   useEffect(() => {
     fetch("/api/v1/health")
@@ -33,6 +36,17 @@ export function SettingsPanel() {
       .then((d) => setTagCount(d.length))
       .catch(() => {});
   }, []);
+
+  async function exportData(format: "json" | "csv") {
+    setExporting(format);
+    try {
+      await downloadModelExport(format);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setExporting(null);
+    }
+  }
 
   const statItems = [
     { label: "Vault version", value: health ? `${health.name} v${health.version}` : "Loading...", desc: "API server status and version", icon: Server },
@@ -100,6 +114,47 @@ export function SettingsPanel() {
               <p className="text-sm text-[var(--on-surface-variant)] leading-relaxed">
                 <strong className="text-[var(--on-surface)]">PrintStash</strong> is a self-hosted, Plex-style asset management platform for 3D printing workflows. It ingests source meshes (STL/3MF) and sliced jobs (G-Code), extracts technical metadata, deduplicates assets, and exposes everything via a clean REST API.
               </p>
+            </div>
+          </div>
+
+          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex items-center gap-2 sm:gap-3">
+              <div className="w-9 h-9 rounded bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0">
+                <Download className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                  Data export
+                </h3>
+                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  Metadata only, no raw STL/3MF/G-code files
+                </p>
+              </div>
+            </div>
+            <div className="p-3 sm:p-4 lg:p-6 space-y-4">
+              <p className="text-sm text-[var(--on-surface-variant)] leading-relaxed">
+                Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => exportData("json")}
+                  disabled={exporting !== null}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {exporting === "json" ? "Exporting" : "JSON"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportData("csv")}
+                  disabled={exporting !== null}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {exporting === "csv" ? "Exporting" : "CSV"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

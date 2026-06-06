@@ -3,17 +3,17 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: nexus3d-frontend
+    container_name: printstash-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://api:8000
       # Browser-side WebSocket URL (Next.js rewrites do NOT proxy WS).
-      # Override in .env to your public host/port (e.g. ws://nexus3d.lan:8000).
+      # Override in .env to your public host/port (e.g. ws://printstash.lan:8000).
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
     networks:
-      - nexus3d_net
+      - printstash_net
     depends_on:
       api:
         condition: service_healthy
@@ -22,7 +22,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: nexus3d-api
+    container_name: printstash-api
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -31,7 +31,7 @@ services:
       VAULT_DATA_DIR: /data/files
       VAULT_THUMB_DIR: /data/thumbs
       VAULT_STAGING_DIR: /data/staging
-      VAULT_DB_URL: ${VAULT_DB_URL:-sqlite:////data/db/nexus3d.sqlite}
+      VAULT_DB_URL: ${VAULT_DB_URL:-sqlite:////data/db/printstash.sqlite}
       VAULT_BACKUP_DIR: /data/backups
       VAULT_BACKUP_RETENTION_DAYS: ${VAULT_BACKUP_RETENTION_DAYS:-30}
       VAULT_BACKUP_S3_BUCKET: ${VAULT_BACKUP_S3_BUCKET:-}
@@ -57,13 +57,13 @@ services:
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
       TZ: UTC
     volumes:
-      - vault_data:/data/files
-      - vault_thumbs:/data/thumbs
-      - vault_db:/data/db
-      - vault_staging:/data/staging
-      - vault_backups:/data/backups
+      - printstash_data:/data/files
+      - printstash_thumbs:/data/thumbs
+      - printstash_db:/data/db
+      - printstash_staging:/data/staging
+      - printstash_backups:/data/backups
     networks:
-      - nexus3d_net
+      - printstash_net
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
       interval: 30s
@@ -79,22 +79,22 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: nexus3d-postgres
+    container_name: printstash-postgres
     restart: unless-stopped
     profiles:
       - postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nexus3d}
-      POSTGRES_USER: ${POSTGRES_USER:-nexus3d}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus3d}
+      POSTGRES_DB: ${POSTGRES_DB:-printstash}
+      POSTGRES_USER: ${POSTGRES_USER:-printstash}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-printstash}
     ports:
       - "5432:5432"
     volumes:
-      - vault_postgres:/var/lib/postgresql/data
+      - printstash_postgres:/var/lib/postgresql/data
     networks:
-      - nexus3d_net
+      - printstash_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus3d} -d ${POSTGRES_DB:-nexus3d}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-printstash} -d ${POSTGRES_DB:-printstash}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,7 +102,7 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: nexus3d-minio
+    container_name: printstash-minio
     restart: unless-stopped
     profiles:
       - s3
@@ -114,9 +114,9 @@ services:
       - "9000:9000"
       - "9001:9001"
     volumes:
-      - vault_minio:/data
+      - printstash_minio:/data
     networks:
-      - nexus3d_net
+      - printstash_net
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
       interval: 15s
@@ -125,14 +125,14 @@ services:
       start_period: 15s
 
 networks:
-  nexus3d_net:
+  printstash_net:
     driver: bridge
 
 volumes:
-  vault_data:
-  vault_thumbs:
-  vault_db:
-  vault_staging:
-  vault_backups:
-  vault_postgres:
-  vault_minio:
+  printstash_data:
+  printstash_thumbs:
+  printstash_db:
+  printstash_staging:
+  printstash_backups:
+  printstash_postgres:
+  printstash_minio:

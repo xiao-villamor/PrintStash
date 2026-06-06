@@ -47,7 +47,12 @@ def _database_probe() -> dict:
 def _backup_probe() -> dict:
     backup_dir = Path(settings.backup_dir)
     try:
-        backups = sorted(backup_dir.glob("nexus3d-backup-*.tar.gz"))
+        backups = sorted(
+            [
+                *backup_dir.glob("printstash-backup-*.tar.gz"),
+                *backup_dir.glob("nexus3d-backup-*.tar.gz"),
+            ]
+        )
         return {
             "ok": backup_dir.exists() and backup_dir.is_dir(),
             "path": str(backup_dir),

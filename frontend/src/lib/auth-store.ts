@@ -5,11 +5,14 @@
  * touching localStorage directly. Events drive cross-component sync.
  */
 
-const TOKEN_KEY = "nexus3d.token";
-const USER_KEY = "nexus3d.user";
-const API_KEY_KEY = "nexus3d.apiKey";
-const AUTH_EVENT = "nexus3d:auth-changed";
-const UNAUTH_EVENT = "nexus3d:unauthorized";
+const TOKEN_KEY = "printstash.token";
+const USER_KEY = "printstash.user";
+const API_KEY_KEY = "printstash.apiKey";
+const LEGACY_TOKEN_KEY = "nexus3d.token";
+const LEGACY_USER_KEY = "nexus3d.user";
+const LEGACY_API_KEY_KEY = "nexus3d.apiKey";
+const AUTH_EVENT = "printstash:auth-changed";
+const UNAUTH_EVENT = "printstash:unauthorized";
 
 export interface StoredUser {
   id: number;
@@ -29,7 +32,7 @@ function emit() {
 export function getToken(): string | null {
   if (!isBrowser()) return null;
   try {
-    return localStorage.getItem(TOKEN_KEY);
+    return localStorage.getItem(TOKEN_KEY) ?? localStorage.getItem(LEGACY_TOKEN_KEY);
   } catch {
     return null;
   }
@@ -38,7 +41,7 @@ export function getToken(): string | null {
 export function getUser(): StoredUser | null {
   if (!isBrowser()) return null;
   try {
-    const raw = localStorage.getItem(USER_KEY);
+    const raw = localStorage.getItem(USER_KEY) ?? localStorage.getItem(LEGACY_USER_KEY);
     return raw ? (JSON.parse(raw) as StoredUser) : null;
   } catch {
     return null;
@@ -52,7 +55,7 @@ export function isLoggedIn(): boolean {
 export function getApiKey(): string | null {
   if (!isBrowser()) return null;
   try {
-    return localStorage.getItem(API_KEY_KEY);
+    return localStorage.getItem(API_KEY_KEY) ?? localStorage.getItem(LEGACY_API_KEY_KEY);
   } catch {
     return null;
   }
@@ -63,8 +66,10 @@ export function setApiKey(key: string | null): void {
   try {
     if (key && key.trim()) {
       localStorage.setItem(API_KEY_KEY, key.trim());
+      localStorage.removeItem(LEGACY_API_KEY_KEY);
     } else {
       localStorage.removeItem(API_KEY_KEY);
+      localStorage.removeItem(LEGACY_API_KEY_KEY);
     }
     emit();
   } catch { /* ignore */ }
@@ -75,6 +80,8 @@ export function storeLogin(token: string, user: StoredUser): void {
   try {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_USER_KEY);
     emit();
   } catch { /* ignore */ }
 }
@@ -84,6 +91,8 @@ export function clearLogin(): void {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(LEGACY_TOKEN_KEY);
+    localStorage.removeItem(LEGACY_USER_KEY);
     emit();
   } catch { /* ignore */ }
 }

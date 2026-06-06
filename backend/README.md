@@ -79,8 +79,8 @@ uv run alembic upgrade head
 
 cd ..
 python scripts/sqlite_to_postgres.py \
-  --sqlite sqlite:////absolute/path/to/nexus3d.sqlite \
-  --postgres postgresql://nexus3d:nexus3d@localhost:5432/nexus3d
+  --sqlite sqlite:////absolute/path/to/printstash.sqlite \
+  --postgres postgresql://printstash:printstash@localhost:5432/printstash
 ```
 
 ## Layout
@@ -150,7 +150,7 @@ docker compose --profile postgres up -d postgres
 Then set:
 
 ```bash
-VAULT_DB_URL=postgresql://nexus3d:nexus3d@postgres:5432/nexus3d
+VAULT_DB_URL=postgresql://printstash:printstash@postgres:5432/printstash
 ```
 
 Run migrations before starting the API:
@@ -176,7 +176,7 @@ Then configure:
 
 ```bash
 VAULT_STORAGE_BACKEND=s3
-VAULT_S3_BUCKET=nexus3d-vault
+VAULT_S3_BUCKET=printstash-vault
 VAULT_S3_ENDPOINT_URL=http://minio:9000
 VAULT_S3_REGION=us-east-1
 VAULT_S3_ACCESS_KEY=minioadmin

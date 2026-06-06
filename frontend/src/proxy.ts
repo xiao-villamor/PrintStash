@@ -18,11 +18,13 @@ import { NextRequest, NextResponse } from "next/server";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const SETUP_COOKIE = "nexus3d.setup";
+const SETUP_COOKIE = "printstash.setup";
+const LEGACY_SETUP_COOKIE = "nexus3d.setup";
 
 export async function proxy(request: NextRequest) {
   // Check the short-lived cookie first to avoid hitting the API on every nav.
-  const cookie = request.cookies.get(SETUP_COOKIE);
+  const cookie =
+    request.cookies.get(SETUP_COOKIE) ?? request.cookies.get(LEGACY_SETUP_COOKIE);
   if (cookie?.value === "1") {
     return NextResponse.next();
   }

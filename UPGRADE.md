@@ -50,8 +50,10 @@ Then restart the backend and frontend development servers.
 
 ## SQLite Notes
 
-- The default database remains `sqlite:////data/db/nexus3d.sqlite` for backward
-  compatibility with existing volumes.
+- New 0.1 Compose installs use `sqlite:////data/db/printstash.sqlite`.
+- Early development installs may still have `sqlite:////data/db/nexus3d.sqlite`;
+  keep that `VAULT_DB_URL` if you are upgrading an existing volume rather than
+  starting fresh.
 - Always back up the SQLite file before running migrations.
 - Do not edit the SQLite file directly while the API container is running.
 

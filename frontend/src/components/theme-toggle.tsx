@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
-const STORAGE_KEY = "nexus3d.theme";
+const STORAGE_KEY = "printstash.theme";
+const LEGACY_STORAGE_KEY = "nexus3d.theme";
 type Theme = "light" | "dark";
 
 function applyTheme(theme: Theme) {
@@ -17,7 +18,10 @@ export function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const stored = (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "light";
+    const stored =
+      (localStorage.getItem(STORAGE_KEY) as Theme | null) ??
+      (localStorage.getItem(LEGACY_STORAGE_KEY) as Theme | null) ??
+      "light";
     setTheme(stored);
     setMounted(true);
   }, []);
@@ -26,6 +30,7 @@ export function ThemeToggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     setTheme(next);
     localStorage.setItem(STORAGE_KEY, next);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
     applyTheme(next);
   }
 

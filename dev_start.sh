@@ -1,8 +1,10 @@
 #!/bin/bash
-# Start Nexus3D Vault dev stack
+# Start the PrintStash dev stack
 set -e
 
-cd /home/local/nexus3d/backend
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cd "$ROOT_DIR/backend"
 
 # Ensure data dirs exist
 mkdir -p _data/files _data/thumbs
@@ -29,7 +31,7 @@ for i in $(seq 1 15); do
     sleep 1
 done
 
-cd /home/local/nexus3d/frontend
+cd "$ROOT_DIR/frontend"
 pkill -f "next dev" 2>/dev/null || true
 sleep 0.5
 

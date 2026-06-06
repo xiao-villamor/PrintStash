@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from pathlib import Path
 import uuid
 from typing import Literal, List, Optional
@@ -16,7 +18,8 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func
 from sqlmodel import Session, delete, select
 from starlette.concurrency import run_in_threadpool
@@ -34,6 +37,7 @@ from app.db.models import (
     ModelTagLink,
     Printer,
     PrinterFile,
+    SENTINEL_MODEL_HASH,
     Tag,
 )
 from app.db.session import get_session
@@ -54,6 +58,41 @@ from app.services import taxonomy
 router = APIRouter(prefix="/models", tags=["models"])
 
 _GCODE_SUFFIXES = {".gcode", ".g", ".gco"}
+_EXPORT_CSV_FIELDS = [
+    "model_id",
+    "model_name",
+    "model_slug",
+    "category",
+    "tags",
+    "file_id",
+    "file_type",
+    "version",
+    "original_filename",
+    "size_bytes",
+    "sha256",
+    "revision_label",
+    "revision_status",
+    "revision_notes",
+    "is_recommended",
+    "uploaded_at",
+    "slicer_name",
+    "slicer_version",
+    "printer_model",
+    "nozzle_diameter_mm",
+    "layer_height_mm",
+    "infill_percent",
+    "estimated_time_s",
+    "filament_weight_g",
+    "filament_length_mm",
+    "filament_cost",
+    "material_type",
+    "material_brand",
+    "bbox_x_mm",
+    "bbox_y_mm",
+    "bbox_z_mm",
+    "volume_mm3",
+    "triangle_count",
+]
 
 
 def _tag_names_for(session: Session, model_id: int) -> List[str]:
@@ -284,6 +323,115 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
         created_at=m.created_at,
         updated_at=m.updated_at,
         files=file_reads,
+    )
+
+
+def _export_models(session: Session) -> dict:
+    rows = session.exec(
+        select(Model)
+        .where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(Model.hash != SENTINEL_MODEL_HASH)
+        .order_by(Model.name.asc())  # type: ignore[attr-defined]
+    ).all()
+    models = [_build_model_read(session, m.id).model_dump(mode="json") for m in rows if m.id]
+    file_count = sum(len(model["files"]) for model in models)
+    return {
+        "export_version": 1,
+        "app": {"name": settings.app_name, "version": settings.app_version},
+        "generated_at": utcnow().isoformat(),
+        "contents": {
+            "kind": "metadata_only",
+            "includes": [
+                "models",
+                "categories",
+                "tags",
+                "stored file metadata",
+                "slicer/mesh metadata",
+                "G-code revision labels and outcomes",
+            ],
+            "excludes": ["raw STL/3MF/G-code blobs", "secrets", "printer credentials"],
+        },
+        "counts": {"models": len(models), "files": file_count},
+        "models": models,
+    }
+
+
+def _export_models_csv(payload: dict) -> str:
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=_EXPORT_CSV_FIELDS)
+    writer.writeheader()
+    for model in payload["models"]:
+        tags = ",".join(model["tags"])
+        for file_row in model["files"]:
+            metadata = file_row.get("metadata") or {}
+            writer.writerow(
+                {
+                    "model_id": model["id"],
+                    "model_name": model["name"],
+                    "model_slug": model["slug"],
+                    "category": model.get("category") or "",
+                    "tags": tags,
+                    "file_id": file_row["id"],
+                    "file_type": file_row["file_type"],
+                    "version": file_row["version"],
+                    "original_filename": file_row["original_filename"],
+                    "size_bytes": file_row["size_bytes"],
+                    "sha256": file_row["sha256"],
+                    "revision_label": file_row.get("revision_label") or "",
+                    "revision_status": file_row.get("revision_status") or "",
+                    "revision_notes": file_row.get("revision_notes") or "",
+                    "is_recommended": file_row["is_recommended"],
+                    "uploaded_at": file_row["uploaded_at"],
+                    "slicer_name": metadata.get("slicer_name") or "",
+                    "slicer_version": metadata.get("slicer_version") or "",
+                    "printer_model": metadata.get("printer_model") or "",
+                    "nozzle_diameter_mm": metadata.get("nozzle_diameter_mm") or "",
+                    "layer_height_mm": metadata.get("layer_height_mm") or "",
+                    "infill_percent": metadata.get("infill_percent") or "",
+                    "estimated_time_s": metadata.get("estimated_time_s") or "",
+                    "filament_weight_g": metadata.get("filament_weight_g") or "",
+                    "filament_length_mm": metadata.get("filament_length_mm") or "",
+                    "filament_cost": metadata.get("filament_cost") or "",
+                    "material_type": metadata.get("material_type") or "",
+                    "material_brand": metadata.get("material_brand") or "",
+                    "bbox_x_mm": metadata.get("bbox_x_mm") or "",
+                    "bbox_y_mm": metadata.get("bbox_y_mm") or "",
+                    "bbox_z_mm": metadata.get("bbox_z_mm") or "",
+                    "volume_mm3": metadata.get("volume_mm3") or "",
+                    "triangle_count": metadata.get("triangle_count") or "",
+                }
+            )
+    return out.getvalue()
+
+
+@router.get(
+    "/export",
+    dependencies=[Depends(require_auth)],
+    summary="Export library metadata",
+    description=(
+        "Exports the searchable PrintStash library metadata without raw model "
+        "or G-code file blobs. Use JSON for portability/AI context and CSV for "
+        "spreadsheet analysis."
+    ),
+)
+def export_models(
+    format: Literal["json", "csv"] = Query("json", description="Export format"),
+    session: Session = Depends(get_session),
+) -> Response:
+    payload = _export_models(session)
+    if format == "csv":
+        return Response(
+            content=_export_models_csv(payload),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="printstash-model-export.csv"'
+            },
+        )
+    return JSONResponse(
+        content=jsonable_encoder(payload),
+        headers={
+            "Content-Disposition": 'attachment; filename="printstash-model-export.json"'
+        },
     )
 
 

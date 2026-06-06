@@ -50,6 +50,32 @@ export interface PrinterCapabilities {
   unsupported_actions: string[];
 }
 
+export interface PrinterDiagnosticCheck {
+  name: string;
+  ok: boolean;
+  code?: string;
+  detail?: string;
+}
+
+export interface PrinterDiagnostics {
+  printer_id: number;
+  provider: PrinterProvider;
+  support_level: "stable" | "beta" | string;
+  capabilities: {
+    can_upload: boolean;
+    can_start: boolean;
+    can_pause: boolean;
+    can_resume: boolean;
+    can_cancel: boolean;
+    can_live_status: boolean;
+    can_list_files: boolean;
+  };
+  unsupported_actions: string[];
+  notes: string[];
+  checks: PrinterDiagnosticCheck[];
+  ok: boolean;
+}
+
 export interface PrinterFileRead {
   id: number;
   printer_id: number;

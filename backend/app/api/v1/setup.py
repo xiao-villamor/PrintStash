@@ -58,7 +58,7 @@ def _validate_writable_dir(path_str: str, label: str) -> Path:
             detail=f"{label}_not_creatable",
         ) from exc
 
-    probe = path / ".nexus3d-write-probe"
+    probe = path / ".printstash-write-probe"
     try:
         probe.write_text("ok", encoding="utf-8")
     except OSError as exc:

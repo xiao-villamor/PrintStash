@@ -49,8 +49,10 @@ What works today:
 - Content-hash deduplication and model version history
 - G-code revision notes, outcome labels, recommended version, and metadata compare
 - Categories, tags, search, thumbnails, and an in-browser STL viewer
+- Metadata-only JSON/CSV export for portability, audits, spreadsheets, and local AI context
 - First-run setup wizard, API key auth for scripts, JWT login for the UI
 - Moonraker/Klipper printer integration with live status, send-to-print, remote-file start, controls, and file inventory sync
+- Provider diagnostics showing capabilities, unsupported actions, and live connectivity checks
 - Printer presence badges and filters showing where model G-code already exists
 - Beta Bambu LAN support for status and pause/resume/cancel controls
 - Optional Postgres, S3/R2 storage, backup/restore archives, health probes, and audit logs
@@ -61,6 +63,9 @@ Known rough spots:
   status/control-only in 0.1
 - Printer integrations need more real-world hardware testing
 - The UI is functional, but workflow polish is still in progress
+
+See [docs/known-limitations.md](./docs/known-limitations.md) for the full 0.1
+limitations list before exposing PrintStash beyond a trusted local network.
 
 ## Quick Start
 
@@ -105,13 +110,26 @@ the vault is offline so it never breaks a slice/export.
 
 ```bash
 # OrcaSlicer -> Print Settings -> Advanced -> Post-processing Scripts
-/usr/bin/python3 /path/to/PrintStash/scripts/nexus3d_orca_push.py \
+/usr/bin/python3 /path/to/PrintStash/scripts/printstash_orca_push.py \
   --url http://your-printstash-host:8000 \
   --api-key YOUR_API_KEY \
   --category "Functional/Brackets"
 ```
 
-After that, exported G-code is pushed into the vault automatically.
+After that, exported G-code is pushed into PrintStash automatically. The old
+`scripts/nexus3d_orca_push.py` path remains as a compatibility wrapper for early
+installs.
+
+## Demo Path
+
+For a clean first look, follow [docs/demo-walkthrough.md](./docs/demo-walkthrough.md).
+The short version:
+
+1. Start Docker Compose and complete first-run setup.
+2. Upload one STL/3MF and one G-code file.
+3. Open the model detail page to show metadata, thumbnails, revisions, and the STL viewer.
+4. Add a Moonraker printer or open provider diagnostics to show capability checks.
+5. Export metadata from Settings as JSON or CSV.
 
 ## Screenshots
 
@@ -136,11 +154,13 @@ Common endpoints:
 | `GET` | `/api/v1/models` | List and search models |
 | `GET` | `/api/v1/models/{id}` | Read one model with files and metadata |
 | `PATCH` | `/api/v1/models/{id}` | Update name, description, category, tags |
+| `GET` | `/api/v1/models/export?format=json` | Export library metadata without raw file blobs (auth required) |
 | `PATCH` | `/api/v1/models/{id}/files/{file_id}/revision` | Update G-code revision status, notes, recommended marker |
 | `GET` | `/api/v1/files/{id}/raw` | Download a stored file |
 | `GET` | `/api/v1/printers` | List registered printers |
 | `POST` | `/api/v1/printers/{id}/send` | Send vault G-code to a printer |
 | `GET` | `/api/v1/printers/{id}/status` | Read printer status |
+| `GET` | `/api/v1/printers/{id}/diagnostics` | Check provider capabilities and connectivity |
 | `WS` | `/api/v1/printers/{id}/ws` | Live printer status stream |
 
 Example upload:
@@ -161,13 +181,14 @@ Most installs only need to edit secrets in `.env`.
 | --- | --- | --- |
 | `VAULT_API_KEY` | `changeme` | Shared key for scripts and write endpoints |
 | `VAULT_JWT_SECRET` | `changeme...` | Change before exposing the UI |
-| `VAULT_DB_URL` | `sqlite:////data/db/nexus3d.sqlite` | SQLite by default; Postgres optional |
+| `VAULT_DB_URL` | `sqlite:////data/db/printstash.sqlite` | SQLite by default; Postgres optional |
 | `VAULT_STORAGE_BACKEND` | `local` | `local` or `s3` |
 | `VAULT_DATA_DIR` | `/data/files` | Container path for stored files |
 | `VAULT_THUMB_DIR` | `/data/thumbs` | Container path for generated thumbnails |
 | `VAULT_MAX_UPLOAD_MB` | `512` | Upload size limit |
 | `NEXT_PUBLIC_WS_URL` | `ws://localhost:8000` | Browser-reachable WebSocket URL |
 
+The `VAULT_` prefix is retained for config compatibility from early development.
 See [.env.example](./.env.example) for the full list, including S3/R2, backups,
 MinIO, Postgres, and lifecycle settings.
 
@@ -236,6 +257,7 @@ Postgres + S3/R2 optional
 
 The repository keeps architecture decisions documented in [docs/adr](./docs/adr),
 with release and operations notes in [docs](./docs).
+For release-ready community issues, see [docs/community-starter-issues.md](./docs/community-starter-issues.md).
 
 ## Roadmap
 

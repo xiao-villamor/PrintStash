@@ -27,7 +27,7 @@ COPY alembic ./alembic
 
 ENV VAULT_DATA_DIR=/data/files \
     VAULT_THUMB_DIR=/data/thumbs \
-    VAULT_DB_URL=sqlite:////data/db/nexus3d.sqlite
+    VAULT_DB_URL=sqlite:////data/db/printstash.sqlite
 
 EXPOSE 8000
 

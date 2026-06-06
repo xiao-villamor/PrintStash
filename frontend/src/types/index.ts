@@ -21,6 +21,8 @@ export type {
   PrinterStatus,
   PrinterProvider,
   PrinterCapabilities,
+  PrinterDiagnosticCheck,
+  PrinterDiagnostics,
   PrintJobState,
   PrinterRead,
   PrinterFileRead,
