@@ -100,6 +100,29 @@ const printer = {
   updated_at: now,
 };
 
+const printerDiagnostics = {
+  printer_id: printer.id,
+  provider: printer.provider,
+  support_level: "stable",
+  capabilities: {
+    can_start: true,
+    can_pause: true,
+    can_resume: true,
+    can_cancel: true,
+    can_live_status: true,
+    can_upload: true,
+    can_list_files: true,
+  },
+  unsupported_actions: [],
+  notes: [],
+  checks: [
+    { name: "configuration", ok: true },
+    { name: "provider_info", ok: true },
+    { name: "live_status", ok: true },
+  ],
+  ok: true,
+};
+
 const modelList = [
   {
     id: model.id,
@@ -214,6 +237,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/printers/3") {
     sendJson(res, printer);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/diagnostics") {
+    sendJson(res, printerDiagnostics);
     return;
   }
   if (url.pathname === "/api/v1/printers/3/status") {
