@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3210);
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
+const apiBase = `http://127.0.0.1:${apiPort}`;
+const testApiEnv = `NEXT_PUBLIC_API_URL=${apiBase}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -19,10 +21,10 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `NEXT_PUBLIC_API_URL=http://127.0.0.1:${apiPort} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
+    command: `${testApiEnv} ./node_modules/.bin/next build && ${testApiEnv} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    timeout: 120_000,
   },
   projects: [
     {
