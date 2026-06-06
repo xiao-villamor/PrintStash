@@ -19,7 +19,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `NEXT_PUBLIC_API_URL=http://127.0.0.1:${apiPort} ./node_modules/.bin/next start -H 127.0.0.1 -p ${port}`,
+    command: `NEXT_PUBLIC_API_URL=http://127.0.0.1:${apiPort} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
