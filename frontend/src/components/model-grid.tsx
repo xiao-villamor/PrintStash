@@ -99,7 +99,7 @@ export function ModelBrowser() {
   const [reloadKey, setReloadKey] = useState(0);
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
 
-  // Allow other parts of the app (sidebar "Upload") to deep-link the modal open.
+  // Allow navigation shortcuts to deep-link the modal open.
   useEffect(() => {
     if (searchParams.get("upload") === "1") {
       setUploadOpen(true);
@@ -200,10 +200,7 @@ export function ModelBrowser() {
       <UploadModal
         open={uploadOpen}
         onClose={() => setUploadOpen(false)}
-        onUploaded={() => {
-          setUploadOpen(false);
-          refresh();
-        }}
+        onUploaded={refresh}
       />
 
       <MobileFilterDrawer

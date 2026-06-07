@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, LogIn, LogOut, Printer, Settings, Upload, User } from "lucide-react";
+import { Box, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/?upload=1", label: "Upload", icon: Upload, match: "/upload" },
   { href: "/printers", label: "Printers", icon: Printer },
 ];
 
@@ -39,8 +38,8 @@ export function SidebarNav() {
         {mainItems.map((item) => {
           const isActive =
             item.href === "/"
-              ? pathname === "/" && !item.match
-              : pathname.startsWith(item.match ?? item.href);
+              ? pathname === "/"
+              : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}

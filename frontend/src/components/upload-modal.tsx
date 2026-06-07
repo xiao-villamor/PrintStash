@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CheckCircle,
   ChevronDown,
   File as FileIcon,
   Loader2,
@@ -22,7 +21,7 @@ import {
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { CategoryRead, TagRead } from "@/types";
+import { CategoryRead, IngestJobStatus, TagRead } from "@/types";
 
 const MESH_EXT = new Set([".stl", ".3mf", ".obj"]);
 const GCODE_EXT = new Set([".gcode", ".g", ".gco"]);
@@ -48,12 +47,12 @@ function formatBytes(b: number): string {
   return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-type UploadStep =
-  | "idle"
-  | "uploading_mesh"
-  | "processing_mesh"
-  | "uploading_gcode"
-  | "done";
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const POLL_INTERVAL_MS = 1_000;
+const POLL_TIMEOUT_MS = 15 * 60_000;
 
 export function UploadModal({
   open,
@@ -74,10 +73,6 @@ export function UploadModal({
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [step, setStep] = useState<UploadStep>("idle");
-  const [stepLabel, setStepLabel] = useState("");
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [catOpen, setCatOpen] = useState(false);
@@ -142,11 +137,7 @@ export function UploadModal({
     setCategoryPath("");
     setSelectedTags([]);
     setTagInput("");
-    setJobId(null);
-    setError(null);
     setSubmitting(false);
-    setStep("idle");
-    setStepLabel("");
   }
 
   function close() {
@@ -156,45 +147,175 @@ export function UploadModal({
 
   async function pollJob(
     jid: string,
-    taskId?: string,
-    progressStart = 40,
-    progressEnd = 90,
-  ): Promise<number> {
-    const maxAttempts = 60;
-    for (let i = 0; i < maxAttempts; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
+    taskId: string,
+    {
+      progressStart,
+      progressEnd,
+      pendingDetail,
+      runningDetail,
+      completedDetail,
+      completeTask,
+    }: {
+      progressStart: number;
+      progressEnd: number;
+      pendingDetail: string;
+      runningDetail: string;
+      completedDetail: string;
+      completeTask: boolean;
+    },
+  ): Promise<IngestJobStatus> {
+    const startedAt = Date.now();
+    let attempts = 0;
+
+    while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+      await sleep(POLL_INTERVAL_MS);
+      attempts += 1;
       const status = await getJobStatus(jid);
-      if (taskId) {
-        const progress =
-          progressStart + ((i + 1) / maxAttempts) * (progressEnd - progressStart);
+
+      if (status.state === "completed") {
         updateTask(taskId, {
-          status: status.state === "pending" ? "pending" : "running",
+          status: completeTask ? "completed" : "running",
+          progress: completeTask ? 100 : progressEnd,
+          detail: completedDetail,
+        });
+        return status;
+      }
+
+      if (status.state === "failed") {
+        updateTask(taskId, {
+          status: "failed",
+          progress: 100,
+          detail: status.error || "Ingestion job failed",
+        });
+        throw new Error(status.error || "Ingestion job failed");
+      }
+
+      if (status.state === "pending" || status.state === "running") {
+        const progress =
+          progressStart +
+          Math.min(attempts / 60, 1) * (progressEnd - progressStart);
+        updateTask(taskId, {
+          status: status.state,
           progress,
-          detail:
-            status.state === "pending"
-              ? "Waiting for the vault to start processing"
-              : "Extracting metadata and thumbnails",
+          detail: status.state === "pending" ? pendingDetail : runningDetail,
         });
       }
-      if (status.state === "completed") {
-        if (status.model_id == null)
-          throw new Error("Job completed but no model_id returned");
-        if (taskId) {
-          updateTask(taskId, {
-            status: progressEnd >= 99 ? "completed" : "running",
-            progress: progressEnd >= 99 ? 100 : progressEnd,
-            detail: progressEnd >= 99 ? "Upload processed" : "Mesh processed",
-          });
-        }
-        return status.model_id;
-      }
-      if (status.state === "failed")
-        throw new Error(status.error || "Ingestion job failed");
     }
+
     throw new Error("Timed out waiting for ingestion to complete");
   }
 
-  async function doSubmit(e: React.FormEvent) {
+  async function runUploadTask({
+    taskId,
+    mesh,
+    gcode,
+    name,
+    category,
+    tagsForUpload,
+  }: {
+    taskId: string;
+    mesh: File | null;
+    gcode: File | null;
+    name: string;
+    category: string;
+    tagsForUpload: string[];
+  }) {
+    try {
+      if (mesh) {
+        updateTask(taskId, {
+          detail: `Uploading ${mesh.name}`,
+          status: "running",
+          progress: 15,
+        });
+        const meshFd = new FormData();
+        meshFd.append("file", mesh);
+        meshFd.append("model_name", name || mesh.name);
+        if (category) meshFd.append("category", category);
+        if (tagsForUpload.length) meshFd.append("tags", tagsForUpload.join(","));
+        const meshRes = await ingestModel(meshFd);
+
+        updateTask(taskId, {
+          detail: "Processing mesh and thumbnail",
+          status: "running",
+          progress: 35,
+        });
+        const meshStatus = await pollJob(meshRes.job_id, taskId, {
+          progressStart: 35,
+          progressEnd: gcode ? 55 : 100,
+          pendingDetail: "Waiting for the vault to start processing",
+          runningDetail: "Extracting mesh metadata and thumbnail",
+          completedDetail: gcode ? "Mesh processed; linking G-code" : "Upload processed",
+          completeTask: !gcode,
+        });
+
+        if (!gcode) {
+          onUploaded();
+          return;
+        }
+
+        if (meshStatus.model_id == null) {
+          throw new Error("Mesh job completed but no model_id returned");
+        }
+
+        const full = await getModel(meshStatus.model_id);
+        updateTask(taskId, {
+          detail: `Uploading ${gcode.name}`,
+          status: "running",
+          progress: 60,
+        });
+        const gcodeFd = new FormData();
+        gcodeFd.append("file", gcode);
+        gcodeFd.append("model_name", name || gcode.name);
+        if (category) gcodeFd.append("category", category);
+        if (tagsForUpload.length) gcodeFd.append("tags", tagsForUpload.join(","));
+        gcodeFd.append("source_hash", full.hash);
+        const gcodeRes = await ingestOrca(gcodeFd);
+        await pollJob(gcodeRes.job_id, taskId, {
+          progressStart: 70,
+          progressEnd: 100,
+          pendingDetail: "Waiting for the vault to start processing G-code",
+          runningDetail: "Parsing slicer metadata and thumbnail",
+          completedDetail: "Upload processed",
+          completeTask: true,
+        });
+        onUploaded();
+        return;
+      }
+
+      if (gcode) {
+        updateTask(taskId, {
+          detail: `Uploading ${gcode.name}`,
+          status: "running",
+          progress: 25,
+        });
+        const fd = new FormData();
+        fd.append("file", gcode);
+        fd.append("model_name", name || gcode.name);
+        if (category) fd.append("category", category);
+        if (tagsForUpload.length) fd.append("tags", tagsForUpload.join(","));
+        const res = await ingestOrca(fd);
+        await pollJob(res.job_id, taskId, {
+          progressStart: 45,
+          progressEnd: 100,
+          pendingDetail: "Waiting for the vault to start processing",
+          runningDetail: "Parsing slicer metadata and thumbnail",
+          completedDetail: "Upload processed",
+          completeTask: true,
+        });
+        onUploaded();
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      updateTask(taskId, {
+        status: "failed",
+        progress: 100,
+        detail: msg,
+      });
+      toast.error(err);
+    }
+  }
+
+  function doSubmit(e: React.FormEvent) {
     e.preventDefault();
     if ((!meshFile && !gcodeFile) || submitting) return;
     if (!auth.isAuthenticated) {
@@ -208,102 +329,16 @@ export function UploadModal({
       progress: 5,
     });
     setSubmitting(true);
-    setError(null);
-    try {
-      // ---- Upload mesh first (if present) ----
-      if (meshFile) {
-        setStep("uploading_mesh");
-        setStepLabel("Uploading 3D model…");
-        updateTask(taskId, {
-          detail: `Uploading ${meshFile.name}`,
-          status: "running",
-          progress: 15,
-        });
-        const meshFd = new FormData();
-        meshFd.append("file", meshFile);
-        meshFd.append("model_name", modelName || meshFile.name);
-        if (categoryPath) meshFd.append("category", categoryPath);
-        if (selectedTags.length)
-          meshFd.append("tags", selectedTags.join(","));
-        const meshRes = await ingestModel(meshFd);
-
-        setStep("processing_mesh");
-        setStepLabel("Processing 3D model (meshing, thumbnail)…");
-        updateTask(taskId, {
-          detail: "Processing mesh and thumbnail",
-          status: "running",
-          progress: 35,
-        });
-        const modelId = await pollJob(meshRes.job_id, taskId, 35, gcodeFile ? 55 : 95);
-
-        // Get the model hash so we can link the G-code to this model.
-        if (gcodeFile) {
-          const full = await getModel(modelId);
-          setStep("uploading_gcode");
-          setStepLabel("Uploading G-code…");
-          updateTask(taskId, {
-            detail: `Uploading ${gcodeFile.name}`,
-            status: "running",
-            progress: 60,
-          });
-          const gcodeFd = new FormData();
-          gcodeFd.append("file", gcodeFile);
-          gcodeFd.append("model_name", modelName || gcodeFile.name);
-          if (categoryPath) gcodeFd.append("category", categoryPath);
-          if (selectedTags.length)
-            gcodeFd.append("tags", selectedTags.join(","));
-          gcodeFd.append("source_hash", full.hash);
-          const gcodeRes = await ingestOrca(gcodeFd);
-          setJobId(gcodeRes.job_id);
-          void pollJob(gcodeRes.job_id, taskId, 70, 98).catch((err) => {
-            updateTask(taskId, {
-              status: "failed",
-              progress: 100,
-              detail: err instanceof Error ? err.message : String(err),
-            });
-          });
-        } else {
-          setJobId(meshRes.job_id);
-        }
-      } else if (gcodeFile) {
-        // ---- G-code only ----
-        setStep("uploading_gcode");
-        setStepLabel("Uploading G-code…");
-        updateTask(taskId, {
-          detail: `Uploading ${gcodeFile.name}`,
-          status: "running",
-          progress: 25,
-        });
-        const fd = new FormData();
-        fd.append("file", gcodeFile);
-        fd.append("model_name", modelName || gcodeFile.name);
-        if (categoryPath) fd.append("category", categoryPath);
-        if (selectedTags.length) fd.append("tags", selectedTags.join(","));
-        const res = await ingestOrca(fd);
-        setJobId(res.job_id);
-        void pollJob(res.job_id, taskId, 45, 98).catch((err) => {
-          updateTask(taskId, {
-            status: "failed",
-            progress: 100,
-            detail: err instanceof Error ? err.message : String(err),
-          });
-        });
-      }
-
-      setStep("done");
-      onUploaded();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-      updateTask(taskId, {
-        status: "failed",
-        progress: 100,
-        detail: msg,
-      });
-      toast.error(err);
-    } finally {
-      setSubmitting(false);
-    }
+    void runUploadTask({
+      taskId,
+      mesh: meshFile,
+      gcode: gcodeFile,
+      name: modelName,
+      category: categoryPath,
+      tagsForUpload: [...selectedTags],
+    });
+    reset();
+    onClose();
   }
 
   async function doCreateTag(name: string) {
@@ -347,37 +382,7 @@ export function UploadModal({
         aria-modal="true"
         aria-labelledby="upload-modal-title"
       >
-        {step === "done" || jobId ? (
-          <div className="p-8 text-center space-y-4">
-            <CheckCircle className="h-12 w-12 text-emerald-500 mx-auto" />
-            <h3 className="text-lg font-semibold text-[var(--on-surface)]">
-              Upload queued
-            </h3>
-            <p className="text-sm text-[var(--on-surface-variant)]">
-              Processing in background. You can close this dialog.
-            </p>
-            {jobId && (
-              <div className="rounded bg-[var(--surface-container)] p-3 font-mono text-xs break-all text-[var(--on-surface-variant)]">
-                Job ID: {jobId}
-              </div>
-            )}
-            <div className="flex gap-3 justify-center pt-2">
-              <button
-                onClick={reset}
-                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider"
-              >
-                Upload another
-              </button>
-              <button
-                onClick={close}
-                className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        ) : (
-          <>
+        <>
             <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--outline-variant)]">
               <div>
                 <h3
@@ -605,19 +610,6 @@ export function UploadModal({
                 )}
               </div>
 
-              {error && (
-                <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-3 text-xs text-[var(--error)] font-mono break-words">
-                  {error}
-                </div>
-              )}
-
-              {submitting && (
-                <div className="flex items-center gap-2 text-sm text-[var(--on-surface-variant)] font-mono">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {stepLabel}
-                </div>
-              )}
-
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -642,8 +634,7 @@ export function UploadModal({
                 </button>
               </div>
             </form>
-          </>
-        )}
+        </>
       </div>
     </div>
   );
