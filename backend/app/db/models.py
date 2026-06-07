@@ -83,7 +83,14 @@ class Metadata(SQLModel, table=True):
     printer_model: Optional[str] = Field(default=None, max_length=128)
     nozzle_diameter_mm: Optional[float] = None
     layer_height_mm: Optional[float] = None
+    first_layer_height_mm: Optional[float] = None
     infill_percent: Optional[float] = None
+    wall_loops: Optional[int] = None
+    top_shell_layers: Optional[int] = None
+    bottom_shell_layers: Optional[int] = None
+    support_material: Optional[bool] = None
+    nozzle_temperature_c: Optional[float] = None
+    bed_temperature_c: Optional[float] = None
 
     # Print stats
     estimated_time_s: Optional[int] = None
@@ -103,6 +110,22 @@ class Metadata(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
     file: Optional["File"] = Relationship(back_populates="file_metadata")
+
+
+class FilamentProfile(SQLModel, table=True):
+    """Local slicer filament preset with cost data for per-part estimates."""
+
+    __tablename__ = "filament_profiles"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=128, unique=True, index=True)
+    material_type: Optional[str] = Field(default=None, max_length=64, index=True)
+    material_brand: Optional[str] = Field(default=None, max_length=128, index=True)
+    cost_per_kg: Optional[float] = None
+    notes: Optional[str] = None
+
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class File(SQLModel, table=True):

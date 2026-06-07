@@ -8,6 +8,7 @@ import {
   CategoryRead,
   FileRead,
   FileRevisionStatus,
+  MetadataRead,
   ModelRead,
   ModelPrinterFileRead,
   PrinterRead,
@@ -70,6 +71,26 @@ function formatDuration(seconds: number | null): string {
   return `${h}h ${m}m`;
 }
 
+function formatMillimeters(value: number | null | undefined): string {
+  return value ? `${value}mm` : "—";
+}
+
+function formatPercent(value: number | null | undefined): string {
+  return value ? `${value}%` : "—";
+}
+
+function formatGrams(value: number | null | undefined): string {
+  return value ? `${value}g` : "—";
+}
+
+function formatTemperature(value: number | null | undefined): string {
+  return value ? `${value}°C` : "—";
+}
+
+function formatCost(value: number | null | undefined): string {
+  return value ? value.toFixed(2) : "—";
+}
+
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -106,6 +127,85 @@ function revisionStatusClass(status: FileRevisionStatus | null): string {
 
 function revisionStatusLabel(status: FileRevisionStatus | null): string {
   return status ? REVISION_STATUS_LABELS[status] : "Unmarked";
+}
+
+type PrintSettingRow = {
+  label: string;
+  value: string;
+  chip?: boolean;
+  highlight?: boolean;
+};
+
+function buildPrintSettingRows(meta: MetadataRead | null | undefined): PrintSettingRow[] {
+  const rows: PrintSettingRow[] = [
+    { label: "PRINTER PROFILE", value: meta?.printer_model ?? "—" },
+    {
+      label: "MATERIAL",
+      value: meta?.material_type ?? "—",
+      chip: true,
+    },
+  ];
+
+  if (meta?.material_brand) {
+    rows.push({ label: "FILAMENT PROFILE", value: meta.material_brand });
+  }
+
+  rows.push(
+    { label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) },
+  );
+
+  if (meta?.first_layer_height_mm) {
+    rows.push({
+      label: "FIRST LAYER",
+      value: formatMillimeters(meta.first_layer_height_mm),
+    });
+  }
+
+  rows.push(
+    { label: "NOZZLE", value: formatMillimeters(meta?.nozzle_diameter_mm) },
+    { label: "INFILL", value: formatPercent(meta?.infill_percent) },
+  );
+
+  if (meta?.wall_loops) {
+    rows.push({ label: "WALLS", value: String(meta.wall_loops) });
+  }
+
+  if (meta?.top_shell_layers || meta?.bottom_shell_layers) {
+    rows.push({
+      label: "TOP / BOTTOM",
+      value: `${meta?.top_shell_layers ?? "—"} / ${meta?.bottom_shell_layers ?? "—"}`,
+    });
+  }
+
+  if (meta?.support_material !== null && meta?.support_material !== undefined) {
+    rows.push({ label: "SUPPORTS", value: meta.support_material ? "Yes" : "No" });
+  }
+
+  if (meta?.nozzle_temperature_c) {
+    rows.push({
+      label: "NOZZLE TEMP",
+      value: formatTemperature(meta.nozzle_temperature_c),
+    });
+  }
+
+  if (meta?.bed_temperature_c) {
+    rows.push({ label: "BED TEMP", value: formatTemperature(meta.bed_temperature_c) });
+  }
+
+  rows.push(
+    {
+      label: "EST. TIME",
+      value: formatDuration(meta?.estimated_time_s ?? null),
+      highlight: true,
+    },
+    { label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) },
+  );
+
+  if (meta?.filament_cost) {
+    rows.push({ label: "FILAMENT COST", value: formatCost(meta.filament_cost) });
+  }
+
+  return rows;
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
@@ -248,6 +348,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const latestFile = recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
+  const printSettingRows = useMemo(() => buildPrintSettingRows(meta), [meta]);
   const meshFile = model.files.find(
     (f) => f.file_type === "stl" || f.file_type === "3mf" || f.file_type === "obj",
   );
@@ -462,13 +563,16 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 Print Settings
               </h2>
               <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
-                <SettingRow label="PRINTER PROFILE" value={meta?.printer_model ?? "—"} />
-                <SettingRow label="MATERIAL" value={meta?.material_type ?? "—"} chip />
-                <SettingRow label="LAYER HEIGHT" value={meta?.layer_height_mm ? `${meta.layer_height_mm}mm` : "—"} />
-                <SettingRow label="NOZZLE" value={meta?.nozzle_diameter_mm ? `${meta.nozzle_diameter_mm}mm` : "—"} />
-                <SettingRow label="INFILL" value={meta?.infill_percent ? `${meta.infill_percent}%` : "—"} />
-                <SettingRow label="EST. TIME" value={formatDuration(meta?.estimated_time_s ?? null)} highlight />
-                <SettingRow label="FILAMENT" value={meta?.filament_weight_g ? `${meta.filament_weight_g}g` : "—"} last />
+                {printSettingRows.map((row, index) => (
+                  <SettingRow
+                    key={row.label}
+                    label={row.label}
+                    value={row.value}
+                    chip={row.chip}
+                    highlight={row.highlight}
+                    last={index === printSettingRows.length - 1}
+                  />
+                ))}
               </div>
             </section>
 
@@ -1028,24 +1132,72 @@ function RevisionCompare({ left, right }: { left: FileRead; right: FileRead }) {
     ],
     [
       "Layer height",
-      left.metadata?.layer_height_mm ? `${left.metadata.layer_height_mm}mm` : "—",
-      right.metadata?.layer_height_mm ? `${right.metadata.layer_height_mm}mm` : "—",
+      formatMillimeters(left.metadata?.layer_height_mm),
+      formatMillimeters(right.metadata?.layer_height_mm),
+    ],
+    [
+      "First layer",
+      formatMillimeters(left.metadata?.first_layer_height_mm),
+      formatMillimeters(right.metadata?.first_layer_height_mm),
     ],
     [
       "Nozzle",
-      left.metadata?.nozzle_diameter_mm ? `${left.metadata.nozzle_diameter_mm}mm` : "—",
-      right.metadata?.nozzle_diameter_mm ? `${right.metadata.nozzle_diameter_mm}mm` : "—",
+      formatMillimeters(left.metadata?.nozzle_diameter_mm),
+      formatMillimeters(right.metadata?.nozzle_diameter_mm),
     ],
     [
       "Infill",
-      left.metadata?.infill_percent ? `${left.metadata.infill_percent}%` : "—",
-      right.metadata?.infill_percent ? `${right.metadata.infill_percent}%` : "—",
+      formatPercent(left.metadata?.infill_percent),
+      formatPercent(right.metadata?.infill_percent),
+    ],
+    [
+      "Walls",
+      left.metadata?.wall_loops ? String(left.metadata.wall_loops) : "—",
+      right.metadata?.wall_loops ? String(right.metadata.wall_loops) : "—",
+    ],
+    [
+      "Top / bottom",
+      left.metadata?.top_shell_layers || left.metadata?.bottom_shell_layers
+        ? `${left.metadata?.top_shell_layers ?? "—"} / ${left.metadata?.bottom_shell_layers ?? "—"}`
+        : "—",
+      right.metadata?.top_shell_layers || right.metadata?.bottom_shell_layers
+        ? `${right.metadata?.top_shell_layers ?? "—"} / ${right.metadata?.bottom_shell_layers ?? "—"}`
+        : "—",
+    ],
+    [
+      "Supports",
+      left.metadata?.support_material === null || left.metadata?.support_material === undefined
+        ? "—"
+        : left.metadata.support_material
+          ? "Yes"
+          : "No",
+      right.metadata?.support_material === null || right.metadata?.support_material === undefined
+        ? "—"
+        : right.metadata.support_material
+          ? "Yes"
+          : "No",
+    ],
+    [
+      "Nozzle temp",
+      formatTemperature(left.metadata?.nozzle_temperature_c),
+      formatTemperature(right.metadata?.nozzle_temperature_c),
+    ],
+    [
+      "Bed temp",
+      formatTemperature(left.metadata?.bed_temperature_c),
+      formatTemperature(right.metadata?.bed_temperature_c),
     ],
     ["Material", left.metadata?.material_type ?? "—", right.metadata?.material_type ?? "—"],
+    ["Filament profile", left.metadata?.material_brand ?? "—", right.metadata?.material_brand ?? "—"],
     [
       "Filament",
-      left.metadata?.filament_weight_g ? `${left.metadata.filament_weight_g}g` : "—",
-      right.metadata?.filament_weight_g ? `${right.metadata.filament_weight_g}g` : "—",
+      formatGrams(left.metadata?.filament_weight_g),
+      formatGrams(right.metadata?.filament_weight_g),
+    ],
+    [
+      "Filament cost",
+      formatCost(left.metadata?.filament_cost),
+      formatCost(right.metadata?.filament_cost),
     ],
     [
       "Est. time",

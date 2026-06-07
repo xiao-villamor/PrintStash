@@ -33,6 +33,7 @@ from app.db.models import (
     File,
     FileRevisionStatus,
     FileType,
+    FilamentProfile,
     Metadata,
     Model,
     ModelTagLink,
@@ -81,7 +82,14 @@ _EXPORT_CSV_FIELDS = [
     "printer_model",
     "nozzle_diameter_mm",
     "layer_height_mm",
+    "first_layer_height_mm",
     "infill_percent",
+    "wall_loops",
+    "top_shell_layers",
+    "bottom_shell_layers",
+    "support_material",
+    "nozzle_temperature_c",
+    "bed_temperature_c",
     "estimated_time_s",
     "filament_weight_g",
     "filament_length_mm",
@@ -175,6 +183,57 @@ def _printer_presence_for(
         )
         for printer_id, printer_name, file_count in rows
     ]
+
+
+def _normalise_profile_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip().lower()
+    return stripped or None
+
+
+def _matching_filament_profile(
+    session: Session,
+    metadata: Metadata,
+) -> FilamentProfile | None:
+    candidates = [
+        _normalise_profile_key(metadata.material_brand),
+        _normalise_profile_key(metadata.material_type),
+    ]
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        profile = session.exec(
+            select(FilamentProfile).where(func.lower(FilamentProfile.name) == candidate)
+        ).first()
+        if profile is not None:
+            return profile
+
+    material_type = _normalise_profile_key(metadata.material_type)
+    material_brand = _normalise_profile_key(metadata.material_brand)
+    if material_type is None:
+        return None
+
+    stmt = select(FilamentProfile).where(
+        func.lower(FilamentProfile.material_type) == material_type
+    )
+    if material_brand is not None:
+        stmt = stmt.where(func.lower(FilamentProfile.material_brand) == material_brand)
+    else:
+        stmt = stmt.where(FilamentProfile.material_brand.is_(None))
+    return session.exec(stmt).first()
+
+
+def _metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
+    data = metadata.model_dump()
+    if data.get("filament_cost") is None and metadata.filament_weight_g:
+        profile = _matching_filament_profile(session, metadata)
+        if profile and profile.cost_per_kg is not None:
+            data["filament_cost"] = round(
+                metadata.filament_weight_g * profile.cost_per_kg / 1000,
+                4,
+            )
+    return MetadataRead(**data)
 
 
 @router.get(
@@ -306,7 +365,7 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
             revision_notes=f.revision_notes,
             is_recommended=f.is_recommended,
             uploaded_at=f.uploaded_at,
-            metadata=MetadataRead(**md.model_dump()) if md else None,
+            metadata=_metadata_read(session, md) if md else None,
         )
         for f, md in files_with_meta
     ]
@@ -392,7 +451,7 @@ def _export_models(session: Session) -> dict:
                     revision_notes=file_row.revision_notes,
                     is_recommended=file_row.is_recommended,
                     uploaded_at=file_row.uploaded_at,
-                    metadata=MetadataRead(**metadata.model_dump()) if metadata else None,
+                    metadata=_metadata_read(session, metadata) if metadata else None,
                 ).model_dump(mode="json")
             )
 
@@ -467,7 +526,16 @@ def _export_models_csv(payload: dict) -> str:
                     "printer_model": metadata.get("printer_model") or "",
                     "nozzle_diameter_mm": metadata.get("nozzle_diameter_mm") or "",
                     "layer_height_mm": metadata.get("layer_height_mm") or "",
+                    "first_layer_height_mm": metadata.get("first_layer_height_mm") or "",
                     "infill_percent": metadata.get("infill_percent") or "",
+                    "wall_loops": metadata.get("wall_loops") or "",
+                    "top_shell_layers": metadata.get("top_shell_layers") or "",
+                    "bottom_shell_layers": metadata.get("bottom_shell_layers") or "",
+                    "support_material": metadata.get("support_material")
+                    if metadata.get("support_material") is not None
+                    else "",
+                    "nozzle_temperature_c": metadata.get("nozzle_temperature_c") or "",
+                    "bed_temperature_c": metadata.get("bed_temperature_c") or "",
                     "estimated_time_s": metadata.get("estimated_time_s") or "",
                     "filament_weight_g": metadata.get("filament_weight_g") or "",
                     "filament_length_mm": metadata.get("filament_length_mm") or "",

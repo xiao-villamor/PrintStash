@@ -8,13 +8,20 @@ const metadata = {
   printer_model: "Creality Ender-3 V3 SE",
   nozzle_diameter_mm: 0.4,
   layer_height_mm: 0.2,
+  first_layer_height_mm: 0.24,
   infill_percent: 15,
+  wall_loops: 3,
+  top_shell_layers: 4,
+  bottom_shell_layers: 3,
+  support_material: false,
+  nozzle_temperature_c: 215,
+  bed_temperature_c: 60,
   estimated_time_s: 1812,
   filament_weight_g: 6.8,
-  filament_length_mm: null,
+  filament_length_mm: 2280,
   filament_cost: 0.14,
   material_type: "PLA",
-  material_brand: null,
+  material_brand: "Generic PLA",
   bbox_x_mm: null,
   bbox_y_mm: null,
   bbox_z_mm: null,
@@ -99,6 +106,19 @@ const printer = {
   created_at: "2026-05-31T18:51:39.627384",
   updated_at: now,
 };
+
+const filamentProfiles = [
+  {
+    id: 1,
+    name: "Generic PLA",
+    material_type: "PLA",
+    material_brand: "Generic",
+    cost_per_kg: 21,
+    notes: null,
+    created_at: now,
+    updated_at: now,
+  },
+];
 
 const printerDiagnostics = {
   printer_id: printer.id,
@@ -193,6 +213,11 @@ function sendPng(res: ServerResponse): void {
   res.end(pixel);
 }
 
+function drainRequest(req: IncomingMessage, done: () => void): void {
+  req.resume();
+  req.on("end", done);
+}
+
 function handle(req: IncomingMessage, res: ServerResponse): void {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (req.method === "OPTIONS") {
@@ -207,6 +232,24 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
 
   if (url.pathname === "/api/v1/setup/status") {
     sendJson(res, { configured: true, has_users: true });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/me") {
+    sendJson(res, {
+      id: 1,
+      username: "tester",
+      email: null,
+      is_superuser: true,
+      created_at: now,
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/categories") {
+    sendJson(res, []);
+    return;
+  }
+  if (url.pathname === "/api/v1/tags") {
+    sendJson(res, []);
     return;
   }
   if (url.pathname === "/api/v1/models") {
@@ -229,6 +272,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         missing_since: null,
       },
     ]);
+    return;
+  }
+  if (url.pathname === "/api/v1/filament-profiles") {
+    sendJson(res, filamentProfiles);
     return;
   }
   if (url.pathname === "/api/v1/printers") {
@@ -269,6 +316,24 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         updated_at: now,
       },
     ]);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/v1/ingest/orca") {
+    drainRequest(req, () => {
+      sendJson(res, { job_id: "gcode-job-1", state: "pending", message: "ingestion queued" }, 202);
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/ingest/jobs/gcode-job-1") {
+    sendJson(res, {
+      job_id: "gcode-job-1",
+      state: "completed",
+      model_id: model.id,
+      file_id: 2,
+      error: null,
+      started_at: now,
+      finished_at: now,
+    });
     return;
   }
   if (url.pathname === "/api/v1/files/1/thumbnail") {

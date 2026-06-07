@@ -36,12 +36,53 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*layer_height\s*=\s*([\d.]+)", re.IGNORECASE),
         re.compile(r";\s*layer height\s*[:=]\s*([\d.]+)", re.IGNORECASE),
     ),
+    "first_layer_height_mm": (
+        re.compile(r";\s*first_layer_height\s*=\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*first layer height\s*[:=]\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*initial_layer_print_height\s*=\s*([\d.]+)", re.IGNORECASE),
+    ),
     "infill_percent": (
         re.compile(
             r";\s*sparse_infill_density\s*=\s*([\d.]+)\s*%?", re.IGNORECASE
         ),
         re.compile(r";\s*infill_density\s*=\s*([\d.]+)\s*%?", re.IGNORECASE),
         re.compile(r";\s*fill density\s*[:=]\s*([\d.]+)\s*%?", re.IGNORECASE),
+    ),
+    "wall_loops": (
+        re.compile(r";\s*wall_loops\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*wall loops\s*[:=]\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*perimeters\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*wall_line_count\s*=\s*(\d+)", re.IGNORECASE),
+    ),
+    "top_shell_layers": (
+        re.compile(r";\s*top_shell_layers\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*top shell layers\s*[:=]\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*top_solid_layers\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*top_layers\s*=\s*(\d+)", re.IGNORECASE),
+    ),
+    "bottom_shell_layers": (
+        re.compile(r";\s*bottom_shell_layers\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*bottom shell layers\s*[:=]\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*bottom_solid_layers\s*=\s*(\d+)", re.IGNORECASE),
+        re.compile(r";\s*bottom_layers\s*=\s*(\d+)", re.IGNORECASE),
+    ),
+    "support_material_raw": (
+        re.compile(r";\s*enable_support\s*=\s*([^\r\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*support_material\s*=\s*([^\r\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*support_enable\s*=\s*([^\r\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*support\s*[:=]\s*([^\r\n;]+)", re.IGNORECASE),
+    ),
+    "nozzle_temperature_c": (
+        re.compile(r";\s*nozzle_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*temperature\s*[:=]\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*print_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
+    ),
+    "bed_temperature_c": (
+        re.compile(r";\s*bed_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_bed_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*bed temperature\s*[:=]\s*([\d.]+)", re.IGNORECASE),
+        re.compile(r";\s*print_bed_temperature\s*=\s*([\d.]+)", re.IGNORECASE),
     ),
     "estimated_time_raw": (
         re.compile(r";\s*estimated printing time.*?=\s*(.+)", re.IGNORECASE),
@@ -68,6 +109,11 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
     "material_type": (
         re.compile(r";\s*filament_type\s*=\s*([^\n;]+)", re.IGNORECASE),
         re.compile(r";\s*filament type\s*[:=]\s*([^\n;]+)", re.IGNORECASE),
+    ),
+    "material_brand": (
+        re.compile(r";\s*filament_brand\s*=\s*([^\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_vendor\s*=\s*([^\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_settings_id\s*=\s*([^\n;]+)", re.IGNORECASE),
     ),
 }
 
@@ -115,14 +161,30 @@ def _first_match(text: str, patterns: tuple[re.Pattern[str], ...]) -> str | None
 
 
 def _to_float(value: str) -> float | None:
-    try:
-        return float(value.split(",", 1)[0].strip().rstrip("%"))
-    except ValueError:
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", value)
+    if not match:
         return None
+    return float(match.group(0))
 
 
 def _normalise_material(value: str) -> str:
     return value.split(";", 1)[0].split(",", 1)[0].strip()
+
+
+def _to_int(value: str) -> int | None:
+    try:
+        return int(float(value.split(",", 1)[0].strip()))
+    except ValueError:
+        return None
+
+
+def _to_bool(value: str) -> bool | None:
+    normalised = value.split(",", 1)[0].strip().lower()
+    if normalised in {"1", "true", "yes", "on", "enabled", "generated"}:
+        return True
+    if normalised in {"0", "false", "no", "off", "disabled", "none", "not generated"}:
+        return False
+    return None
 
 
 def parse(path: Path) -> Dict[str, Any]:
@@ -133,12 +195,20 @@ def parse(path: Path) -> Dict[str, Any]:
         "printer_model": None,
         "nozzle_diameter_mm": None,
         "layer_height_mm": None,
+        "first_layer_height_mm": None,
         "infill_percent": None,
+        "wall_loops": None,
+        "top_shell_layers": None,
+        "bottom_shell_layers": None,
+        "support_material": None,
+        "nozzle_temperature_c": None,
+        "bed_temperature_c": None,
         "estimated_time_s": None,
         "filament_weight_g": None,
         "filament_length_mm": None,
         "filament_cost": None,
         "material_type": None,
+        "material_brand": None,
     }
 
     try:
@@ -154,6 +224,8 @@ def parse(path: Path) -> Dict[str, Any]:
 
         if key == "estimated_time_raw":
             out["estimated_time_s"] = parse_duration(value)
+        elif key == "support_material_raw":
+            out["support_material"] = _to_bool(value)
         elif key == "slicer_version":
             out["slicer_version"] = value
             # Try to also derive slicer_name from the same line.
@@ -171,12 +243,15 @@ def parse(path: Path) -> Dict[str, Any]:
         elif (
             key.endswith("_mm")
             or key.endswith("_g")
+            or key.endswith("_c")
             or key in {"filament_cost", "infill_percent"}
         ):
             out[key] = _to_float(value)
             if key == "filament_length_mm" and "filament used:" in text.lower():
                 out[key] = out[key] * 1000 if out[key] is not None else None
-        elif key == "material_type":
+        elif key in {"wall_loops", "top_shell_layers", "bottom_shell_layers"}:
+            out[key] = _to_int(value)
+        elif key in {"material_type", "material_brand"}:
             out[key] = _normalise_material(value)
         else:
             out[key] = value

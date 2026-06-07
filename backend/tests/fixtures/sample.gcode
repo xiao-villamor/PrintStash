@@ -2,11 +2,19 @@
 ; printer_model = Ender-3 V3 SE
 ; nozzle_diameter = 0.4
 ; layer_height = 0.2
+; first_layer_height = 0.24
 ; sparse_infill_density = 15%
+; wall_loops = 3
+; top_shell_layers = 4
+; bottom_shell_layers = 3
+; enable_support = 0
+; nozzle_temperature = 215
+; bed_temperature = 60
 ; total filament used [g] = 12.5
 ; total filament length [mm] = 4200.0
 ; total filament cost = 0.35
 ; filament_type = PLA
+; filament_brand = Generic PLA
 ; estimated printing time (normal mode) = 1h 23m 45s
 ;
 ; thumbnail begin 32x32 128

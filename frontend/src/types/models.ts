@@ -4,7 +4,14 @@ export interface MetadataRead {
   printer_model: string | null;
   nozzle_diameter_mm: number | null;
   layer_height_mm: number | null;
+  first_layer_height_mm: number | null;
   infill_percent: number | null;
+  wall_loops: number | null;
+  top_shell_layers: number | null;
+  bottom_shell_layers: number | null;
+  support_material: boolean | null;
+  nozzle_temperature_c: number | null;
+  bed_temperature_c: number | null;
   estimated_time_s: number | null;
   filament_weight_g: number | null;
   filament_length_mm: number | null;
@@ -141,6 +148,33 @@ export interface CategoryRead {
   path: string;
   parent_id: number | null;
   model_count: number;
+}
+
+export interface FilamentProfileRead {
+  id: number;
+  name: string;
+  material_type: string | null;
+  material_brand: string | null;
+  cost_per_kg: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FilamentProfileCreate {
+  name: string;
+  material_type?: string | null;
+  material_brand?: string | null;
+  cost_per_kg?: number | null;
+  notes?: string | null;
+}
+
+export interface FilamentProfileUpdate {
+  name?: string;
+  material_type?: string | null;
+  material_brand?: string | null;
+  cost_per_kg?: number | null;
+  notes?: string | null;
 }
 
 export interface TagRead {

@@ -15,6 +15,9 @@ export type {
   TagCreate,
   CategoryRead,
   TagRead,
+  FilamentProfileRead,
+  FilamentProfileCreate,
+  FilamentProfileUpdate,
 } from "./models";
 
 export type {

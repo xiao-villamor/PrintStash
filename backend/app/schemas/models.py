@@ -14,7 +14,14 @@ class MetadataRead(BaseModel):
     printer_model: Optional[str] = None
     nozzle_diameter_mm: Optional[float] = None
     layer_height_mm: Optional[float] = None
+    first_layer_height_mm: Optional[float] = None
     infill_percent: Optional[float] = None
+    wall_loops: Optional[int] = None
+    top_shell_layers: Optional[int] = None
+    bottom_shell_layers: Optional[int] = None
+    support_material: Optional[bool] = None
+    nozzle_temperature_c: Optional[float] = None
+    bed_temperature_c: Optional[float] = None
 
     estimated_time_s: Optional[int] = None
     filament_weight_g: Optional[float] = None
@@ -136,3 +143,31 @@ class TagRead(BaseModel):
     name: str
     slug: str
     model_count: int = 0
+
+
+class FilamentProfileBase(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    material_type: Optional[str] = Field(default=None, max_length=64)
+    material_brand: Optional[str] = Field(default=None, max_length=128)
+    cost_per_kg: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+
+
+class FilamentProfileCreate(FilamentProfileBase):
+    model_config = ConfigDict(extra="forbid")
+
+
+class FilamentProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    material_type: Optional[str] = Field(default=None, max_length=64)
+    material_brand: Optional[str] = Field(default=None, max_length=128)
+    cost_per_kg: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+
+
+class FilamentProfileRead(FilamentProfileBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime

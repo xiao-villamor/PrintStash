@@ -39,12 +39,20 @@ class TestParse:
         assert result["printer_model"] == "Ender-3 V3 SE"
         assert result["nozzle_diameter_mm"] == 0.4
         assert result["layer_height_mm"] == 0.2
+        assert result["first_layer_height_mm"] == 0.24
         assert result["infill_percent"] == 15.0
+        assert result["wall_loops"] == 3
+        assert result["top_shell_layers"] == 4
+        assert result["bottom_shell_layers"] == 3
+        assert result["support_material"] is False
+        assert result["nozzle_temperature_c"] == 215.0
+        assert result["bed_temperature_c"] == 60.0
         assert result["estimated_time_s"] == 5025
         assert result["filament_weight_g"] == 12.5
         assert result["filament_length_mm"] == 4200.0
         assert result["filament_cost"] == 0.35
         assert result["material_type"] == "PLA"
+        assert result["material_brand"] == "Generic PLA"
 
     def test_parse_prusaslicer_fixture(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "prusaslicer_sample.gcode"

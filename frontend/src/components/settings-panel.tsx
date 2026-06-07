@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Server, Database, HardDrive, Tag, Folder, User, Download } from "lucide-react";
+import {
+  Database,
+  DollarSign,
+  Download,
+  Folder,
+  HardDrive,
+  KeyRound,
+  Server,
+  Tag,
+  User,
+} from "lucide-react";
 import { TaxonomyManager } from "@/components/taxonomy-manager";
 import { ApiKeyCard } from "@/components/api-key-card";
+import { FilamentProfilesCard } from "@/components/filament-profiles-card";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import { downloadModelExport } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -15,8 +26,23 @@ interface HealthResponse {
   version: string;
 }
 
+type SettingsSection = "overview" | "access" | "storage" | "filaments" | "organize";
+
+const SETTINGS_SECTIONS: {
+  id: SettingsSection;
+  label: string;
+  icon: typeof Server;
+}[] = [
+  { id: "overview", label: "Overview", icon: Server },
+  { id: "access", label: "Access", icon: KeyRound },
+  { id: "storage", label: "Storage", icon: HardDrive },
+  { id: "filaments", label: "Filaments", icon: DollarSign },
+  { id: "organize", label: "Organize", icon: Folder },
+];
+
 export function SettingsPanel() {
   const { user } = useAuth();
+  const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [categoryCount, setCategoryCount] = useState<number | null>(null);
   const [tagCount, setTagCount] = useState<number | null>(null);
@@ -60,9 +86,32 @@ export function SettingsPanel() {
     <div className="w-full space-y-4 sm:space-y-6 lg:space-y-8">
       <h2 className="text-xl font-semibold text-[var(--on-surface)]">Settings</h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 sm:gap-6 lg:gap-8">
-        {/* Left column — read-only system info */}
-        <div className="md:col-span-1 lg:col-span-2 space-y-4 sm:space-y-6 lg:space-y-8">
+      <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+        <div className="flex flex-wrap gap-1 p-1">
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const active = activeSection === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setActiveSection(section.id)}
+                className={`inline-flex items-center gap-2 rounded px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
+                  active
+                    ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
+                    : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {section.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeSection === "overview" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
           {user && (
             <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
               <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex items-center gap-2 sm:gap-3">
@@ -158,14 +207,31 @@ export function SettingsPanel() {
             </div>
           </div>
         </div>
+      )}
 
-        {/* Right column — active configuration */}
-        <div className="md:col-span-1 lg:col-span-3 space-y-4 sm:space-y-6 lg:space-y-8">
+      {activeSection === "access" && (
+        <div className="max-w-3xl">
           <ApiKeyCard />
+        </div>
+      )}
+
+      {activeSection === "storage" && (
+        <div className="max-w-3xl">
           <StorageConfigCard />
+        </div>
+      )}
+
+      {activeSection === "filaments" && (
+        <div className="max-w-5xl">
+          <FilamentProfilesCard />
+        </div>
+      )}
+
+      {activeSection === "organize" && (
+        <div className="max-w-5xl">
           <TaxonomyManager />
         </div>
-      </div>
+      )}
     </div>
   );
 }

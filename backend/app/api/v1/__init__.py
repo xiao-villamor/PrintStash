@@ -8,6 +8,7 @@ from app.api.v1 import (
     backup,
     config,
     files,
+    filaments,
     health,
     ingest,
     models,
@@ -24,6 +25,7 @@ api_router.include_router(admin.router)
 api_router.include_router(ingest.router)
 api_router.include_router(models.router)
 api_router.include_router(files.router)
+api_router.include_router(filaments.router)
 api_router.include_router(taxonomy.router)
 api_router.include_router(printers.router)
 api_router.include_router(backup.router)
