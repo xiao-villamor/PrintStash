@@ -161,25 +161,24 @@ def file_as_stl(file_id: int, session: Session = Depends(get_session)):
 @router.post(
     "/thumbnails/rebuild",
     dependencies=[Depends(require_auth)],
-    summary="Regenerate missing mesh thumbnails for existing models",
+    summary="Regenerate mesh thumbnails for existing models",
     description=(
-        "Walks every non-soft-deleted Model that has no thumbnail and tries to "
-        "render one from its newest mesh file (STL/3MF/OBJ). Useful after a "
-        "dependency fix (e.g. installing networkx for 3MF parsing) without "
-        "re-uploading. Returns a per-model summary."
+        "Walks non-soft-deleted models and tries to render a thumbnail from "
+        "the newest mesh file (STL/3MF/OBJ). By default only missing "
+        "thumbnails are rebuilt; pass force=true to refresh existing "
+        "thumbnails after renderer improvements without re-uploading."
     ),
 )
 def rebuild_missing_thumbnails(
+    force: bool = False,
     session: Session = Depends(get_session),
 ) -> dict:
     from app.services import mesh_processing
 
-    models = session.exec(
-        select(Model).where(
-            Model.deleted_at.is_(None),  # type: ignore[union-attr]
-            Model.thumbnail_file_id.is_(None),  # type: ignore[union-attr]
-        )
-    ).all()
+    stmt = select(Model).where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
+    if not force:
+        stmt = stmt.where(Model.thumbnail_file_id.is_(None))  # type: ignore[union-attr]
+    models = session.exec(stmt).all()
 
     rebuilt: list[int] = []
     skipped: list[int] = []

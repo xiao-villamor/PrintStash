@@ -22,6 +22,8 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+FLAT_MESH_THICKNESS_RATIO = 0.35
+
 
 def render_thumbnail(
     load_mesh, path: Path, width: int = 640, height: int = 480
@@ -59,15 +61,14 @@ def render_thumbnail(
         verts = verts - center
 
         # ------------------------------------------------------------------
-        # 2. Isometric-ish view: yaw -45° around Z, pitch +30° around X.
+        # 2. Pick a camera view.
+        #
+        #    Thin display-like prints (badges, signs, character fronts) are
+        #    most recognisable from their broad face, matching the web viewer's
+        #    first-open camera. Chunkier parts keep the older isometric angle.
         # ------------------------------------------------------------------
-        elev = np.radians(30.0)
-        azim = np.radians(-45.0)
-        cz, sz = np.cos(azim), np.sin(azim)
-        cx, sx = np.cos(elev), np.sin(elev)
-        rot_z = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]], dtype=np.float64)
-        rot_x = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]], dtype=np.float64)
-        rotation = rot_x @ rot_z
+        rotation = _select_view_rotation(verts, np)
+        view_handedness = float(np.linalg.det(rotation))
         view = verts @ rotation.T  # (N, 3)  — camera is at -Z, looks toward +Z
 
         # ------------------------------------------------------------------
@@ -148,10 +149,12 @@ def render_thumbnail(
         )  # (F, 3)
         shade_rgb = np.clip(shade_rgb, 0.0, 1.0)
 
-        # Back-face cull: after normal-flipping, valid faces had original z<0.
+        # Back-face cull: in right-handed view-space, visible faces have
+        # raw z<0. Front-on flat views preserve screen orientation with a
+        # negative-determinant transform, which flips that sign.
         # Re-derive original-z sign from the raw (pre-flip) cross product.
         raw_normals = np.cross(edge1, edge2)
-        front = raw_normals[:, 2] < 0.0
+        front = (raw_normals[:, 2] * view_handedness) < 0.0
         valid = front & (norm_len.squeeze() > 1e-8)
 
         tri = tri[valid]
@@ -209,6 +212,46 @@ def render_thumbnail(
             "mesh_render: render_thumbnail failed for %s", path.name, exc_info=True
         )
         return None
+
+
+# ---------------------------------------------------------------------------
+# View selection helpers
+# ---------------------------------------------------------------------------
+
+
+def _select_view_rotation(verts, np):
+    """Return an original-space -> view-space matrix for thumbnail rendering."""
+
+    extents = verts.max(axis=0) - verts.min(axis=0)
+    thin_axis = int(np.argmin(extents))
+    thin_extent = float(extents[thin_axis])
+    broad_extent = float(np.max(np.delete(extents, thin_axis)))
+
+    if broad_extent > 1e-6 and thin_extent / broad_extent <= FLAT_MESH_THICKNESS_RATIO:
+        return _front_rotation_for_thin_axis(thin_axis, np)
+
+    elev = np.radians(30.0)
+    azim = np.radians(-45.0)
+    cz, sz = np.cos(azim), np.sin(azim)
+    cx, sx = np.cos(elev), np.sin(elev)
+    rot_z = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]], dtype=np.float64)
+    rot_x = np.array([[1, 0, 0], [0, cx, -sx], [0, sx, cx]], dtype=np.float64)
+    return rot_x @ rot_z
+
+
+def _front_rotation_for_thin_axis(thin_axis: int, np):
+    """View a flat mesh from its positive thin axis, with the broad face upright."""
+
+    if thin_axis == 0:
+        # Screen X/Y = model Y/Z, camera views from +X.
+        rows = ((0, 1, 0), (0, 0, 1), (-1, 0, 0))
+    elif thin_axis == 1:
+        # Screen X/Y = model X/Z, camera views from +Y.
+        rows = ((1, 0, 0), (0, 0, 1), (0, -1, 0))
+    else:
+        # Screen X/Y = model X/Y, camera views from +Z like the frontend STL viewer.
+        rows = ((1, 0, 0), (0, 1, 0), (0, 0, -1))
+    return np.array(rows, dtype=np.float64)
 
 
 # ---------------------------------------------------------------------------

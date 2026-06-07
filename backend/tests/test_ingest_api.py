@@ -223,3 +223,42 @@ def test_ingest_stl_creates_db_blob_and_thumbnail(
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text
     assert thumbnail.content.startswith(PNG_MAGIC)
+
+
+def test_force_rebuild_refreshes_existing_mesh_thumbnail(
+    tmp_path: Path,
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    _configure_storage(tmp_path)
+
+    payload = _completed_job(
+        client,
+        client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("cube.stl", _cube_stl(), "application/sla")},
+            data={"model_name": "Cube"},
+        ),
+    )
+    file_id = payload["file_id"]
+    model_id = payload["model_id"]
+    replacement = PNG_MAGIC + b"forced-thumbnail"
+
+    monkeypatch.setattr(
+        "app.services.mesh_processing.render_thumbnail",
+        lambda _path: replacement,
+    )
+
+    response = client.post(
+        "/api/v1/files/thumbnails/rebuild?force=true",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["rebuilt"] == [model_id]
+
+    thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
+    assert thumbnail.status_code == 200, thumbnail.text
+    assert thumbnail.content == replacement
