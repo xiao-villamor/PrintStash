@@ -24,7 +24,7 @@ Developed features in the current app:
 - Content-hash deduplication, logical model grouping, version history, thumbnails, and in-browser STL preview
 - Categories, tags, search, model editing, printer-presence filters, and model-to-printer file badges
 - G-code revision upload, labels, outcome status, notes, recommended marker, and metadata comparison
-- First-run setup wizard, API-key script auth, JWT UI login, refresh/logout flow, role-aware admin access, and audit logs
+- First-run setup wizard, JWT auth for UI/scripts, refresh/logout flow, role-aware admin access, and audit logs
 - Alembic migrations, optional Postgres support, SQLite-to-Postgres migration script, and documented upgrade flow
 - Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, lifecycle policy configuration, and backup/restore endpoints
 - Operational health output for database, storage, backup, and printer provider readiness

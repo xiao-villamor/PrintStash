@@ -25,7 +25,7 @@ Show that PrintStash can answer:
    ```
 
 2. Open `http://localhost:3000/setup` and create the first admin.
-3. Open Settings and store the API key for local scripts if needed.
+3. Sign in with the admin account created during setup.
 4. Prepare one safe STL or 3MF and one safe G-code file from OrcaSlicer,
    PrusaSlicer, Bambu Studio, or Cura.
 

@@ -7,10 +7,8 @@
 
 const TOKEN_KEY = "printstash.token";
 const USER_KEY = "printstash.user";
-const API_KEY_KEY = "printstash.apiKey";
 const LEGACY_TOKEN_KEY = "nexus3d.token";
 const LEGACY_USER_KEY = "nexus3d.user";
-const LEGACY_API_KEY_KEY = "nexus3d.apiKey";
 const AUTH_EVENT = "printstash:auth-changed";
 const UNAUTH_EVENT = "printstash:unauthorized";
 
@@ -50,29 +48,6 @@ export function getUser(): StoredUser | null {
 
 export function isLoggedIn(): boolean {
   return !!getToken();
-}
-
-export function getApiKey(): string | null {
-  if (!isBrowser()) return null;
-  try {
-    return localStorage.getItem(API_KEY_KEY) ?? localStorage.getItem(LEGACY_API_KEY_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setApiKey(key: string | null): void {
-  if (!isBrowser()) return;
-  try {
-    if (key && key.trim()) {
-      localStorage.setItem(API_KEY_KEY, key.trim());
-      localStorage.removeItem(LEGACY_API_KEY_KEY);
-    } else {
-      localStorage.removeItem(API_KEY_KEY);
-      localStorage.removeItem(LEGACY_API_KEY_KEY);
-    }
-    emit();
-  } catch { /* ignore */ }
 }
 
 export function storeLogin(token: string, user: StoredUser): void {

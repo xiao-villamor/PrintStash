@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { AlertTriangle, X } from "lucide-react";
 import {
-  hasStoredApiKey,
   isLoggedIn,
   onAuthChange,
   onUnauthorized,
@@ -29,8 +28,6 @@ export function AuthBanner() {
       let r: "missing" | "rejected" | "expired";
       if (isLoggedIn()) {
         r = "expired";
-      } else if (hasStoredApiKey()) {
-        r = "rejected";
       } else {
         r = "missing";
       }
@@ -39,8 +36,8 @@ export function AuthBanner() {
       // Toast only on subsequent 401s, not the automatic bootstrap probe.
       if (!firstFire.current) {
         const msgs: Record<string, string> = {
-          missing: "Authentication required — sign in or add an API key in Settings.",
-          rejected: "Credentials were rejected by the server. Sign in again or update your API key.",
+          missing: "Authentication required — sign in to continue.",
+          rejected: "Credentials were rejected by the server. Sign in again.",
           expired: "Your session has expired. Please sign in again.",
         };
         toast.warning(msgs[r]);
@@ -57,9 +54,9 @@ export function AuthBanner() {
 
   const messages: Record<string, string> = {
     missing:
-      "An action requires authentication. Sign in or add an API key in Settings.",
+      "An action requires authentication. Sign in to continue.",
     rejected:
-      "Server rejected the stored credentials. Sign in or update your API key in Settings.",
+      "Server rejected the stored credentials. Sign in again.",
     expired:
       "Your session has expired. Please sign in again.",
   };

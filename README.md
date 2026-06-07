@@ -50,7 +50,7 @@ What works today:
 - G-code revision notes, outcome labels, recommended version, and metadata compare
 - Categories, tags, search, thumbnails, and an in-browser STL viewer
 - Metadata-only JSON/CSV export for portability, audits, spreadsheets, and local AI context
-- First-run setup wizard, API key auth for scripts, JWT login for the UI
+- First-run setup wizard with JWT auth for the UI and scripts
 - Moonraker/Klipper printer integration with live status, send-to-print, remote-file start, controls, and file inventory sync
 - Provider diagnostics showing capabilities, unsupported actions, and live connectivity checks
 - Printer presence badges and filters showing where model G-code already exists
@@ -76,7 +76,7 @@ git clone https://github.com/xiao-villamor/PrintStash.git
 cd PrintStash
 
 cp .env.example .env
-# Edit .env and change VAULT_API_KEY and VAULT_JWT_SECRET.
+# Edit .env and change VAULT_JWT_SECRET.
 
 docker compose up -d --build
 ```
@@ -112,13 +112,12 @@ the vault is offline so it never breaks a slice/export.
 # OrcaSlicer -> Print Settings -> Advanced -> Post-processing Scripts
 /usr/bin/python3 /path/to/PrintStash/scripts/printstash_orca_push.py \
   --url http://your-printstash-host:8000 \
-  --api-key YOUR_API_KEY \
+  --username YOUR_USERNAME \
+  --password YOUR_PASSWORD \
   --category "Functional/Brackets"
 ```
 
-After that, exported G-code is pushed into PrintStash automatically. The old
-`scripts/nexus3d_orca_push.py` path remains as a compatibility wrapper for early
-installs.
+After that, exported G-code is pushed into PrintStash automatically.
 
 ## Demo Path
 
@@ -169,7 +168,7 @@ Example upload:
 curl -F "file=@my_print.gcode" \
   -F "model_name=Desk Bracket" \
   -F "category=Functional/Brackets" \
-  -H "X-API-Key: YOUR_KEY_HERE" \
+  -H "Authorization: Bearer YOUR_LOGIN_TOKEN" \
   http://localhost:8000/api/v1/ingest/orca
 ```
 
@@ -179,7 +178,6 @@ Most installs only need to edit secrets in `.env`.
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `VAULT_API_KEY` | `changeme` | Shared key for scripts and write endpoints |
 | `VAULT_JWT_SECRET` | `changeme...` | Change before exposing the UI |
 | `VAULT_DB_URL` | `sqlite:////data/db/printstash.sqlite` | SQLite by default; Postgres optional |
 | `VAULT_STORAGE_BACKEND` | `local` | `local` or `s3` |
@@ -206,7 +204,6 @@ Backend:
 cd backend
 uv sync --extra dev
 
-VAULT_API_KEY=devkey \
 VAULT_DB_URL=sqlite:///./dev.sqlite \
 VAULT_DATA_DIR=./_data/files \
 VAULT_THUMB_DIR=./_data/thumbs \

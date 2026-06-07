@@ -3,8 +3,7 @@
 /**
  * Auth-awareness helpers for write-operation components.
  *
- * ``isAuthenticated()`` — true when the user has a JWT token OR a stored
- * API key (either suffices for ``require_auth`` on the backend).
+ * ``isAuthenticated()`` — true when the user has a JWT token.
  *
  * ``guardWrite(op)`` — wraps an async operation: if not authenticated, shows
  * an amber toast explaining how to proceed; if authenticated, runs ``op``.
@@ -15,11 +14,11 @@
 
 import { useCallback, useMemo } from "react";
 
-import { hasStoredApiKey, isLoggedIn } from "@/lib/auth";
+import { isLoggedIn } from "@/lib/auth";
 import { toast } from "@/lib/toast";
 
 export interface UseRequireAuthReturn {
-  /** True if the user holds a JWT or a stored API key. */
+  /** True if the user holds a JWT. */
   isAuthenticated: boolean;
   /** Human-readable reason a write operation is blocked, or null. */
   blockReason: string | null;
@@ -35,10 +34,10 @@ export interface UseRequireAuthReturn {
 }
 
 const AUTH_REQUIRED_MSG =
-  "Sign in required to perform this action. Use the login page or add an API key in Settings.";
+  "Sign in required to perform this action. Use the login page to continue.";
 
 export function useRequireAuth(): UseRequireAuthReturn {
-  const isAuthenticated = useMemo(() => isLoggedIn() || hasStoredApiKey(), []);
+  const isAuthenticated = useMemo(() => isLoggedIn(), []);
 
   const blockReason = useMemo(
     () => (isAuthenticated ? null : "Sign in required"),

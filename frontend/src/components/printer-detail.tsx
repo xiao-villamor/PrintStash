@@ -425,8 +425,8 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
               </div>
               <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
                 {auth.isAuthenticated
-                  ? "Controls use the API key from Settings."
-                  : "Sign in or add an API key in Settings to control printers."}
+                  ? "Controls use your signed-in user session."
+                  : "Sign in to control printers."}
               </p>
             </div>
           </div>

@@ -19,9 +19,6 @@ export function getVaultConfig(): Promise<VaultConfigRead> {
   return getJson<VaultConfigRead>("/api/v1/config");
 }
 
-export function updateVaultConfig(
-  body: VaultConfigUpdate,
-  apiKey?: string,
-): Promise<VaultConfigRead> {
-  return sendJson<VaultConfigRead>("/api/v1/config", "PUT", body, apiKey);
+export function updateVaultConfig(body: VaultConfigUpdate): Promise<VaultConfigRead> {
+  return sendJson<VaultConfigRead>("/api/v1/config", "PUT", body);
 }

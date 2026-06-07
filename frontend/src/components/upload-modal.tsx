@@ -406,9 +406,9 @@ export function UploadModal({
 
             {!auth.isAuthenticated && (
               <div className="mx-6 mt-4 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-200 font-mono">
-                Sign in or add an API key in Settings before uploading.{" "}
-                <a href="/settings" className="underline">
-                  Open settings
+                Sign in before uploading.{" "}
+                <a href="/login" className="underline">
+                  Open login
                 </a>
                 .
               </div>

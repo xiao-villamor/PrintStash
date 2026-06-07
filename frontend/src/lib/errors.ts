@@ -68,7 +68,7 @@ export function parseApiError(raw: unknown): ApiError {
 /** Human-readable error messages keyed by server detail codes. */
 const ERROR_MESSAGES: Record<string, string> = {
   // Auth
-  invalid_api_key_or_token: "Authentication failed. Sign in or add a valid API key in Settings.",
+  invalid_api_key_or_token: "Authentication failed. Sign in again.",
   invalid_credentials: "Invalid username or password.",
   not_authenticated: "You must sign in to perform this action.",
   invalid_or_expired_token: "Your session has expired. Please sign in again.",

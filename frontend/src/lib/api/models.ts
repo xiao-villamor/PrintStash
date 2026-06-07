@@ -67,53 +67,42 @@ export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]
 export function updateModel(
   id: number,
   payload: ModelUpdate,
-  apiKey?: string,
 ): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload, apiKey);
+  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload);
 }
 
-export function deleteModel(id: number, apiKey?: string): Promise<void> {
-  return sendAction(`/api/v1/models/${id}`, "DELETE", apiKey);
+export function deleteModel(id: number): Promise<void> {
+  return sendAction(`/api/v1/models/${id}`, "DELETE");
 }
 
 export function updateFileRevision(
   modelId: number,
   fileId: number,
   payload: FileRevisionUpdate,
-  apiKey?: string,
 ): Promise<ModelRead> {
   return sendJson<ModelRead>(
     `/api/v1/models/${modelId}/files/${fileId}/revision`,
     "PATCH",
     payload,
-    apiKey,
   );
 }
 
 export function addGcodeRevision(
   modelId: number,
   formData: FormData,
-  apiKey?: string,
 ): Promise<ModelRead> {
   return sendForm<ModelRead>(
     `/api/v1/models/${modelId}/gcode-revisions`,
     formData,
-    apiKey,
   );
 }
 
-export function ingestOrca(
-  formData: FormData,
-  apiKey?: string,
-): Promise<IngestResponse> {
-  return sendForm<IngestResponse>("/api/v1/ingest/orca", formData, apiKey);
+export function ingestOrca(formData: FormData): Promise<IngestResponse> {
+  return sendForm<IngestResponse>("/api/v1/ingest/orca", formData);
 }
 
-export function ingestModel(
-  formData: FormData,
-  apiKey?: string,
-): Promise<IngestResponse> {
-  return sendForm<IngestResponse>("/api/v1/ingest/model", formData, apiKey);
+export function ingestModel(formData: FormData): Promise<IngestResponse> {
+  return sendForm<IngestResponse>("/api/v1/ingest/model", formData);
 }
 
 export function getJobStatus(jobId: string): Promise<IngestJobStatus> {

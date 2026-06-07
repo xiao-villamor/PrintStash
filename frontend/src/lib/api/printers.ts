@@ -34,74 +34,64 @@ export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
   return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`);
 }
 
-export function createPrinter(
-  payload: PrinterCreate,
-  apiKey?: string,
-): Promise<PrinterRead> {
-  return sendJson<PrinterRead>("/api/v1/printers", "POST", payload, apiKey);
+export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
+  return sendJson<PrinterRead>("/api/v1/printers", "POST", payload);
 }
 
 export function updatePrinter(
   id: number,
   payload: PrinterUpdate,
-  apiKey?: string,
 ): Promise<PrinterRead> {
   return sendJson<PrinterRead>(
     `/api/v1/printers/${id}`,
     "PATCH",
     payload,
-    apiKey,
   );
 }
 
-export function deletePrinter(id: number, apiKey?: string): Promise<void> {
-  return sendAction(`/api/v1/printers/${id}`, "DELETE", apiKey);
+export function deletePrinter(id: number): Promise<void> {
+  return sendAction(`/api/v1/printers/${id}`, "DELETE");
 }
 
 export function sendToPrinter(
   id: number,
   payload: SendToPrinter,
-  apiKey?: string,
 ): Promise<PrintJobRead> {
   return sendJson<PrintJobRead>(
     `/api/v1/printers/${id}/send`,
     "POST",
     payload,
-    apiKey,
   );
 }
 
 export function startPrinterFile(
   id: number,
   payload: StartPrinterFile,
-  apiKey?: string,
 ): Promise<PrintJobRead> {
   return sendJson<PrintJobRead>(
     `/api/v1/printers/${id}/start`,
     "POST",
     payload,
-    apiKey,
   );
 }
 
 function printerControl(
   id: number,
   action: "pause" | "resume" | "cancel",
-  apiKey?: string,
 ): Promise<void> {
-  return sendAction(`/api/v1/printers/${id}/${action}`, "POST", apiKey);
+  return sendAction(`/api/v1/printers/${id}/${action}`, "POST");
 }
 
-export function pausePrinter(id: number, apiKey?: string): Promise<void> {
-  return printerControl(id, "pause", apiKey);
+export function pausePrinter(id: number): Promise<void> {
+  return printerControl(id, "pause");
 }
 
-export function resumePrinter(id: number, apiKey?: string): Promise<void> {
-  return printerControl(id, "resume", apiKey);
+export function resumePrinter(id: number): Promise<void> {
+  return printerControl(id, "resume");
 }
 
-export function cancelPrinter(id: number, apiKey?: string): Promise<void> {
-  return printerControl(id, "cancel", apiKey);
+export function cancelPrinter(id: number): Promise<void> {
+  return printerControl(id, "cancel");
 }
 
 export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
@@ -112,15 +102,11 @@ export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {
   return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`);
 }
 
-export function syncPrinterFiles(
-  id: number,
-  apiKey?: string,
-): Promise<PrinterFileRead[]> {
+export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
   return sendJson<PrinterFileRead[]>(
     `/api/v1/printers/${id}/files/sync`,
     "POST",
     {},
-    apiKey,
   );
 }
 

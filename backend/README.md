@@ -25,7 +25,6 @@ uv sync
 VAULT_DB_URL=sqlite:///./dev.sqlite \
 VAULT_DATA_DIR=./_data/files \
 VAULT_THUMB_DIR=./_data/thumbs \
-VAULT_API_KEY=devkey \
 uv run uvicorn app.main:app --reload
 ```
 
@@ -105,7 +104,6 @@ backend/
 | `VAULT_DB_URL` | Database connection string | `sqlite:///./dev.sqlite` |
 | `VAULT_DATA_DIR` | Where ingested files live | `./_data/files` |
 | `VAULT_THUMB_DIR` | Where rendered thumbnails go | `./_data/thumbs` |
-| `VAULT_API_KEY` | Shared key for write endpoints | `devkey` |
 | `VAULT_JWT_SECRET` | Signing key for auth tokens | anything random |
 | `VAULT_JWT_ALGORITHM` | JWT algorithm | `HS256` |
 | `VAULT_ACCESS_TOKEN_EXPIRE_MINUTES` | Token lifetime | `60` |

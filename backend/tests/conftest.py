@@ -113,7 +113,6 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     override_session_factory(_test_factory)
     _overlay.clear()
     _overlay["db_url"] = TEST_DB_URL
-    _overlay["api_key"] = "testkey"
     _truncate_all()
 
 
@@ -156,5 +155,17 @@ def hub() -> PrinterHub:
 
 
 @pytest.fixture
-def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": "testkey"}
+def auth_headers(db_session: Session) -> dict[str, str]:
+    from app.db.models import User
+    from app.services.auth import create_access_token, hash_password
+
+    user = User(
+        username="test-writer",
+        hashed_password=hash_password("Password123"),
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    token = create_access_token(user.id, user.username, scope="write")
+    return {"Authorization": f"Bearer {token}"}

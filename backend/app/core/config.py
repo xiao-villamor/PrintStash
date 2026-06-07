@@ -54,7 +54,6 @@ class Settings(BaseSettings):
 
     db_url: str = "sqlite:////data/db/printstash.sqlite"
 
-    api_key: str = "changeme"
     jwt_secret: str = "changeme_jwt_secret_please_change"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60

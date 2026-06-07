@@ -6,7 +6,8 @@ Configure in OrcaSlicer:
     Process → Others → Post-processing scripts:
         /usr/bin/python3 /path/to/printstash_orca_push.py \
             --url https://printstash.example.com \
-            --api-key YOUR_PRINTSTASH_API_KEY \
+            --username YOUR_USERNAME \
+            --password YOUR_PASSWORD \
             --category "Functional/Brackets"
 
 OrcaSlicer appends the exported .gcode path automatically as the final argv.
@@ -19,6 +20,7 @@ Design rules (do not break):
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import mimetypes
 import os
@@ -66,14 +68,40 @@ def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
     return bytes(body), f"multipart/form-data; boundary={boundary}"
 
 
-def push(url: str, api_key: str, gcode: Path, fields: dict, retries: int = 3) -> bool:
+def login(url: str, username: str, password: str) -> str | None:
+    endpoint = url.rstrip("/") + "/api/v1/auth/login"
+    body = json.dumps({"username": username, "password": password}).encode("utf-8")
+    req = urlrequest.Request(endpoint, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", "PrintStash-OrcaHook/1.0")
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+            token = payload.get("access_token")
+            if isinstance(token, str) and token:
+                return token
+            log.error("login response did not include access_token")
+            return None
+    except HTTPError as e:
+        err_body = (
+            e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        )
+        log.error("login HTTP %s: %s", e.code, err_body)
+    except URLError as e:
+        log.error("login network error: %s", e.reason)
+    except Exception as e:  # noqa: BLE001 — defensive: never crash the slicer
+        log.error("login unexpected error: %s", e)
+    return None
+
+
+def push(url: str, token: str, gcode: Path, fields: dict, retries: int = 3) -> bool:
     endpoint = url.rstrip("/") + "/api/v1/ingest/orca"
     body, content_type = build_multipart(fields, gcode)
 
     for attempt in range(1, retries + 1):
         req = urlrequest.Request(endpoint, data=body, method="POST")
         req.add_header("Content-Type", content_type)
-        req.add_header("X-API-Key", api_key)
+        req.add_header("Authorization", f"Bearer {token}")
         req.add_header("User-Agent", "PrintStash-OrcaHook/1.0")
         try:
             with urlrequest.urlopen(req, timeout=30) as resp:
@@ -81,7 +109,11 @@ def push(url: str, api_key: str, gcode: Path, fields: dict, retries: int = 3) ->
                 log.info("upload OK [%s] %s -> %s", resp.status, gcode.name, payload)
                 return True
         except HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+            err_body = (
+                e.read().decode("utf-8", errors="replace")
+                if hasattr(e, "read")
+                else ""
+            )
             log.error("HTTP %s on attempt %d: %s", e.code, attempt, err_body)
             if 400 <= e.code < 500:
                 # Client error — won't be fixed by retry.
@@ -100,12 +132,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--url",
-        default=os.environ.get("PRINTSTASH_URL") or os.environ.get("NEXUS3D_URL"),
+        default=os.environ.get("PRINTSTASH_URL"),
     )
     parser.add_argument(
-        "--api-key",
-        default=os.environ.get("PRINTSTASH_API_KEY")
-        or os.environ.get("NEXUS3D_API_KEY"),
+        "--username",
+        default=os.environ.get("PRINTSTASH_USERNAME"),
+    )
+    parser.add_argument(
+        "--password",
+        default=os.environ.get("PRINTSTASH_PASSWORD"),
     )
     parser.add_argument("--category", default=None)
     parser.add_argument("--tags", default=None)
@@ -119,8 +154,10 @@ def main() -> int:
     if not gcode.exists():
         log.error("file not found: %s", gcode)
         return 0
-    if not args.url or not args.api_key:
-        log.warning("missing --url or --api-key — skipping PrintStash push")
+    if not args.url or not args.username or not args.password:
+        log.warning(
+            "missing --url, --username, or --password — skipping PrintStash push"
+        )
         return 0
 
     fields = {
@@ -129,7 +166,12 @@ def main() -> int:
         "tags": args.tags,
     }
 
-    ok = push(args.url, args.api_key, gcode, fields)
+    token = login(args.url, args.username, args.password)
+    if not token:
+        log.warning("PrintStash login failed; export still proceeds")
+        return 0
+
+    ok = push(args.url, token, gcode, fields)
     if not ok:
         log.warning("PrintStash push failed; export still proceeds")
 

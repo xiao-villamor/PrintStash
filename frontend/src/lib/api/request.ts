@@ -1,4 +1,4 @@
-import { emitUnauthorized, getStoredApiKey, getStoredToken } from "@/lib/auth";
+import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
@@ -74,23 +74,17 @@ export async function expectOk(res: Response): Promise<void> {
   if (!res.ok) throw await parseError(res);
 }
 
-export function authHeaders(apiKey?: string): Record<string, string> {
+export function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   const token = getStoredToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-
-  const key =
-    apiKey !== undefined ? apiKey || undefined : getStoredApiKey() ?? undefined;
-  if (key) {
-    headers["X-API-Key"] = key;
-  }
   return headers;
 }
 
-export function jsonHeaders(apiKey?: string): Record<string, string> {
-  return { "Content-Type": "application/json", ...authHeaders(apiKey) };
+export function jsonHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json", ...authHeaders() };
 }
 
 export async function getJson<T>(path: string): Promise<T> {
@@ -105,11 +99,10 @@ export async function sendJson<T>(
   path: string,
   method: "POST" | "PUT" | "PATCH",
   body: unknown,
-  apiKey?: string,
 ): Promise<T> {
   const res = await fetch(getUrl(path), {
     method,
-    headers: jsonHeaders(apiKey),
+    headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
   return handleResponse<T>(res);
@@ -118,11 +111,10 @@ export async function sendJson<T>(
 export async function sendForm<T>(
   path: string,
   formData: FormData,
-  apiKey?: string,
 ): Promise<T> {
   const res = await fetch(getUrl(path), {
     method: "POST",
-    headers: authHeaders(apiKey),
+    headers: authHeaders(),
     body: formData,
   });
   return handleResponse<T>(res);
@@ -131,11 +123,10 @@ export async function sendForm<T>(
 export async function sendAction(
   path: string,
   method: "POST" | "DELETE",
-  apiKey?: string,
 ): Promise<void> {
   const res = await fetch(getUrl(path), {
     method,
-    headers: authHeaders(apiKey),
+    headers: authHeaders(),
   });
   return expectOk(res);
 }

@@ -392,7 +392,7 @@ export function StorageConfigCard() {
 
         {!canEdit && (
           <p className="text-xs text-[var(--on-surface-variant)] italic">
-            Sign in or set an API key to modify configuration.
+            Sign in to modify configuration.
           </p>
         )}
       </div>

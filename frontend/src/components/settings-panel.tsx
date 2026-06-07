@@ -13,7 +13,6 @@ import {
   User,
 } from "lucide-react";
 import { TaxonomyManager } from "@/components/taxonomy-manager";
-import { ApiKeyCard } from "@/components/api-key-card";
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import { downloadModelExport } from "@/lib/api";
@@ -129,7 +128,7 @@ export function SettingsPanel() {
                 </div>
               </div>
               <div className="p-3 sm:p-4 text-xs font-mono text-[var(--on-surface-variant)]">
-                Write operations use your JWT token. The API key below is kept for OrcaSlicer hooks and scripts.
+                Write operations use your signed-in user session.
               </div>
             </div>
           )}
@@ -211,7 +210,26 @@ export function SettingsPanel() {
 
       {activeSection === "access" && (
         <div className="max-w-3xl">
-          <ApiKeyCard />
+          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex items-center gap-2 sm:gap-3">
+              <div className="w-9 h-9 rounded bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0">
+                <User className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                  {user ? `Signed in as ${user.username}` : "Not signed in"}
+                </h3>
+                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  {user
+                    ? `${user.is_superuser ? "Administrator" : "User"} session`
+                    : "Sign in to make changes to the vault"}
+                </p>
+              </div>
+            </div>
+            <div className="p-3 sm:p-4 text-xs font-mono text-[var(--on-surface-variant)]">
+              Uploads, deletes, printer control, and configuration changes are authenticated with your user session.
+            </div>
+          </div>
         </div>
       )}
 

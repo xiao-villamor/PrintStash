@@ -19,7 +19,7 @@ and provider maturity rather than core Stage 4 feature development.
 Developed Stage 4 capabilities:
 
 - Alembic-backed schema upgrades, optional Postgres support, and SQLite-to-Postgres migration tooling
-- JWT refresh/logout, API-key script auth, role-aware admin access, and audit logs
+- JWT auth for UI/scripts, refresh/logout, role-aware admin access, and audit logs
 - Soft-delete, restore, hard-delete, scheduled garbage collection, and orphan blob cleanup
 - Local backup/restore, optional cloud backup, disaster-recovery docs, and operational health probes
 - Optional S3/R2 storage with multipart uploads, pre-signed downloads, MinIO dev support, and lifecycle policy configuration

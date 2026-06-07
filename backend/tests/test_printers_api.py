@@ -39,7 +39,7 @@ class TestCreatePrinter:
         )
         assert resp.status_code == 401
 
-    def test_create_with_api_key(self, client: TestClient, auth_headers):
+    def test_create_with_auth(self, client: TestClient, auth_headers):
         resp = client.post(
             "/api/v1/printers",
             json={
