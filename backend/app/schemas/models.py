@@ -107,6 +107,28 @@ class ModelListItem(BaseModel):
     updated_at: datetime
 
 
+class StorageUsageRead(BaseModel):
+    backend: str
+    prefix: Optional[str] = None
+    bucket: Optional[str] = None
+    object_count: int = 0
+    total_size_bytes: int = 0
+    ok: bool = True
+    error: Optional[str] = None
+
+
+class VaultStatsRead(BaseModel):
+    model_count: int = 0
+    file_count: int = 0
+    source_file_count: int = 0
+    gcode_file_count: int = 0
+    category_count: int = 0
+    tag_count: int = 0
+    printer_count: int = 0
+    indexed_size_bytes: int = 0
+    storage: StorageUsageRead
+
+
 class ModelUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

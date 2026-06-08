@@ -16,6 +16,7 @@ import {
   ModelPrinterFileRead,
   ModelRead,
   ModelUpdate,
+  VaultStatsRead,
 } from "@/types";
 
 export async function listModels(
@@ -38,6 +39,10 @@ export async function listModels(
 
 export function getModel(id: number): Promise<ModelRead> {
   return getJson<ModelRead>(`/api/v1/models/${id}`);
+}
+
+export function getVaultStats(): Promise<VaultStatsRead> {
+  return getJson<VaultStatsRead>("/api/v1/models/stats");
 }
 
 export async function downloadModelExport(format: "json" | "csv"): Promise<void> {

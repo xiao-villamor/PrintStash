@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, CloudUpload, Printer, Settings } from "lucide-react";
+import { Box, FolderTree, Printer, Settings } from "lucide-react";
 
 const items = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/?upload=1", label: "Uploads", icon: CloudUpload },
   { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/organize", label: "Catalog", icon: FolderTree },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, LogIn, LogOut, Printer, Settings, Upload, User, X } from "lucide-react";
+import { Box, FolderTree, LogIn, LogOut, Printer, Settings, User, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 interface MobileNavDrawerProps {
@@ -13,8 +13,8 @@ interface MobileNavDrawerProps {
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/?upload=1", label: "Upload", icon: Upload },
   { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/organize", label: "Catalog", icon: FolderTree },
 ];
 
 const bottomItems = [

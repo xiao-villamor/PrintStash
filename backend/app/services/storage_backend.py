@@ -68,6 +68,9 @@ class StorageBackend(ABC):
     def walk_keys(self, prefix: str = "") -> Iterator[str]: ...
 
     @abstractmethod
+    def usage(self, prefix: str = "") -> dict: ...
+
+    @abstractmethod
     def presigned_download_url(self, key: str, filename: str) -> str | None: ...
 
     @abstractmethod
@@ -160,6 +163,26 @@ class LocalStorageBackend(StorageBackend):
         for p in root.rglob("*"):
             if p.is_file():
                 yield str(p)
+
+    def usage(self, prefix: str = "") -> dict:
+        root = Path(prefix) if prefix else settings.data_dir
+        total_size = 0
+        object_count = 0
+        if root.exists():
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                try:
+                    total_size += path.stat().st_size
+                    object_count += 1
+                except OSError:
+                    continue
+        return {
+            "backend": "local",
+            "prefix": str(root),
+            "object_count": object_count,
+            "total_size_bytes": total_size,
+        }
 
     def presigned_download_url(self, key: str, filename: str) -> str | None:
         return None
@@ -342,6 +365,23 @@ class S3StorageBackend(StorageBackend):
         for page in paginator.paginate(Bucket=self._bucket, Prefix=full_prefix):
             for obj in page.get("Contents", []):
                 yield obj["Key"]
+
+    def usage(self, prefix: str = "") -> dict:
+        full_prefix = prefix or self._prefix()
+        total_size = 0
+        object_count = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=full_prefix):
+            for obj in page.get("Contents", []):
+                object_count += 1
+                total_size += int(obj.get("Size", 0) or 0)
+        return {
+            "backend": "s3",
+            "bucket": self._bucket,
+            "prefix": full_prefix,
+            "object_count": object_count,
+            "total_size_bytes": total_size,
+        }
 
     def presigned_download_url(self, key: str, filename: str) -> str | None:
         return self._client.generate_presigned_url(

@@ -90,6 +90,15 @@ export function TaxonomyManager() {
     }
   }
 
+  const assignedCategoryModels = categories.reduce((sum, category) => sum + category.model_count, 0);
+  const assignedTagModels = tags.reduce((sum, tag) => sum + tag.model_count, 0);
+  const topCategories = [...categories]
+    .sort((a, b) => b.model_count - a.model_count || a.name.localeCompare(b.name))
+    .slice(0, 4);
+  const topTags = [...tags]
+    .sort((a, b) => b.model_count - a.model_count || a.name.localeCompare(b.name))
+    .slice(0, 8);
+
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
       {error && (
@@ -98,8 +107,29 @@ export function TaxonomyManager() {
         </div>
       )}
 
-      {/* Categories */}
-      <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+      <div className="grid grid-cols-2 lg:grid-cols-4 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-[var(--surface-variant)]">
+        {[
+          { label: "Categories", value: categories.length, detail: `${assignedCategoryModels} assigned` },
+          { label: "Tags", value: tags.length, detail: `${assignedTagModels} assignments` },
+          { label: "Top category", value: topCategories[0]?.name ?? "None", detail: `${topCategories[0]?.model_count ?? 0} models` },
+          { label: "Top tag", value: topTags[0]?.name ?? "None", detail: `${topTags[0]?.model_count ?? 0} models` },
+        ].map((item) => (
+          <div key={item.label} className="p-4 sm:p-5 min-w-0">
+            <p className="font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+              {item.label}
+            </p>
+            <p className="mt-2 text-xl font-semibold text-[var(--on-surface)] truncate">
+              {item.value}
+            </p>
+            <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+              {item.detail}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] gap-4 sm:gap-6 lg:gap-8 items-start">
+        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
         <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
           <div className="flex items-center gap-2">
             <FolderTree className="h-4 w-4 text-[var(--on-surface-variant)] flex-shrink-0" />
@@ -178,7 +208,6 @@ export function TaxonomyManager() {
         </div>
       </div>
 
-      {/* Tags */}
       <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
         <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
           <div className="flex items-center gap-2">
@@ -242,6 +271,56 @@ export function TaxonomyManager() {
               ))}
             </div>
           )}
+        </div>
+      </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
+        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
+            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used categories</h3>
+          </div>
+          <div className="p-3 sm:p-4 space-y-2">
+            {loading ? (
+              <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+            ) : topCategories.length === 0 ? (
+              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No category usage yet.</p>
+            ) : (
+              topCategories.map((category) => (
+                <div key={category.id} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="text-sm text-[var(--on-surface)] truncate">{category.path}</span>
+                  <span className="font-mono text-xs text-[var(--on-surface-variant)]">{category.model_count}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
+            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used tags</h3>
+          </div>
+          <div className="p-3 sm:p-4">
+            {loading ? (
+              <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+            ) : topTags.length === 0 ? (
+              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No tag usage yet.</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {topTags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1.5 bg-[var(--surface-container)] text-[var(--on-surface)] px-2.5 py-1.5 rounded font-mono text-xs uppercase tracking-wider"
+                  >
+                    {tag.name}
+                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                      {tag.model_count}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

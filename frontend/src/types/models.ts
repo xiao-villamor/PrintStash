@@ -99,6 +99,28 @@ export interface ModelListItem {
   updated_at: string;
 }
 
+export interface StorageUsageRead {
+  backend: string;
+  prefix: string | null;
+  bucket: string | null;
+  object_count: number;
+  total_size_bytes: number;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface VaultStatsRead {
+  model_count: number;
+  file_count: number;
+  source_file_count: number;
+  gcode_file_count: number;
+  category_count: number;
+  tag_count: number;
+  printer_count: number;
+  indexed_size_bytes: number;
+  storage: StorageUsageRead;
+}
+
 export interface ModelUpdate {
   name?: string;
   description?: string;

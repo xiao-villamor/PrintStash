@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
+import { Box, FolderTree, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
   { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/organize", label: "Catalog", icon: FolderTree },
 ];
 
 const bottomItems = [

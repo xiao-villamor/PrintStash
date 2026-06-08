@@ -52,10 +52,13 @@ from app.schemas.models import (
     ModelListItem,
     ModelRead,
     ModelUpdate,
+    StorageUsageRead,
+    VaultStatsRead,
 )
 from app.services import storage
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services import taxonomy
+from app.services.storage_backend import get_backend
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -580,6 +583,77 @@ def export_models(
         headers={
             "Content-Disposition": 'attachment; filename="printstash-model-export.json"'
         },
+    )
+
+
+@router.get(
+    "/stats",
+    response_model=VaultStatsRead,
+    summary="Vault library and storage summary",
+    description=(
+        "Returns live library counts plus real storage usage from the configured "
+        "local or S3-compatible backend."
+    ),
+)
+def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
+    live_model_ids = select(Model.id).where(
+        Model.deleted_at.is_(None),  # type: ignore[union-attr]
+        Model.hash != SENTINEL_MODEL_HASH,
+    )
+    live_files = (
+        select(File)
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+    )
+
+    model_count = session.exec(select(func.count()).select_from(live_model_ids.subquery())).one()
+    file_count = session.exec(select(func.count()).select_from(live_files.subquery())).one()
+    indexed_size = session.exec(
+        select(func.coalesce(func.sum(File.size_bytes), 0))
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+    ).one()
+    source_file_count = session.exec(
+        select(func.count(File.id))
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+        .where(File.file_type != FileType.GCODE)
+    ).one()
+    gcode_file_count = session.exec(
+        select(func.count(File.id))
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+        .where(File.file_type == FileType.GCODE)
+    ).one()
+    category_count = session.exec(
+        select(func.count(Category.id)).where(Category.deleted_at.is_(None))  # type: ignore[union-attr]
+    ).one()
+    tag_count = session.exec(
+        select(func.count(Tag.id)).where(Tag.deleted_at.is_(None))  # type: ignore[union-attr]
+    ).one()
+    printer_count = session.exec(
+        select(func.count(Printer.id)).where(Printer.deleted_at.is_(None))  # type: ignore[union-attr]
+    ).one()
+
+    try:
+        storage_usage = StorageUsageRead(**get_backend().usage())
+    except Exception as exc:
+        storage_usage = StorageUsageRead(
+            backend=settings.storage_backend,
+            ok=False,
+            error=exc.__class__.__name__,
+        )
+
+    return VaultStatsRead(
+        model_count=int(model_count or 0),
+        file_count=int(file_count or 0),
+        source_file_count=int(source_file_count or 0),
+        gcode_file_count=int(gcode_file_count or 0),
+        category_count=int(category_count or 0),
+        tag_count=int(tag_count or 0),
+        printer_count=int(printer_count or 0),
+        indexed_size_bytes=int(indexed_size or 0),
+        storage=storage_usage,
     )
 
 
