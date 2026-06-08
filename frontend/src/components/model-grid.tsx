@@ -403,7 +403,7 @@ export function ModelBrowser() {
               ) : (
                 <ModelListSkeleton />
               )
-            ) : sortedModels.length === 0 ? (
+            ) : sortedModels.length === 0 && visibleCollections.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-[var(--on-surface-variant)]">
                 <p className="text-lg font-medium text-[var(--on-surface)]">
                   No models found

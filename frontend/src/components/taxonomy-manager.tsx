@@ -12,7 +12,15 @@ import {
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Plus, X, FolderTree, Tag as TagIcon } from "lucide-react";
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Plus,
+  Tag as TagIcon,
+  X,
+} from "lucide-react";
 
 interface CollectionNode {
   collection: CollectionRead;
@@ -45,16 +53,22 @@ function CollectionTreeRow({
   node,
   depth,
   auth,
+  expanded,
+  onToggle,
   onAddChild,
   onDelete,
 }: {
   node: CollectionNode;
   depth: number;
   auth: ReturnType<typeof useRequireAuth>;
+  expanded: Set<number>;
+  onToggle: (id: number) => void;
   onAddChild: (collection: CollectionRead) => void;
   onDelete: (collection: CollectionRead) => void;
 }) {
   const collection = node.collection;
+  const hasChildren = node.children.length > 0;
+  const isOpen = expanded.has(collection.id);
   return (
     <>
       <div
@@ -62,6 +76,23 @@ function CollectionTreeRow({
         style={{ paddingLeft: `${depth * 18 + 8}px` }}
       >
         <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={() => onToggle(collection.id)}
+              className="rounded p-0.5 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container)] hover:text-[var(--on-surface)]"
+              aria-label={isOpen ? "Collapse collection" : "Expand collection"}
+            >
+              <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+            </button>
+          ) : (
+            <span className="w-4 flex-shrink-0" />
+          )}
+          {isOpen ? (
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--primary)]" />
+          ) : (
+            <Folder className="h-4 w-4 flex-shrink-0 text-[var(--on-surface-variant)]" />
+          )}
           <span className="text-sm text-[var(--on-surface)] truncate">
             {collection.name}
           </span>
@@ -97,12 +128,14 @@ function CollectionTreeRow({
           </button>
         </div>
       </div>
-      {node.children.map((child) => (
+      {isOpen && node.children.map((child) => (
         <CollectionTreeRow
           key={child.collection.id}
           node={child}
           depth={depth + 1}
           auth={auth}
+          expanded={expanded}
+          onToggle={onToggle}
           onAddChild={onAddChild}
           onDelete={onDelete}
         />
@@ -118,6 +151,7 @@ export function TaxonomyManager() {
   const [newCollection, setNewCollection] = useState("");
   const [parentCollectionId, setParentCollectionId] = useState<number | null>(null);
   const [newTag, setNewTag] = useState("");
+  const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -197,6 +231,15 @@ export function TaxonomyManager() {
   const topTags = [...tags]
     .sort((a, b) => b.model_count - a.model_count || a.name.localeCompare(b.name))
     .slice(0, 8);
+
+  function toggleCollection(id: number) {
+    setExpandedCollections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
@@ -289,9 +332,12 @@ export function TaxonomyManager() {
                   node={node}
                   depth={0}
                   auth={auth}
+                  expanded={expandedCollections}
+                  onToggle={toggleCollection}
                   onAddChild={(collection) => {
                     setParentCollectionId(collection.id);
                     setNewCollection("");
+                    setExpandedCollections((prev) => new Set(prev).add(collection.id));
                   }}
                   onDelete={(collection) => {
                     if (collection.model_count > 0) {
