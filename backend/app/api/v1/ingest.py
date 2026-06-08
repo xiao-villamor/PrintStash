@@ -72,8 +72,8 @@ async def ingest_orca(
     background_tasks: BackgroundTasks,
     file: UploadFile = UploadFileParam(..., description="The .gcode file"),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
-    category: Optional[str] = Form(
-        None, description="Optional category, e.g. 'Functional/Brackets'"
+    collection: Optional[str] = Form(
+        None, description="Optional collection, e.g. 'Functional/Brackets'"
     ),
     tags: Optional[str] = Form(None, description="Comma-separated tag list"),
     source_hash: Optional[str] = Form(
@@ -97,7 +97,7 @@ async def ingest_orca(
         staged_path=staged,
         original_filename=original_filename,
         model_name=_resolve_name(model_name, original_filename),
-        category=category,
+        collection=collection,
         tags=tags,
         source_hash=source_hash,
         session_factory=session_factory,
@@ -122,8 +122,8 @@ async def ingest_model(
     background_tasks: BackgroundTasks,
     file: UploadFile = UploadFileParam(..., description="The .stl, .3mf, or .obj file"),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
-    category: Optional[str] = Form(
-        None, description="Optional category, e.g. 'Functional/Brackets'"
+    collection: Optional[str] = Form(
+        None, description="Optional collection, e.g. 'Functional/Brackets'"
     ),
     tags: Optional[str] = Form(None, description="Comma-separated tag list"),
     source_hash: Optional[str] = Form(None, description="Optional sha256 for dedup"),
@@ -145,7 +145,7 @@ async def ingest_model(
         staged_path=staged,
         original_filename=original_filename,
         model_name=_resolve_name(model_name, original_filename),
-        category=category,
+        collection=collection,
         tags=tags,
         file_type=SUFFIX_TO_FILE_TYPE[suffix],
         source_hash=source_hash,

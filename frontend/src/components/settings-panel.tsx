@@ -9,6 +9,7 @@ import {
   HardDrive,
   KeyRound,
   Copy,
+  Palette,
   RefreshCw,
   RotateCcw,
   Trash2,
@@ -30,6 +31,13 @@ import {
   updateVaultConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import {
+  DEFAULT_METADATA_PREFERENCES,
+  METADATA_FIELDS,
+  MetadataPreferences,
+  readMetadataPreferences,
+  writeMetadataPreferences,
+} from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import type { ApiKeyRead, TrashedModelRead, VaultStatsRead } from "@/types";
 
@@ -39,7 +47,7 @@ interface HealthResponse {
   version: string;
 }
 
-type SettingsSection = "overview" | "access" | "storage" | "trash";
+type SettingsSection = "overview" | "access" | "storage" | "design" | "trash";
 
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
@@ -49,6 +57,7 @@ const SETTINGS_SECTIONS: {
   { id: "overview", label: "Overview", icon: Server },
   { id: "access", label: "Access", icon: KeyRound },
   { id: "storage", label: "Storage", icon: HardDrive },
+  { id: "design", label: "Design", icon: Palette },
   { id: "trash", label: "Trash", icon: Trash2 },
 ];
 
@@ -84,6 +93,9 @@ export function SettingsPanel() {
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashBusy, setTrashBusy] = useState<number | "expired" | "settings" | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
+  const [metadataPrefs, setMetadataPrefs] = useState<MetadataPreferences>(
+    DEFAULT_METADATA_PREFERENCES,
+  );
 
   useEffect(() => {
     fetch("/api/v1/health")
@@ -93,6 +105,7 @@ export function SettingsPanel() {
     getVaultStats()
       .then(setStats)
       .catch(() => {});
+    setMetadataPrefs(readMetadataPreferences());
   }, []);
 
   useEffect(() => {
@@ -173,6 +186,20 @@ export function SettingsPanel() {
     toast.success("API key copied.");
   }
 
+  function updateMetadataPreference(
+    field: keyof MetadataPreferences,
+    visible: boolean,
+  ) {
+    const next = { ...metadataPrefs, [field]: visible };
+    setMetadataPrefs(next);
+    writeMetadataPreferences(next);
+  }
+
+  function resetMetadataPreferences() {
+    setMetadataPrefs(DEFAULT_METADATA_PREFERENCES);
+    writeMetadataPreferences(DEFAULT_METADATA_PREFERENCES);
+    toast.success("Metadata display reset.");
+  }
 
   async function saveTrashRetention() {
     setTrashBusy("settings");
@@ -233,7 +260,7 @@ export function SettingsPanel() {
     { label: "Storage backend", value: stats ? stats.storage.backend.toUpperCase() : "...", desc: stats?.storage.bucket ?? stats?.storage.prefix ?? "Configured vault storage", icon: HardDrive },
     { label: "Storage used", value: stats ? formatBytes(stats.storage.total_size_bytes) : "...", desc: stats ? `${stats.storage.object_count} stored objects` : "Real usage from storage backend", icon: Activity },
     { label: "Indexed files", value: stats ? `${stats.file_count}` : "...", desc: stats ? `${formatBytes(stats.indexed_size_bytes)} tracked in the database` : "Stored model and G-code files", icon: Database },
-    { label: "Categories", value: stats ? `${stats.category_count}` : "...", desc: "Hierarchical category tree entries", icon: Tag },
+    { label: "Collections", value: stats ? `${stats.collection_count}` : "...", desc: "Hierarchical collection tree entries", icon: Tag },
     { label: "Tags", value: stats ? `${stats.tag_count}` : "...", desc: "Flat tag vocabulary size", icon: Tag },
   ];
 
@@ -483,6 +510,52 @@ export function SettingsPanel() {
       {activeSection === "storage" && (
         <div className="max-w-3xl">
           <StorageConfigCard />
+        </div>
+      )}
+
+      {activeSection === "design" && (
+        <div className="max-w-5xl">
+          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                  Model metadata
+                </h3>
+                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  Choose which metadata fields appear on model detail pages.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetMetadataPreferences}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </button>
+            </div>
+            <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-3 lg:p-6">
+              {METADATA_FIELDS.map((field) => (
+                <label
+                  key={field.id}
+                  className="flex items-center justify-between gap-3 rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-3 py-2.5"
+                >
+                  <span className="text-sm text-[var(--on-surface)]">
+                    {field.label}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={metadataPrefs[field.id]}
+                    onChange={(event) => updateMetadataPreference(
+                      field.id,
+                      event.target.checked,
+                    )}
+                    className="h-4 w-4 accent-[var(--primary)]"
+                  />
+                </label>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

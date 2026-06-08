@@ -34,8 +34,8 @@ const model = {
   name: "skadis_kitchen-roll_screw",
   slug: "skadis-kitchen-roll-screw",
   hash: "59b3ca0dd226918a7e65c4417a6c2ea2314f821b77bed988fa9eb7fec86d3f30",
-  category: "maraio",
-  category_id: 1,
+  collection: "maraio",
+  collection_id: 1,
   description: null,
   tags: ["tete"],
   thumbnail_url: "/api/v1/files/1/thumbnail",
@@ -161,8 +161,8 @@ const modelList = [
     id: model.id,
     name: model.name,
     slug: model.slug,
-    category: model.category,
-    category_id: model.category_id,
+    collection: model.collection,
+    collection_id: model.collection_id,
     tags: model.tags,
     thumbnail_url: model.thumbnail_url,
     file_count: model.files.length,
@@ -257,7 +257,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
-  if (url.pathname === "/api/v1/categories") {
+  if (url.pathname === "/api/v1/collections") {
     sendJson(res, []);
     return;
   }

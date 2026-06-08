@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 
 def _ordered_table_names(table_names: Iterable[str]) -> list[str]:
     preferred = [
-        "categories",
+        "collections",
         "models",
         "files",
         "metadata",

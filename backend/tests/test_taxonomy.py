@@ -49,25 +49,25 @@ class TestResolveTags:
         assert names == {"shared", "new"}
 
 
-class TestResolveCategories:
+class TestResolveCollections:
     def test_resolve_creates_hierarchy(self, db_session) -> None:
-        from app.services.taxonomy import resolve_or_create_category
+        from app.services.taxonomy import resolve_or_create_collection
 
-        cat = resolve_or_create_category(db_session, "Functional/Brackets")
+        cat = resolve_or_create_collection(db_session, "Functional/Brackets")
         assert cat is not None
         assert cat.name == "Brackets"
         assert cat.path == "functional/brackets"
 
     def test_resolve_reuses_existing(self, db_session) -> None:
-        from app.services.taxonomy import resolve_or_create_category
+        from app.services.taxonomy import resolve_or_create_collection
 
-        first = resolve_or_create_category(db_session, "Functional/Brackets")
-        second = resolve_or_create_category(db_session, "Functional/Brackets")
+        first = resolve_or_create_collection(db_session, "Functional/Brackets")
+        second = resolve_or_create_collection(db_session, "Functional/Brackets")
         assert first is not None and second is not None
         assert first.id == second.id
 
     def test_resolve_empty_returns_none(self, db_session) -> None:
-        from app.services.taxonomy import resolve_or_create_category
+        from app.services.taxonomy import resolve_or_create_collection
 
-        assert resolve_or_create_category(db_session, "") is None
-        assert resolve_or_create_category(db_session, None) is None
+        assert resolve_or_create_collection(db_session, "") is None
+        assert resolve_or_create_collection(db_session, None) is None

@@ -8,7 +8,7 @@ Configure in OrcaSlicer:
             --url https://printstash.example.com \
             --username YOUR_USERNAME \
             --password YOUR_PASSWORD \
-            --category "Functional/Brackets"
+            --collection "Functional/Brackets"
 
 OrcaSlicer appends the exported .gcode path automatically as the final argv.
 
@@ -142,7 +142,7 @@ def main() -> int:
         "--password",
         default=os.environ.get("PRINTSTASH_PASSWORD"),
     )
-    parser.add_argument("--category", default=None)
+    parser.add_argument("--collection", default=None)
     parser.add_argument("--tags", default=None)
     parser.add_argument("--model-name", default=None)
     args, positional = parser.parse_known_args()
@@ -162,7 +162,7 @@ def main() -> int:
 
     fields = {
         "model_name": args.model_name or gcode.stem,
-        "category": args.category,
+        "collection": args.collection,
         "tags": args.tags,
     }
 

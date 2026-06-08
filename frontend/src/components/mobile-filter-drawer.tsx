@@ -2,20 +2,20 @@
 
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import { CategoryRead, PrinterRead, TagRead } from "@/types";
+import { CollectionRead, PrinterRead, TagRead } from "@/types";
 import { FilterSidebarContent } from "@/components/filter-sidebar";
 
 interface MobileFilterDrawerProps {
   open: boolean;
   onClose: () => void;
-  categories: CategoryRead[];
+  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
-  selectedCategory: string | null;
+  selectedCollection: string | null;
   selectedTags: string[];
   selectedPrinterId: number | null;
   selectedPrinterPresence: "any" | "none" | null;
-  onCategoryChange: (path: string | null) => void;
+  onCollectionChange: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;

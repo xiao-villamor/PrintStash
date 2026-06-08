@@ -26,7 +26,7 @@ export async function listModels(
   params?: ListModelsParams,
 ): Promise<ModelListItem[]> {
   const search = new URLSearchParams();
-  if (params?.category) search.set("category", params.category);
+  if (params?.collection) search.set("collection", params.collection);
   if (params?.q) search.set("q", params.q);
   if (params?.limit) search.set("limit", String(params.limit));
   if (params?.offset) search.set("offset", String(params.offset));

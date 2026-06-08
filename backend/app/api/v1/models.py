@@ -29,7 +29,7 @@ from app.core.config import settings
 from app.core.security import require_auth
 from app.core.time import utcnow
 from app.db.models import (
-    Category,
+    Collection,
     File,
     FileRevisionStatus,
     FileType,
@@ -70,7 +70,7 @@ _EXPORT_CSV_FIELDS = [
     "model_id",
     "model_name",
     "model_slug",
-    "category",
+    "collection",
     "tags",
     "file_id",
     "file_type",
@@ -120,9 +120,9 @@ def _tag_names_for(session: Session, model_id: int) -> List[str]:
     return list(session.exec(stmt).all())
 
 
-def _category_name_for(model: Model) -> Optional[str]:
-    """Resolve the category name from the FK-joined relationship."""
-    return model.category_rel.path if model.category_rel else None
+def _collection_name_for(model: Model) -> Optional[str]:
+    """Resolve the collection name from the FK-joined relationship."""
+    return model.collection_rel.path if model.collection_rel else None
 
 
 def _thumb_url(model: Model) -> Optional[str]:
@@ -210,7 +210,7 @@ def _trashed_model_read(
         id=model.id,  # type: ignore[arg-type]
         name=model.name,
         slug=model.slug,
-        category=_category_name_for(model),
+        collection=_collection_name_for(model),
         tags=_tag_names_for(session, model.id),  # type: ignore[arg-type]
         thumbnail_url=_thumb_url(model),
         file_count=int(file_count or 0),
@@ -261,13 +261,16 @@ def _matching_filament_profile(
 
 def _metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
     data = metadata.model_dump()
-    if data.get("filament_cost") is None and metadata.filament_weight_g:
-        profile = _matching_filament_profile(session, metadata)
-        if profile and profile.cost_per_kg is not None:
-            data["filament_cost"] = round(
-                metadata.filament_weight_g * profile.cost_per_kg / 1000,
-                4,
-            )
+    profile = _matching_filament_profile(session, metadata)
+    if (
+        profile
+        and profile.cost_per_kg is not None
+        and metadata.filament_weight_g
+    ):
+        data["filament_cost"] = round(
+            metadata.filament_weight_g * profile.cost_per_kg / 1000,
+            4,
+        )
     return MetadataRead(**data)
 
 
@@ -277,13 +280,13 @@ def _metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
     summary="List models",
     description=(
         "List logical models with optional filtering. Soft-deleted models are excluded. "
-        "Filter by category (path prefix match, includes descendants), one or more tag "
+        "Filter by collection (path prefix match, includes descendants), one or more tag "
         "slugs (AND semantics), and/or a name substring."
     ),
 )
 def list_models(
-    category: Optional[str] = Query(
-        None, description="Category path e.g. 'functional/brackets'"
+    collection: Optional[str] = Query(
+        None, description="Collection path e.g. 'functional/brackets'"
     ),
     tag: Optional[List[str]] = Query(
         None, description="Tag slug; repeat for AND-filter"
@@ -313,13 +316,13 @@ def list_models(
         )
     )
 
-    if category:
-        cat_path = category.strip().strip("/").lower()
-        # Match the category path or any descendant via FK join on Categories.
-        matching_cat_ids = select(Category.id).where(
-            (Category.path == cat_path) | (Category.path.startswith(cat_path + "/"))
+    if collection:
+        cat_path = collection.strip().strip("/").lower()
+        # Match the collection path or any descendant via FK join on Collections.
+        matching_cat_ids = select(Collection.id).where(
+            (Collection.path == cat_path) | (Collection.path.startswith(cat_path + "/"))
         )
-        stmt = stmt.where(Model.category_id.in_(matching_cat_ids))  # type: ignore[union-attr]
+        stmt = stmt.where(Model.collection_id.in_(matching_cat_ids))  # type: ignore[union-attr]
 
     if q:
         stmt = stmt.where(Model.name.contains(q))  # type: ignore[attr-defined]
@@ -357,8 +360,8 @@ def list_models(
                 id=m.id,  # type: ignore[arg-type]
                 name=m.name,
                 slug=m.slug,
-                category=_category_name_for(m),
-                category_id=m.category_id,
+                collection=_collection_name_for(m),
+                collection_id=m.collection_id,
                 tags=_tag_names_for(session, m.id),  # type: ignore[arg-type]
                 thumbnail_url=_thumb_url(m),
                 file_count=int(file_count or 0),
@@ -410,8 +413,8 @@ def _build_model_read(session: Session, model_id: int) -> ModelRead:
         name=m.name,
         slug=m.slug,
         hash=m.hash,
-        category=_category_name_for(m),
-        category_id=m.category_id,
+        collection=_collection_name_for(m),
+        collection_id=m.collection_id,
         description=m.description,
         tags=_tag_names_for(session, m.id),  # type: ignore[arg-type]
         thumbnail_url=_thumb_url(m),
@@ -433,15 +436,15 @@ def _export_models(session: Session) -> dict:
         models = []
         file_count = 0
     else:
-        category_ids = {
-            m.category_id for m in model_rows if m.category_id is not None
+        collection_ids = {
+            m.collection_id for m in model_rows if m.collection_id is not None
         }
-        categories = {}
-        if category_ids:
-            categories = {
+        collections = {}
+        if collection_ids:
+            collections = {
                 c.id: c.path
                 for c in session.exec(
-                    select(Category).where(Category.id.in_(category_ids))  # type: ignore[union-attr]
+                    select(Collection).where(Collection.id.in_(collection_ids))  # type: ignore[union-attr]
                 ).all()
                 if c.id is not None
             }
@@ -496,8 +499,8 @@ def _export_models(session: Session) -> dict:
                 "name": model.name,
                 "slug": model.slug,
                 "hash": model.hash,
-                "category": categories.get(model.category_id),
-                "category_id": model.category_id,
+                "collection": collections.get(model.collection_id),
+                "collection_id": model.collection_id,
                 "description": model.description,
                 "tags": tags_by_model.get(model.id or 0, []),
                 "thumbnail_url": _thumb_url(model),
@@ -517,7 +520,7 @@ def _export_models(session: Session) -> dict:
             "kind": "metadata_only",
             "includes": [
                 "models",
-                "categories",
+                "collections",
                 "tags",
                 "stored file metadata",
                 "slicer/mesh metadata",
@@ -543,7 +546,7 @@ def _export_models_csv(payload: dict) -> str:
                     "model_id": model["id"],
                     "model_name": model["name"],
                     "model_slug": model["slug"],
-                    "category": model.get("category") or "",
+                    "collection": model.get("collection") or "",
                     "tags": tags,
                     "file_id": file_row["id"],
                     "file_type": file_row["file_type"],
@@ -657,8 +660,8 @@ def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
         .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
         .where(File.file_type == FileType.GCODE)
     ).one()
-    category_count = session.exec(
-        select(func.count(Category.id)).where(Category.deleted_at.is_(None))  # type: ignore[union-attr]
+    collection_count = session.exec(
+        select(func.count(Collection.id)).where(Collection.deleted_at.is_(None))  # type: ignore[union-attr]
     ).one()
     tag_count = session.exec(
         select(func.count(Tag.id)).where(Tag.deleted_at.is_(None))  # type: ignore[union-attr]
@@ -681,7 +684,7 @@ def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
         file_count=int(file_count or 0),
         source_file_count=int(source_file_count or 0),
         gcode_file_count=int(gcode_file_count or 0),
-        category_count=int(category_count or 0),
+        collection_count=int(collection_count or 0),
         tag_count=int(tag_count or 0),
         printer_count=int(printer_count or 0),
         indexed_size_bytes=int(indexed_size or 0),
@@ -832,7 +835,7 @@ def get_model_printer_files(
     "/{model_id}",
     response_model=ModelRead,
     dependencies=[Depends(require_auth)],
-    summary="Update a model's name, description, category, or tags",
+    summary="Update a model's name, description, collection, or tags",
 )
 def update_model(
     model_id: int,
@@ -846,13 +849,13 @@ def update_model(
     if payload.description is not None:
         m.description = payload.description
 
-    if payload.category is not None:
-        if payload.category.strip() == "":
-            m.category_id = None
+    if payload.collection is not None:
+        if payload.collection.strip() == "":
+            m.collection_id = None
         else:
-            cat = taxonomy.resolve_or_create_category(session, payload.category)
+            cat = taxonomy.resolve_or_create_collection(session, payload.collection)
             if cat is not None:
-                m.category_id = cat.id
+                m.collection_id = cat.id
 
     if payload.tags is not None:
         session.exec(delete(ModelTagLink).where(ModelTagLink.model_id == model_id))  # type: ignore[call-overload]

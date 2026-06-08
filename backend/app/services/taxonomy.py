@@ -1,4 +1,4 @@
-"""Category (hierarchical) + Tag (flat) services."""
+"""Collection (hierarchical) + Tag (flat) services."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from typing import Iterable, List, Optional
 
 from sqlmodel import Session, select
 
-from app.db.models import Category, Tag
+from app.db.models import Collection, Tag
 from app.services.storage import slugify
 
 
-def resolve_or_create_category(
+def resolve_or_create_collection(
     session: Session, raw_path: Optional[str]
-) -> Optional[Category]:
-    """Resolve a path like 'Functional/Brackets' to a Category row, creating
+) -> Optional[Collection]:
+    """Resolve a path like 'Functional/Brackets' to a Collection row, creating
     any missing nodes along the way. Returns None for empty input.
 
     Path segments are split on '/', whitespace-trimmed, and slugified for
@@ -25,15 +25,15 @@ def resolve_or_create_category(
     if not segments:
         return None
 
-    parent: Optional[Category] = None
+    parent: Optional[Collection] = None
     materialised_slug: List[str] = []
     for name in segments:
         slug = slugify(name)
         materialised_slug.append(slug)
         path = "/".join(materialised_slug)
-        existing = session.exec(select(Category).where(Category.path == path)).first()
+        existing = session.exec(select(Collection).where(Collection.path == path)).first()
         if existing is None:
-            existing = Category(
+            existing = Collection(
                 name=name,
                 slug=slug,
                 parent_id=parent.id if parent else None,
@@ -46,14 +46,14 @@ def resolve_or_create_category(
     return parent
 
 
-def list_categories(session: Session) -> List[Category]:
-    return list(session.exec(select(Category).order_by(Category.path)).all())
+def list_collections(session: Session) -> List[Collection]:
+    return list(session.exec(select(Collection).order_by(Collection.path)).all())
 
 
-def category_descendant_paths(session: Session, root_path: str) -> List[str]:
+def collection_descendant_paths(session: Session, root_path: str) -> List[str]:
     """Return root_path plus all descendant paths (for prefix filtering)."""
-    stmt = select(Category.path).where(
-        (Category.path == root_path) | (Category.path.startswith(root_path + "/"))  # type: ignore[attr-defined]
+    stmt = select(Collection.path).where(
+        (Collection.path == root_path) | (Collection.path.startswith(root_path + "/"))  # type: ignore[attr-defined]
     )
     return list(session.exec(stmt).all())
 

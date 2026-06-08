@@ -7,7 +7,7 @@ from sqlmodel import Session, delete, select
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import Category, File, Printer, Tag, User
+from app.db.models import Collection, File, Printer, Tag, User
 from app.db.session import get_session_factory
 from app.services.storage_backend import get_backend
 from app.services.trash import hard_delete_expired_models
@@ -41,7 +41,7 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
     with get_session_factory().scoped_session() as session:
         purged_model_ids = hard_delete_expired_models(session, effective_retention)
         purged["rows"] += len(purged_model_ids)
-        for model in (File, Tag, Category, Printer, User):
+        for model in (File, Tag, Collection, Printer, User):
             result = session.exec(
                 delete(model).where(
                     model.deleted_at.is_not(None),  # type: ignore[attr-defined]

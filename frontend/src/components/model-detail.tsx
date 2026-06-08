@@ -5,7 +5,7 @@ import type { STLViewerControls } from "@/components/stl-viewer";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
-  CategoryRead,
+  CollectionRead,
   FileRead,
   FileRevisionStatus,
   MetadataRead,
@@ -24,7 +24,7 @@ import {
   deleteModel,
   getAssetUrl,
   getModelPrinterFiles,
-  listCategories,
+  listCollections,
   listPrinters,
   listTags,
   sendToPrinter,
@@ -32,6 +32,11 @@ import {
   updateModel,
   addGcodeRevision,
 } from "@/lib/api";
+import {
+  DEFAULT_METADATA_PREFERENCES,
+  MetadataPreferences,
+  readMetadataPreferences,
+} from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -136,72 +141,90 @@ type PrintSettingRow = {
   highlight?: boolean;
 };
 
-function buildPrintSettingRows(meta: MetadataRead | null | undefined): PrintSettingRow[] {
-  const rows: PrintSettingRow[] = [
-    { label: "PRINTER PROFILE", value: meta?.printer_model ?? "—" },
-    {
+function buildPrintSettingRows(
+  meta: MetadataRead | null | undefined,
+  preferences: MetadataPreferences,
+): PrintSettingRow[] {
+  const rows: PrintSettingRow[] = [];
+
+  if (preferences.printer_profile) {
+    rows.push({ label: "PRINTER PROFILE", value: meta?.printer_model ?? "—" });
+  }
+
+  if (preferences.material) {
+    rows.push({
       label: "MATERIAL",
       value: meta?.material_type ?? "—",
       chip: true,
-    },
-  ];
+    });
+  }
 
-  if (meta?.material_brand) {
+  if (preferences.filament_profile && meta?.material_brand) {
     rows.push({ label: "FILAMENT PROFILE", value: meta.material_brand });
   }
 
-  rows.push(
-    { label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) },
-  );
+  if (preferences.layer_height) {
+    rows.push({ label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) });
+  }
 
-  if (meta?.first_layer_height_mm) {
+  if (preferences.first_layer && meta?.first_layer_height_mm) {
     rows.push({
       label: "FIRST LAYER",
       value: formatMillimeters(meta.first_layer_height_mm),
     });
   }
 
-  rows.push(
-    { label: "NOZZLE", value: formatMillimeters(meta?.nozzle_diameter_mm) },
-    { label: "INFILL", value: formatPercent(meta?.infill_percent) },
-  );
+  if (preferences.nozzle) {
+    rows.push({ label: "NOZZLE", value: formatMillimeters(meta?.nozzle_diameter_mm) });
+  }
 
-  if (meta?.wall_loops) {
+  if (preferences.infill) {
+    rows.push({ label: "INFILL", value: formatPercent(meta?.infill_percent) });
+  }
+
+  if (preferences.walls && meta?.wall_loops) {
     rows.push({ label: "WALLS", value: String(meta.wall_loops) });
   }
 
-  if (meta?.top_shell_layers || meta?.bottom_shell_layers) {
+  if (preferences.top_bottom && (meta?.top_shell_layers || meta?.bottom_shell_layers)) {
     rows.push({
       label: "TOP / BOTTOM",
       value: `${meta?.top_shell_layers ?? "—"} / ${meta?.bottom_shell_layers ?? "—"}`,
     });
   }
 
-  if (meta?.support_material !== null && meta?.support_material !== undefined) {
+  if (
+    preferences.supports
+    && meta?.support_material !== null
+    && meta?.support_material !== undefined
+  ) {
     rows.push({ label: "SUPPORTS", value: meta.support_material ? "Yes" : "No" });
   }
 
-  if (meta?.nozzle_temperature_c) {
+  if (preferences.nozzle_temp && meta?.nozzle_temperature_c) {
     rows.push({
       label: "NOZZLE TEMP",
       value: formatTemperature(meta.nozzle_temperature_c),
     });
   }
 
-  if (meta?.bed_temperature_c) {
+  if (preferences.bed_temp && meta?.bed_temperature_c) {
     rows.push({ label: "BED TEMP", value: formatTemperature(meta.bed_temperature_c) });
   }
 
-  rows.push(
-    {
+  if (preferences.estimated_time) {
+    rows.push({
       label: "EST. TIME",
       value: formatDuration(meta?.estimated_time_s ?? null),
       highlight: true,
-    },
-    { label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) },
-  );
+    });
+  }
 
-  if (meta?.filament_cost) {
+  if (preferences.filament_weight) {
+    rows.push({ label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) });
+  }
+
+  if (preferences.filament_cost && meta?.filament_cost) {
     rows.push({ label: "FILAMENT COST", value: formatCost(meta.filament_cost) });
   }
 
@@ -218,13 +241,16 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [saving, setSaving] = useState(false);
   const [editName, setEditName] = useState(model.name);
   const [editDescription, setEditDescription] = useState(model.description || "");
-  const [editCategory, setEditCategory] = useState(model.category || "");
+  const [editCollection, setEditCollection] = useState(model.collection || "");
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
   const [catOpen, setCatOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
-  const [categories, setCategories] = useState<CategoryRead[]>([]);
+  const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [catLoaded, setCatLoaded] = useState(false);
+  const [metadataPreferences, setMetadataPreferences] = useState<MetadataPreferences>(
+    DEFAULT_METADATA_PREFERENCES,
+  );
   const [revisionSaving, setRevisionSaving] = useState<number | null>(null);
   const [editingRevisionId, setEditingRevisionId] = useState<number | null>(null);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
@@ -240,6 +266,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   useEffect(() => {
     getModelPrinterFiles(model.id).then(setPrinterFiles).catch(() => {});
   }, [model.id]);
+
+  useEffect(() => {
+    setMetadataPreferences(readMetadataPreferences());
+  }, []);
 
   async function doDelete() {
     if (!confirm("Delete this model? This cannot be undone.")) return;
@@ -259,12 +289,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   function enterEdit() {
     setEditName(model.name);
     setEditDescription(model.description || "");
-    setEditCategory(model.category || "");
+    setEditCollection(model.collection || "");
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
     if (!catLoaded) {
-      listCategories().then((c) => { setCategories(c); setCatLoaded(true); }).catch(() => {});
+      listCollections().then((c) => { setCollections(c); setCatLoaded(true); }).catch(() => {});
       listTags().then(setTags).catch(() => {});
     }
     setEditing(true);
@@ -280,7 +310,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       const updated = await updateModel(model.id, {
         name: editName.trim() || undefined,
         description: editDescription.trim() || undefined,
-        category: editCategory || undefined,
+        collection: editCollection || undefined,
         tags: editTags.length ? editTags : undefined,
       });
       setModel(updated);
@@ -348,7 +378,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const latestFile = recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
-  const printSettingRows = useMemo(() => buildPrintSettingRows(meta), [meta]);
+  const printSettingRows = useMemo(
+    () => buildPrintSettingRows(meta, metadataPreferences),
+    [meta, metadataPreferences],
+  );
   const meshFile = model.files.find(
     (f) => f.file_type === "stl" || f.file_type === "3mf" || f.file_type === "obj",
   );
@@ -558,38 +591,42 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         <div className="md:w-[400px] bg-[var(--surface-container-lowest)] border-l-0 md:border-l border-t md:border-t-0 border-[var(--outline-variant)] flex flex-col h-auto md:h-full shrink-0 min-h-0">
           <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8">
             {/* Print Settings */}
-            <section>
-              <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
-                Print Settings
-              </h2>
-              <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
-                {printSettingRows.map((row, index) => (
-                  <SettingRow
-                    key={row.label}
-                    label={row.label}
-                    value={row.value}
-                    chip={row.chip}
-                    highlight={row.highlight}
-                    last={index === printSettingRows.length - 1}
-                  />
-                ))}
-              </div>
-            </section>
+            {printSettingRows.length > 0 && (
+              <section>
+                <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
+                  Print Settings
+                </h2>
+                <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
+                  {printSettingRows.map((row, index) => (
+                    <SettingRow
+                      key={row.label}
+                      label={row.label}
+                      value={row.value}
+                      chip={row.chip}
+                      highlight={row.highlight}
+                      last={index === printSettingRows.length - 1}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
             {/* Mesh Geometry */}
-            {(meta?.volume_mm3 || meta?.triangle_count) && (
+            {((metadataPreferences.mesh_volume && meta?.volume_mm3)
+              || (metadataPreferences.mesh_triangles && meta?.triangle_count)) && (
               <section>
                 <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
                   Mesh Geometry
                 </h2>
                 <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
-                  {meta?.volume_mm3 && (
+                  {metadataPreferences.mesh_volume && meta?.volume_mm3 && (
                     <SettingRow
                       label="VOLUME"
                       value={meta.volume_mm3 < 1000 ? `${meta.volume_mm3.toFixed(1)} mm³` : `${(meta.volume_mm3 / 1000).toFixed(2)} cm³`}
+                      last={!metadataPreferences.mesh_triangles || !meta?.triangle_count}
                     />
                   )}
-                  {meta?.triangle_count && (
+                  {metadataPreferences.mesh_triangles && meta?.triangle_count && (
                     <SettingRow label="TRIANGLES" value={meta.triangle_count.toLocaleString()} last />
                   )}
                 </div>
@@ -597,20 +634,20 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             )}
 
             {/* Slicer info */}
-            {meta?.slicer_name && (
+            {metadataPreferences.slicer_info && meta?.slicer_name && (
               <p className="font-mono text-xs text-[var(--on-surface-variant)]">
                 Sliced with {meta.slicer_name}
                 {meta.slicer_version ? ` v${meta.slicer_version}` : ""}
               </p>
             )}
 
-            {/* Tags & Category */}
+            {/* Tags & Collection */}
             {editing ? (
               <div className="space-y-4">
-                {/* Category picker */}
+                {/* Collection picker */}
                 <div>
                   <label className="block font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
-                    Category
+                    Collection
                   </label>
                   <div className="relative">
                     <button
@@ -618,8 +655,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                       onClick={() => setCatOpen((v) => !v)}
                       className="w-full h-10 flex items-center justify-between bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
                     >
-                      <span className={editCategory ? "" : "text-[var(--on-surface-variant)]/60"}>
-                        {editCategory || "None"}
+                      <span className={editCollection ? "" : "text-[var(--on-surface-variant)]/60"}>
+                        {editCollection || "None"}
                       </span>
                       <ChevronDown className="h-4 w-4 text-[var(--on-surface-variant)]" />
                     </button>
@@ -629,18 +666,18 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                         <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 max-h-56 overflow-y-auto">
                           <button
                             type="button"
-                            onClick={() => { setEditCategory(""); setCatOpen(false); }}
+                            onClick={() => { setEditCollection(""); setCatOpen(false); }}
                             className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
                           >
                             None
                           </button>
-                          {categories.map((c) => (
+                          {collections.map((c) => (
                             <button
                               key={c.id}
                               type="button"
-                              onClick={() => { setEditCategory(c.path); setCatOpen(false); }}
+                              onClick={() => { setEditCollection(c.path); setCatOpen(false); }}
                               className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                                editCategory === c.path
+                                editCollection === c.path
                                   ? "text-[var(--primary)] bg-[var(--secondary-container)]"
                                   : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
                               }`}
@@ -731,9 +768,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </div>
             ) : (
               <div className="flex flex-wrap gap-2">
-                {model.category && (
+                {model.collection && (
                   <span className="bg-[var(--surface-container)] text-[var(--on-surface)] px-3 py-1 rounded font-mono text-xs uppercase tracking-wider">
-                    {model.category}
+                    {model.collection}
                   </span>
                 )}
                 {model.tags.map((t) => (

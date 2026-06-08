@@ -7,7 +7,7 @@ from app.core.security import require_superuser
 from app.core.time import utcnow
 from app.db.models import (
     AuditLog,
-    Category,
+    Collection,
     File,
     Model,
     PrintJob,
@@ -30,7 +30,7 @@ _RESOURCE_MODEL = {
     "print_jobs": PrintJob,
     "users": User,
     "tags": Tag,
-    "categories": Category,
+    "collections": Collection,
 }
 
 

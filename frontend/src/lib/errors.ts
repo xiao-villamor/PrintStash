@@ -81,8 +81,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   unsupported_file_type: "Unsupported file type.",
   file_too_large: "File exceeds the upload size limit.",
   // Taxonomy
-  category_not_found: "Category not found.",
-  category_not_empty: "Cannot delete: category still has models assigned.",
+  collection_not_found: "Collection not found.",
+  collection_not_empty: "Cannot delete: collection still has models assigned.",
   tag_not_found: "Tag not found.",
   // Setup
   already_configured: "This vault has already been set up.",

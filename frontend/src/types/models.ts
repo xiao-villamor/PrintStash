@@ -60,8 +60,8 @@ export interface ModelRead {
   name: string;
   slug: string;
   hash: string;
-  category: string | null;
-  category_id: number | null;
+  collection: string | null;
+  collection_id: number | null;
   description: string | null;
   tags: string[];
   thumbnail_url: string | null;
@@ -90,8 +90,8 @@ export interface ModelListItem {
   id: number;
   name: string;
   slug: string;
-  category: string | null;
-  category_id: number | null;
+  collection: string | null;
+  collection_id: number | null;
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
@@ -103,7 +103,7 @@ export interface TrashedModelRead {
   id: number;
   name: string;
   slug: string;
-  category: string | null;
+  collection: string | null;
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
@@ -132,7 +132,7 @@ export interface VaultStatsRead {
   file_count: number;
   source_file_count: number;
   gcode_file_count: number;
-  category_count: number;
+  collection_count: number;
   tag_count: number;
   printer_count: number;
   indexed_size_bytes: number;
@@ -142,7 +142,7 @@ export interface VaultStatsRead {
 export interface ModelUpdate {
   name?: string;
   description?: string;
-  category?: string;
+  collection?: string;
   tags?: string[];
 }
 
@@ -163,7 +163,7 @@ export interface IngestJobStatus {
 }
 
 export interface ListModelsParams {
-  category?: string;
+  collection?: string;
   tag?: string[];
   q?: string;
   printer_id?: number;
@@ -172,7 +172,7 @@ export interface ListModelsParams {
   offset?: number;
 }
 
-export interface CategoryCreate {
+export interface CollectionCreate {
   name: string;
   parent_id?: number | null;
 }
@@ -181,7 +181,7 @@ export interface TagCreate {
   name: string;
 }
 
-export interface CategoryRead {
+export interface CollectionRead {
   id: number;
   name: string;
   slug: string;

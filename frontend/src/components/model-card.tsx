@@ -134,9 +134,9 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
                   maskImage: "linear-gradient(to right, black 85%, transparent 100%)",
                 }}
               >
-                {model.category && (
+                {model.collection && (
                   <span className="bg-[var(--surface-container)] text-[var(--on-surface)] px-1.5 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider whitespace-nowrap flex-shrink-0">
-                    {model.category}
+                    {model.collection}
                   </span>
                 )}
                 {visibleTags.map((tag) => (

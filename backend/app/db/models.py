@@ -178,24 +178,24 @@ class File(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Categories (hierarchical) & Tags (flat, many-to-many)
+# Collections (hierarchical) & Tags (flat, many-to-many)
 # ---------------------------------------------------------------------------
 
 
-class Category(SQLModel, table=True):
-    """Hierarchical category. Self-referential via parent_id.
+class Collection(SQLModel, table=True):
+    """Hierarchical collection. Self-referential via parent_id.
 
     `path` is the materialised slash-joined slug chain ("functional/brackets"),
     used for fast filtering and stable URLs.
     """
 
-    __tablename__ = "categories"
+    __tablename__ = "collections"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)
     slug: str = Field(max_length=128, index=True)
     parent_id: Optional[int] = Field(
-        default=None, foreign_key="categories.id", index=True
+        default=None, foreign_key="collections.id", index=True
     )
     path: str = Field(max_length=512, unique=True, index=True)
 
@@ -240,8 +240,8 @@ class Model(SQLModel, table=True):
     slug: str = Field(index=True, unique=True, max_length=255)
     hash: str = Field(index=True, unique=True, max_length=64)
 
-    category_id: Optional[int] = Field(
-        default=None, foreign_key="categories.id", index=True
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", index=True
     )
     description: Optional[str] = None
     thumbnail_path: Optional[str] = Field(default=None, max_length=512)
@@ -265,9 +265,9 @@ class Model(SQLModel, table=True):
         link_model=ModelTagLink,
         sa_relationship_kwargs={"lazy": "selectin"},
     )
-    category_rel: Optional["Category"] = Relationship(
+    collection_rel: Optional["Collection"] = Relationship(
         sa_relationship_kwargs={
-            "primaryjoin": "Model.category_id == Category.id",
+            "primaryjoin": "Model.collection_id == Collection.id",
             "lazy": "selectin",
         },
     )
