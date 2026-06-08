@@ -855,8 +855,10 @@ class TestSendToPrinter:
             select(PrinterFile).where(PrinterFile.printer_id == p.id)
         ).one()
         assert row.file_id == f.id
-        assert row.remote_filename == "bracket.gcode"
+        assert row.remote_filename == f"bracket__vault-f{f.id}-{'d' * 12}.gcode"
         assert row.matched_by == "upload_history"
+        mock_upload.assert_awaited_once()
+        assert mock_upload.await_args.args[1] == row.remote_filename
 
 
 class TestDashboard:

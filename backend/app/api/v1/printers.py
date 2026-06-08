@@ -57,6 +57,7 @@ from app.services.printer_provider import (
     provider_diagnostic_summary,
 )
 from app.services.printer_files import (
+    build_traceable_remote_filename,
     list_printer_files,
     sync_printer_files,
     upsert_printer_file,
@@ -429,7 +430,11 @@ async def send_to_printer(
         logger.warning("failed to stage print upload file=%s", f.id)
         raise HTTPException(status_code=502, detail="storage_error")
 
-    remote_name = (payload.remote_filename or f.original_filename).strip()
+    remote_name = (
+        payload.remote_filename.strip()
+        if payload.remote_filename
+        else build_traceable_remote_filename(f)
+    )
     if not remote_name.lower().endswith((".gcode", ".g", ".gco")):
         remote_name += ".gcode"
 
