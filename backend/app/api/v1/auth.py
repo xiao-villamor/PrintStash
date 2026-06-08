@@ -13,6 +13,9 @@ from app.core.security import oauth2_scheme, require_user
 from app.db.models import User
 from app.db.session import get_session
 from app.schemas.auth import (
+    ApiKeyCreateRequest,
+    ApiKeyCreateResponse,
+    ApiKeyRead,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
@@ -20,9 +23,13 @@ from app.schemas.auth import (
     UserRead,
 )
 from app.services.auth import (
+    authenticate_api_key,
     authenticate_user,
+    create_api_key,
     create_access_token,
     create_refresh_token,
+    list_active_api_keys,
+    revoke_api_key,
     revoke_access_token,
     revoke_refresh_token,
     rotate_refresh_token,
@@ -33,8 +40,21 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
-    """Authenticate with username + password and receive a JWT access token."""
-    user = authenticate_user(session, body.username, body.password)
+    """Authenticate and receive a JWT access token.
+
+    Programmatic clients can exchange username + API key for the same Bearer
+    JWT used by the UI, so protected endpoints keep one Authorization header.
+    """
+    if bool(body.password) == bool(body.api_key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="provide_password_or_api_key",
+        )
+    user = (
+        authenticate_user(session, body.username, body.password)
+        if body.password
+        else authenticate_api_key(session, body.username, body.api_key or "")
+    )
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -95,3 +115,44 @@ def logout(
 def get_me(current_user=Depends(require_user)) -> UserRead:
     """Return the currently logged-in user's profile."""
     return UserRead.model_validate(current_user)
+
+
+@router.get("/api-keys", response_model=list[ApiKeyRead])
+def get_api_keys(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> list[ApiKeyRead]:
+    return [
+        ApiKeyRead.model_validate(key)
+        for key in list_active_api_keys(session, current_user.id)
+    ]
+
+
+@router.post("/api-keys", response_model=ApiKeyCreateResponse)
+def post_api_key(
+    body: ApiKeyCreateRequest,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ApiKeyCreateResponse:
+    record, raw_key = create_api_key(session, current_user.id, body.name)
+    return ApiKeyCreateResponse(
+        id=record.id,
+        name=record.name,
+        prefix=record.prefix,
+        created_at=record.created_at,
+        last_used_at=record.last_used_at,
+        api_key=raw_key,
+    )
+
+
+@router.delete("/api-keys/{key_id}", status_code=204)
+def delete_api_key(
+    key_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> None:
+    if not revoke_api_key(session, current_user.id, key_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="api_key_not_found",
+        )

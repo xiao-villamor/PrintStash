@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import User
-from app.services.auth import hash_password
+from app.services.auth import create_api_key, hash_password
 
 
 def _create_user(
@@ -42,6 +42,88 @@ class TestAuthFlow:
         assert body["scope"] == "write"
         assert isinstance(body["access_token"], str) and body["access_token"]
         assert isinstance(body["refresh_token"], str) and body["refresh_token"]
+
+    def test_login_accepts_username_and_api_key(
+        self, client: TestClient, db_session: Session
+    ):
+        user = _create_user(db_session, "script-user", "Password123", is_superuser=False)
+        _, raw_key = create_api_key(db_session, user.id, "Orca uploader")
+
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={"username": "script-user", "api_key": raw_key},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["token_type"] == "bearer"
+        assert body["scope"] == "write"
+        assert isinstance(body["access_token"], str) and body["access_token"]
+
+    def test_login_rejects_password_and_api_key_together(
+        self, client: TestClient, db_session: Session
+    ):
+        user = _create_user(db_session, "dual-user", "Password123", is_superuser=False)
+        _, raw_key = create_api_key(db_session, user.id, "Bad client")
+
+        resp = client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": "dual-user",
+                "password": "Password123",
+                "api_key": raw_key,
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "provide_password_or_api_key"
+
+    def test_api_key_is_not_a_bearer_token(
+        self, client: TestClient, db_session: Session
+    ):
+        user = _create_user(db_session, "direct-key", "Password123", is_superuser=False)
+        _, raw_key = create_api_key(db_session, user.id, "Direct header")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {raw_key}"},
+        )
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "not_authenticated"
+
+    def test_user_can_create_and_revoke_api_key(
+        self, client: TestClient, db_session: Session
+    ):
+        _create_user(db_session, "key-owner", "Password123", is_superuser=False)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "key-owner", "password": "Password123"},
+        ).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+        created = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "Uploader"},
+            headers=headers,
+        )
+        assert created.status_code == 200
+        key_body = created.json()
+        assert key_body["name"] == "Uploader"
+        assert key_body["api_key"].startswith("psk_")
+
+        listed = client.get("/api/v1/auth/api-keys", headers=headers)
+        assert listed.status_code == 200
+        assert listed.json()[0]["id"] == key_body["id"]
+
+        deleted = client.delete(
+            f"/api/v1/auth/api-keys/{key_body['id']}",
+            headers=headers,
+        )
+        assert deleted.status_code == 204
+
+        relogin = client.post(
+            "/api/v1/auth/login",
+            json={"username": "key-owner", "api_key": key_body["api_key"]},
+        )
+        assert relogin.status_code == 401
 
     def test_refresh_rotates_token(self, client: TestClient, db_session: Session):
         _create_user(db_session, "bob", "Password123", is_superuser=False)

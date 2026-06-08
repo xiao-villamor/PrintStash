@@ -66,9 +66,9 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
         {/* 1. Thumbnail — fixed aspect ratio, no padding */}
         <div className="aspect-[16/9] bg-[var(--surface-container-low)] relative overflow-hidden flex-shrink-0">
           {model.file_count > 0 && (
-            <div className="absolute top-2 right-2 bg-[var(--surface-container-lowest)]/90 backdrop-blur-sm border border-[var(--outline-variant)] px-[6px] py-[2px] rounded flex items-center gap-1 z-10">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="font-mono text-[9px] text-[var(--on-surface)] uppercase tracking-wider leading-none">
+            <div className="absolute right-2 top-2 z-10 inline-flex h-6 items-center gap-1.5 rounded border border-[var(--primary-fixed-dim)] bg-[var(--primary-fixed)] px-2 shadow-sm">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="font-mono text-[10px] uppercase leading-none tracking-wider text-[#00174b]">
                 {model.file_count} file{model.file_count !== 1 ? "s" : ""}
               </span>
             </div>
@@ -169,6 +169,7 @@ function ModelCardInner({ model }: { model: ModelListItem }) {
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           aria-label={`Open actions for ${model.name}`}
+          title="Model actions"
         >
           <MoreVertical className="h-4 w-4" />
         </button>

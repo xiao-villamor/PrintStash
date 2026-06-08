@@ -79,13 +79,15 @@ export function TopBar() {
         <TopBarSearch />
       </Suspense>
 
-      <div className="flex items-center gap-2 md:gap-3">
+      <div className="flex items-center gap-1 md:gap-2">
         <ThemeToggle />
-        <div ref={popoverRef} className="relative hidden sm:block">
+        <div ref={popoverRef} className="relative hidden sm:flex">
           <button
+            type="button"
             onClick={() => setOpen((value) => !value)}
-            className="relative text-[var(--on-surface-variant)] hover:text-[var(--primary)] transition-colors rounded p-1"
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)] hover:text-[var(--primary)]"
             aria-label="Task notifications"
+            title="Task notifications"
           >
             <Bell className="h-5 w-5" />
             {activeCount > 0 && (
@@ -102,7 +104,12 @@ export function TopBar() {
             />
           )}
         </div>
-        <button className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] transition-colors rounded p-1 hidden sm:block">
+        <button
+          type="button"
+          className="hidden h-9 w-9 items-center justify-center rounded text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)] hover:text-[var(--primary)] sm:inline-flex"
+          aria-label="Help"
+          title="Help"
+        >
           <HelpCircle className="h-5 w-5" />
         </button>
       </div>

@@ -321,6 +321,19 @@ class RefreshToken(SQLModel, table=True):
     revoked_at: Optional[datetime] = None
 
 
+class ApiKey(SQLModel, table=True):
+    __tablename__ = "api_keys"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    name: str = Field(default="Programmatic access", max_length=128)
+    key_hash: str = Field(max_length=64, unique=True, index=True)
+    prefix: str = Field(max_length=16, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    last_used_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = Field(default=None, index=True)
+
+
 class SystemConfig(SQLModel, table=True):
     """Singleton row (id=1) holding runtime-configurable settings.
 

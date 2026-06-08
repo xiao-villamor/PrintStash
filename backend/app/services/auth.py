@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import RefreshToken, User
+from app.db.models import ApiKey, RefreshToken, User
 from app.core.time import utcnow
 
 logger = get_logger(__name__)
@@ -137,4 +137,61 @@ def authenticate_user(session: Session, username: str, password: str) -> Optiona
         logger.info("login failed: user=%s bad password", username)
         return None
     logger.info("login success: user=%s", username)
+    return user
+
+
+def create_api_key(session: Session, user_id: int, name: str) -> tuple[ApiKey, str]:
+    raw_key = f"psk_{secrets.token_urlsafe(32)}"
+    record = ApiKey(
+        user_id=user_id,
+        name=name,
+        key_hash=_token_hash(raw_key),
+        prefix=raw_key[:12],
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    return record, raw_key
+
+
+def list_active_api_keys(session: Session, user_id: int) -> list[ApiKey]:
+    return list(
+        session.exec(
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id)
+            .where(ApiKey.revoked_at.is_(None))
+            .order_by(ApiKey.created_at.desc())
+        )
+    )
+
+
+def revoke_api_key(session: Session, user_id: int, key_id: int) -> bool:
+    record = session.get(ApiKey, key_id)
+    if record is None or record.user_id != user_id:
+        return False
+    if record.revoked_at is None:
+        record.revoked_at = utcnow()
+        session.add(record)
+        session.commit()
+    return True
+
+
+def authenticate_api_key(session: Session, username: str, api_key: str) -> Optional[User]:
+    user = get_user_by_username(session, username)
+    if not user or not user.is_active:
+        logger.info("api key login failed: user=%s not found or inactive", username)
+        return None
+    record = session.exec(
+        select(ApiKey)
+        .where(ApiKey.user_id == user.id)
+        .where(ApiKey.key_hash == _token_hash(api_key))
+        .where(ApiKey.revoked_at.is_(None))
+    ).first()
+    if record is None:
+        logger.info("api key login failed: user=%s bad key", username)
+        return None
+    record.last_used_at = utcnow()
+    session.add(record)
+    session.commit()
+    logger.info("api key login success: user=%s", username)
     return user

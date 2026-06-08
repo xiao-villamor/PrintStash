@@ -36,7 +36,7 @@ export function ThemeToggle() {
 
   // Avoid hydration mismatch — render a placeholder until mounted.
   if (!mounted) {
-    return <div className="w-7 h-7" aria-hidden />;
+    return <div className="h-9 w-9" aria-hidden />;
   }
 
   return (
@@ -44,7 +44,7 @@ export function ThemeToggle() {
       onClick={toggle}
       title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       aria-label="Toggle theme"
-      className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] transition-colors rounded p-1"
+      className="inline-flex h-9 w-9 items-center justify-center rounded text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)] hover:text-[var(--primary)]"
     >
       {theme === "dark" ? (
         <Sun className="h-5 w-5" />

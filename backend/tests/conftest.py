@@ -48,6 +48,7 @@ _TRUNCATE_TABLES_ORDER = [
     "metadata",
     "models",
     "categories",
+    "api_keys",
     "refresh_tokens",
     "users",
     "system_config",

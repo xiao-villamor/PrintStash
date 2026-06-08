@@ -7,6 +7,8 @@ export type {
   ModelPrinterFileRead,
   ModelPrinterPresenceRead,
   ModelListItem,
+  StorageUsageRead,
+  VaultStatsRead,
   ModelUpdate,
   IngestResponse,
   IngestJobStatus,
@@ -41,6 +43,8 @@ export type {
 } from "./printers";
 
 export type {
+  ApiKeyCreateResponse,
+  ApiKeyRead,
   LoginRequest,
   TokenResponse,
   UserRead,
