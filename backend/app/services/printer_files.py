@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import PurePosixPath
+import re
 from typing import Any
 
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.models import File, FileType, PrintJob, PrinterFile
+
+_VAULT_MARKER_RE = re.compile(
+    r"(?:^|__)vault-f(?P<file_id>\d+)-(?P<sha>[a-fA-F0-9]{8,64})(?:\.|$|[-_])"
+)
 
 
 def _remote_name(raw: dict[str, Any]) -> str | None:
@@ -37,12 +42,48 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
         return None
 
 
+def build_traceable_remote_filename(file: File) -> str:
+    """Return a Moonraker-safe filename with a Vault revision marker."""
+    suffix = PurePosixPath(file.original_filename).suffix
+    if suffix.lower() not in {".gcode", ".g", ".gco"}:
+        suffix = ".gcode"
+    stem = PurePosixPath(file.original_filename).stem or "print"
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"
+    marker = f"vault-f{file.id}-{file.sha256[:12]}"
+    max_stem_len = max(1, 512 - len(marker) - len(suffix) - 2)
+    return f"{safe_stem[:max_stem_len]}__{marker}{suffix}"
+
+
+def _find_marker_match(
+    session: Session,
+    remote_filename: str,
+) -> tuple[int | None, str] | None:
+    match = _VAULT_MARKER_RE.search(PurePosixPath(remote_filename).name)
+    if not match:
+        return None
+    file_id = int(match.group("file_id"))
+    sha_prefix = match.group("sha").lower()
+    file_row = session.get(File, file_id)
+    if (
+        file_row is not None
+        and file_row.file_type == FileType.GCODE
+        and file_row.deleted_at is None
+        and file_row.sha256.lower().startswith(sha_prefix)
+    ):
+        return file_id, "vault_marker"
+    return None, "vault_marker_mismatch"
+
+
 def _find_match(
     session: Session,
     printer_id: int,
     remote_filename: str,
     size_bytes: int | None,
 ) -> tuple[int | None, str]:
+    marker_match = _find_marker_match(session, remote_filename)
+    if marker_match is not None:
+        return marker_match
+
     job = session.exec(
         select(PrintJob)
         .where(
