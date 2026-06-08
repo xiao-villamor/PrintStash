@@ -77,6 +77,8 @@ def apply_overlay(session: Session) -> None:
     _set("s3_secret_key", config.s3_secret_key)
     if config.backup_retention_days is not None:
         _overlay["backup_retention_days"] = config.backup_retention_days
+    if config.trash_retention_days is not None:
+        _overlay["trash_retention_days"] = config.trash_retention_days
     _set("backup_s3_bucket", config.backup_s3_bucket)
     _set("backup_s3_endpoint_url", config.backup_s3_endpoint_url)
     _set("backup_s3_region", config.backup_s3_region)
@@ -139,6 +141,7 @@ def update_config(
     s3_access_key: Optional[str] = None,
     s3_secret_key: Optional[str] = None,
     backup_retention_days: Optional[int] = None,
+    trash_retention_days: Optional[int] = None,
     backup_s3_bucket: Optional[str] = None,
     backup_s3_endpoint_url: Optional[str] = None,
     backup_s3_region: Optional[str] = None,
@@ -187,6 +190,7 @@ def update_config(
     _apply_str("s3_access_key", s3_access_key)
     _apply_str("s3_secret_key", s3_secret_key)
     _apply_int("backup_retention_days", backup_retention_days)
+    _apply_int("trash_retention_days", trash_retention_days)
     _apply_str("backup_s3_bucket", backup_s3_bucket)
     _apply_str("backup_s3_endpoint_url", backup_s3_endpoint_url)
     _apply_str("backup_s3_region", backup_s3_region)
@@ -232,6 +236,7 @@ def get_effective_config(session: Session) -> dict:
         "has_s3_access_key": bool(settings.s3_access_key),
         "has_s3_secret_key": bool(settings.s3_secret_key),
         "backup_retention_days": int(settings.backup_retention_days),
+        "trash_retention_days": int(settings.trash_retention_days),
         "backup_s3_bucket": str(settings.backup_s3_bucket),
         "backup_s3_endpoint_url": str(settings.backup_s3_endpoint_url),
         "backup_s3_region": str(settings.backup_s3_region),

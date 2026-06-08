@@ -99,6 +99,24 @@ export interface ModelListItem {
   updated_at: string;
 }
 
+export interface TrashedModelRead {
+  id: number;
+  name: string;
+  slug: string;
+  category: string | null;
+  tags: string[];
+  thumbnail_url: string | null;
+  file_count: number;
+  size_bytes: number;
+  deleted_at: string;
+  expires_at: string | null;
+}
+
+export interface TrashPurgeRead {
+  purged_model_ids: number[];
+  purged_count: number;
+}
+
 export interface StorageUsageRead {
   backend: string;
   prefix: string | null;

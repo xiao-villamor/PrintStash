@@ -7,6 +7,8 @@ export type {
   ModelPrinterFileRead,
   ModelPrinterPresenceRead,
   ModelListItem,
+  TrashedModelRead,
+  TrashPurgeRead,
   StorageUsageRead,
   VaultStatsRead,
   ModelUpdate,

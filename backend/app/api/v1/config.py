@@ -27,6 +27,7 @@ class VaultConfigRead(BaseModel):
     has_s3_access_key: bool = False
     has_s3_secret_key: bool = False
     backup_retention_days: int = 30
+    trash_retention_days: int = 30
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
     backup_s3_region: str = "auto"
@@ -49,6 +50,7 @@ class VaultConfigUpdate(BaseModel):
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
     backup_retention_days: Optional[int] = Field(default=None, ge=-1)
+    trash_retention_days: Optional[int] = Field(default=None, ge=-1)
     backup_s3_bucket: Optional[str] = None
     backup_s3_endpoint_url: Optional[str] = None
     backup_s3_region: Optional[str] = None
@@ -110,6 +112,7 @@ def update_config(
         s3_access_key=body.s3_access_key,
         s3_secret_key=body.s3_secret_key,
         backup_retention_days=body.backup_retention_days,
+        trash_retention_days=body.trash_retention_days,
         backup_s3_bucket=body.backup_s3_bucket,
         backup_s3_endpoint_url=body.backup_s3_endpoint_url,
         backup_s3_region=body.backup_s3_region,

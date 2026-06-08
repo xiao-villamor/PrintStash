@@ -64,6 +64,7 @@ class Settings(BaseSettings):
 
     backup_dir: Path = Path("/data/backups")
     backup_retention_days: int = 30
+    trash_retention_days: int = 30
 
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""

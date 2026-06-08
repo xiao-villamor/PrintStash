@@ -53,12 +53,15 @@ from app.schemas.models import (
     ModelRead,
     ModelUpdate,
     StorageUsageRead,
+    TrashPurgeRead,
+    TrashedModelRead,
     VaultStatsRead,
 )
 from app.services import storage
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
+from app.services.trash import hard_delete_expired_models, hard_delete_model, trash_expires_at
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -186,6 +189,35 @@ def _printer_presence_for(
         )
         for printer_id, printer_name, file_count in rows
     ]
+
+
+def _trashed_model_read(
+    session: Session,
+    model: Model,
+    *,
+    retention_days: int,
+) -> TrashedModelRead:
+    file_count = session.exec(
+        select(func.count(File.id)).where(File.model_id == model.id)
+    ).one()
+    size_bytes = session.exec(
+        select(func.coalesce(func.sum(File.size_bytes), 0)).where(
+            File.model_id == model.id
+        )
+    ).one()
+    assert model.deleted_at is not None
+    return TrashedModelRead(
+        id=model.id,  # type: ignore[arg-type]
+        name=model.name,
+        slug=model.slug,
+        category=_category_name_for(model),
+        tags=_tag_names_for(session, model.id),  # type: ignore[arg-type]
+        thumbnail_url=_thumb_url(model),
+        file_count=int(file_count or 0),
+        size_bytes=int(size_bytes or 0),
+        deleted_at=model.deleted_at,
+        expires_at=trash_expires_at(model.deleted_at, retention_days),
+    )
 
 
 def _normalise_profile_key(value: str | None) -> str | None:
@@ -658,6 +690,56 @@ def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
 
 
 @router.get(
+    "/trash",
+    response_model=List[TrashedModelRead],
+    dependencies=[Depends(require_auth)],
+    summary="List models in the trash",
+    description=(
+        "Returns soft-deleted models. They are hidden from normal library browse "
+        "but can be restored until they are permanently purged."
+    ),
+)
+def list_trash(
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    session: Session = Depends(get_session),
+) -> List[TrashedModelRead]:
+    rows = session.exec(
+        select(Model)
+        .where(Model.deleted_at.is_not(None))  # type: ignore[union-attr]
+        .order_by(Model.deleted_at.desc())  # type: ignore[attr-defined]
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return [
+        _trashed_model_read(
+            session,
+            model,
+            retention_days=int(settings.trash_retention_days),
+        )
+        for model in rows
+    ]
+
+
+@router.delete(
+    "/trash/expired",
+    response_model=TrashPurgeRead,
+    dependencies=[Depends(require_auth)],
+    summary="Permanently delete expired trash items",
+)
+def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRead:
+    purged_model_ids = hard_delete_expired_models(
+        session,
+        retention_days=int(settings.trash_retention_days),
+    )
+    session.commit()
+    return TrashPurgeRead(
+        purged_model_ids=purged_model_ids,
+        purged_count=len(purged_model_ids),
+    )
+
+
+@router.get(
     "/{model_id}",
     response_model=ModelRead,
     summary="Get model detail with files and metadata",
@@ -844,6 +926,42 @@ def update_file_revision(
     return _build_model_read(session, model_id)
 
 
+@router.post(
+    "/{model_id}/restore",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Restore a model from the trash",
+)
+def restore_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
+    m = session.get(Model, model_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    if m.deleted_at is not None:
+        m.deleted_at = None
+        m.deleted_by = None
+        m.updated_at = utcnow()
+        session.add(m)
+        session.commit()
+    return _build_model_read(session, model_id)
+
+
+@router.delete(
+    "/{model_id}/purge",
+    response_model=TrashPurgeRead,
+    dependencies=[Depends(require_auth)],
+    summary="Permanently delete a model from the trash",
+)
+def purge_model(model_id: int, session: Session = Depends(get_session)) -> TrashPurgeRead:
+    m = session.get(Model, model_id)
+    if m is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    if m.deleted_at is None:
+        raise HTTPException(status_code=400, detail="model_not_in_trash")
+    hard_delete_model(session, m)
+    session.commit()
+    return TrashPurgeRead(purged_model_ids=[model_id], purged_count=1)
+
+
 @router.delete(
     "/{model_id}",
     status_code=204,
@@ -858,6 +976,7 @@ def update_file_revision(
 def delete_model(model_id: int, session: Session = Depends(get_session)) -> Response:
     m = _live_model(session, model_id)
     m.deleted_at = utcnow()
+    m.updated_at = utcnow()
     session.add(m)
     session.commit()
     return Response(status_code=204)

@@ -107,6 +107,24 @@ class ModelListItem(BaseModel):
     updated_at: datetime
 
 
+class TrashedModelRead(BaseModel):
+    id: int
+    name: str
+    slug: str
+    category: Optional[str] = None
+    tags: List[str] = []
+    thumbnail_url: Optional[str] = None
+    file_count: int
+    size_bytes: int
+    deleted_at: datetime
+    expires_at: Optional[datetime] = None
+
+
+class TrashPurgeRead(BaseModel):
+    purged_model_ids: List[int] = []
+    purged_count: int = 0
+
+
 class StorageUsageRead(BaseModel):
     backend: str
     prefix: Optional[str] = None

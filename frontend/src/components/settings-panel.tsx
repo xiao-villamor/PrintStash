@@ -1,22 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   Database,
   Download,
+  Eraser,
   HardDrive,
   KeyRound,
   Copy,
+  RefreshCw,
+  RotateCcw,
   Trash2,
   Server,
   Tag,
 } from "lucide-react";
 import { StorageConfigCard } from "@/components/storage-config-card";
-import { createApiKey, downloadModelExport, getVaultStats, listApiKeys, revokeApiKey } from "@/lib/api";
+import {
+  createApiKey,
+  downloadModelExport,
+  getVaultConfig,
+  getVaultStats,
+  listApiKeys,
+  listTrash,
+  purgeExpiredTrash,
+  purgeModel,
+  restoreModel,
+  revokeApiKey,
+  updateVaultConfig,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
-import type { ApiKeyRead, VaultStatsRead } from "@/types";
+import type { ApiKeyRead, TrashedModelRead, VaultStatsRead } from "@/types";
 
 interface HealthResponse {
   status: string;
@@ -24,7 +39,7 @@ interface HealthResponse {
   version: string;
 }
 
-type SettingsSection = "overview" | "access" | "storage";
+type SettingsSection = "overview" | "access" | "storage" | "trash";
 
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
@@ -34,6 +49,7 @@ const SETTINGS_SECTIONS: {
   { id: "overview", label: "Overview", icon: Server },
   { id: "access", label: "Access", icon: KeyRound },
   { id: "storage", label: "Storage", icon: HardDrive },
+  { id: "trash", label: "Trash", icon: Trash2 },
 ];
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -43,6 +59,15 @@ function formatBytes(bytes: number | null | undefined): string {
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** exponent;
   return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`;
+}
+
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "Never";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
 }
 
 export function SettingsPanel() {
@@ -55,6 +80,10 @@ export function SettingsPanel() {
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("Programmatic access");
   const [keyBusy, setKeyBusy] = useState(false);
+  const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
+  const [trashLoading, setTrashLoading] = useState(false);
+  const [trashBusy, setTrashBusy] = useState<number | "expired" | "settings" | null>(null);
+  const [trashRetentionDays, setTrashRetentionDays] = useState(30);
 
   useEffect(() => {
     fetch("/api/v1/health")
@@ -76,6 +105,29 @@ export function SettingsPanel() {
       .then(setApiKeys)
       .catch(() => {});
   }, [user]);
+
+  const loadTrash = useCallback(async () => {
+    if (!user) {
+      setTrashItems([]);
+      return;
+    }
+    setTrashLoading(true);
+    try {
+      const [items, cfg] = await Promise.all([listTrash(), getVaultConfig()]);
+      setTrashItems(items);
+      setTrashRetentionDays(cfg.trash_retention_days ?? 30);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (activeSection === "trash") {
+      loadTrash();
+    }
+  }, [activeSection, loadTrash]);
 
   async function exportData(format: "json" | "csv") {
     setExporting(format);
@@ -119,6 +171,60 @@ export function SettingsPanel() {
     if (!newApiKey) return;
     await navigator.clipboard.writeText(newApiKey);
     toast.success("API key copied.");
+  }
+
+
+  async function saveTrashRetention() {
+    setTrashBusy("settings");
+    try {
+      await updateVaultConfig({ trash_retention_days: Math.max(-1, trashRetentionDays) });
+      toast.success("Trash retention updated.");
+      await loadTrash();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function restoreTrashItem(id: number) {
+    setTrashBusy(id);
+    try {
+      await restoreModel(id);
+      setTrashItems((current) => current.filter((item) => item.id !== id));
+      toast.success("Model restored.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function purgeTrashItem(id: number) {
+    if (!window.confirm("Permanently delete this model and its files?")) return;
+    setTrashBusy(id);
+    try {
+      await purgeModel(id);
+      setTrashItems((current) => current.filter((item) => item.id !== id));
+      toast.success("Model permanently deleted.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function purgeExpiredItems() {
+    setTrashBusy("expired");
+    try {
+      const result = await purgeExpiredTrash();
+      toast.success(`${result.purged_count} expired model${result.purged_count === 1 ? "" : "s"} deleted.`);
+      await loadTrash();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
   }
 
   const statItems = [
@@ -377,6 +483,135 @@ export function SettingsPanel() {
       {activeSection === "storage" && (
         <div className="max-w-3xl">
           <StorageConfigCard />
+        </div>
+      )}
+
+      {activeSection === "trash" && (
+        <div className="max-w-5xl space-y-4 sm:space-y-6">
+          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                  Trash retention
+                </h3>
+                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  Soft-deleted models stay restorable until the retention window expires.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadTrash}
+                disabled={trashLoading}
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] disabled:opacity-50"
+                title="Refresh trash"
+              >
+                <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 lg:p-6 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
+              <label className="block">
+                <span className="block text-[11px] text-[var(--on-surface-variant)] mb-1">
+                  Days
+                </span>
+                <input
+                  type="number"
+                  min={-1}
+                  value={trashRetentionDays}
+                  onChange={(event) => setTrashRetentionDays(Number(event.target.value))}
+                  disabled={!user || trashBusy === "settings"}
+                  className="w-full px-2.5 py-2 text-sm rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] text-[var(--on-surface)] disabled:opacity-50"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={saveTrashRetention}
+                disabled={!user || trashBusy === "settings"}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {trashBusy === "settings" ? "Saving" : "Save retention"}
+              </button>
+              <button
+                type="button"
+                onClick={purgeExpiredItems}
+                disabled={!user || trashBusy === "expired" || trashRetentionDays < 0}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Eraser className="h-3.5 w-3.5" />
+                {trashBusy === "expired" ? "Purging" : "Purge expired"}
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)]">
+              <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                Deleted models
+              </h3>
+              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                Restore models or remove them permanently from storage.
+              </p>
+            </div>
+            <div className="divide-y divide-[var(--surface-variant)]">
+              {!user ? (
+                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                  Sign in to manage the trash.
+                </p>
+              ) : trashLoading ? (
+                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                  Loading...
+                </p>
+              ) : trashItems.length === 0 ? (
+                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                  Trash is empty.
+                </p>
+              ) : (
+                trashItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[1fr_auto] lg:items-center"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-medium text-[var(--on-surface)]">
+                          {item.name}
+                        </p>
+                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)]">
+                          {item.file_count} files
+                        </span>
+                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)]">
+                          {formatBytes(item.size_bytes)}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+                        Deleted {formatDate(item.deleted_at)} · Expires {formatDate(item.expires_at)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <button
+                        type="button"
+                        onClick={() => restoreTrashItem(item.id)}
+                        disabled={trashBusy !== null}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Restore
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => purgeTrashItem(item.id)}
+                        disabled={trashBusy !== null}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
 

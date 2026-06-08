@@ -383,6 +383,7 @@ class SystemConfig(SQLModel, table=True):
 
     # Backup
     backup_retention_days: Optional[int] = Field(default=None)
+    trash_retention_days: Optional[int] = Field(default=None)
 
     # Backup S3 destination (separate from vault S3 — allows local vault + cloud backups)
     backup_s3_bucket: Optional[str] = Field(default=None, max_length=256)

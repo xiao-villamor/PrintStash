@@ -144,6 +144,8 @@ def run_ingestion_pipeline(
                 )
             else:
                 model = existing
+                model.deleted_at = None
+                model.deleted_by = None
                 model.updated_at = utcnow()
                 session.add(model)
                 session.commit()
