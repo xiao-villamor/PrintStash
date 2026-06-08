@@ -120,6 +120,19 @@ const filamentProfiles = [
   },
 ];
 
+const printerProfiles = [
+  {
+    id: 1,
+    name: "Creality Ender-3 V3 SE",
+    printer_model: "Creality Ender-3 V3 SE",
+    slicer_name: "OrcaSlicer",
+    nozzle_diameter_mm: 0.4,
+    notes: null,
+    created_at: now,
+    updated_at: now,
+  },
+];
+
 const printerDiagnostics = {
   printer_id: printer.id,
   provider: printer.provider,
@@ -276,6 +289,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/filament-profiles") {
     sendJson(res, filamentProfiles);
+    return;
+  }
+  if (url.pathname === "/api/v1/printer-profiles") {
+    sendJson(res, printerProfiles);
     return;
   }
   if (url.pathname === "/api/v1/printers") {

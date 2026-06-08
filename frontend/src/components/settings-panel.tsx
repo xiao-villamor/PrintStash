@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import {
   Activity,
   Database,
-  DollarSign,
   Download,
   HardDrive,
   KeyRound,
@@ -13,7 +12,6 @@ import {
   Server,
   Tag,
 } from "lucide-react";
-import { FilamentProfilesCard } from "@/components/filament-profiles-card";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import { createApiKey, downloadModelExport, getVaultStats, listApiKeys, revokeApiKey } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -26,7 +24,7 @@ interface HealthResponse {
   version: string;
 }
 
-type SettingsSection = "overview" | "access" | "storage" | "filaments";
+type SettingsSection = "overview" | "access" | "storage";
 
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
@@ -36,7 +34,6 @@ const SETTINGS_SECTIONS: {
   { id: "overview", label: "Overview", icon: Server },
   { id: "access", label: "Access", icon: KeyRound },
   { id: "storage", label: "Storage", icon: HardDrive },
-  { id: "filaments", label: "Filaments", icon: DollarSign },
 ];
 
 function formatBytes(bytes: number | null | undefined): string {
@@ -383,11 +380,6 @@ export function SettingsPanel() {
         </div>
       )}
 
-      {activeSection === "filaments" && (
-        <div className="max-w-5xl">
-          <FilamentProfilesCard />
-        </div>
-      )}
     </div>
   );
 }

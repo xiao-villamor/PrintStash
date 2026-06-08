@@ -22,6 +22,7 @@ from app.db.session import SessionFactory
 from app.services import gcode_parser, storage, taxonomy, thumbnail
 from app.services.hashing import sha256_file
 from app.services.jobs import registry
+from app.services.profile_detection import upsert_detected_profiles
 from app.services.storage_backend import get_backend
 
 logger = get_logger(__name__)
@@ -187,6 +188,7 @@ def run_ingestion_pipeline(
             md = Metadata(file_id=file_row.id, **meta)
             session.add(md)
             session.commit()
+            upsert_detected_profiles(session, meta)
 
             registry.update(
                 job_id,

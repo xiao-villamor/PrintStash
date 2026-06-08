@@ -128,6 +128,22 @@ class FilamentProfile(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class PrinterProfile(SQLModel, table=True):
+    """Local slicer printer preset detected from uploaded jobs."""
+
+    __tablename__ = "printer_profiles"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=128, unique=True, index=True)
+    printer_model: Optional[str] = Field(default=None, max_length=128, index=True)
+    slicer_name: Optional[str] = Field(default=None, max_length=64, index=True)
+    nozzle_diameter_mm: Optional[float] = None
+    notes: Optional[str] = None
+
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class File(SQLModel, table=True):
     """Physical artifact stored on disk; many-to-one with Model."""
 

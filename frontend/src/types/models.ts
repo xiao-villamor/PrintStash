@@ -199,6 +199,33 @@ export interface FilamentProfileUpdate {
   notes?: string | null;
 }
 
+export interface PrinterProfileRead {
+  id: number;
+  name: string;
+  printer_model: string | null;
+  slicer_name: string | null;
+  nozzle_diameter_mm: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PrinterProfileCreate {
+  name: string;
+  printer_model?: string | null;
+  slicer_name?: string | null;
+  nozzle_diameter_mm?: number | null;
+  notes?: string | null;
+}
+
+export interface PrinterProfileUpdate {
+  name?: string;
+  printer_model?: string | null;
+  slicer_name?: string | null;
+  nozzle_diameter_mm?: number | null;
+  notes?: string | null;
+}
+
 export interface TagRead {
   id: number;
   name: string;

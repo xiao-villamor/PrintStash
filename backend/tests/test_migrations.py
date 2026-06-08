@@ -23,6 +23,7 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     assert "files" in tables
     assert "print_jobs" in tables
     assert "refresh_tokens" in tables
+    assert "printer_profiles" in tables
 
     files_columns = {col["name"]: col for col in inspector.get_columns("files")}
     assert "revision_label" in files_columns

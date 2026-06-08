@@ -41,6 +41,7 @@ _TRUNCATE_TABLES_ORDER = [
     "printer_files",
     "print_jobs",
     "printers",
+    "printer_profiles",
     "filament_profiles",
     "files",
     "model_tags",

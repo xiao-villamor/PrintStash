@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
-from app.db.models import File, FileType, Metadata, Model
+from app.db.models import (
+    File,
+    FileType,
+    FilamentProfile,
+    Metadata,
+    Model,
+    PrinterProfile,
+)
 from app.services.storage_backend import get_backend
 
 
@@ -167,6 +174,18 @@ def test_ingest_orca_gcode_creates_db_blob_and_thumbnail(
     assert thumbnail.status_code == 200, thumbnail.text
     assert thumbnail.content.startswith(PNG_MAGIC)
 
+    filament_profile = db_session.exec(
+        select(FilamentProfile).where(FilamentProfile.name == "Generic PLA")
+    ).one()
+    assert filament_profile.material_type == "PLA"
+    assert filament_profile.cost_per_kg == 28
+
+    printer_profile = db_session.exec(
+        select(PrinterProfile).where(PrinterProfile.name == "Ender-3 V3 SE")
+    ).one()
+    assert printer_profile.slicer_name == "OrcaSlicer"
+    assert printer_profile.nozzle_diameter_mm == 0.4
+
 
 def test_ingest_orca_stages_upload_in_threadpool(
     tmp_path: Path,
@@ -223,6 +242,48 @@ def test_ingest_stl_creates_db_blob_and_thumbnail(
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text
     assert thumbnail.content.startswith(PNG_MAGIC)
+
+
+def test_reuploading_deleted_model_restores_it(
+    tmp_path: Path,
+    client: TestClient,
+    db_session: Session,
+    auth_headers: dict[str, str],
+) -> None:
+    _configure_storage(tmp_path)
+
+    first = _completed_job(
+        client,
+        client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("cube.stl", _cube_stl(), "application/sla")},
+            data={"model_name": "Cube"},
+        ),
+    )
+    model_id = first["model_id"]
+
+    delete = client.delete(f"/api/v1/models/{model_id}", headers=auth_headers)
+    assert delete.status_code == 204
+    assert client.get(f"/api/v1/models/{model_id}").status_code == 404
+
+    second = _completed_job(
+        client,
+        client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("cube.stl", _cube_stl(), "application/sla")},
+            data={"model_name": "Cube"},
+        ),
+    )
+
+    assert second["model_id"] == model_id
+    model = db_session.get(Model, model_id)
+    assert model is not None
+    assert model.deleted_at is None
+    detail = client.get(f"/api/v1/models/{model_id}")
+    assert detail.status_code == 200, detail.text
+    assert len(detail.json()["files"]) == 2
 
 
 def test_force_rebuild_refreshes_existing_mesh_thumbnail(

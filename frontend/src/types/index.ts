@@ -20,6 +20,9 @@ export type {
   FilamentProfileRead,
   FilamentProfileCreate,
   FilamentProfileUpdate,
+  PrinterProfileRead,
+  PrinterProfileCreate,
+  PrinterProfileUpdate,
 } from "./models";
 
 export type {

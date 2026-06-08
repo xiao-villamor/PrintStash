@@ -5,7 +5,17 @@ from sqlmodel import Session, select
 
 from app.core.security import require_superuser
 from app.core.time import utcnow
-from app.db.models import AuditLog, Category, File, Model, PrintJob, Printer, Tag, User
+from app.db.models import (
+    AuditLog,
+    Category,
+    File,
+    Model,
+    PrintJob,
+    Printer,
+    PrinterProfile,
+    Tag,
+    User,
+)
 from app.db.session import get_session
 from app.services.lifecycle import gc_soft_deleted
 from app.services.storage_backend import get_backend
@@ -16,6 +26,7 @@ _RESOURCE_MODEL = {
     "models": Model,
     "files": File,
     "printers": Printer,
+    "printer_profiles": PrinterProfile,
     "print_jobs": PrintJob,
     "users": User,
     "tags": Tag,

@@ -75,6 +75,22 @@ test("printer list route loads configured printers through the frontend proxy", 
   expect(problems).toEqual([]);
 });
 
+test("profiles route renders detected filament and printer presets", async ({ page }) => {
+  const problems = await collectPageProblems(page);
+
+  await page.goto("/profiles");
+
+  await expect(page.getByRole("heading", { name: "Profiles" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Filament presets" })).toBeVisible();
+  await expect(page.getByLabel("Filament preset name 1")).toHaveValue("Generic PLA");
+  await expect(page.getByLabel("Filament brand 1")).toHaveValue("Generic");
+  await expect(page.getByRole("heading", { name: "Printer presets" })).toBeVisible();
+  await expect(page.getByLabel("Printer preset name 1")).toHaveValue("Creality Ender-3 V3 SE");
+  await expect(page.getByText("Failed to fetch")).toHaveCount(0);
+  await expect(page.getByText("This page could not be found")).toHaveCount(0);
+  expect(problems).toEqual([]);
+});
+
 test("printer detail route preserves the dynamic id and renders live status", async ({ page }) => {
   const problems = await collectPageProblems(page);
 

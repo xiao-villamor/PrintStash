@@ -193,3 +193,31 @@ class FilamentProfileRead(FilamentProfileBase):
     id: int
     created_at: datetime
     updated_at: datetime
+
+
+class PrinterProfileBase(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    printer_model: Optional[str] = Field(default=None, max_length=128)
+    slicer_name: Optional[str] = Field(default=None, max_length=64)
+    nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+
+
+class PrinterProfileCreate(PrinterProfileBase):
+    model_config = ConfigDict(extra="forbid")
+
+
+class PrinterProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    printer_model: Optional[str] = Field(default=None, max_length=128)
+    slicer_name: Optional[str] = Field(default=None, max_length=64)
+    nozzle_diameter_mm: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=4096)
+
+
+class PrinterProfileRead(PrinterProfileBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
