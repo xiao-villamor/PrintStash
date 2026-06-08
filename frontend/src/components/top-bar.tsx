@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Bell, CheckCircle2, HelpCircle, Loader2, Search, XCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -16,15 +16,43 @@ function TopBarSearch() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const q = searchParams.get("q") ?? "";
+  const [value, setValue] = useState(q);
+  const [, startTransition] = useTransition();
 
-  function setSearch(value: string) {
+  useEffect(() => {
+    setValue(q);
+  }, [q]);
+
+  useEffect(() => {
+    if (pathname !== "/") return;
+    const handle = window.setTimeout(() => {
+      const next = value.trim();
+      if (next === q) return;
+      const params = new URLSearchParams(searchParams.toString());
+      if (next) {
+        params.set("q", next);
+      } else {
+        params.delete("q");
+      }
+      const queryString = params.toString();
+      startTransition(() => {
+        router.replace(queryString ? `/?${queryString}` : "/", { scroll: false });
+      });
+    }, 250);
+
+    return () => window.clearTimeout(handle);
+  }, [pathname, q, router, searchParams, startTransition, value]);
+
+  function clearSearch() {
+    setValue("");
     const params = new URLSearchParams(searchParams.toString());
-    if (value.trim()) {
-      params.set("q", value.trim());
+    params.delete("q");
+    const queryString = params.toString();
+    if (queryString) {
+      router.replace(`/?${queryString}`, { scroll: false });
     } else {
-      params.delete("q");
+      router.replace("/", { scroll: false });
     }
-    router.replace(`/?${params.toString()}`, { scroll: false });
   }
 
   if (pathname !== "/") return <span className="flex-1" />;
@@ -34,12 +62,23 @@ function TopBarSearch() {
       <div className="relative w-full max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--on-surface-variant)]" />
         <input
-          className="w-full h-9 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-shadow placeholder:text-[var(--on-surface-variant)]/50"
+          className="w-full h-9 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded pl-10 pr-10 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent transition-shadow placeholder:text-[var(--on-surface-variant)]/50"
           placeholder="Search models..."
           type="text"
-          value={q}
-          onChange={(e) => setSearch(e.target.value)}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
         />
+        {value && (
+          <button
+            type="button"
+            onClick={clearSearch}
+            className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)] hover:text-[var(--on-surface)]"
+            aria-label="Clear search"
+            title="Clear search"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );

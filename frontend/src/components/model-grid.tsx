@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CategoryRead, ModelListItem, PrinterRead, TagRead } from "@/types";
 import { ModelCard } from "@/components/model-card";
@@ -92,11 +92,13 @@ export function ModelBrowser() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [facetsLoading, setFacetsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const hasLoadedModels = useRef(false);
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
 
   // Allow navigation shortcuts to deep-link the modal open.
@@ -142,7 +144,11 @@ export function ModelBrowser() {
   useEffect(() => {
     let alive = true;
     const handle = setTimeout(async () => {
-      setLoading(true);
+      if (hasLoadedModels.current) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
       try {
         const data = await listModels({
           limit: PAGE_SIZE,
@@ -157,10 +163,14 @@ export function ModelBrowser() {
         setModels(data);
         setHasMore(data.length === PAGE_SIZE);
         setError(null);
+        hasLoadedModels.current = true;
       } catch (e: any) {
         if (alive) setError(e.message);
       } finally {
-        if (alive) setLoading(false);
+        if (alive) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }, 200);
     return () => {
@@ -254,6 +264,11 @@ export function ModelBrowser() {
                   {!loading && (
                     <span className="ml-2 text-sm font-normal text-[var(--on-surface-variant)] font-mono">
                       ({models.length} models)
+                    </span>
+                  )}
+                  {refreshing && (
+                    <span className="ml-2 text-xs font-normal text-[var(--on-surface-variant)] font-mono">
+                      Updating...
                     </span>
                   )}
                 </h2>
