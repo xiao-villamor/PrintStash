@@ -1,16 +1,16 @@
 import { getJson, sendAction, sendJson } from "@/lib/api/request";
-import { CategoryCreate, CategoryRead, TagCreate, TagRead } from "@/types";
+import { CollectionCreate, CollectionRead, TagCreate, TagRead } from "@/types";
 
-export function listCategories(): Promise<CategoryRead[]> {
-  return getJson<CategoryRead[]>("/api/v1/categories");
+export function listCollections(): Promise<CollectionRead[]> {
+  return getJson<CollectionRead[]>("/api/v1/collections");
 }
 
-export function createCategory(payload: CategoryCreate): Promise<CategoryRead> {
-  return sendJson<CategoryRead>("/api/v1/categories", "POST", payload);
+export function createCollection(payload: CollectionCreate): Promise<CollectionRead> {
+  return sendJson<CollectionRead>("/api/v1/collections", "POST", payload);
 }
 
-export function deleteCategory(id: number): Promise<void> {
-  return sendAction(`/api/v1/categories/${id}`, "DELETE");
+export function deleteCollection(id: number): Promise<void> {
+  return sendAction(`/api/v1/collections/${id}`, "DELETE");
 }
 
 export function listTags(): Promise<TagRead[]> {

@@ -53,17 +53,17 @@ def _next_version_for_model(session: Session, model_id: int) -> int:
 def _apply_taxonomy(
     session: Session,
     model: Model,
-    category: Optional[str],
+    collection: Optional[str],
     tags_raw: Optional[str],
     *,
-    overwrite_category: bool = False,
+    overwrite_collection: bool = False,
 ) -> None:
-    """Resolve & attach category + tags. Idempotent."""
-    if category:
-        cat = taxonomy.resolve_or_create_category(session, category)
+    """Resolve & attach collection + tags. Idempotent."""
+    if collection:
+        cat = taxonomy.resolve_or_create_collection(session, collection)
         if cat is not None:
-            if overwrite_category or model.category_id is None:
-                model.category_id = cat.id
+            if overwrite_collection or model.collection_id is None:
+                model.collection_id = cat.id
             session.add(model)
             session.commit()
 
@@ -89,7 +89,7 @@ def run_ingestion_pipeline(
     staged_path: Path,
     original_filename: str,
     model_name: str,
-    category: Optional[str],
+    collection: Optional[str],
     tags: Optional[str],
     source_hash: Optional[str],
     strategy: IngestionStrategy,
@@ -144,6 +144,8 @@ def run_ingestion_pipeline(
                 )
             else:
                 model = existing
+                model.deleted_at = None
+                model.deleted_by = None
                 model.updated_at = utcnow()
                 session.add(model)
                 session.commit()
@@ -152,7 +154,7 @@ def run_ingestion_pipeline(
 
             assert model.id is not None
 
-            _apply_taxonomy(session, model, category, tags)
+            _apply_taxonomy(session, model, collection, tags)
 
             version = _next_version_for_model(session, model.id)
             dest_key = storage.canonical_blob_path(
@@ -243,7 +245,7 @@ def ingest_orca_gcode(
     staged_path: Path,
     original_filename: str,
     model_name: str,
-    category: Optional[str],
+    collection: Optional[str],
     tags: Optional[str],
     source_hash: Optional[str],
     session_factory: SessionFactory | None = None,
@@ -254,7 +256,7 @@ def ingest_orca_gcode(
         staged_path=staged_path,
         original_filename=original_filename,
         model_name=model_name,
-        category=category,
+        collection=collection,
         tags=tags,
         source_hash=source_hash,
         strategy=_gcode_strategy(),
@@ -268,7 +270,7 @@ def ingest_mesh(
     staged_path: Path,
     original_filename: str,
     model_name: str,
-    category: Optional[str],
+    collection: Optional[str],
     tags: Optional[str],
     file_type: FileType,
     source_hash: Optional[str],
@@ -280,7 +282,7 @@ def ingest_mesh(
         staged_path=staged_path,
         original_filename=original_filename,
         model_name=model_name,
-        category=category,
+        collection=collection,
         tags=tags,
         source_hash=source_hash,
         strategy=_mesh_strategy(file_type),

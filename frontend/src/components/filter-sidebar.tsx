@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CategoryRead, PrinterRead, TagRead } from "@/types";
+import { CollectionRead, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ChevronRight, Search, X } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen, Search, X } from "lucide-react";
 
-interface CategoryNode {
-  cat: CategoryRead;
-  children: CategoryNode[];
+interface CollectionNode {
+  cat: CollectionRead;
+  children: CollectionNode[];
 }
 
-function buildTree(cats: CategoryRead[]): CategoryNode[] {
-  const byId = new Map<number, CategoryNode>();
+function buildTree(cats: CollectionRead[]): CollectionNode[] {
+  const byId = new Map<number, CollectionNode>();
   for (const c of cats) byId.set(c.id, { cat: c, children: [] });
-  const roots: CategoryNode[] = [];
+  const roots: CollectionNode[] = [];
   for (const node of byId.values()) {
     if (node.cat.parent_id == null) {
       roots.push(node);
@@ -23,7 +23,7 @@ function buildTree(cats: CategoryRead[]): CategoryNode[] {
       else roots.push(node);
     }
   }
-  const sortRec = (nodes: CategoryNode[]) => {
+  const sortRec = (nodes: CollectionNode[]) => {
     nodes.sort((a, b) => a.cat.name.localeCompare(b.cat.name));
     nodes.forEach((n) => sortRec(n.children));
   };
@@ -31,7 +31,7 @@ function buildTree(cats: CategoryRead[]): CategoryNode[] {
   return roots;
 }
 
-function CategoryNodeRow({
+function CollectionNodeRow({
   node,
   depth,
   selected,
@@ -39,7 +39,7 @@ function CategoryNodeRow({
   expanded,
   toggle,
 }: {
-  node: CategoryNode;
+  node: CollectionNode;
   depth: number;
   selected: string | null;
   onSelect: (path: string | null) => void;
@@ -53,12 +53,12 @@ function CategoryNodeRow({
   return (
     <div>
       <div
-        className={`flex items-center justify-between rounded-lg py-1.5 cursor-pointer transition-colors ${
+        className={`group/row flex items-center justify-between rounded py-1 cursor-pointer transition-colors ${
           isSelected
-            ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
+            ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
             : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
         }`}
-        style={{ paddingLeft: `${depth * 12 + 12}px`, paddingRight: "4px" }}
+        style={{ paddingLeft: `${depth * 14 + 6}px`, paddingRight: "4px" }}
       >
         <div className="flex items-center gap-1 flex-1 min-w-0">
           {hasChildren ? (
@@ -69,7 +69,7 @@ function CategoryNodeRow({
               aria-label={isOpen ? "Collapse" : "Expand"}
             >
               <ChevronRight
-                className={`h-3 w-3 transition-transform ${
+                className={`h-3.5 w-3.5 transition-transform ${
                   isOpen ? "rotate-90" : ""
                 }`}
               />
@@ -83,7 +83,14 @@ function CategoryNodeRow({
             className="flex flex-1 items-center justify-between gap-2 truncate text-left font-mono text-[13px]"
             title={node.cat.path}
           >
-            <span className="truncate">{node.cat.name}</span>
+            <span className="flex min-w-0 items-center gap-1.5 truncate">
+              {isOpen || isSelected ? (
+                <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-[var(--primary)]" />
+              ) : (
+                <Folder className="h-3.5 w-3.5 flex-shrink-0" />
+              )}
+              <span className="truncate">{node.cat.name}</span>
+            </span>
           </button>
         </div>
         <span className="bg-[var(--surface-container)] px-1 rounded text-[10px] font-mono text-[var(--on-surface-variant)] mr-1">
@@ -92,7 +99,7 @@ function CategoryNodeRow({
       </div>
       {isOpen &&
         node.children.map((child) => (
-          <CategoryNodeRow
+          <CollectionNodeRow
             key={child.cat.id}
             node={child}
             depth={depth + 1}
@@ -107,20 +114,20 @@ function CategoryNodeRow({
 }
 
 export function FilterSidebarContent({
-  categories,
+  collections,
   tags,
   printers,
-  selectedCategory,
+  selectedCollection,
   selectedTags,
   selectedPrinterId,
   selectedPrinterPresence,
-  onCategoryChange,
+  onCollectionChange,
   onTagsChange,
   onPrinterChange,
   onPrinterPresenceChange,
   loading,
 }: FilterSidebarProps) {
-  const tree = useMemo(() => buildTree(categories), [categories]);
+  const tree = useMemo(() => buildTree(collections), [collections]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [tagFilter, setTagFilter] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
@@ -140,8 +147,8 @@ export function FilterSidebarContent({
   const hiddenCount = filteredTags.length - 10;
 
   useEffect(() => {
-    if (!selectedCategory) return;
-    const parts = selectedCategory.split("/");
+    if (!selectedCollection) return;
+    const parts = selectedCollection.split("/");
     const ancestors = new Set<string>();
     for (let i = 1; i < parts.length; i++) {
       ancestors.add(parts.slice(0, i).join("/"));
@@ -151,7 +158,7 @@ export function FilterSidebarContent({
       ancestors.forEach((a) => next.add(a));
       return next;
     });
-  }, [selectedCategory]);
+  }, [selectedCollection]);
 
   function toggleTag(slug: string) {
     if (selectedTags.includes(slug)) {
@@ -183,35 +190,38 @@ export function FilterSidebarContent({
 
   return (
     <div className="p-4 flex flex-col gap-5">
-      {/* Categories */}
+      {/* Collections */}
       <div>
         <h3 className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
-          Categories
+          Collections
         </h3>
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-0.5 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-1">
           <button
             type="button"
-            onClick={() => onCategoryChange(null)}
-            className={`flex items-center justify-between px-3 py-1.5 rounded-lg font-mono text-[13px] transition-colors ${
-              selectedCategory === null
+            onClick={() => onCollectionChange(null)}
+            className={`flex items-center justify-between px-2 py-1.5 rounded font-mono text-[13px] transition-colors ${
+              selectedCollection === null
                 ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)] font-medium"
                 : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
             }`}
           >
-            <span>All Models</span>
+            <span className="flex items-center gap-1.5">
+              <FolderOpen className="h-3.5 w-3.5 text-[var(--primary)]" />
+              All Models
+            </span>
           </button>
           {tree.length === 0 ? (
             <p className="px-3 py-2 text-[11px] text-[var(--on-surface-variant)] font-mono">
-              No categories yet.
+              No collections yet.
             </p>
           ) : (
             tree.map((node) => (
-              <CategoryNodeRow
+              <CollectionNodeRow
                 key={node.cat.id}
                 node={node}
                 depth={0}
-                selected={selectedCategory}
-                onSelect={onCategoryChange}
+                selected={selectedCollection}
+                onSelect={onCollectionChange}
                 expanded={expanded}
                 toggle={toggleExpanded}
               />
@@ -369,14 +379,14 @@ export function FilterSidebarContent({
 }
 
 export interface FilterSidebarProps {
-  categories: CategoryRead[];
+  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
-  selectedCategory: string | null;
+  selectedCollection: string | null;
   selectedTags: string[];
   selectedPrinterId: number | null;
   selectedPrinterPresence: "any" | "none" | null;
-  onCategoryChange: (path: string | null) => void;
+  onCollectionChange: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;

@@ -3,6 +3,7 @@ import {
   expectOk,
   getJson,
   getUrl,
+  handleResponse,
   sendAction,
   sendForm,
   sendJson,
@@ -16,6 +17,8 @@ import {
   ModelPrinterFileRead,
   ModelRead,
   ModelUpdate,
+  TrashPurgeRead,
+  TrashedModelRead,
   VaultStatsRead,
 } from "@/types";
 
@@ -23,7 +26,7 @@ export async function listModels(
   params?: ListModelsParams,
 ): Promise<ModelListItem[]> {
   const search = new URLSearchParams();
-  if (params?.category) search.set("category", params.category);
+  if (params?.collection) search.set("collection", params.collection);
   if (params?.q) search.set("q", params.q);
   if (params?.limit) search.set("limit", String(params.limit));
   if (params?.offset) search.set("offset", String(params.offset));
@@ -78,6 +81,30 @@ export function updateModel(
 
 export function deleteModel(id: number): Promise<void> {
   return sendAction(`/api/v1/models/${id}`, "DELETE");
+}
+
+export function listTrash(): Promise<TrashedModelRead[]> {
+  return getJson<TrashedModelRead[]>("/api/v1/models/trash");
+}
+
+export function restoreModel(id: number): Promise<ModelRead> {
+  return sendJson<ModelRead>(`/api/v1/models/${id}/restore`, "POST", {});
+}
+
+export async function purgeModel(id: number): Promise<TrashPurgeRead> {
+  const res = await fetch(getUrl(`/api/v1/models/${id}/purge`), {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return handleResponse<TrashPurgeRead>(res);
+}
+
+export async function purgeExpiredTrash(): Promise<TrashPurgeRead> {
+  const res = await fetch(getUrl("/api/v1/models/trash/expired"), {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return handleResponse<TrashPurgeRead>(res);
 }
 
 export function updateFileRevision(

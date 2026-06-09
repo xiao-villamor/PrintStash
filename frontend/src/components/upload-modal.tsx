@@ -15,13 +15,13 @@ import {
   getModel,
   ingestModel,
   ingestOrca,
-  listCategories,
+  listCollections,
   listTags,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { CategoryRead, IngestJobStatus, TagRead } from "@/types";
+import { CollectionRead, IngestJobStatus, TagRead } from "@/types";
 
 const MESH_EXT = new Set([".stl", ".3mf", ".obj"]);
 const GCODE_EXT = new Set([".gcode", ".g", ".gco"]);
@@ -69,17 +69,17 @@ export function UploadModal({
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState("");
-  const [categoryPath, setCategoryPath] = useState("");
+  const [collectionPath, setCollectionPath] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [categories, setCategories] = useState<CategoryRead[]>([]);
+  const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [catOpen, setCatOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    listCategories().then(setCategories).catch(() => {});
+    listCollections().then(setCollections).catch(() => {});
     listTags().then(setTags).catch(() => {});
   }, [open]);
 
@@ -134,7 +134,7 @@ export function UploadModal({
     setMeshFile(null);
     setGcodeFile(null);
     setModelName("");
-    setCategoryPath("");
+    setCollectionPath("");
     setSelectedTags([]);
     setTagInput("");
     setSubmitting(false);
@@ -210,14 +210,14 @@ export function UploadModal({
     mesh,
     gcode,
     name,
-    category,
+    collection,
     tagsForUpload,
   }: {
     taskId: string;
     mesh: File | null;
     gcode: File | null;
     name: string;
-    category: string;
+    collection: string;
     tagsForUpload: string[];
   }) {
     try {
@@ -230,7 +230,7 @@ export function UploadModal({
         const meshFd = new FormData();
         meshFd.append("file", mesh);
         meshFd.append("model_name", name || mesh.name);
-        if (category) meshFd.append("category", category);
+        if (collection) meshFd.append("collection", collection);
         if (tagsForUpload.length) meshFd.append("tags", tagsForUpload.join(","));
         const meshRes = await ingestModel(meshFd);
 
@@ -266,7 +266,7 @@ export function UploadModal({
         const gcodeFd = new FormData();
         gcodeFd.append("file", gcode);
         gcodeFd.append("model_name", name || gcode.name);
-        if (category) gcodeFd.append("category", category);
+        if (collection) gcodeFd.append("collection", collection);
         if (tagsForUpload.length) gcodeFd.append("tags", tagsForUpload.join(","));
         gcodeFd.append("source_hash", full.hash);
         const gcodeRes = await ingestOrca(gcodeFd);
@@ -291,7 +291,7 @@ export function UploadModal({
         const fd = new FormData();
         fd.append("file", gcode);
         fd.append("model_name", name || gcode.name);
-        if (category) fd.append("category", category);
+        if (collection) fd.append("collection", collection);
         if (tagsForUpload.length) fd.append("tags", tagsForUpload.join(","));
         const res = await ingestOrca(fd);
         await pollJob(res.job_id, taskId, {
@@ -334,7 +334,7 @@ export function UploadModal({
       mesh: meshFile,
       gcode: gcodeFile,
       name: modelName,
-      category: categoryPath,
+      collection: collectionPath,
       tagsForUpload: [...selectedTags],
     });
     reset();
@@ -454,10 +454,10 @@ export function UploadModal({
                 />
               </div>
 
-              {/* Category */}
+              {/* Collection */}
               <div>
                 <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
-                  Category
+                  Collection
                 </label>
                 <div className="relative">
                   <button
@@ -467,12 +467,12 @@ export function UploadModal({
                   >
                     <span
                       className={
-                        categoryPath
+                        collectionPath
                           ? ""
                           : "text-[var(--on-surface-variant)]/60"
                       }
                     >
-                      {categoryPath || "None"}
+                      {collectionPath || "None"}
                     </span>
                     <ChevronDown className="h-4 w-4 text-[var(--on-surface-variant)]" />
                   </button>
@@ -486,28 +486,28 @@ export function UploadModal({
                         <button
                           type="button"
                           onClick={() => {
-                            setCategoryPath("");
+                            setCollectionPath("");
                             setCatOpen(false);
                           }}
                           className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
                         >
                           None
                         </button>
-                        {categories.length === 0 ? (
+                        {collections.length === 0 ? (
                           <div className="px-3 py-2 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
-                            No categories yet. Create one in Settings.
+                            No collections yet. Create one in Settings.
                           </div>
                         ) : (
-                          categories.map((c) => (
+                          collections.map((c) => (
                             <button
                               key={c.id}
                               type="button"
                               onClick={() => {
-                                setCategoryPath(c.path);
+                                setCollectionPath(c.path);
                                 setCatOpen(false);
                               }}
                               className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                                categoryPath === c.path
+                                collectionPath === c.path
                                   ? "text-[var(--primary)] bg-[var(--secondary-container)]"
                                   : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
                               }`}

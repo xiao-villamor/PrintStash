@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import timedelta
 from typing import Any, Callable
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
+from app.core.time import utcnow
 from app.db.models import (
     File,
     FileType,
@@ -284,6 +286,121 @@ def test_reuploading_deleted_model_restores_it(
     detail = client.get(f"/api/v1/models/{model_id}")
     assert detail.status_code == 200, detail.text
     assert len(detail.json()["files"]) == 2
+
+
+def test_trash_can_restore_and_purge_model(
+    tmp_path: Path,
+    client: TestClient,
+    db_session: Session,
+    auth_headers: dict[str, str],
+) -> None:
+    _configure_storage(tmp_path)
+
+    payload = _completed_job(
+        client,
+        client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("cube.stl", _cube_stl(), "application/sla")},
+            data={"model_name": "Cube"},
+        ),
+    )
+    model_id = payload["model_id"]
+    file_row = db_session.get(File, payload["file_id"])
+    assert file_row is not None
+    blob_path = file_row.path
+    thumb_path = get_backend().thumbnail_key(file_row.id)
+
+    delete = client.delete(f"/api/v1/models/{model_id}", headers=auth_headers)
+    assert delete.status_code == 204
+
+    trash = client.get("/api/v1/models/trash", headers=auth_headers)
+    assert trash.status_code == 200, trash.text
+    assert trash.json()[0]["id"] == model_id
+    assert trash.json()[0]["file_count"] == 1
+    assert trash.json()[0]["expires_at"] is not None
+
+    restored = client.post(f"/api/v1/models/{model_id}/restore", headers=auth_headers)
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["id"] == model_id
+    assert client.get("/api/v1/models/trash", headers=auth_headers).json() == []
+
+    delete = client.delete(f"/api/v1/models/{model_id}", headers=auth_headers)
+    assert delete.status_code == 204
+    purged = client.delete(f"/api/v1/models/{model_id}/purge", headers=auth_headers)
+    assert purged.status_code == 200, purged.text
+    assert purged.json() == {"purged_model_ids": [model_id], "purged_count": 1}
+    db_session.expire_all()
+    assert db_session.get(Model, model_id) is None
+    assert db_session.get(File, payload["file_id"]) is None
+    assert not get_backend().exists(blob_path)
+    assert not get_backend().exists(thumb_path)
+
+
+def test_purge_expired_trash_uses_retention_setting(
+    tmp_path: Path,
+    client: TestClient,
+    db_session: Session,
+    auth_headers: dict[str, str],
+) -> None:
+    _configure_storage(tmp_path)
+    _overlay["trash_retention_days"] = 30
+    old_model = Model(
+        name="Old Cube",
+        slug="old-cube",
+        hash="old-cube".ljust(64, "0"),
+        deleted_at=utcnow() - timedelta(days=31),
+    )
+    fresh_model = Model(
+        name="Fresh Cube",
+        slug="fresh-cube",
+        hash="fresh-cube".ljust(64, "0"),
+        deleted_at=utcnow() - timedelta(days=3),
+    )
+    db_session.add(old_model)
+    db_session.add(fresh_model)
+    db_session.commit()
+    db_session.refresh(old_model)
+    db_session.refresh(fresh_model)
+
+    old_file = File(
+        model_id=old_model.id,
+        path=str(tmp_path / "files" / "old-cube.stl"),
+        original_filename="old-cube.stl",
+        file_type=FileType.STL,
+        version=1,
+        size_bytes=4,
+        sha256="a" * 64,
+    )
+    fresh_file = File(
+        model_id=fresh_model.id,
+        path=str(tmp_path / "files" / "fresh-cube.stl"),
+        original_filename="fresh-cube.stl",
+        file_type=FileType.STL,
+        version=1,
+        size_bytes=4,
+        sha256="b" * 64,
+    )
+    db_session.add(old_file)
+    db_session.add(fresh_file)
+    db_session.commit()
+    old_model_id = old_model.id
+    fresh_model_id = fresh_model.id
+    old_file_path = old_file.path
+    fresh_file_path = fresh_file.path
+    Path(old_file.path).parent.mkdir(parents=True, exist_ok=True)
+    Path(old_file.path).write_bytes(b"old")
+    Path(fresh_file.path).write_bytes(b"new")
+
+    purged = client.delete("/api/v1/models/trash/expired", headers=auth_headers)
+
+    assert purged.status_code == 200, purged.text
+    assert purged.json() == {"purged_model_ids": [old_model_id], "purged_count": 1}
+    db_session.expire_all()
+    assert db_session.get(Model, old_model_id) is None
+    assert db_session.get(Model, fresh_model_id) is not None
+    assert not Path(old_file_path).exists()
+    assert Path(fresh_file_path).exists()
 
 
 def test_force_rebuild_refreshes_existing_mesh_thumbnail(

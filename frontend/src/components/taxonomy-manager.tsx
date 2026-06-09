@@ -1,32 +1,164 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { CategoryRead, TagRead } from "@/types";
+import { useEffect, useMemo, useState } from "react";
+import { CollectionRead, TagRead } from "@/types";
 import {
-  listCategories,
+  listCollections,
   listTags,
-  createCategory,
+  createCollection,
   createTag,
-  deleteCategory,
+  deleteCollection,
   deleteTag,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Plus, X, FolderTree, Tag as TagIcon } from "lucide-react";
+import {
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Plus,
+  Tag as TagIcon,
+  X,
+} from "lucide-react";
+
+interface CollectionNode {
+  collection: CollectionRead;
+  children: CollectionNode[];
+}
+
+function buildCollectionTree(collections: CollectionRead[]): CollectionNode[] {
+  const byId = new Map<number, CollectionNode>();
+  for (const collection of collections) {
+    byId.set(collection.id, { collection, children: [] });
+  }
+  const roots: CollectionNode[] = [];
+  for (const node of byId.values()) {
+    const parent =
+      node.collection.parent_id == null
+        ? null
+        : byId.get(node.collection.parent_id);
+    if (parent) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sortNodes = (nodes: CollectionNode[]) => {
+    nodes.sort((a, b) => a.collection.name.localeCompare(b.collection.name));
+    nodes.forEach((node) => sortNodes(node.children));
+  };
+  sortNodes(roots);
+  return roots;
+}
+
+function CollectionTreeRow({
+  node,
+  depth,
+  auth,
+  expanded,
+  onToggle,
+  onAddChild,
+  onDelete,
+}: {
+  node: CollectionNode;
+  depth: number;
+  auth: ReturnType<typeof useRequireAuth>;
+  expanded: Set<number>;
+  onToggle: (id: number) => void;
+  onAddChild: (collection: CollectionRead) => void;
+  onDelete: (collection: CollectionRead) => void;
+}) {
+  const collection = node.collection;
+  const hasChildren = node.children.length > 0;
+  const isOpen = expanded.has(collection.id);
+  return (
+    <>
+      <div
+        className="flex items-center justify-between py-1.5 pr-2 rounded hover:bg-[var(--surface-container-low)] group gap-2"
+        style={{ paddingLeft: `${depth * 18 + 8}px` }}
+      >
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+          {hasChildren ? (
+            <button
+              type="button"
+              onClick={() => onToggle(collection.id)}
+              className="rounded p-0.5 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container)] hover:text-[var(--on-surface)]"
+              aria-label={isOpen ? "Collapse collection" : "Expand collection"}
+            >
+              <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+            </button>
+          ) : (
+            <span className="w-4 flex-shrink-0" />
+          )}
+          {isOpen ? (
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--primary)]" />
+          ) : (
+            <Folder className="h-4 w-4 flex-shrink-0 text-[var(--on-surface-variant)]" />
+          )}
+          <span className="text-sm text-[var(--on-surface)] truncate">
+            {collection.name}
+          </span>
+          <span className="font-mono text-[10px] text-[var(--on-surface-variant)] truncate hidden sm:inline">
+            {collection.path}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+            {collection.model_count} models
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+              onAddChild(collection);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)]"
+            title={`Add subcollection to ${collection.name}`}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+              onDelete(collection);
+            }}
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--error-container)]/30 text-[var(--error)]"
+            title={`Delete ${collection.name}`}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+      {isOpen && node.children.map((child) => (
+        <CollectionTreeRow
+          key={child.collection.id}
+          node={child}
+          depth={depth + 1}
+          auth={auth}
+          expanded={expanded}
+          onToggle={onToggle}
+          onAddChild={onAddChild}
+          onDelete={onDelete}
+        />
+      ))}
+    </>
+  );
+}
 
 export function TaxonomyManager() {
   const auth = useRequireAuth();
-  const [categories, setCategories] = useState<CategoryRead[]>([]);
+  const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
-  const [newCat, setNewCat] = useState("");
+  const [newCollection, setNewCollection] = useState("");
+  const [parentCollectionId, setParentCollectionId] = useState<number | null>(null);
   const [newTag, setNewTag] = useState("");
+  const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function refresh() {
     try {
-      const [c, t] = await Promise.all([listCategories(), listTags()]);
-      setCategories(c);
+      const [c, t] = await Promise.all([listCollections(), listTags()]);
+      setCollections(c);
       setTags(t);
       setError(null);
     } catch (e: any) {
@@ -38,14 +170,14 @@ export function TaxonomyManager() {
 
   useEffect(() => { refresh(); }, []);
 
-  async function handleCreateCategory() {
-    const name = newCat.trim();
+  async function handleCreateCollection() {
+    const name = newCollection.trim();
     if (!name) return;
     if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
     try {
-      await createCategory({ name });
-      setNewCat("");
-      toast.success(`Category "${name}" created`);
+      await createCollection({ name, parent_id: parentCollectionId });
+      setNewCollection("");
+      toast.success(`Collection "${name}" created`);
       refresh();
     } catch (e: any) {
       setError(e.message);
@@ -53,10 +185,10 @@ export function TaxonomyManager() {
     }
   }
 
-  async function handleDeleteCategory(id: number) {
+  async function handleDeleteCollection(id: number) {
     try {
-      await deleteCategory(id);
-      toast.success("Category removed");
+      await deleteCollection(id);
+      toast.success("Collection removed");
       refresh();
     } catch (e: any) {
       setError(e.message);
@@ -90,14 +222,24 @@ export function TaxonomyManager() {
     }
   }
 
-  const assignedCategoryModels = categories.reduce((sum, category) => sum + category.model_count, 0);
+  const tree = useMemo(() => buildCollectionTree(collections), [collections]);
+  const assignedCollectionModels = collections.reduce((sum, collection) => sum + collection.model_count, 0);
   const assignedTagModels = tags.reduce((sum, tag) => sum + tag.model_count, 0);
-  const topCategories = [...categories]
+  const topCollections = [...collections]
     .sort((a, b) => b.model_count - a.model_count || a.name.localeCompare(b.name))
     .slice(0, 4);
   const topTags = [...tags]
     .sort((a, b) => b.model_count - a.model_count || a.name.localeCompare(b.name))
     .slice(0, 8);
+
+  function toggleCollection(id: number) {
+    setExpandedCollections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
@@ -109,9 +251,9 @@ export function TaxonomyManager() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-[var(--surface-variant)]">
         {[
-          { label: "Categories", value: categories.length, detail: `${assignedCategoryModels} assigned` },
+          { label: "Collections", value: collections.length, detail: `${assignedCollectionModels} assigned` },
           { label: "Tags", value: tags.length, detail: `${assignedTagModels} assignments` },
-          { label: "Top category", value: topCategories[0]?.name ?? "None", detail: `${topCategories[0]?.model_count ?? 0} models` },
+          { label: "Top collection", value: topCollections[0]?.name ?? "None", detail: `${topCollections[0]?.model_count ?? 0} models` },
           { label: "Top tag", value: topTags[0]?.name ?? "None", detail: `${topTags[0]?.model_count ?? 0} models` },
         ].map((item) => (
           <div key={item.label} className="p-4 sm:p-5 min-w-0">
@@ -134,26 +276,40 @@ export function TaxonomyManager() {
           <div className="flex items-center gap-2">
             <FolderTree className="h-4 w-4 text-[var(--on-surface-variant)] flex-shrink-0" />
             <h3 className="text-sm font-semibold text-[var(--on-surface)]">
-              Categories
+              Collections
             </h3>
             <span className="font-mono text-xs text-[var(--on-surface-variant)]">
-              ({categories.length})
+              ({collections.length})
             </span>
           </div>
           <form
-            onSubmit={(e) => { e.preventDefault(); handleCreateCategory(); }}
+            onSubmit={(e) => { e.preventDefault(); handleCreateCollection(); }}
             className="flex items-center gap-2"
           >
             <input
-              value={newCat}
-              onChange={(e) => setNewCat(e.target.value)}
+              value={newCollection}
+              onChange={(e) => setNewCollection(e.target.value)}
               disabled={!auth.isAuthenticated}
-              placeholder={auth.isAuthenticated ? "New category..." : "Sign in to add"}
+              placeholder={auth.isAuthenticated ? "New collection..." : "Sign in to add"}
               className="flex-1 sm:flex-none sm:w-40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent disabled:opacity-50"
             />
+            <select
+              value={parentCollectionId ?? ""}
+              onChange={(e) => setParentCollectionId(e.target.value ? Number(e.target.value) : null)}
+              disabled={!auth.isAuthenticated}
+              className="max-w-44 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 py-[6px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent disabled:opacity-50"
+              title="Parent collection"
+            >
+              <option value="">Root</option>
+              {collections.map((collection) => (
+                <option key={collection.id} value={collection.id}>
+                  {collection.path}
+                </option>
+              ))}
+            </select>
             <button
               type="submit"
-              disabled={!newCat.trim() || !auth.isAuthenticated}
+              disabled={!newCollection.trim() || !auth.isAuthenticated}
               className="p-1.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -164,44 +320,33 @@ export function TaxonomyManager() {
         <div className="p-3 sm:p-4">
           {loading ? (
             <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
-          ) : categories.length === 0 ? (
+          ) : collections.length === 0 ? (
             <p className="text-xs text-[var(--on-surface-variant)] font-mono">
-              No categories yet. Create one above.
+              No collections yet. Create one above.
             </p>
           ) : (
             <div className="space-y-1">
-              {categories.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-[var(--surface-container-low)] group gap-2"
-                >
-                  <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-                    <span className="text-sm text-[var(--on-surface)] truncate">
-                      {c.name}
-                    </span>
-                    <span className="font-mono text-[10px] text-[var(--on-surface-variant)] truncate hidden sm:inline">
-                      {c.path}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs text-[var(--on-surface-variant)]">
-                      {c.model_count} models
-                    </span>
-                    <button
-                      onClick={() => {
-                        if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
-                        if (c.model_count > 0) {
-                          toast.warning("Cannot delete category", "Remove all assigned models first.");
-                          return;
-                        }
-                        handleDeleteCategory(c.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--error-container)]/30 text-[var(--error)] disabled:opacity-20"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
+              {tree.map((node) => (
+                <CollectionTreeRow
+                  key={node.collection.id}
+                  node={node}
+                  depth={0}
+                  auth={auth}
+                  expanded={expandedCollections}
+                  onToggle={toggleCollection}
+                  onAddChild={(collection) => {
+                    setParentCollectionId(collection.id);
+                    setNewCollection("");
+                    setExpandedCollections((prev) => new Set(prev).add(collection.id));
+                  }}
+                  onDelete={(collection) => {
+                    if (collection.model_count > 0) {
+                      toast.warning("Cannot delete collection", "Remove all assigned models first.");
+                      return;
+                    }
+                    handleDeleteCollection(collection.id);
+                  }}
+                />
               ))}
             </div>
           )}
@@ -278,18 +423,18 @@ export function TaxonomyManager() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
         <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
           <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
-            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used categories</h3>
+            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used collections</h3>
           </div>
           <div className="p-3 sm:p-4 space-y-2">
             {loading ? (
               <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
-            ) : topCategories.length === 0 ? (
-              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No category usage yet.</p>
+            ) : topCollections.length === 0 ? (
+              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No collection usage yet.</p>
             ) : (
-              topCategories.map((category) => (
-                <div key={category.id} className="flex items-center justify-between gap-3 py-1.5">
-                  <span className="text-sm text-[var(--on-surface)] truncate">{category.path}</span>
-                  <span className="font-mono text-xs text-[var(--on-surface-variant)]">{category.model_count}</span>
+              topCollections.map((collection) => (
+                <div key={collection.id} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="text-sm text-[var(--on-surface)] truncate">{collection.path}</span>
+                  <span className="font-mono text-xs text-[var(--on-surface-variant)]">{collection.model_count}</span>
                 </div>
               ))
             )}

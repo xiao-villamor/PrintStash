@@ -68,8 +68,8 @@ class ModelRead(BaseModel):
     name: str
     slug: str
     hash: str
-    category: Optional[str] = None
-    category_id: Optional[int] = None
+    collection: Optional[str] = None
+    collection_id: Optional[int] = None
     description: Optional[str] = None
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
@@ -98,13 +98,31 @@ class ModelListItem(BaseModel):
     id: int
     name: str
     slug: str
-    category: Optional[str] = None
-    category_id: Optional[int] = None
+    collection: Optional[str] = None
+    collection_id: Optional[int] = None
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
     file_count: int
     printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
+
+
+class TrashedModelRead(BaseModel):
+    id: int
+    name: str
+    slug: str
+    collection: Optional[str] = None
+    tags: List[str] = []
+    thumbnail_url: Optional[str] = None
+    file_count: int
+    size_bytes: int
+    deleted_at: datetime
+    expires_at: Optional[datetime] = None
+
+
+class TrashPurgeRead(BaseModel):
+    purged_model_ids: List[int] = []
+    purged_count: int = 0
 
 
 class StorageUsageRead(BaseModel):
@@ -122,7 +140,7 @@ class VaultStatsRead(BaseModel):
     file_count: int = 0
     source_file_count: int = 0
     gcode_file_count: int = 0
-    category_count: int = 0
+    collection_count: int = 0
     tag_count: int = 0
     printer_count: int = 0
     indexed_size_bytes: int = 0
@@ -134,11 +152,11 @@ class ModelUpdate(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=4096)
-    category: Optional[str] = Field(default=None, max_length=1024)
+    collection: Optional[str] = Field(default=None, max_length=1024)
     tags: Optional[List[str]] = Field(default=None, max_length=100)
 
 
-class CategoryRead(BaseModel):
+class CollectionRead(BaseModel):
     id: int
     name: str
     slug: str
@@ -147,7 +165,7 @@ class CategoryRead(BaseModel):
     model_count: int = 0
 
 
-class CategoryCreate(BaseModel):
+class CollectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)

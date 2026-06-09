@@ -72,6 +72,53 @@ def test_model_metadata_estimates_cost_from_local_filament_profile(
     assert metadata["filament_cost"] == 0.2
 
 
+def test_model_metadata_profile_cost_overrides_slicer_cost(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    model = Model(name="Hook", slug="hook", hash="c" * 64)
+    db_session.add(model)
+    db_session.commit()
+    db_session.refresh(model)
+
+    file_row = File(
+        model_id=model.id,
+        path="/tmp/hook.gcode",
+        original_filename="hook.gcode",
+        file_type=FileType.GCODE,
+        version=1,
+        size_bytes=123,
+        sha256="d" * 64,
+    )
+    db_session.add(file_row)
+    db_session.commit()
+    db_session.refresh(file_row)
+
+    db_session.add(
+        Metadata(
+            file_id=file_row.id,
+            material_type="PLA",
+            material_brand="ELEGOO",
+            filament_weight_g=10,
+            filament_cost=0.5,
+        )
+    )
+    db_session.add(
+        FilamentProfile(
+            name="ELEGOO",
+            material_type="PLA",
+            material_brand="ELEGOO",
+            cost_per_kg=20,
+        )
+    )
+    db_session.commit()
+
+    response = client.get(f"/api/v1/models/{model.id}")
+    assert response.status_code == 200
+    metadata = response.json()["files"][0]["metadata"]
+    assert metadata["filament_cost"] == 0.2
+
+
 def test_detected_filament_profile_infers_cost_per_kg_and_preserves_manual_cost(
     db_session: Session,
 ) -> None:

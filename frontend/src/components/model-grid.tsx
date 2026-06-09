@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CategoryRead, ModelListItem, PrinterRead, TagRead } from "@/types";
+import { CollectionRead, ModelListItem, PrinterRead, TagRead } from "@/types";
 import { ModelCard } from "@/components/model-card";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
@@ -17,8 +17,11 @@ import {
   FileText,
   MoreVertical,
   Printer,
+  Folder,
+  FolderOpen,
+  ChevronRight,
 } from "lucide-react";
-import { listCategories, listModels, listPrinters, listTags } from "@/lib/api";
+import { listCollections, listModels, listPrinters, listTags } from "@/lib/api";
 import Link from "next/link";
 import { getAssetUrl } from "@/lib/api";
 
@@ -76,14 +79,42 @@ function timeAgo(dateStr: string): string {
 
 const PAGE_SIZE = 60;
 
+function childCollections(
+  collections: CollectionRead[],
+  selectedPath: string | null,
+): CollectionRead[] {
+  const selected = selectedPath
+    ? collections.find((collection) => collection.path === selectedPath)
+    : null;
+  const parentId = selectedPath ? selected?.id ?? -1 : null;
+  return collections
+    .filter((collection) => collection.parent_id === parentId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function collectionBreadcrumbs(
+  collections: CollectionRead[],
+  selectedPath: string | null,
+): CollectionRead[] {
+  if (!selectedPath) return [];
+  const byPath = new Map(collections.map((collection) => [collection.path, collection]));
+  const parts = selectedPath.split("/");
+  const crumbs: CollectionRead[] = [];
+  for (let i = 1; i <= parts.length; i += 1) {
+    const collection = byPath.get(parts.slice(0, i).join("/"));
+    if (collection) crumbs.push(collection);
+  }
+  return crumbs;
+}
+
 export function ModelBrowser() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [models, setModels] = useState<ModelListItem[]>([]);
-  const [categories, setCategories] = useState<CategoryRead[]>([]);
+  const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
   const [selectedPrinterPresence, setSelectedPrinterPresence] = useState<"any" | "none" | null>(null);
@@ -116,18 +147,26 @@ export function ModelBrowser() {
     () => sortModels(models, sortBy),
     [models, sortBy],
   );
+  const visibleCollections = useMemo(
+    () => childCollections(collections, selectedCollection),
+    [collections, selectedCollection],
+  );
+  const breadcrumbs = useMemo(
+    () => collectionBreadcrumbs(collections, selectedCollection),
+    [collections, selectedCollection],
+  );
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const [c, t, p] = await Promise.all([
-          listCategories(),
+          listCollections(),
           listTags(),
           listPrinters(),
         ]);
         if (!alive) return;
-        setCategories(c);
+        setCollections(c);
         setTags(t);
         setPrinters(p);
       } catch (e: any) {
@@ -153,7 +192,7 @@ export function ModelBrowser() {
         const data = await listModels({
           limit: PAGE_SIZE,
           offset: 0,
-          category: selectedCategory ?? undefined,
+          collection: selectedCollection ?? undefined,
           tag: selectedTags.length ? selectedTags : undefined,
           q: query.trim() || undefined,
           printer_id: selectedPrinterId ?? undefined,
@@ -177,7 +216,7 @@ export function ModelBrowser() {
       alive = false;
       clearTimeout(handle);
     };
-  }, [selectedCategory, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey]);
+  }, [selectedCollection, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey]);
 
   async function loadMore() {
     if (loadingMore || !hasMore) return;
@@ -186,7 +225,7 @@ export function ModelBrowser() {
       const data = await listModels({
         limit: PAGE_SIZE,
         offset: models.length,
-        category: selectedCategory ?? undefined,
+        collection: selectedCollection ?? undefined,
         tag: selectedTags.length ? selectedTags : undefined,
         q: query.trim() || undefined,
         printer_id: selectedPrinterId ?? undefined,
@@ -216,14 +255,14 @@ export function ModelBrowser() {
       <MobileFilterDrawer
         open={filterDrawerOpen}
         onClose={closeDrawer}
-        categories={categories}
+        collections={collections}
         tags={tags}
         printers={printers}
-        selectedCategory={selectedCategory}
+        selectedCollection={selectedCollection}
         selectedTags={selectedTags}
         selectedPrinterId={selectedPrinterId}
         selectedPrinterPresence={selectedPrinterPresence}
-        onCategoryChange={setSelectedCategory}
+        onCollectionChange={setSelectedCollection}
         onTagsChange={setSelectedTags}
         onPrinterChange={setSelectedPrinterId}
         onPrinterPresenceChange={setSelectedPrinterPresence}
@@ -234,14 +273,14 @@ export function ModelBrowser() {
         {/* Filter sidebar + content split */}
         <div className="flex flex-1 min-h-0">
           <FilterSidebar
-            categories={categories}
+            collections={collections}
             tags={tags}
             printers={printers}
-            selectedCategory={selectedCategory}
+            selectedCollection={selectedCollection}
             selectedTags={selectedTags}
             selectedPrinterId={selectedPrinterId}
             selectedPrinterPresence={selectedPrinterPresence}
-            onCategoryChange={setSelectedCategory}
+            onCollectionChange={setSelectedCollection}
             onTagsChange={setSelectedTags}
             onPrinterChange={setSelectedPrinterId}
             onPrinterPresenceChange={setSelectedPrinterPresence}
@@ -260,7 +299,7 @@ export function ModelBrowser() {
                   Filters
                 </button>
                 <h2 className="text-lg font-semibold text-[var(--on-surface)]">
-                  Vault
+                  {selectedCollection ? "Collection" : "Vault"}
                   {!loading && (
                     <span className="ml-2 text-sm font-normal text-[var(--on-surface-variant)] font-mono">
                       ({models.length} models)
@@ -352,19 +391,25 @@ export function ModelBrowser() {
               </div>
             )}
 
+            <CollectionBreadcrumbs
+              breadcrumbs={breadcrumbs}
+              onRoot={() => setSelectedCollection(null)}
+              onSelect={(path) => setSelectedCollection(path)}
+            />
+
             {loading ? (
               viewMode === "grid" ? (
                 <ModelGridSkeleton />
               ) : (
                 <ModelListSkeleton />
               )
-            ) : sortedModels.length === 0 ? (
+            ) : sortedModels.length === 0 && visibleCollections.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-[var(--on-surface-variant)]">
                 <p className="text-lg font-medium text-[var(--on-surface)]">
                   No models found
                 </p>
                 <p className="text-sm mt-1">
-                  {query || selectedCategory || selectedTags.length
+                  {query || selectedCollection || selectedTags.length
                     || selectedPrinterId
                     || selectedPrinterPresence
                     ? "Try clearing some filters."
@@ -373,6 +418,12 @@ export function ModelBrowser() {
               </div>
             ) : viewMode === "grid" ? (
               <>
+                {visibleCollections.length > 0 && (
+                  <CollectionFolderGrid
+                    collections={visibleCollections}
+                    onSelect={(path) => setSelectedCollection(path)}
+                  />
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
                   {sortedModels.map((model) => (
                     <ModelCard key={model.id} model={model} />
@@ -386,11 +437,18 @@ export function ModelBrowser() {
                   <div className="flex items-center gap-3 px-2 md:px-4 py-2 border-b border-[var(--outline-variant)] text-xs font-mono text-[var(--on-surface-variant)] uppercase tracking-wider">
                     <span className="w-8 md:w-10 flex-shrink-0">Thumb</span>
                     <span className="flex-1">Name</span>
-                    <span className="w-24 text-right hidden sm:block">Category</span>
+                    <span className="w-24 text-right hidden sm:block">Collection</span>
                     <span className="w-12 md:w-20 text-right">Files</span>
                     <span className="w-20 md:w-24 text-right hidden md:block">Updated</span>
                     <span className="w-8" />
                   </div>
+                  {visibleCollections.map((collection) => (
+                    <CollectionListRow
+                      key={collection.id}
+                      collection={collection}
+                      onSelect={(path) => setSelectedCollection(path)}
+                    />
+                  ))}
                   {sortedModels.map((model) => (
                     <ModelListRow key={model.id} model={model} />
                   ))}
@@ -402,6 +460,112 @@ export function ModelBrowser() {
         </div>
       </div>
     </>
+  );
+}
+
+function CollectionBreadcrumbs({
+  breadcrumbs,
+  onRoot,
+  onSelect,
+}: {
+  breadcrumbs: CollectionRead[];
+  onRoot: () => void;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <div className="mb-4 flex min-h-8 flex-wrap items-center gap-1 border-b border-[var(--outline-variant)] pb-3 font-mono text-xs text-[var(--on-surface-variant)]">
+      <button
+        type="button"
+        onClick={onRoot}
+        className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+      >
+        <FolderOpen className="h-3.5 w-3.5 text-[var(--primary)]" />
+        Vault
+      </button>
+      {breadcrumbs.map((collection) => (
+        <span key={collection.id} className="inline-flex items-center gap-1">
+          <ChevronRight className="h-3 w-3 opacity-50" />
+          <button
+            type="button"
+            onClick={() => onSelect(collection.path)}
+            className="rounded px-2 py-1 hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
+          >
+            {collection.name}
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CollectionFolderGrid({
+  collections,
+  onSelect,
+}: {
+  collections: CollectionRead[];
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+      {collections.map((collection) => (
+        <button
+          key={collection.id}
+          type="button"
+          onClick={() => onSelect(collection.path)}
+          className="group flex h-20 items-center gap-3 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-3 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-container-low)]"
+        >
+          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-[var(--surface-container)] text-[var(--primary)] group-hover:bg-[var(--secondary-container)]">
+            <Folder className="h-5 w-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium text-[var(--on-surface)]">
+              {collection.name}
+            </span>
+            <span className="mt-1 block truncate font-mono text-[11px] text-[var(--on-surface-variant)]">
+              {collection.model_count} models
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function CollectionListRow({
+  collection,
+  onSelect,
+}: {
+  collection: CollectionRead;
+  onSelect: (path: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(collection.path)}
+      className="flex items-center gap-2 md:gap-3 px-2 md:px-4 py-3 border-b border-[var(--surface-variant)] text-left hover:bg-[var(--surface-container-low)] transition-colors group"
+    >
+      <span className="w-8 h-8 md:w-10 md:h-10 rounded bg-[var(--surface-container)] flex-shrink-0 border border-[var(--outline-variant)] flex items-center justify-center text-[var(--primary)]">
+        <Folder className="h-4 w-4 md:h-5 md:w-5" />
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-sm font-medium text-[var(--on-surface)] truncate">
+          {collection.name}
+        </span>
+        <span className="block font-mono text-[10px] text-[var(--on-surface-variant)] truncate">
+          {collection.path}
+        </span>
+      </span>
+      <span className="w-24 text-right text-xs font-mono text-[var(--on-surface-variant)] truncate hidden sm:block">
+        Folder
+      </span>
+      <span className="w-20 text-right text-xs font-mono text-[var(--on-surface-variant)]">
+        {collection.model_count}
+      </span>
+      <span className="w-20 md:w-24 hidden md:block" />
+      <span className="w-8 flex justify-center">
+        <ChevronRight className="h-4 w-4 text-[var(--on-surface-variant)] opacity-60 group-hover:opacity-100" />
+      </span>
+    </button>
   );
 }
 
@@ -463,7 +627,7 @@ function ModelListRow({ model }: { model: ModelListItem }) {
       </div>
 
       <span className="w-24 text-right text-xs font-mono text-[var(--on-surface-variant)] truncate hidden sm:block">
-        {model.category || "—"}
+        {model.collection || "—"}
       </span>
 
       <span className="w-20 text-right text-xs font-mono text-[var(--on-surface-variant)]">

@@ -34,10 +34,10 @@ def _add_soft_delete_cols(table: str) -> None:
 
 def upgrade() -> None:
     is_sqlite = op.get_bind().dialect.name == "sqlite"
-    for table in ("files", "printers", "print_jobs", "users", "tags", "categories"):
+    for table in ("files", "printers", "print_jobs", "users", "tags", "collections"):
         _add_soft_delete_cols(table)
 
-    for table in ("models", "printers", "print_jobs", "tags", "categories"):
+    for table in ("models", "printers", "print_jobs", "tags", "collections"):
         op.add_column(table, sa.Column("created_by", sa.Integer(), nullable=True))
         op.add_column(table, sa.Column("updated_by", sa.Integer(), nullable=True))
         if not is_sqlite:
@@ -86,14 +86,14 @@ def downgrade() -> None:
         op.drop_constraint("fk_models_deleted_by_users", "models", type_="foreignkey")
     op.drop_column("models", "deleted_by")
 
-    for table in ("models", "printers", "print_jobs", "tags", "categories"):
+    for table in ("models", "printers", "print_jobs", "tags", "collections"):
         if not is_sqlite:
             op.drop_constraint(f"fk_{table}_updated_by_users", table, type_="foreignkey")
             op.drop_constraint(f"fk_{table}_created_by_users", table, type_="foreignkey")
         op.drop_column(table, "updated_by")
         op.drop_column(table, "created_by")
 
-    for table in ("files", "printers", "print_jobs", "users", "tags", "categories"):
+    for table in ("files", "printers", "print_jobs", "users", "tags", "collections"):
         if not is_sqlite:
             op.drop_constraint(f"fk_{table}_deleted_by_users", table, type_="foreignkey")
         op.drop_index(f"ix_{table}_deleted_at", table_name=table)

@@ -7,14 +7,12 @@ from sqlmodel import Session, delete, select
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import Category, File, Model, PrintJob, Printer, Tag, User
+from app.db.models import Collection, File, Printer, Tag, User
 from app.db.session import get_session_factory
 from app.services.storage_backend import get_backend
+from app.services.trash import hard_delete_expired_models
 
 logger = get_logger(__name__)
-
-SOFT_DELETE_RETENTION_DAYS = 30
-
 
 def _cleanup_orphan_blobs(session: Session) -> int:
     backend = get_backend()
@@ -31,13 +29,24 @@ def _cleanup_orphan_blobs(session: Session) -> int:
     return removed
 
 
-def gc_soft_deleted(retention_days: int = SOFT_DELETE_RETENTION_DAYS) -> dict[str, int]:
-    cutoff = utcnow() - timedelta(days=retention_days)
+def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
+    effective_retention = (
+        int(settings.trash_retention_days) if retention_days is None else retention_days
+    )
+    if effective_retention < 0:
+        logger.info("gc skipped: trash retention is disabled")
+        return {"rows": 0, "orphan_blobs": 0}
+    cutoff = utcnow() - timedelta(days=effective_retention)
     purged = {"rows": 0, "orphan_blobs": 0}
     with get_session_factory().scoped_session() as session:
-        for model in (PrintJob, File, Model, Tag, Category, Printer, User):
+        purged_model_ids = hard_delete_expired_models(session, effective_retention)
+        purged["rows"] += len(purged_model_ids)
+        for model in (File, Tag, Collection, Printer, User):
             result = session.exec(
-                delete(model).where(model.deleted_at.is_not(None), model.deleted_at < cutoff)  # type: ignore[attr-defined]
+                delete(model).where(
+                    model.deleted_at.is_not(None),  # type: ignore[attr-defined]
+                    model.deleted_at < cutoff,  # type: ignore[attr-defined]
+                )
             )
             purged["rows"] += int(result.rowcount or 0)
         session.commit()

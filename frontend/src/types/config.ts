@@ -59,6 +59,7 @@ export interface VaultConfigRead {
   has_s3_access_key: boolean;
   has_s3_secret_key: boolean;
   backup_retention_days: number;
+  trash_retention_days: number;
   backup_s3_bucket: string;
   backup_s3_endpoint_url: string;
   backup_s3_region: string;
@@ -79,6 +80,7 @@ export interface VaultConfigUpdate {
   s3_access_key?: string;
   s3_secret_key?: string;
   backup_retention_days?: number;
+  trash_retention_days?: number;
   backup_s3_bucket?: string;
   backup_s3_endpoint_url?: string;
   backup_s3_region?: string;
