@@ -1,3 +1,5 @@
+import type { PrintJobState } from "./printers";
+
 export interface MetadataRead {
   slicer_name: string | null;
   slicer_version: string | null;
@@ -86,6 +88,29 @@ export interface ModelPrinterPresenceRead {
   file_count: number;
 }
 
+export interface ModelPrintJobRead {
+  id: number;
+  printer_id: number;
+  printer_name: string;
+  file_id: number;
+  gcode_revision_number: number | null;
+  revision_label: string | null;
+  state: PrintJobState;
+  material_type: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+}
+
+export interface PrintSummaryRead {
+  layer_height_mm: number | null;
+  estimated_time_s: number | null;
+  filament_weight_g: number | null;
+  material_type: string | null;
+  slicer_name: string | null;
+}
+
 export interface ModelListItem {
   id: number;
   name: string;
@@ -97,6 +122,9 @@ export interface ModelListItem {
   file_count: number;
   printer_presence: ModelPrinterPresenceRead[];
   updated_at: string;
+  print_summary: PrintSummaryRead | null;
+  recommended_revision_status?: FileRevisionStatus | null;
+  recommended_revision_label?: string | null;
 }
 
 export interface TrashedModelRead {
@@ -144,6 +172,25 @@ export interface ModelUpdate {
   description?: string;
   collection?: string;
   tags?: string[];
+}
+
+export interface ManualPrintJobCreate {
+  printer_id: number;
+  file_id: number;
+  state?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+}
+
+export interface ImportedPrintJobRead {
+  filename: string;
+  status: string;
+  print_duration?: number | null;
+  start_time?: number | null;
+  end_time?: number | null;
+  matched_file_id?: number | null;
+  imported: boolean;
 }
 
 export interface IngestResponse {

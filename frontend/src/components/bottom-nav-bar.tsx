@@ -16,7 +16,7 @@ export function BottomNavBar() {
   const pathname = usePathname();
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center h-[72px] px-4 bg-[var(--surface)] border-t border-[var(--outline-variant)] z-40 pb-safe">
+    <nav className="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center h-[72px] px-4 bg-card border-t border-border z-40 pb-safe">
       {items.map((item) => {
         const isActive =
           item.href === "/"
@@ -28,8 +28,8 @@ export function BottomNavBar() {
             href={item.href}
             className={`flex flex-col items-center justify-center px-2 py-1 rounded-full active:scale-95 transition-transform duration-150 ${
               isActive
-                ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
-                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors"
+                ? "bg-blue-50 text-blue-700 dark:text-orange-400"
+                : "text-muted-foreground hover:bg-muted transition-colors"
             }`}
           >
             <item.icon

@@ -58,10 +58,12 @@ export function UploadModal({
   open,
   onClose,
   onUploaded,
+  defaultCollection,
 }: {
   open: boolean;
   onClose: () => void;
   onUploaded: () => void;
+  defaultCollection?: string | null;
 }) {
   const auth = useRequireAuth();
   const meshRef = useRef<HTMLInputElement>(null);
@@ -69,7 +71,7 @@ export function UploadModal({
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState("");
-  const [collectionPath, setCollectionPath] = useState("");
+  const [collectionPath, setCollectionPath] = useState(defaultCollection ?? "");
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -82,6 +84,10 @@ export function UploadModal({
     listCollections().then(setCollections).catch(() => {});
     listTags().then(setTags).catch(() => {});
   }, [open]);
+
+  useEffect(() => {
+    if (open) setCollectionPath(defaultCollection ?? "");
+  }, [open, defaultCollection]);
 
   useEffect(() => {
     if (!open) return;
@@ -134,7 +140,7 @@ export function UploadModal({
     setMeshFile(null);
     setGcodeFile(null);
     setModelName("");
-    setCollectionPath("");
+    setCollectionPath(defaultCollection ?? "");
     setSelectedTags([]);
     setTagInput("");
     setSubmitting(false);

@@ -34,22 +34,19 @@ export function ThemeToggle() {
     applyTheme(next);
   }
 
-  // Avoid hydration mismatch — render a placeholder until mounted.
-  if (!mounted) {
-    return <div className="h-9 w-9" aria-hidden />;
-  }
+  if (!mounted) return <div className="h-9 w-9" aria-hidden />;
 
   return (
     <button
       onClick={toggle}
       title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
       aria-label="Toggle theme"
-      className="inline-flex h-9 w-9 items-center justify-center rounded text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container)] hover:text-[var(--primary)]"
+      className="text-muted-foreground hover:text-blue-600 dark:text-orange-500 transition-all flex items-center justify-center font-mono"
     >
       {theme === "dark" ? (
-        <Sun className="h-5 w-5" />
+        <Sun className="h-4 w-4" />
       ) : (
-        <Moon className="h-5 w-5" />
+        <Moon className="h-4 w-4" />
       )}
     </button>
   );

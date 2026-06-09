@@ -6,9 +6,12 @@ export const metadata = {
 
 export default function OrganizePage() {
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="w-full space-y-4 sm:space-y-6 lg:space-y-8">
-        <h2 className="text-xl font-semibold text-[var(--on-surface)]">Catalog</h2>
+    <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
+      <div className="w-full space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground tracking-tight">Catalog</h2>
+          <p className="text-sm text-muted-foreground">Collections and tags</p>
+        </div>
         <TaxonomyManager />
       </div>
     </div>

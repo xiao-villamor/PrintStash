@@ -72,7 +72,7 @@ function CollectionTreeRow({
   return (
     <>
       <div
-        className="flex items-center justify-between py-1.5 pr-2 rounded hover:bg-[var(--surface-container-low)] group gap-2"
+        className="flex items-center justify-between py-1.5 pr-2 rounded hover:bg-muted/50 group gap-2"
         style={{ paddingLeft: `${depth * 18 + 8}px` }}
       >
         <div className="flex items-center gap-2 min-w-0 overflow-hidden">
@@ -80,7 +80,7 @@ function CollectionTreeRow({
             <button
               type="button"
               onClick={() => onToggle(collection.id)}
-              className="rounded p-0.5 text-[var(--on-surface-variant)] hover:bg-[var(--surface-container)] hover:text-[var(--on-surface)]"
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
               aria-label={isOpen ? "Collapse collection" : "Expand collection"}
             >
               <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-90" : ""}`} />
@@ -89,19 +89,19 @@ function CollectionTreeRow({
             <span className="w-4 flex-shrink-0" />
           )}
           {isOpen ? (
-            <FolderOpen className="h-4 w-4 flex-shrink-0 text-[var(--primary)]" />
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-blue-600 dark:text-orange-500" />
           ) : (
-            <Folder className="h-4 w-4 flex-shrink-0 text-[var(--on-surface-variant)]" />
+            <Folder className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           )}
-          <span className="text-sm text-[var(--on-surface)] truncate">
+          <span className="text-sm text-foreground truncate">
             {collection.name}
           </span>
-          <span className="font-mono text-[10px] text-[var(--on-surface-variant)] truncate hidden sm:inline">
+          <span className="font-mono text-[10px] text-muted-foreground truncate hidden sm:inline">
             {collection.path}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+          <span className="text-xs text-muted-foreground">
             {collection.model_count} models
           </span>
           <button
@@ -110,7 +110,7 @@ function CollectionTreeRow({
               if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
               onAddChild(collection);
             }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--surface-container)] text-[var(--on-surface-variant)]"
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground"
             title={`Add subcollection to ${collection.name}`}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -121,7 +121,7 @@ function CollectionTreeRow({
               if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
               onDelete(collection);
             }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--error-container)]/30 text-[var(--error)]"
+            className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50/30 text-red-600"
             title={`Delete ${collection.name}`}
           >
             <X className="h-3.5 w-3.5" />
@@ -244,12 +244,12 @@ export function TaxonomyManager() {
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
       {error && (
-        <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-3 text-xs text-[var(--error)] font-mono">
+        <div className="rounded border border-red-300/30 bg-red-50/20 p-3 text-xs text-red-600">
           {error}
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-[var(--surface-variant)]">
+      <div className="grid grid-cols-2 lg:grid-cols-4 bg-card border border-border rounded overflow-hidden divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-slate-100">
         {[
           { label: "Collections", value: collections.length, detail: `${assignedCollectionModels} assigned` },
           { label: "Tags", value: tags.length, detail: `${assignedTagModels} assignments` },
@@ -257,13 +257,13 @@ export function TaxonomyManager() {
           { label: "Top tag", value: topTags[0]?.name ?? "None", detail: `${topTags[0]?.model_count ?? 0} models` },
         ].map((item) => (
           <div key={item.label} className="p-4 sm:p-5 min-w-0">
-            <p className="font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
               {item.label}
             </p>
-            <p className="mt-2 text-xl font-semibold text-[var(--on-surface)] truncate">
+            <p className="mt-2 text-xl font-semibold text-foreground truncate">
               {item.value}
             </p>
-            <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+            <p className="mt-1 text-xs text-muted-foreground">
               {item.detail}
             </p>
           </div>
@@ -271,14 +271,14 @@ export function TaxonomyManager() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)] gap-4 sm:gap-6 lg:gap-8 items-start">
-        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+        <div className="bg-card border border-border rounded overflow-hidden">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
           <div className="flex items-center gap-2">
-            <FolderTree className="h-4 w-4 text-[var(--on-surface-variant)] flex-shrink-0" />
-            <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+            <FolderTree className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <h3 className="text-sm font-semibold text-foreground">
               Collections
             </h3>
-            <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+            <span className="text-xs text-muted-foreground">
               ({collections.length})
             </span>
           </div>
@@ -291,13 +291,13 @@ export function TaxonomyManager() {
               onChange={(e) => setNewCollection(e.target.value)}
               disabled={!auth.isAuthenticated}
               placeholder={auth.isAuthenticated ? "New collection..." : "Sign in to add"}
-              className="flex-1 sm:flex-none sm:w-40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent disabled:opacity-50"
+              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
             />
             <select
               value={parentCollectionId ?? ""}
               onChange={(e) => setParentCollectionId(e.target.value ? Number(e.target.value) : null)}
               disabled={!auth.isAuthenticated}
-              className="max-w-44 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 py-[6px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent disabled:opacity-50"
+              className="max-w-44 bg-background text-foreground text-xs border border-border rounded px-2 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
               title="Parent collection"
             >
               <option value="">Root</option>
@@ -310,7 +310,7 @@ export function TaxonomyManager() {
             <button
               type="submit"
               disabled={!newCollection.trim() || !auth.isAuthenticated}
-              className="p-1.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
+              className="p-1.5 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -319,9 +319,9 @@ export function TaxonomyManager() {
 
         <div className="p-3 sm:p-4">
           {loading ? (
-            <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+            <p className="text-xs text-muted-foreground">Loading...</p>
           ) : collections.length === 0 ? (
-            <p className="text-xs text-[var(--on-surface-variant)] font-mono">
+            <p className="text-xs text-muted-foreground">
               No collections yet. Create one above.
             </p>
           ) : (
@@ -353,14 +353,14 @@ export function TaxonomyManager() {
         </div>
       </div>
 
-      <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
+      <div className="bg-card border border-border rounded overflow-hidden">
+        <div className="px-4 sm:px-6 py-3 sm:py-4 border-b border-border flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between">
           <div className="flex items-center gap-2">
-            <TagIcon className="h-4 w-4 text-[var(--on-surface-variant)] flex-shrink-0" />
-            <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+            <TagIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+            <h3 className="text-sm font-semibold text-foreground">
               Tags
             </h3>
-            <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+            <span className="text-xs text-muted-foreground">
               ({tags.length})
             </span>
           </div>
@@ -373,12 +373,12 @@ export function TaxonomyManager() {
               onChange={(e) => setNewTag(e.target.value)}
               disabled={!auth.isAuthenticated}
               placeholder={auth.isAuthenticated ? "New tag..." : "Sign in to add"}
-              className="flex-1 sm:flex-none sm:w-40 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent disabled:opacity-50"
+              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={!newTag.trim() || !auth.isAuthenticated}
-              className="p-1.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
+              className="p-1.5 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -387,9 +387,9 @@ export function TaxonomyManager() {
 
         <div className="p-3 sm:p-4">
           {loading ? (
-            <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+            <p className="text-xs text-muted-foreground">Loading...</p>
           ) : tags.length === 0 ? (
-            <p className="text-xs text-[var(--on-surface-variant)] font-mono">
+            <p className="text-xs text-muted-foreground">
               No tags yet. Create one above.
             </p>
           ) : (
@@ -397,10 +397,10 @@ export function TaxonomyManager() {
               {tags.map((t) => (
                 <span
                   key={t.id}
-                  className="inline-flex items-center gap-1.5 bg-[var(--surface-container)] text-[var(--on-surface)] px-2.5 py-1.5 rounded font-mono text-xs uppercase tracking-wider group"
+                  className="inline-flex items-center gap-1.5 bg-muted text-foreground px-2.5 py-1.5 rounded text-xs uppercase tracking-wider group"
                 >
                   {t.name}
-                  <span className="text-[10px] text-[var(--on-surface-variant)]">
+                  <span className="text-[10px] text-muted-foreground">
                     ({t.model_count})
                   </span>
                   <button
@@ -408,7 +408,7 @@ export function TaxonomyManager() {
                       if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
                       handleDeleteTag(t.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-[var(--error)]"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-red-600"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -421,44 +421,44 @@ export function TaxonomyManager() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
-        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-          <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
-            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used collections</h3>
+        <div className="bg-card border border-border rounded overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">Most used collections</h3>
           </div>
           <div className="p-3 sm:p-4 space-y-2">
             {loading ? (
-              <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+              <p className="text-xs text-muted-foreground">Loading...</p>
             ) : topCollections.length === 0 ? (
-              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No collection usage yet.</p>
+              <p className="text-xs text-muted-foreground">No collection usage yet.</p>
             ) : (
               topCollections.map((collection) => (
                 <div key={collection.id} className="flex items-center justify-between gap-3 py-1.5">
-                  <span className="text-sm text-[var(--on-surface)] truncate">{collection.path}</span>
-                  <span className="font-mono text-xs text-[var(--on-surface-variant)]">{collection.model_count}</span>
+                  <span className="text-sm text-foreground truncate">{collection.path}</span>
+                  <span className="text-xs text-muted-foreground">{collection.model_count}</span>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-          <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
-            <h3 className="text-sm font-semibold text-[var(--on-surface)]">Most used tags</h3>
+        <div className="bg-card border border-border rounded overflow-hidden">
+          <div className="px-4 sm:px-6 py-3 border-b border-border">
+            <h3 className="text-sm font-semibold text-foreground">Most used tags</h3>
           </div>
           <div className="p-3 sm:p-4">
             {loading ? (
-              <p className="text-xs text-[var(--on-surface-variant)] font-mono">Loading...</p>
+              <p className="text-xs text-muted-foreground">Loading...</p>
             ) : topTags.length === 0 ? (
-              <p className="text-xs text-[var(--on-surface-variant)] font-mono">No tag usage yet.</p>
+              <p className="text-xs text-muted-foreground">No tag usage yet.</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {topTags.map((tag) => (
                   <span
                     key={tag.id}
-                    className="inline-flex items-center gap-1.5 bg-[var(--surface-container)] text-[var(--on-surface)] px-2.5 py-1.5 rounded font-mono text-xs uppercase tracking-wider"
+                    className="inline-flex items-center gap-1.5 bg-muted text-foreground px-2.5 py-1.5 rounded text-xs uppercase tracking-wider"
                   >
                     {tag.name}
-                    <span className="text-[10px] text-[var(--on-surface-variant)]">
+                    <span className="text-[10px] text-muted-foreground">
                       {tag.model_count}
                     </span>
                   </span>

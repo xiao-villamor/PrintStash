@@ -10,11 +10,14 @@ import {
 } from "@/lib/api/request";
 import {
   FileRevisionUpdate,
+  ImportedPrintJobRead,
   IngestJobStatus,
   IngestResponse,
   ListModelsParams,
+  ManualPrintJobCreate,
   ModelListItem,
   ModelPrinterFileRead,
+  ModelPrintJobRead,
   ModelRead,
   ModelUpdate,
   TrashPurgeRead,
@@ -70,6 +73,28 @@ export async function downloadModelExport(format: "json" | "csv"): Promise<void>
 
 export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]> {
   return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`);
+}
+
+export function getModelPrintJobs(id: number): Promise<ModelPrintJobRead[]> {
+  return getJson<ModelPrintJobRead[]>(`/api/v1/models/${id}/print-jobs`);
+}
+
+export function createManualPrintJob(
+  modelId: number,
+  payload: ManualPrintJobCreate,
+): Promise<ModelPrintJobRead> {
+  return sendJson<ModelPrintJobRead>(`/api/v1/models/${modelId}/print-jobs`, "POST", payload);
+}
+
+export function importPrintJobsFromPrinter(
+  modelId: number,
+  printerId: number,
+): Promise<ImportedPrintJobRead[]> {
+  return sendJson<ImportedPrintJobRead[]>(
+    `/api/v1/models/${modelId}/print-jobs/import-printer/${printerId}`,
+    "POST",
+    {},
+  );
 }
 
 export function updateModel(

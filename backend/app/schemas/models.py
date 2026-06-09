@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.db.models import FileRevisionStatus, FileType
+from app.db.models import FileRevisionStatus, FileType, PrintJobState
 
 
 class MetadataRead(BaseModel):
@@ -94,6 +94,33 @@ class ModelPrinterPresenceRead(BaseModel):
     file_count: int
 
 
+class ModelPrintJobRead(BaseModel):
+    """A print job belonging to a model, enriched for the history view."""
+
+    id: int
+    printer_id: int
+    printer_name: str
+    file_id: int
+    gcode_revision_number: Optional[int] = None
+    revision_label: Optional[str] = None
+    state: PrintJobState
+    material_type: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class PrintSummaryRead(BaseModel):
+    """Aggregated print metadata for a model's most recent G-code file."""
+
+    layer_height_mm: Optional[float] = None
+    estimated_time_s: Optional[int] = None
+    filament_weight_g: Optional[float] = None
+    material_type: Optional[str] = None
+    slicer_name: Optional[str] = None
+
+
 class ModelListItem(BaseModel):
     id: int
     name: str
@@ -105,6 +132,9 @@ class ModelListItem(BaseModel):
     file_count: int
     printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
+    print_summary: Optional[PrintSummaryRead] = None
+    recommended_revision_status: Optional[FileRevisionStatus] = None
+    recommended_revision_label: Optional[str] = None
 
 
 class TrashedModelRead(BaseModel):
@@ -154,6 +184,27 @@ class ModelUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=4096)
     collection: Optional[str] = Field(default=None, max_length=1024)
     tags: Optional[List[str]] = Field(default=None, max_length=100)
+
+
+class ManualPrintJobCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    printer_id: int
+    file_id: int
+    state: str = Field(default="completed", max_length=32)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    error: Optional[str] = Field(default=None, max_length=1024)
+
+
+class ImportedPrintJobRead(BaseModel):
+    filename: str
+    status: str
+    print_duration: Optional[float] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    matched_file_id: Optional[int] = None
+    imported: bool = False
 
 
 class CollectionRead(BaseModel):

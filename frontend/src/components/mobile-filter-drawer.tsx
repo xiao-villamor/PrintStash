@@ -19,6 +19,7 @@ interface MobileFilterDrawerProps {
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
+  onCreateCollection: () => void;
   loading?: boolean;
 }
 
@@ -50,15 +51,15 @@ export function MobileFilterDrawer({
       />
       <div
         ref={drawerRef}
-        className="absolute left-0 top-0 bottom-0 w-[280px] max-w-[85vw] bg-[var(--surface-container-lowest)] shadow-xl slide-in-left"
+        className="absolute left-0 top-0 bottom-0 w-[280px] max-w-[85vw] bg-background shadow-xl slide-in-left"
       >
-        <div className="flex items-center justify-between p-4 border-b border-[var(--outline-variant)]">
-          <h3 className="font-headline-sm text-[18px] font-semibold text-[var(--on-surface)]">
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h3 className="text-[18px] font-semibold text-foreground">
             Filters
           </h3>
           <button
             onClick={onClose}
-            className="text-[var(--on-surface-variant)] hover:text-[var(--on-surface)] p-1 rounded-full hover:bg-[var(--surface-container-low)] transition-colors"
+            className="text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
           >
             <X className="h-5 w-5" />
           </button>

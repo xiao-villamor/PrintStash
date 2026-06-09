@@ -39,17 +39,24 @@ from app.db.models import (
     ModelTagLink,
     Printer,
     PrinterFile,
+    PrintJob,
+    PrintJobState,
     SENTINEL_MODEL_HASH,
     Tag,
 )
+from app.services.moonraker import MoonrakerClient, MoonrakerError
 from app.db.session import get_session
 from app.schemas.models import (
     FileRead,
     FileRevisionUpdate,
+    ImportedPrintJobRead,
+    ManualPrintJobCreate,
     MetadataRead,
     ModelPrinterPresenceRead,
     ModelPrinterFileRead,
+    ModelPrintJobRead,
     ModelListItem,
+    PrintSummaryRead,
     ModelRead,
     ModelUpdate,
     StorageUsageRead,
@@ -61,7 +68,11 @@ from app.services import storage
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
-from app.services.trash import hard_delete_expired_models, hard_delete_model, trash_expires_at
+from app.services.trash import (
+    hard_delete_expired_models,
+    hard_delete_model,
+    trash_expires_at,
+)
 
 router = APIRouter(prefix="/models", tags=["models"])
 
@@ -191,6 +202,48 @@ def _printer_presence_for(
     ]
 
 
+def _print_summary_for(session: Session, model_id: int) -> PrintSummaryRead | None:
+    """Return aggregated print metadata from the most recent G-code file."""
+    row = session.exec(
+        select(Metadata)
+        .join(File, File.id == Metadata.file_id)
+        .where(
+            File.model_id == model_id,
+            File.file_type == FileType.GCODE,
+            File.deleted_at.is_(None),  # type: ignore[union-attr]
+        )
+        .order_by(File.uploaded_at.desc())
+        .limit(1)
+    ).first()
+    if row is None:
+        return None
+    return PrintSummaryRead(
+        layer_height_mm=row.layer_height_mm,
+        estimated_time_s=row.estimated_time_s,
+        filament_weight_g=row.filament_weight_g,
+        material_type=row.material_type,
+        slicer_name=row.slicer_name,
+    )
+
+
+def _recommended_revision_for(
+    session: Session, model_id: int
+) -> tuple[FileRevisionStatus | None, str | None]:
+    """Return (revision_status, revision_label) of the recommended file, if any."""
+    f = session.exec(
+        select(File)
+        .where(
+            File.model_id == model_id,
+            File.deleted_at.is_(None),  # type: ignore[union-attr]
+            File.is_recommended == True,  # noqa: E712
+        )
+        .limit(1)
+    ).first()
+    if f:
+        return f.revision_status, f.revision_label
+    return None, None
+
+
 def _trashed_model_read(
     session: Session,
     model: Model,
@@ -262,11 +315,7 @@ def _matching_filament_profile(
 def _metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
     data = metadata.model_dump()
     profile = _matching_filament_profile(session, metadata)
-    if (
-        profile
-        and profile.cost_per_kg is not None
-        and metadata.filament_weight_g
-    ):
+    if profile and profile.cost_per_kg is not None and metadata.filament_weight_g:
         data["filament_cost"] = round(
             metadata.filament_weight_g * profile.cost_per_kg / 1000,
             4,
@@ -355,6 +404,7 @@ def list_models(
         file_count = session.exec(
             select(func.count(File.id)).where(File.model_id == m.id)
         ).one()
+        rec_status, rec_label = _recommended_revision_for(session, m.id)  # type: ignore[arg-type]
         out.append(
             ModelListItem(
                 id=m.id,  # type: ignore[arg-type]
@@ -367,6 +417,9 @@ def list_models(
                 file_count=int(file_count or 0),
                 printer_presence=_printer_presence_for(session, m.id),  # type: ignore[arg-type]
                 updated_at=m.updated_at,
+                print_summary=_print_summary_for(session, m.id),  # type: ignore[arg-type]
+                recommended_revision_status=rec_status,
+                recommended_revision_label=rec_label,
             )
         )
     return out
@@ -564,7 +617,8 @@ def _export_models_csv(payload: dict) -> str:
                     "printer_model": metadata.get("printer_model") or "",
                     "nozzle_diameter_mm": metadata.get("nozzle_diameter_mm") or "",
                     "layer_height_mm": metadata.get("layer_height_mm") or "",
-                    "first_layer_height_mm": metadata.get("first_layer_height_mm") or "",
+                    "first_layer_height_mm": metadata.get("first_layer_height_mm")
+                    or "",
                     "infill_percent": metadata.get("infill_percent") or "",
                     "wall_loops": metadata.get("wall_loops") or "",
                     "top_shell_layers": metadata.get("top_shell_layers") or "",
@@ -641,8 +695,12 @@ def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
         .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
     )
 
-    model_count = session.exec(select(func.count()).select_from(live_model_ids.subquery())).one()
-    file_count = session.exec(select(func.count()).select_from(live_files.subquery())).one()
+    model_count = session.exec(
+        select(func.count()).select_from(live_model_ids.subquery())
+    ).one()
+    file_count = session.exec(
+        select(func.count()).select_from(live_files.subquery())
+    ).one()
     indexed_size = session.exec(
         select(func.coalesce(func.sum(File.size_bytes), 0))
         .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
@@ -831,6 +889,223 @@ def get_model_printer_files(
     ]
 
 
+@router.get(
+    "/{model_id}/print-jobs",
+    response_model=List[ModelPrintJobRead],
+    summary="List recent print jobs for this model (print history)",
+)
+def get_model_print_jobs(
+    model_id: int, session: Session = Depends(get_session)
+) -> List[ModelPrintJobRead]:
+    _live_model(session, model_id)
+
+    # Revision numbers are derived, not stored — mirror _build_model_read.
+    gcode_files = session.exec(
+        select(File)
+        .where(File.model_id == model_id)
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.file_type == FileType.GCODE)
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
+    ).all()
+    revision_numbers = {f.id: i for i, f in enumerate(gcode_files, start=1)}
+
+    rows = session.exec(
+        select(PrintJob, Printer, File, Metadata)
+        .join(Printer, Printer.id == PrintJob.printer_id)
+        .join(File, File.id == PrintJob.file_id)
+        .outerjoin(Metadata, Metadata.file_id == File.id)
+        .where(
+            PrintJob.model_id == model_id,
+            PrintJob.deleted_at.is_(None),  # type: ignore[union-attr]
+        )
+        .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
+        .limit(50)
+    ).all()
+    return [
+        ModelPrintJobRead(
+            id=job.id,  # type: ignore[arg-type]
+            printer_id=job.printer_id,
+            printer_name=printer.name,
+            file_id=job.file_id,
+            gcode_revision_number=revision_numbers.get(job.file_id),
+            revision_label=file.revision_label,
+            state=job.state,
+            material_type=md.material_type if md else None,
+            error=job.error,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+            created_at=job.created_at,
+        )
+        for job, printer, file, md in rows
+    ]
+
+
+@router.post(
+    "/{model_id}/print-jobs",
+    response_model=ModelPrintJobRead,
+    dependencies=[Depends(require_auth)],
+    summary="Manually log a print job for this model",
+)
+def create_manual_print_job(
+    model_id: int,
+    payload: ManualPrintJobCreate,
+    session: Session = Depends(get_session),
+) -> ModelPrintJobRead:
+    _live_model(session, model_id)
+
+    file_row = session.get(File, payload.file_id)
+    if file_row is None or file_row.model_id != model_id:
+        raise HTTPException(status_code=404, detail={"code": "file_not_found"})
+
+    printer = session.get(Printer, payload.printer_id)
+    if printer is None or printer.deleted_at is not None:
+        raise HTTPException(status_code=404, detail={"code": "printer_not_found"})
+
+    try:
+        state = PrintJobState(payload.state)
+    except ValueError:
+        state = PrintJobState.COMPLETED
+
+    job = PrintJob(
+        printer_id=payload.printer_id,
+        file_id=payload.file_id,
+        model_id=model_id,
+        remote_filename=file_row.original_filename,
+        state=state,
+        source="manual",
+        started_at=payload.started_at,
+        finished_at=payload.finished_at,
+        error=payload.error,
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+
+    gcode_files = session.exec(
+        select(File)
+        .where(File.model_id == model_id)
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.file_type == FileType.GCODE)
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
+    ).all()
+    revision_numbers = {f.id: i for i, f in enumerate(gcode_files, start=1)}
+
+    return ModelPrintJobRead(
+        id=job.id,
+        printer_id=job.printer_id,
+        printer_name=printer.name,
+        file_id=job.file_id,
+        gcode_revision_number=revision_numbers.get(job.file_id),
+        revision_label=file_row.revision_label,
+        state=job.state,
+        material_type=None,
+        error=job.error,
+        started_at=job.started_at,
+        finished_at=job.finished_at,
+        created_at=job.created_at,
+    )
+
+
+@router.post(
+    "/{model_id}/print-jobs/import-printer/{printer_id}",
+    response_model=List[ImportedPrintJobRead],
+    dependencies=[Depends(require_auth)],
+    summary="Fetch and import matching print history from a Moonraker printer",
+)
+async def import_print_jobs_from_printer(
+    model_id: int,
+    printer_id: int,
+    session: Session = Depends(get_session),
+) -> List[ImportedPrintJobRead]:
+    _live_model(session, model_id)
+
+    printer = session.get(Printer, printer_id)
+    if printer is None or printer.deleted_at is not None:
+        raise HTTPException(status_code=404, detail={"code": "printer_not_found"})
+    if not printer.moonraker_url:
+        raise HTTPException(status_code=400, detail={"code": "printer_no_url"})
+
+    gcode_files = session.exec(
+        select(File)
+        .where(File.model_id == model_id)
+        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(File.file_type == FileType.GCODE)
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
+    ).all()
+    filenames_to_file = {f.original_filename.lower(): f for f in gcode_files}
+
+    client = MoonrakerClient(printer.moonraker_url, printer.api_key)
+    try:
+        history = await client.get_print_history(limit=100)
+    except MoonrakerError as exc:
+        raise HTTPException(status_code=502, detail={"code": "printer_unreachable", "detail": str(exc)})
+
+    existing_remote = {
+        row[0]
+        for row in session.exec(
+            select(PrintJob.remote_filename)
+            .where(PrintJob.printer_id == printer_id)
+            .where(PrintJob.model_id == model_id)
+            .where(PrintJob.deleted_at.is_(None))  # type: ignore[union-attr]
+        ).all()
+    }
+
+    results: List[ImportedPrintJobRead] = []
+    for entry in history:
+        fname = entry.get("filename", "")
+        matched = filenames_to_file.get(fname.lower())
+        already_imported = fname in existing_remote
+
+        if matched and not already_imported:
+            raw_status = entry.get("status", "completed")
+            state_map = {
+                "completed": PrintJobState.COMPLETED,
+                "cancelled": PrintJobState.CANCELLED,
+                "error": PrintJobState.FAILED,
+            }
+            state = state_map.get(raw_status, PrintJobState.COMPLETED)
+            start_ts = entry.get("start_time")
+            end_ts = entry.get("end_time")
+
+            from datetime import timezone
+            from datetime import datetime as _dt
+
+            def _ts(t: float | None):
+                return _dt.fromtimestamp(t, tz=timezone.utc) if t else None
+
+            job = PrintJob(
+                printer_id=printer_id,
+                file_id=matched.id,
+                model_id=model_id,
+                remote_filename=fname,
+                state=state,
+                source="printer_history",
+                started_at=_ts(start_ts),
+                finished_at=_ts(end_ts),
+            )
+            session.add(job)
+            session.commit()
+
+            results.append(ImportedPrintJobRead(
+                filename=fname,
+                status=raw_status,
+                print_duration=entry.get("print_duration"),
+                start_time=start_ts,
+                end_time=end_ts,
+                matched_file_id=matched.id,
+                imported=True,
+            ))
+        elif matched and already_imported:
+            results.append(ImportedPrintJobRead(
+                filename=fname,
+                status=entry.get("status", ""),
+                matched_file_id=matched.id,
+                imported=False,
+            ))
+
+    return results
+
+
 @router.patch(
     "/{model_id}",
     response_model=ModelRead,
@@ -954,7 +1229,9 @@ def restore_model(model_id: int, session: Session = Depends(get_session)) -> Mod
     dependencies=[Depends(require_auth)],
     summary="Permanently delete a model from the trash",
 )
-def purge_model(model_id: int, session: Session = Depends(get_session)) -> TrashPurgeRead:
+def purge_model(
+    model_id: int, session: Session = Depends(get_session)
+) -> TrashPurgeRead:
     m = session.get(Model, model_id)
     if m is None:
         raise HTTPException(status_code=404, detail="model_not_found")

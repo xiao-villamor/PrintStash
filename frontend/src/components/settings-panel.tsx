@@ -272,10 +272,13 @@ export function SettingsPanel() {
   ];
 
   return (
-    <div className="w-full space-y-4 sm:space-y-6 lg:space-y-8">
-      <h2 className="text-xl font-semibold text-[var(--on-surface)]">Settings</h2>
+    <div className="w-full space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold text-foreground tracking-tight">Settings</h2>
+        <p className="text-sm text-muted-foreground">Vault configuration and display preferences</p>
+      </div>
 
-      <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
+      <div className="bg-card border border-border rounded">
         <div className="flex flex-wrap gap-1 p-1">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
@@ -285,10 +288,10 @@ export function SettingsPanel() {
                 key={section.id}
                 type="button"
                 onClick={() => setActiveSection(section.id)}
-                className={`inline-flex items-center gap-2 rounded px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
+                className={`inline-flex items-center gap-2 rounded px-3 py-2 text-xs uppercase tracking-wider transition-colors ${
                   active
-                    ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
-                    : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                    ?  "bg-blue-50 dark:bg-orange-950/50 text-blue-700 dark:text-orange-400 dark:text-orange-400"
+                    : "text-muted-foreground hover:bg-muted/50"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -301,21 +304,21 @@ export function SettingsPanel() {
 
       {activeSection === "overview" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
-          <div className="lg:col-span-2 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)]">
-              <h3 className="text-sm font-semibold text-[var(--on-surface)]">Vault health</h3>
-              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">Current library, storage, and printer totals</p>
+          <div className="lg:col-span-2 bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border dark:bg-[var(--surface-container-high)] rounded-t">
+              <h3 className="text-sm font-semibold text-foreground">Vault health</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Current library, storage, and printer totals</p>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-[var(--surface-variant)]">
+            <div className="grid grid-cols-2 lg:grid-cols-4 divide-x-0 lg:divide-x divide-y lg:divide-y-0 divide-border">
               {vaultSummaryItems.map((item) => (
-                <div key={item.label} className="p-4 sm:p-6">
-                  <p className="font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                <div key={item.label} className="p-4 sm:p-6 bg-card dark:bg-[var(--surface-container)]">
+                  <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
                     {item.label}
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-[var(--on-surface)]">
+                  <p className="mt-2 text-2xl font-semibold text-foreground">
                     {item.value}
                   </p>
-                  <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+                  <p className="mt-1 text-xs text-muted-foreground">
                     {item.desc}
                   </p>
                 </div>
@@ -324,22 +327,22 @@ export function SettingsPanel() {
           </div>
 
           <div className="space-y-4 sm:space-y-6">
-            <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-              <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex items-center gap-2 sm:gap-3">
-                <div className="w-9 h-9 rounded bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0">
+            <div className="bg-card border border-border rounded">
+              <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex items-center gap-2 sm:gap-3">
+                <div className="w-9 h-9 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
                   <Download className="h-4 w-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                  <h3 className="text-sm font-semibold text-foreground">
                     Data export
                   </h3>
-                  <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     Metadata only, no raw STL/3MF/G-code files
                   </p>
                 </div>
               </div>
               <div className="p-3 sm:p-4 lg:p-6 space-y-4">
-                <p className="text-sm text-[var(--on-surface-variant)] leading-relaxed">
+                <p className="text-sm text-muted-foreground leading-relaxed">
                   Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -347,7 +350,7 @@ export function SettingsPanel() {
                     type="button"
                     onClick={() => exportData("json")}
                     disabled={exporting !== null}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Download className="h-3.5 w-3.5" />
                     {exporting === "json" ? "Exporting" : "JSON"}
@@ -356,7 +359,7 @@ export function SettingsPanel() {
                     type="button"
                     onClick={() => exportData("csv")}
                     disabled={exporting !== null}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Download className="h-3.5 w-3.5" />
                     {exporting === "csv" ? "Exporting" : "CSV"}
@@ -365,34 +368,34 @@ export function SettingsPanel() {
               </div>
             </div>
 
-            <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-              <div className="px-4 sm:px-6 py-3 border-b border-[var(--outline-variant)]">
-                <h3 className="text-sm font-semibold text-[var(--on-surface)]">About</h3>
+            <div className="bg-card border border-border rounded">
+              <div className="px-4 sm:px-6 py-3 border-b border-border">
+                <h3 className="text-sm font-semibold text-foreground">About</h3>
               </div>
               <div className="p-3 sm:p-4">
-                <p className="text-xs sm:text-sm text-[var(--on-surface-variant)] leading-relaxed">
-                  <strong className="text-[var(--on-surface)]">PrintStash</strong> keeps source meshes and sliced jobs searchable with extracted print metadata, deduplication, and a REST API.
+                <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                  <strong className="text-foreground">PrintStash</strong> keeps source meshes and sliced jobs searchable with extracted print metadata, deduplication, and a REST API.
                 </p>
               </div>
             </div>
           </div>
 
-          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)]">
-              <h3 className="text-sm font-semibold text-[var(--on-surface)]">Vault status</h3>
-              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">System overview and configuration</p>
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border dark:bg-[var(--surface-container-high)] rounded-t">
+              <h3 className="text-sm font-semibold text-foreground">Vault status</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">System overview and configuration</p>
             </div>
             <div className="p-3 sm:p-4 lg:p-6">
               {statItems.map((item) => (
-                <div key={item.label} className="flex items-center gap-3 sm:gap-4 py-3 border-b border-[var(--surface-variant)] last:border-b-0">
-                  <div className="w-9 h-9 rounded bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0">
+                <div key={item.label} className="flex items-center gap-3 sm:gap-4 py-3 border-b border-border last:border-b-0">
+                  <div className="w-9 h-9 rounded dark:bg-[var(--surface-container-high)] bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
                     <item.icon className="h-4 w-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[var(--on-surface)]">{item.label}</p>
-                    <p className="text-xs text-[var(--on-surface-variant)] truncate">{item.desc}</p>
+                    <p className="text-sm text-foreground">{item.label}</p>
+                    <p className="text-xs text-muted-foreground truncate">{item.desc}</p>
                   </div>
-                  <span className="font-mono text-xs sm:text-sm text-[var(--on-surface)] text-right">{item.value}</span>
+                  <span className="font-mono text-xs sm:text-sm text-foreground text-right">{item.value}</span>
                 </div>
               ))}
             </div>
@@ -402,23 +405,23 @@ export function SettingsPanel() {
 
       {activeSection === "access" && (
         <div className="max-w-3xl">
-          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex items-center gap-2 sm:gap-3">
-              <div className="w-9 h-9 rounded bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0">
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex items-center gap-2 sm:gap-3">
+              <div className="w-9 h-9 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
                 <KeyRound className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                <h3 className="text-sm font-semibold text-foreground">
                   API keys
                 </h3>
-                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   Create credentials for scripts and integrations, then exchange them for a JWT at login.
                 </p>
               </div>
             </div>
             <div className="p-3 sm:p-4 lg:p-6 space-y-4">
               {!user ? (
-                <p className="text-sm text-[var(--on-surface-variant)]">
+                <p className="text-sm text-muted-foreground">
                   Sign in to create API keys.
                 </p>
               ) : (
@@ -427,14 +430,14 @@ export function SettingsPanel() {
                     <input
                       value={keyName}
                       onChange={(event) => setKeyName(event.target.value)}
-                      className="w-full px-3 py-2 bg-[var(--surface)] border border-[var(--outline-variant)] rounded text-sm text-[var(--on-surface)] focus:outline-none focus:border-[var(--primary)]"
+                      className="w-full px-3 py-2 bg-card border border-border rounded text-sm text-foreground focus:outline-none focus:border-blue-600 dark:focus:border-blue-500 dark:border-orange-500"
                       maxLength={128}
                     />
                     <button
                       type="button"
                       onClick={generateApiKey}
                       disabled={keyBusy}
-                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <KeyRound className="h-3.5 w-3.5" />
                       Generate
@@ -442,18 +445,18 @@ export function SettingsPanel() {
                   </div>
 
                   {newApiKey && (
-                    <div className="border border-[var(--primary)]/30 bg-[var(--primary-fixed)]/10 rounded p-3 space-y-2">
-                      <p className="text-xs text-[var(--on-surface-variant)]">
+                    <div className="border border-blue-200 dark:border-orange-800 dark:border-orange-800 bg-blue-50 dark:bg-orange-950/30 rounded p-3 space-y-2">
+                      <p className="text-xs text-muted-foreground">
                         Copy this key now. It will only be shown once.
                       </p>
                       <div className="flex items-center gap-2">
-                        <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-[var(--surface-container)] px-3 py-2 font-mono text-xs text-[var(--on-surface)]">
+                        <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
                           {newApiKey}
                         </code>
                         <button
                           type="button"
                           onClick={copyApiKey}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted/50"
                           title="Copy API key"
                         >
                           <Copy className="h-4 w-4" />
@@ -464,20 +467,20 @@ export function SettingsPanel() {
 
                   <div className="space-y-2">
                     {apiKeys.length === 0 ? (
-                      <p className="text-sm text-[var(--on-surface-variant)]">
+                      <p className="text-sm text-muted-foreground">
                         No active API keys.
                       </p>
                     ) : (
                       apiKeys.map((key) => (
                         <div
                           key={key.id}
-                          className="flex items-center gap-3 border border-[var(--outline-variant)] rounded px-3 py-2"
+                          className="flex items-center gap-3 border border-border rounded px-3 py-2"
                         >
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm text-[var(--on-surface)]">
+                            <p className="truncate text-sm text-foreground">
                               {key.name}
                             </p>
-                            <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                            <p className="font-mono text-[11px] text-muted-foreground">
                               {key.prefix}... · {key.last_used_at ? "Used" : "Never used"}
                             </p>
                           </div>
@@ -485,7 +488,7 @@ export function SettingsPanel() {
                             type="button"
                             onClick={() => deleteApiKey(key.id)}
                             disabled={keyBusy}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--outline-variant)] text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
                             title="Revoke API key"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -495,8 +498,8 @@ export function SettingsPanel() {
                     )}
                   </div>
 
-                  <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
-                    <p className="text-xs text-[var(--on-surface-variant)] leading-relaxed">
+                  <div className="rounded border border-border bg-background p-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
                       Use your username with this API key on <code className="font-mono">/api/v1/auth/login</code>. The response is the same JWT Bearer token used by the app, so later requests only need the normal <code className="font-mono">Authorization</code> header.
                     </p>
                   </div>
@@ -515,20 +518,20 @@ export function SettingsPanel() {
 
       {activeSection === "design" && (
         <div className="max-w-5xl">
-          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                <h3 className="text-sm font-semibold text-foreground">
                   Model metadata
                 </h3>
-                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   Choose which metadata fields appear on model detail pages.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={resetMetadataPreferences}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Reset
@@ -538,9 +541,9 @@ export function SettingsPanel() {
               {METADATA_FIELDS.map((field) => (
                 <label
                   key={field.id}
-                  className="flex items-center justify-between gap-3 rounded border border-[var(--outline-variant)] bg-[var(--surface)] px-3 py-2.5"
+                  className="flex items-center justify-between gap-3 rounded border border-border bg-background px-3 py-2.5"
                 >
-                  <span className="text-sm text-[var(--on-surface)]">
+                  <span className="text-sm text-foreground">
                     {field.label}
                   </span>
                   <input
@@ -561,13 +564,13 @@ export function SettingsPanel() {
 
       {activeSection === "trash" && (
         <div className="max-w-5xl space-y-4 sm:space-y-6">
-          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+                <h3 className="text-sm font-semibold text-foreground">
                   Trash retention
                 </h3>
-                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   Soft-deleted models stay restorable until the retention window expires.
                 </p>
               </div>
@@ -575,7 +578,7 @@ export function SettingsPanel() {
                 type="button"
                 onClick={loadTrash}
                 disabled={trashLoading}
-                className="inline-flex h-9 w-9 items-center justify-center rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
                 title="Refresh trash"
               >
                 <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
@@ -583,7 +586,7 @@ export function SettingsPanel() {
             </div>
             <div className="p-3 sm:p-4 lg:p-6 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
               <label className="block">
-                <span className="block text-[11px] text-[var(--on-surface-variant)] mb-1">
+                <span className="block text-[11px] text-muted-foreground mb-1">
                   Days
                 </span>
                 <input
@@ -592,14 +595,14 @@ export function SettingsPanel() {
                   value={trashRetentionDays}
                   onChange={(event) => setTrashRetentionDays(Number(event.target.value))}
                   disabled={!user || trashBusy === "settings"}
-                  className="w-full px-2.5 py-2 text-sm rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] text-[var(--on-surface)] disabled:opacity-50"
+                  className="w-full px-2.5 py-2 text-sm rounded border border-border bg-background text-foreground disabled:opacity-50"
                 />
               </label>
               <button
                 type="button"
                 onClick={saveTrashRetention}
                 disabled={!user || trashBusy === "settings"}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 {trashBusy === "settings" ? "Saving" : "Save retention"}
@@ -608,7 +611,7 @@ export function SettingsPanel() {
                 type="button"
                 onClick={purgeExpiredItems}
                 disabled={!user || trashBusy === "expired" || trashRetentionDays < 0}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Eraser className="h-3.5 w-3.5" />
                 {trashBusy === "expired" ? "Purging" : "Purge expired"}
@@ -616,26 +619,26 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-[var(--outline-variant)]">
-              <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border">
+              <h3 className="text-sm font-semibold text-foreground">
                 Deleted models
               </h3>
-              <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 Restore models or remove them permanently from storage.
               </p>
             </div>
-            <div className="divide-y divide-[var(--surface-variant)]">
+            <div className="divide-y divide-slate-100">
               {!user ? (
-                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                <p className="p-4 sm:p-6 text-sm text-muted-foreground">
                   Sign in to manage the trash.
                 </p>
               ) : trashLoading ? (
-                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                <p className="p-4 sm:p-6 text-sm text-muted-foreground">
                   Loading...
                 </p>
               ) : trashItems.length === 0 ? (
-                <p className="p-4 sm:p-6 text-sm text-[var(--on-surface-variant)]">
+                <p className="p-4 sm:p-6 text-sm text-muted-foreground">
                   Trash is empty.
                 </p>
               ) : (
@@ -646,17 +649,17 @@ export function SettingsPanel() {
                   >
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-[var(--on-surface)]">
+                        <p className="truncate text-sm font-medium text-foreground">
                           {item.name}
                         </p>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)]">
+                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           {item.file_count} files
                         </span>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)]">
+                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           {formatBytes(item.size_bytes)}
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+                      <p className="mt-1 text-xs text-muted-foreground">
                         Deleted {formatDate(item.deleted_at)} · Expires {formatDate(item.expires_at)}
                       </p>
                     </div>
@@ -665,7 +668,7 @@ export function SettingsPanel() {
                         type="button"
                         onClick={() => restoreTrashItem(item.id)}
                         disabled={trashBusy !== null}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         Restore
@@ -674,7 +677,7 @@ export function SettingsPanel() {
                         type="button"
                         onClick={() => purgeTrashItem(item.id)}
                         disabled={trashBusy !== null}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors font-mono text-xs uppercase tracking-wider disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs uppercase tracking-wider disabled:opacity-50"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         Delete

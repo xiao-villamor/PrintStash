@@ -9,7 +9,16 @@ from sqlmodel import Session
 
 from app.core.config import _overlay
 from app.core.time import utcnow
-from app.db.models import File, FileType, Metadata, Model, Printer, PrinterFile
+from app.db.models import (
+    File,
+    FileType,
+    Metadata,
+    Model,
+    Printer,
+    PrinterFile,
+    PrintJob,
+    PrintJobState,
+)
 
 
 def _model(db_session: Session, *, slug: str = "bracket") -> Model:
@@ -105,6 +114,52 @@ def test_model_printer_files_lists_printers_for_gcode(
             "missing_since": None,
         }
     ]
+
+
+def test_model_print_jobs_empty_when_none(
+    client: TestClient, db_session: Session
+) -> None:
+    model = _model(db_session)
+
+    resp = client.get(f"/api/v1/models/{model.id}/print-jobs")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_model_print_jobs_lists_history_enriched(
+    client: TestClient, db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+    file_row.revision_label = "PETG baseline"
+    db_session.add(file_row)
+    db_session.add(
+        Metadata(file_id=file_row.id, slicer_name="OrcaSlicer", material_type="PETG")
+    )
+    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
+    db_session.add(printer)
+    db_session.commit()
+    db_session.refresh(printer)
+    db_session.add(
+        PrintJob(
+            printer_id=printer.id,
+            file_id=file_row.id,
+            model_id=model.id,
+            remote_filename="file-1.gcode",
+            state=PrintJobState.COMPLETED,
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(f"/api/v1/models/{model.id}/print-jobs")
+    assert resp.status_code == 200
+    rows = resp.json()
+    assert len(rows) == 1
+    assert rows[0]["printer_name"] == "Ender"
+    assert rows[0]["state"] == "completed"
+    assert rows[0]["material_type"] == "PETG"
+    assert rows[0]["revision_label"] == "PETG baseline"
+    assert rows[0]["gcode_revision_number"] == 1
 
 
 def test_list_models_can_filter_by_printer(

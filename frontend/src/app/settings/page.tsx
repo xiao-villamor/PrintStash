@@ -6,7 +6,7 @@ export const metadata = {
 
 export default function SettingsPage() {
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
+    <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
       <SettingsPanel />
     </div>
   );

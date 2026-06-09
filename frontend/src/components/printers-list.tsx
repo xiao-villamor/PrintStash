@@ -11,11 +11,11 @@ import { Plus, Trash2, RefreshCw, ArrowRight, Wifi, WifiOff } from "lucide-react
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
-  printing: "bg-[var(--primary)]",
+  printing: "bg-blue-600 dark:bg-orange-600",
   paused: "bg-amber-500",
-  offline: "bg-[var(--outline)]",
-  unknown: "bg-[var(--outline)]",
-  error: "bg-[var(--error)]",
+  offline: "bg-slate-400",
+  unknown: "bg-slate-400",
+  error: "bg-red-600",
 };
 
 function providerLabel(p: PrinterRead): string {
@@ -65,15 +65,16 @@ export function PrintersPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-5xl mx-auto w-full">
+    <div className="flex w-full flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold text-[var(--on-surface)]">
-          Printers
-        </h2>
+        <div>
+          <h2 className="text-2xl font-bold text-foreground tracking-tight">Printers</h2>
+          <p className="text-sm text-muted-foreground">Connected printer endpoints</p>
+        </div>
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[13px] flex items-center gap-1.5"
+            className="px-3 py-2 rounded border border-border bg-background text-xs font-medium text-foreground hover:bg-muted/50 transition-colors flex items-center gap-1.5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
@@ -84,7 +85,7 @@ export function PrintersPage() {
               setAddOpen(true);
             }}
             disabled={!auth.isAuthenticated}
-            className="px-3 py-1.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs font-medium hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="h-3.5 w-3.5" />
             {auth.isAuthenticated ? "Add printer" : "Sign in to add"}
@@ -93,7 +94,7 @@ export function PrintersPage() {
       </div>
 
       {error && (
-        <div className="rounded border border-[var(--error)]/50 bg-[var(--error-container)]/30 p-3 text-sm text-[var(--error)]">
+        <div className="rounded border border-red-300/50 bg-red-50/30 p-3 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -103,7 +104,7 @@ export function PrintersPage() {
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
-              className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded p-5 space-y-3"
+              className="bg-card border border-border rounded p-5 space-y-3"
             >
               <Skeleton className="h-5 w-32" />
               <Skeleton className="h-4 w-48" />
@@ -112,12 +113,12 @@ export function PrintersPage() {
           ))}
         </div>
       ) : printers.length === 0 ? (
-        <div className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded flex flex-col items-center justify-center gap-4 py-16 text-[var(--on-surface-variant)]">
+        <div className="bg-card border border-border rounded flex flex-col items-center gap-4 py-16 text-muted-foreground">
           <PrinterIcon className="h-12 w-12 opacity-30" />
-          <p className="text-sm font-mono">No printers configured yet.</p>
+          <p className="text-sm">No printers configured yet.</p>
           <button
             onClick={() => setAddOpen(true)}
-            className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity flex items-center gap-2"
+            className="px-4 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs font-medium hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors flex items-center gap-2"
           >
             <Plus className="h-3.5 w-3.5" />
             Add your first printer
@@ -129,19 +130,19 @@ export function PrintersPage() {
             <Link
               key={p.id}
               href={`/printers/${p.id}`}
-              className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-[var(--primary)] transition-all duration-200 p-5 flex flex-col gap-3 group"
+              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-blue-600 dark:border-orange-500 transition-all duration-200 p-5 flex flex-col gap-3 group"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h3 className="text-[15px] font-semibold text-[var(--on-surface)] truncate">
+                  <h3 className="text-[15px] font-semibold text-foreground truncate">
                     {p.name}
                   </h3>
                   <div className="mt-1 flex flex-wrap gap-1.5">
-                    <span className="rounded border border-[var(--outline-variant)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <span className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                       {providerLabel(p)}
                     </span>
                     {p.capabilities.support_level === "beta" && (
-                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-amber-600">
+                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-amber-600">
                         Beta
                       </span>
                     )}
@@ -149,43 +150,43 @@ export function PrintersPage() {
                 </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
                   <span
-                    className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-[var(--outline)]"}`}
+                    className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-slate-400"}`}
                   />
-                  <span className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider">
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     {p.status}
                   </span>
                 </span>
               </div>
 
-              <p className="text-[13px] text-[var(--on-surface-variant)] font-mono truncate">
+              <p className="text-[13px] text-muted-foreground truncate">
                 {providerAddress(p)}
               </p>
 
               {p.last_error && (
-                <div className="rounded bg-[var(--error-container)]/30 border border-[var(--error)]/20 p-2 text-xs text-[var(--error)] font-mono truncate">
+                <div className="rounded bg-red-50/30 border border-red-300/20 p-2 text-xs text-red-600 truncate">
                   {p.last_error}
                 </div>
               )}
 
-              <div className="text-[11px] text-[var(--on-surface-variant)] font-mono mt-auto">
+              <div className="text-[11px] text-muted-foreground mt-auto">
                 {p.last_seen_at
                   ? `Last seen ${new Date(p.last_seen_at).toLocaleString()}`
                   : "Never connected"}
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-[var(--surface-variant)]">
+              <div className="flex items-center justify-between pt-2 border-t border-border">
                 <button
                   onClick={(e) => {
                     if (!auth.isAuthenticated) { e.preventDefault(); e.stopPropagation(); auth.showAuthRequiredToast(); return; }
                     handleDelete(p, e);
                   }}
                   disabled={!auth.isAuthenticated}
-                  className="px-2 py-1 rounded text-[var(--error)] hover:bg-[var(--error-container)]/30 transition-colors font-mono text-[10px] uppercase tracking-wider flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-2 py-1 rounded text-red-600 hover:bg-red-500/10 transition-colors text-[10px] uppercase tracking-wider flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="h-3 w-3" />
                   {auth.isAuthenticated ? "Remove" : "Sign in"}
                 </button>
-                <span className="px-2 py-1 rounded border border-[var(--outline-variant)] text-[var(--on-surface)] font-mono text-[10px] uppercase tracking-wider flex items-center gap-1 group-hover:border-[var(--primary)] group-hover:text-[var(--primary)] transition-colors">
+                <span className="px-2 py-1 rounded border border-border text-foreground text-[10px] uppercase tracking-wider flex items-center gap-1 group-hover:border-blue-600 dark:border-orange-500 group-hover:text-blue-600 dark:text-orange-500 transition-colors">
                   Open
                   <ArrowRight className="h-3 w-3" />
                 </span>
@@ -271,37 +272,37 @@ function AddPrinterModal({
         className="absolute inset-0 bg-black/30 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded w-full max-w-md p-6 shadow-lg">
-        <h3 className="text-lg font-semibold text-[var(--on-surface)] mb-5">
+      <div className="relative bg-card border border-border rounded w-full max-w-md p-6 shadow-lg">
+        <h3 className="text-lg font-semibold text-foreground mb-5">
           Add printer
         </h3>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Name
             </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
               placeholder="Voron 2.4"
               required
             />
           </div>
           <div>
-            <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Moonraker URL
             </label>
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
               placeholder="http://voron.local:7125"
               required
             />
           </div>
           <div>
-            <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Moonraker API key{" "}
               <span className="font-normal normal-case tracking-normal opacity-60">
                 (optional)
@@ -311,23 +312,23 @@ function AddPrinterModal({
               type="password"
               value={moonrakerKey}
               onChange={(e) => setMoonrakerKey(e.target.value)}
-              className="w-full bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
               placeholder="Leave blank if auth is disabled"
             />
           </div>
           <div>
-            <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Notes
             </label>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
               placeholder="Optional"
             />
           </div>
           {err && (
-            <div className="rounded border border-[var(--error)]/40 bg-[var(--error-container)]/30 p-2 text-xs text-[var(--error)] font-mono">
+            <div className="rounded border border-red-300/40 bg-red-50/30 p-2 text-xs text-red-600">
               {err}
             </div>
           )}
@@ -335,14 +336,14 @@ function AddPrinterModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors"
+              className="px-4 py-2 rounded border border-border text-muted-foreground text-xs uppercase tracking-wider hover:bg-muted/50 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting || !name || !url}
-              className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? "Adding..." : "Add printer"}
             </button>

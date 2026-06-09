@@ -1,17 +1,20 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import type { STLViewerControls } from "@/components/stl-viewer";
+import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   CollectionRead,
   FileRead,
   FileRevisionStatus,
+  FileRevisionUpdate,
   MetadataRead,
   ModelRead,
   ModelPrinterFileRead,
+  ModelPrintJobRead,
   PrinterRead,
+  PrintJobState,
   TagRead,
 } from "@/types";
 
@@ -21,9 +24,12 @@ const STLViewer = dynamic(
 );
 import {
   createTag,
+  createManualPrintJob,
   deleteModel,
   getAssetUrl,
   getModelPrinterFiles,
+  getModelPrintJobs,
+  importPrintJobsFromPrinter,
   listCollections,
   listPrinters,
   listTags,
@@ -43,15 +49,25 @@ import { useRequireAuth } from "@/lib/use-require-auth";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Axis3d,
+  Box,
+  Camera,
   Check,
+  CheckCircle2,
   ChevronDown,
+  Clock,
+  Crosshair,
   Download,
   FileText,
   GitCompare,
+  Grid3x3,
   Loader2,
+  Maximize2,
   Minus,
   Pencil,
   Plus,
+  Printer as PrinterIcon,
+  RefreshCw,
   RotateCcw,
   Send,
   Star,
@@ -59,6 +75,7 @@ import {
   Wifi,
   WifiOff,
   X,
+  XCircle,
 } from "lucide-react";
 
 function formatBytes(bytes: number): string {
@@ -132,6 +149,47 @@ function revisionStatusClass(status: FileRevisionStatus | null): string {
 
 function revisionStatusLabel(status: FileRevisionStatus | null): string {
   return status ? REVISION_STATUS_LABELS[status] : "Unmarked";
+}
+
+function headerStatusLabel(status: FileRevisionStatus | null): string {
+  return status === "known_good" ? "Printed OK" : revisionStatusLabel(status);
+}
+
+type TabKey = "overview" | "settings" | "revisions" | "files" | "history";
+
+const TABS: { key: TabKey; label: string }[] = [
+  { key: "overview", label: "Overview" },
+  { key: "settings", label: "Settings" },
+  { key: "revisions", label: "Revisions" },
+  { key: "files", label: "Files" },
+  { key: "history", label: "History" },
+];
+
+type PrintJobTone = "success" | "error" | "progress";
+
+const PRINT_JOB_PRESENTATION: Record<
+  PrintJobState,
+  { label: string; tone: PrintJobTone }
+> = {
+  queued: { label: "Queued", tone: "progress" },
+  uploading: { label: "Uploading", tone: "progress" },
+  started: { label: "Started", tone: "progress" },
+  printing: { label: "Printing", tone: "progress" },
+  paused: { label: "Paused", tone: "progress" },
+  completed: { label: "Success", tone: "success" },
+  cancelled: { label: "Cancelled", tone: "error" },
+  failed: { label: "Failed", tone: "error" },
+};
+
+function printJobToneClass(tone: PrintJobTone): string {
+  switch (tone) {
+    case "success":
+      return "bg-emerald-500/15 text-emerald-600 border-emerald-500/30";
+    case "error":
+      return "bg-[var(--error-container)]/40 text-[var(--error)] border-[var(--error)]/30";
+    default:
+      return "bg-amber-500/15 text-amber-600 border-amber-500/30";
+  }
 }
 
 type PrintSettingRow = {
@@ -261,10 +319,19 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [compareLeftId, setCompareLeftId] = useState<number>(initialGcodeFiles.at(-1)?.id ?? 0);
   const [compareRightId, setCompareRightId] = useState<number>(initialGcodeFiles.at(-2)?.id ?? initialGcodeFiles.at(-1)?.id ?? 0);
   const [printerFiles, setPrinterFiles] = useState<ModelPrinterFileRead[]>([]);
+  const [printJobs, setPrintJobs] = useState<ModelPrintJobRead[]>([]);
+  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
+  const [showGrid, setShowGrid] = useState(false);
+  const [showAxes, setShowAxes] = useState(false);
+  const [showBoundingBox, setShowBoundingBox] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
   const viewerControls = useRef<STLViewerControls | null>(null);
 
   useEffect(() => {
     getModelPrinterFiles(model.id).then(setPrinterFiles).catch(() => {});
+    getModelPrintJobs(model.id).then(setPrintJobs).catch(() => {});
   }, [model.id]);
 
   useEffect(() => {
@@ -297,6 +364,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       listCollections().then((c) => { setCollections(c); setCatLoaded(true); }).catch(() => {});
       listTags().then(setTags).catch(() => {});
     }
+    setActiveTab("overview");
     setEditing(true);
   }
 
@@ -323,9 +391,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     }
   }
 
-  function editToggleTag(slug: string) {
+  function editToggleTag(name: string) {
+    const lower = name.toLowerCase();
     setEditTags((p) =>
-      p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug],
+      p.map((n) => n.toLowerCase()).includes(lower)
+        ? p.filter((s) => s.toLowerCase() !== lower)
+        : [...p, name],
     );
   }
 
@@ -336,13 +407,15 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       (t) => t.name.toLowerCase() === trimmed.toLowerCase(),
     );
     if (existing) {
-      if (!editTags.includes(existing.slug)) editToggleTag(existing.slug);
+      if (!editTags.map((n) => n.toLowerCase()).includes(existing.name.toLowerCase())) {
+        editToggleTag(existing.name);
+      }
       return;
     }
     try {
       const t = await createTag({ name: trimmed });
       setTags((p) => [...p, t]);
-      setEditTags((p) => [...p, t.slug]);
+      setEditTags((p) => [...p, t.name]);
     } catch {
       /* ignored */
     }
@@ -350,9 +423,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
   const editFilteredTags = useMemo(() => {
     const q = tagInput.toLowerCase().trim();
+    const selectedNames = editTags.map((n) => n.toLowerCase());
     return tags.filter(
       (t) =>
-        !editTags.includes(t.slug) &&
+        !selectedNames.includes(t.name.toLowerCase()) &&
         (q === "" || t.name.toLowerCase().includes(q)),
     );
   }, [tags, tagInput, editTags]);
@@ -378,10 +452,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const latestFile = recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? sortedFiles[sortedFiles.length - 1];
   const meta = latestFile?.metadata;
-  const printSettingRows = useMemo(
-    () => buildPrintSettingRows(meta, metadataPreferences),
-    [meta, metadataPreferences],
-  );
+  const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
   const meshFile = model.files.find(
     (f) => f.file_type === "stl" || f.file_type === "3mf" || f.file_type === "obj",
   );
@@ -429,6 +500,32 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     }
   }
 
+  async function markRevision(file: FileRead, patch: FileRevisionUpdate) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    setRevisionSaving(file.id);
+    try {
+      const updated = await updateFileRevision(model.id, file.id, patch);
+      setModel(updated);
+      toast.success("Revision updated");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setRevisionSaving(null);
+    }
+  }
+
+  function requestSend(fileId: number) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    setSendFileId(fileId);
+    setSendOpen(true);
+  }
+
   return (
     <div className="flex flex-col h-full">
       {addRevisionOpen && (
@@ -451,7 +548,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <div>
+          <div className="min-w-0">
             {editing ? (
               <input
                 value={editName}
@@ -460,13 +557,38 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 placeholder="Model name"
               />
             ) : (
-              <h1 className="text-xl font-semibold text-[var(--on-surface)] leading-tight">
+              <h1 className="text-xl font-semibold text-[var(--on-surface)] leading-tight truncate">
                 {model.name}
               </h1>
             )}
             <span className="font-mono text-[13px] text-[var(--on-surface-variant)]">
-              Last updated: {timeAgo(model.updated_at)}
+              {(meshFile ?? sourceFiles[0]) ? `${(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()} source · ` : ""}
+              {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"} · Last updated {timeAgo(model.updated_at)}
             </span>
+            {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
+              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                {recommendedGcode && (
+                  <span className="inline-flex items-center gap-1 border border-[var(--primary)]/30 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                    <Star className="h-3 w-3 fill-current" /> Recommended Rev {recommendedGcode.gcode_revision_number ?? recommendedGcode.version}
+                  </span>
+                )}
+                {recommendedGcode?.revision_status && (
+                  <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(recommendedGcode.revision_status)}`}>
+                    {headerStatusLabel(recommendedGcode.revision_status)}
+                  </span>
+                )}
+                {meta?.material_type && (
+                  <span className="border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    {meta.material_type}
+                  </span>
+                )}
+                {meta?.printer_model && (
+                  <span className="inline-flex items-center gap-1 border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <PrinterIcon className="h-3 w-3" /> {meta.printer_model}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -533,6 +655,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               <STLViewer
                 url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
                 onControlsReady={(api) => { viewerControls.current = api; }}
+                displayMode={displayMode}
+                showGrid={showGrid}
+                showAxes={showAxes}
+                showBoundingBox={showBoundingBox}
+                screenshotName={model.slug || model.name}
               />
             </Suspense>
           ) : thumbUrl ? (
@@ -544,6 +671,38 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           ) : (
             <div className="flex items-center justify-center text-[var(--on-surface-variant)]">
               <FileText className="h-20 w-20 opacity-20" />
+            </div>
+          )}
+
+          {/* Viewer toolbar (top-left) */}
+          {meshFile && (
+            <ViewerToolbar
+              displayMode={displayMode}
+              setDisplayMode={setDisplayMode}
+              showGrid={showGrid}
+              setShowGrid={setShowGrid}
+              showAxes={showAxes}
+              setShowAxes={setShowAxes}
+              showBoundingBox={showBoundingBox}
+              setShowBoundingBox={setShowBoundingBox}
+              controls={viewerControls}
+            />
+          )}
+
+          {/* Viewing label (top-right) */}
+          {meshFile && (
+            <div className="absolute top-4 right-4 z-10 max-w-[60%]">
+              <div className="bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded px-2.5 py-1.5 text-right">
+                <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+                  Viewing: {meshFile.original_filename}
+                </p>
+                <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                  Source model
+                  {recommendedGcode
+                    ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
+                    : ""}
+                </p>
+              </div>
             </div>
           )}
 
@@ -574,9 +733,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             </button>
           </div>
 
-          {/* Dimensions overlay */}
+          {/* Dimensions overlay (bottom-left) */}
           {meta?.bbox_x_mm && meta?.bbox_y_mm && meta?.bbox_z_mm && (
-            <div className="absolute top-4 left-4 z-10">
+            <div className="absolute bottom-4 left-4 z-10">
               <div className="bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded px-2 py-1 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span className="font-mono text-[13px] text-[var(--on-surface)]">
@@ -588,9 +747,54 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         </div>
 
         {/* Right: Settings & Files Panel */}
-        <div className="md:w-[400px] bg-[var(--surface-container-lowest)] border-l-0 md:border-l border-t md:border-t-0 border-[var(--outline-variant)] flex flex-col h-auto md:h-full shrink-0 min-h-0">
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8">
+        <div className="md:w-[480px] bg-[var(--surface-container-lowest)] border-l-0 md:border-l border-t md:border-t-0 border-[var(--outline-variant)] flex flex-col h-auto md:h-full shrink-0 min-h-0">
+          {/* Segmented tab navigation */}
+          <nav className="flex shrink-0 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`relative px-3 py-3 font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors ${
+                  activeTab === tab.key
+                    ? "text-[var(--primary)]"
+                    : "text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
+                }`}
+              >
+                {tab.label}
+                {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                  <span className="ml-1 opacity-60">{gcodeFiles.length}</span>
+                )}
+                {activeTab === tab.key && (
+                  <span className="absolute inset-x-2 -bottom-px h-0.5 bg-[var(--primary)] rounded-full" />
+                )}
+              </button>
+            ))}
+          </nav>
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 [scrollbar-width:thin] [scrollbar-color:var(--outline-variant)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[var(--outline-variant)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[var(--primary)]/50">
+            {/* Overview: recommended print + collection/tags/edit */}
+            {activeTab === "overview" && (
+              <RecommendedPrintCard
+                file={recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? null}
+                hasGcode={hasGcode}
+                saving={revisionSaving}
+                onSend={requestSend}
+                onCompare={() => setActiveTab("revisions")}
+                onMark={markRevision}
+                onAddRevision={() => {
+                  if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+                  setAddRevisionOpen(true);
+                }}
+              />
+            )}
+
             {/* Print Settings */}
+            {activeTab === "settings" && (
+            <>
+            {printSettingRows.length === 0 && (
+              <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+                No print settings recorded yet. Add a sliced G-code revision to capture them.
+              </p>
+            )}
             {printSettingRows.length > 0 && (
               <section>
                 <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
@@ -640,9 +844,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 {meta.slicer_version ? ` v${meta.slicer_version}` : ""}
               </p>
             )}
+            </>
+            )}
 
-            {/* Tags & Collection */}
-            {editing ? (
+            {/* Tags & Collection (Overview) */}
+            {activeTab === "overview" && (
+            editing ? (
               <div className="space-y-4">
                 {/* Collection picker */}
                 <div>
@@ -730,7 +937,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                           <button
                             key={t.id}
                             type="button"
-                            onClick={() => { editToggleTag(t.slug); setTagInput(""); }}
+                            onClick={() => { editToggleTag(t.name); setTagInput(""); }}
                             className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] flex justify-between"
                           >
                             <span>{t.name}</span>
@@ -751,17 +958,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   </div>
                   {editTags.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      {editTags.map((slug) => {
-                        const t = tags.find((x) => x.slug === slug);
-                        return (
-                          <span key={slug} className="inline-flex items-center gap-1 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] pl-2 pr-1 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider">
-                            {t?.name || slug}
-                            <button type="button" onClick={() => editToggleTag(slug)} aria-label={`Remove ${t?.name || slug}`} className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-[var(--on-secondary-container)]/10">
-                              <X className="h-3 w-3" />
-                            </button>
-                          </span>
-                        );
-                      })}
+                      {editTags.map((name) => (
+                        <span key={name} className="inline-flex items-center gap-1 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] pl-2 pr-1 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider">
+                          {name}
+                          <button type="button" onClick={() => editToggleTag(name)} aria-label={`Remove ${name}`} className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-[var(--on-secondary-container)]/10">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -779,9 +983,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   </span>
                 ))}
               </div>
-            )}
+            ))}
 
-            {/* G-code Revisions */}
+            {/* G-code Revisions (Revisions tab) */}
+            {activeTab === "revisions" && (
+            <>
             <section>
               <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--outline-variant)] pb-1">
                 <h2 className="text-lg font-semibold text-[var(--on-surface)]">
@@ -962,12 +1168,20 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 </div>
               </section>
             )}
+            </>
+            )}
 
-            {sourceFiles.length > 0 && (
+            {/* Source Files (Files tab) */}
+            {activeTab === "files" && (
               <section>
                 <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
                   Source Files
                 </h2>
+                {sourceFiles.length === 0 && (
+                  <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+                    No source files (STL / 3MF / OBJ) for this model.
+                  </p>
+                )}
                 <div className="space-y-2">
                   {sourceFiles.map((f) => (
                     <div key={f.id} className="flex items-center justify-between p-3 border border-[var(--outline-variant)] rounded hover:border-[var(--primary)] hover:shadow-sm transition-all group bg-[var(--surface)]">
@@ -994,12 +1208,29 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 </div>
               </section>
             )}
+
+            {/* Print History (History tab) */}
+            {activeTab === "history" && (
+              <PrintHistorySection
+                jobs={printJobs}
+                modelId={model.id}
+                gcodeFiles={gcodeFiles}
+                onJobCreated={(job) => setPrintJobs((p) => [job, ...p])}
+              />
+            )}
           </div>
 
           {/* Klipper Sync Panel */}
           <div className="p-4 md:p-6 border-t border-[var(--outline-variant)] bg-[var(--surface-container-low)] shrink-0 space-y-3">
             {hasGcode && (
-              <SendToButtons modelId={model.id} gcodeFiles={gcodeFiles} printerFiles={printerFiles} />
+              <SendToButtons
+                modelId={model.id}
+                gcodeFiles={gcodeFiles}
+                printerFiles={printerFiles}
+                open={sendOpen}
+                onOpenChange={setSendOpen}
+                preselectFileId={sendFileId}
+              />
             )}
             {!hasGcode && (
               <div className="space-y-3">
@@ -1274,15 +1505,27 @@ function SendToButtons({
   modelId,
   gcodeFiles,
   printerFiles,
+  open,
+  onOpenChange,
+  preselectFileId,
 }: {
   modelId: number;
   gcodeFiles: Pick<FileRead, "id" | "original_filename" | "version" | "gcode_revision_number" | "revision_label" | "is_recommended">[];
   printerFiles: ModelPrinterFileRead[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  preselectFileId?: number;
 }) {
   const auth = useRequireAuth();
-  const [showSend, setShowSend] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const showSend = open ?? internalOpen;
+  const setShowSend = onOpenChange ?? setInternalOpen;
   const defaultFile = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
+
+  useEffect(() => {
+    if (showSend && preselectFileId) setSelectedFile(preselectFileId);
+  }, [showSend, preselectFileId]);
   const [startPrint, setStartPrint] = useState(false);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<number[]>([]);
@@ -1525,17 +1768,32 @@ function SendToButtons({
             </button>
           </div>
         </div>
+      ) : printers.length === 0 ? (
+        <div className="space-y-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
+          <div className="flex items-center gap-2">
+            <WifiOff className="h-4 w-4 text-[var(--on-surface-variant)]" />
+            <span className="font-mono text-xs uppercase tracking-wider text-[var(--on-surface)]">
+              No printers configured
+            </span>
+          </div>
+          <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+            Connect Klipper / Moonraker to send files directly to a printer.
+          </p>
+          <Link
+            href="/printers"
+            className="mt-1 w-full py-2 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+          >
+            <PrinterIcon className="h-4 w-4" /> Configure printer
+          </Link>
+        </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <Link href="/printers" className="w-full py-2 border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors rounded font-mono text-xs uppercase tracking-wider text-center">
-            {printers.length === 0 ? "Configure printers" : "Manage printers"}
-          </Link>
           <button
             onClick={() => {
               if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
               setShowSend(true);
             }}
-            disabled={printers.length === 0 || !auth.isAuthenticated}
+            disabled={!auth.isAuthenticated}
             className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {!auth.isAuthenticated ? (
@@ -1544,9 +1802,541 @@ function SendToButtons({
               <><Send className="h-4 w-4" /> Send to printer</>
             )}
           </button>
+          <Link href="/printers" className="w-full py-2 border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors rounded font-mono text-xs uppercase tracking-wider text-center">
+            Manage printers
+          </Link>
         </div>
       )}
     </div>
+  );
+}
+
+function ViewerToolbar({
+  displayMode,
+  setDisplayMode,
+  showGrid,
+  setShowGrid,
+  showAxes,
+  setShowAxes,
+  showBoundingBox,
+  setShowBoundingBox,
+  controls,
+}: {
+  displayMode: ViewerDisplayMode;
+  setDisplayMode: (m: ViewerDisplayMode) => void;
+  showGrid: boolean;
+  setShowGrid: (v: boolean) => void;
+  showAxes: boolean;
+  setShowAxes: (v: boolean) => void;
+  showBoundingBox: boolean;
+  setShowBoundingBox: (v: boolean) => void;
+  controls: React.RefObject<STLViewerControls | null>;
+}) {
+  const modes: { key: ViewerDisplayMode; label: string }[] = [
+    { key: "solid", label: "Solid" },
+    { key: "xray", label: "X-Ray" },
+    { key: "wireframe", label: "Wire" },
+  ];
+  const cluster =
+    "flex bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded overflow-hidden shadow-sm";
+  const iconBtn =
+    "w-9 h-9 flex items-center justify-center text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)] transition-colors";
+
+  return (
+    <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
+      <div className={cluster}>
+        {modes.map((m) => (
+          <button
+            key={m.key}
+            onClick={() => setDisplayMode(m.key)}
+            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+              displayMode === m.key
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+            }`}
+            title={`${m.label} view`}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      <div className={cluster}>
+        <button onClick={() => controls.current?.fit()} className={`${iconBtn} border-r border-[var(--outline-variant)]`} title="Fit view">
+          <Maximize2 className="h-4 w-4" />
+        </button>
+        <button onClick={() => controls.current?.center()} className={`${iconBtn} border-r border-[var(--outline-variant)]`} title="Center">
+          <Crosshair className="h-4 w-4" />
+        </button>
+        <button onClick={() => controls.current?.screenshot()} className={iconBtn} title="Screenshot">
+          <Camera className="h-4 w-4" />
+        </button>
+      </div>
+      <div className={cluster}>
+        <button
+          onClick={() => setShowGrid(!showGrid)}
+          className={`${iconBtn} border-r border-[var(--outline-variant)] ${showGrid ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
+          title="Build plate grid"
+        >
+          <Grid3x3 className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setShowAxes(!showAxes)}
+          className={`${iconBtn} border-r border-[var(--outline-variant)] ${showAxes ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
+          title="XYZ axes"
+        >
+          <Axis3d className="h-4 w-4" />
+        </button>
+        <button
+          onClick={() => setShowBoundingBox(!showBoundingBox)}
+          className={`${iconBtn} ${showBoundingBox ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
+          title="Bounding box"
+        >
+          <Box className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RecommendedPrintCard({
+  file,
+  hasGcode,
+  saving,
+  onSend,
+  onCompare,
+  onMark,
+  onAddRevision,
+}: {
+  file: FileRead | null;
+  hasGcode: boolean;
+  saving: number | null;
+  onSend: (fileId: number) => void;
+  onCompare: () => void;
+  onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
+  onAddRevision: () => void;
+}) {
+  const meta = file?.metadata;
+  const isSaving = file ? saving === file.id : false;
+
+  const rows: PrintSettingRow[] = file
+    ? [
+        { label: "PRINTER", value: meta?.printer_model ?? "—" },
+        { label: "MATERIAL", value: meta?.material_type ?? "—", chip: true },
+        { label: "LAYER HEIGHT", value: formatMillimeters(meta?.layer_height_mm) },
+        { label: "EST. TIME", value: formatDuration(meta?.estimated_time_s ?? null), highlight: true },
+        { label: "FILAMENT", value: formatGrams(meta?.filament_weight_g) },
+        {
+          label: "SLICER",
+          value:
+            [meta?.slicer_name, meta?.slicer_version].filter(Boolean).join(" ") || "—",
+        },
+      ]
+    : [];
+
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)] flex items-center gap-2">
+        <Star className="h-4 w-4 text-[var(--primary)]" /> Recommended Print
+      </h2>
+
+      {!file ? (
+        <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface)] p-4 space-y-3">
+          <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
+            {hasGcode
+              ? "No revision is marked as recommended yet. Mark a known-good G-code as recommended."
+              : "No sliced G-code yet. Add a revision to capture the settings that worked."}
+          </p>
+          <button
+            onClick={onAddRevision}
+            className="w-full py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Plus className="h-4 w-4" /> Add G-code revision
+          </button>
+        </div>
+      ) : (
+        <div className="rounded border border-[var(--primary)]/30 bg-[var(--primary-fixed)]/15 p-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="font-mono text-[11px] text-[var(--primary)] font-bold uppercase tracking-wider">
+              Rev {file.gcode_revision_number ?? file.version}
+            </span>
+            <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(file.revision_status)}`}>
+              {headerStatusLabel(file.revision_status)}
+            </span>
+            {file.is_recommended && (
+              <span className="inline-flex items-center gap-1 border border-[var(--primary)]/30 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                <Star className="h-3 w-3 fill-current" /> Recommended
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-[var(--on-surface)] font-medium truncate">
+            {file.original_filename}
+          </p>
+          <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
+            {rows.map((row, index) => (
+              <SettingRow
+                key={row.label}
+                label={row.label}
+                value={row.value}
+                chip={row.chip}
+                highlight={row.highlight}
+                last={index === rows.length - 1}
+              />
+            ))}
+          </div>
+
+          <button
+            onClick={() => onSend(file.id)}
+            className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+          >
+            <Send className="h-4 w-4" /> Send to printer
+          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <a
+              href={getAssetUrl(`/api/v1/files/${file.id}/download`)}
+              download={file.original_filename}
+              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Download className="h-4 w-4" /> Download
+            </a>
+            <button
+              onClick={onCompare}
+              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+            >
+              <GitCompare className="h-4 w-4" /> Compare
+            </button>
+            <button
+              onClick={() => onMark(file, { revision_status: "failed" })}
+              disabled={isSaving}
+              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <XCircle className="h-4 w-4" /> Mark failed
+            </button>
+            <button
+              onClick={() => onMark(file, { is_recommended: true, revision_status: "known_good" })}
+              disabled={isSaving || file.is_recommended}
+              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />} Recommend
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+type PrintHistoryMode = "manual" | "auto";
+
+function PrintHistorySection({
+  jobs,
+  modelId,
+  gcodeFiles,
+  onJobCreated,
+}: {
+  jobs: ModelPrintJobRead[];
+  modelId: number;
+  gcodeFiles: FileRead[];
+  onJobCreated: (job: ModelPrintJobRead) => void;
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [mode, setMode] = useState<PrintHistoryMode>("manual");
+
+  // Manual form state
+  const [printers, setPrinters] = useState<PrinterRead[]>([]);
+  const [selectedPrinterId, setSelectedPrinterId] = useState<number | "">("");
+  const [selectedFileId, setSelectedFileId] = useState<number | "">(gcodeFiles[0]?.id ?? "");
+  const [jobState, setJobState] = useState("completed");
+  const [startedAt, setStartedAt] = useState("");
+  const [finishedAt, setFinishedAt] = useState("");
+  const [jobError, setJobError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  // Auto mode state
+  const [importing, setImporting] = useState(false);
+  const [importResults, setImportResults] = useState<{ filename: string; imported: boolean }[]>([]);
+  const [importDone, setImportDone] = useState(false);
+
+  function openAdd() {
+    setShowAdd(true);
+    setMode("manual");
+    setSelectedPrinterId("");
+    setSelectedFileId(gcodeFiles[0]?.id ?? "");
+    setJobState("completed");
+    setStartedAt("");
+    setFinishedAt("");
+    setJobError("");
+    setImportResults([]);
+    setImportDone(false);
+    if (printers.length === 0) {
+      listPrinters().then(setPrinters).catch(() => {});
+    }
+  }
+
+  async function submitManual() {
+    if (!selectedPrinterId || !selectedFileId) return;
+    setSubmitting(true);
+    try {
+      const job = await createManualPrintJob(modelId, {
+        printer_id: selectedPrinterId as number,
+        file_id: selectedFileId as number,
+        state: jobState,
+        started_at: startedAt || null,
+        finished_at: finishedAt || null,
+        error: jobError || null,
+      });
+      onJobCreated(job);
+      setShowAdd(false);
+      toast.success("Print record added");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function runAutoImport() {
+    if (!selectedPrinterId) return;
+    setImporting(true);
+    setImportResults([]);
+    setImportDone(false);
+    try {
+      const results = await importPrintJobsFromPrinter(modelId, selectedPrinterId as number);
+      setImportResults(results.map((r) => ({ filename: r.filename, imported: r.imported })));
+      setImportDone(true);
+      const imported = results.filter((r) => r.imported).length;
+      if (imported > 0) {
+        const refreshed = await getModelPrintJobs(modelId);
+        refreshed.forEach((j) => onJobCreated(j));
+        toast.success(`Imported ${imported} job${imported === 1 ? "" : "s"} from printer`);
+      } else {
+        toast.success("No new jobs to import");
+      }
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-4 pb-1 border-b border-[var(--outline-variant)]">
+        <h2 className="text-lg font-semibold text-[var(--on-surface)] flex items-center gap-2">
+          <Clock className="h-4 w-4" /> Print History
+        </h2>
+        <button
+          onClick={openAdd}
+          className="inline-flex items-center gap-1.5 rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container-low)]"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add Record
+        </button>
+      </div>
+
+      {/* Add record panel */}
+      {showAdd && (
+        <div className="mb-4 border border-[var(--outline-variant)] rounded bg-[var(--surface-container-low)] p-3 space-y-3">
+          {/* Mode toggle */}
+          <div className="flex gap-1">
+            {(["manual", "auto"] as PrintHistoryMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setImportResults([]); setImportDone(false); }}
+                className={`px-3 py-1 font-mono text-[10px] uppercase tracking-wider rounded transition-colors ${
+                  mode === m
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                }`}
+              >
+                {m === "manual" ? "Manual Entry" : "Auto from Printer"}
+              </button>
+            ))}
+          </div>
+
+          {mode === "manual" ? (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Printer</label>
+                  <select
+                    value={selectedPrinterId}
+                    onChange={(e) => setSelectedPrinterId(e.target.value ? Number(e.target.value) : "")}
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  >
+                    <option value="">Select printer…</option>
+                    {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">G-code Revision</label>
+                  <select
+                    value={selectedFileId}
+                    onChange={(e) => setSelectedFileId(e.target.value ? Number(e.target.value) : "")}
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  >
+                    <option value="">Select revision…</option>
+                    {gcodeFiles.map((f, i) => (
+                      <option key={f.id} value={f.id}>Rev {i + 1} — {f.original_filename}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Result</label>
+                <select
+                  value={jobState}
+                  onChange={(e) => setJobState(e.target.value)}
+                  className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                >
+                  <option value="completed">Completed</option>
+                  <option value="failed">Failed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Started (opt.)</label>
+                  <input
+                    type="datetime-local"
+                    value={startedAt}
+                    onChange={(e) => setStartedAt(e.target.value)}
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  />
+                </div>
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Finished (opt.)</label>
+                  <input
+                    type="datetime-local"
+                    value={finishedAt}
+                    onChange={(e) => setFinishedAt(e.target.value)}
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  />
+                </div>
+              </div>
+              {jobState === "failed" && (
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Error (opt.)</label>
+                  <input
+                    value={jobError}
+                    onChange={(e) => setJobError(e.target.value)}
+                    placeholder="Describe what went wrong…"
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  />
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={submitManual}
+                  disabled={submitting || !selectedPrinterId || !selectedFileId}
+                  className="flex-1 h-8 bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                >
+                  {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Save
+                </button>
+                <button onClick={() => setShowAdd(false)} className="px-3 h-8 border border-[var(--outline-variant)] rounded font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] transition-colors">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                Fetch recent print history from a Moonraker printer and import jobs matching this model&apos;s G-code files.
+              </p>
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Printer</label>
+                <select
+                  value={selectedPrinterId}
+                  onChange={(e) => { setSelectedPrinterId(e.target.value ? Number(e.target.value) : ""); setImportResults([]); setImportDone(false); }}
+                  className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                >
+                  <option value="">Select printer…</option>
+                  {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              {importDone && importResults.length > 0 && (
+                <div className="space-y-1">
+                  {importResults.map((r) => (
+                    <div key={r.filename} className="flex items-center gap-2 font-mono text-[11px]">
+                      {r.imported
+                        ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        : <XCircle className="h-3.5 w-3.5 text-[var(--on-surface-variant)] shrink-0" />
+                      }
+                      <span className={r.imported ? "text-[var(--on-surface)]" : "text-[var(--on-surface-variant)]"}>{r.filename}</span>
+                      <span className="opacity-50">{r.imported ? "imported" : "already exists"}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {importDone && importResults.length === 0 && (
+                <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">No matching jobs found on this printer.</p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={runAutoImport}
+                  disabled={importing || !selectedPrinterId}
+                  className="flex-1 h-8 bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                >
+                  {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Fetch &amp; Import
+                </button>
+                <button onClick={() => setShowAdd(false)} className="px-3 h-8 border border-[var(--outline-variant)] rounded font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] transition-colors">
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {jobs.length === 0 ? (
+        <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+          No print history yet. Add a record manually or import from a printer.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {jobs.map((job) => {
+            const present = PRINT_JOB_PRESENTATION[job.state];
+            const Icon =
+              present.tone === "success" ? CheckCircle2 : present.tone === "error" ? XCircle : Clock;
+            return (
+              <div
+                key={job.id}
+                className="p-3 border border-[var(--outline-variant)] rounded bg-[var(--surface)] space-y-1"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Icon
+                      className={`h-4 w-4 shrink-0 ${
+                        present.tone === "success"
+                          ? "text-emerald-600"
+                          : present.tone === "error"
+                            ? "text-[var(--error)]"
+                            : "text-amber-600"
+                      }`}
+                    />
+                    <span className="font-mono text-[13px] text-[var(--on-surface)] truncate">
+                      Rev {job.gcode_revision_number ?? "—"} · {job.printer_name}
+                    </span>
+                  </div>
+                  <span className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${printJobToneClass(present.tone)}`}>
+                    {present.label}
+                  </span>
+                </div>
+                <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                  {job.material_type ? `${job.material_type} · ` : ""}
+                  {timeAgo(job.created_at)}
+                </p>
+                {job.error && (
+                  <p className="font-mono text-[11px] text-[var(--error)] break-words">
+                    {job.error}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

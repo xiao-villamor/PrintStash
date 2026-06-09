@@ -21,16 +21,16 @@ export function SidebarNav() {
   const { user, logout } = useAuth();
 
   return (
-    <nav className="bg-[var(--surface-container-low)] border-r border-[var(--outline-variant)] h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
+    <nav className="bg-card border-r border-border h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
       <div className="flex items-center gap-4 mb-10 px-1">
-        <div className="w-10 h-10 rounded bg-[var(--primary-container)] flex items-center justify-center text-[var(--on-primary-container)] flex-shrink-0">
+        <div className="w-10 h-10 rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white flex-shrink-0">
           <Box className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-[var(--primary)] leading-tight">
+          <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">
             PrintStash
           </h1>
-          <p className="text-[11px] text-[var(--on-surface-variant)] font-mono">
+          <p className="text-[11px] text-muted-foreground font-mono">
             Your prints, organized
           </p>
         </div>
@@ -48,8 +48,8 @@ export function SidebarNav() {
               href={item.href}
               className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 ${
                 isActive
-                  ? "text-[var(--primary)] border-r-[3px] border-[var(--primary)] bg-[var(--secondary-container)]"
-                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                  ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+                  : "text-muted-foreground hover:bg-muted"
               }`}
             >
               <item.icon className="h-5 w-5" />
@@ -63,21 +63,18 @@ export function SidebarNav() {
 
       {/* Bottom section */}
       <div className="flex flex-col gap-1">
-        {/* User section */}
         {user ? (
           <div className="flex items-center gap-3 px-3 py-2 mb-1">
-            <div className="w-7 h-7 rounded-full bg-[var(--primary-container)] flex items-center justify-center text-[var(--on-primary-container)]">
+            <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-white">
               <User className="h-3.5 w-3.5" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-mono text-[var(--on-surface)] truncate">
-                {user.username}
-              </p>
+              <p className="text-xs font-mono text-foreground truncate">{user.username}</p>
             </div>
             <button
               type="button"
               onClick={logout}
-              className="text-[var(--on-surface-variant)] hover:text-[var(--error)] transition-colors p-1"
+              className="text-muted-foreground hover:text-red-500 transition-colors p-1"
               title="Sign out"
             >
               <LogOut className="h-4 w-4" />
@@ -88,14 +85,12 @@ export function SidebarNav() {
             href="/login"
             className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 mb-1 ${
               pathname.startsWith("/login")
-                ? "text-[var(--primary)] border-r-[3px] border-[var(--primary)] bg-[var(--secondary-container)]"
-                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+                : "text-muted-foreground hover:bg-muted"
             }`}
           >
             <LogIn className="h-5 w-5" />
-            <span className="font-mono text-xs tracking-wider uppercase">
-              Sign in
-            </span>
+            <span className="font-mono text-xs tracking-wider uppercase">Sign in</span>
           </Link>
         )}
 
@@ -107,14 +102,12 @@ export function SidebarNav() {
               href={item.href}
               className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 ${
                 isActive
-                  ? "text-[var(--primary)] border-r-[3px] border-[var(--primary)] bg-[var(--secondary-container)]"
-                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                  ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+                  : "text-muted-foreground hover:bg-muted"
               }`}
             >
               <item.icon className="h-5 w-5" />
-              <span className="font-mono text-xs tracking-wider uppercase">
-                {item.label}
-              </span>
+              <span className="font-mono text-xs tracking-wider uppercase">{item.label}</span>
             </Link>
           );
         })}

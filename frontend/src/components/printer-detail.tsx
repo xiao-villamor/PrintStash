@@ -929,7 +929,7 @@ function TempRow({
       {pct != null && (
         <div className="h-1 w-full overflow-hidden rounded bg-[var(--surface-container-high)]">
           <div
-            className="h-full bg-orange-500 transition-all duration-500"
+            className="h-full bg-blue-500 dark:bg-orange-500 transition-all duration-500"
             style={{ width: `${pct}%` }}
           />
         </div>

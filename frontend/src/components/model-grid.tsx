@@ -20,35 +20,27 @@ import {
   Folder,
   FolderOpen,
   ChevronRight,
+  Plus,
 } from "lucide-react";
-import { listCollections, listModels, listPrinters, listTags } from "@/lib/api";
+import { listCollections, listModels, listPrinters, listTags, createCollection } from "@/lib/api";
+import { toast } from "@/lib/toast";
+import { useRequireAuth } from "@/lib/use-require-auth";
 import Link from "next/link";
 import { getAssetUrl } from "@/lib/api";
 
 type SortKey = "date-desc" | "date-asc" | "name-asc" | "name-desc";
 type ViewMode = "grid" | "list";
 
-const SORT_LABELS: Record<SortKey, string> = {
-  "date-desc": "Newest",
-  "date-asc": "Oldest",
-  "name-asc": "Name A-Z",
-  "name-desc": "Name Z-A",
-};
+const PAGE_SIZE = 60;
 
 function sortModels(models: ModelListItem[], key: SortKey): ModelListItem[] {
   const sorted = [...models];
   switch (key) {
     case "date-desc":
-      sorted.sort(
-        (a, b) =>
-          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-      );
+      sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
       break;
     case "date-asc":
-      sorted.sort(
-        (a, b) =>
-          new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime(),
-      );
+      sorted.sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime());
       break;
     case "name-asc":
       sorted.sort((a, b) => a.name.localeCompare(b.name));
@@ -71,24 +63,19 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
-
-const PAGE_SIZE = 60;
 
 function childCollections(
   collections: CollectionRead[],
   selectedPath: string | null,
 ): CollectionRead[] {
   const selected = selectedPath
-    ? collections.find((collection) => collection.path === selectedPath)
+    ? collections.find((c) => c.path === selectedPath)
     : null;
   const parentId = selectedPath ? selected?.id ?? -1 : null;
   return collections
-    .filter((collection) => collection.parent_id === parentId)
+    .filter((c) => c.parent_id === parentId)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -97,19 +84,29 @@ function collectionBreadcrumbs(
   selectedPath: string | null,
 ): CollectionRead[] {
   if (!selectedPath) return [];
-  const byPath = new Map(collections.map((collection) => [collection.path, collection]));
+  const byPath = new Map(collections.map((c) => [c.path, c]));
   const parts = selectedPath.split("/");
   const crumbs: CollectionRead[] = [];
   for (let i = 1; i <= parts.length; i += 1) {
-    const collection = byPath.get(parts.slice(0, i).join("/"));
-    if (collection) crumbs.push(collection);
+    const c = byPath.get(parts.slice(0, i).join("/"));
+    if (c) crumbs.push(c);
   }
   return crumbs;
+}
+
+function selectedCollectionName(
+  collections: CollectionRead[],
+  selectedPath: string | null,
+): string | null {
+  if (!selectedPath) return null;
+  const byPath = new Map(collections.map((c) => [c.path, c]));
+  return byPath.get(selectedPath)?.name ?? null;
 }
 
 export function ModelBrowser() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const auth = useRequireAuth();
   const [models, setModels] = useState<ModelListItem[]>([]);
   const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
@@ -118,8 +115,6 @@ export function ModelBrowser() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
   const [selectedPrinterPresence, setSelectedPrinterPresence] = useState<"any" | "none" | null>(null);
-  const [sortBy, setSortBy] = useState<SortKey>("date-desc");
-  const [sortOpen, setSortOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -129,10 +124,11 @@ export function ModelBrowser() {
   const [facetsLoading, setFacetsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [isCreatingCollection, setIsCreatingCollection] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState("");
   const hasLoadedModels = useRef(false);
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
 
-  // Allow navigation shortcuts to deep-link the modal open.
   useEffect(() => {
     if (searchParams.get("upload") === "1") {
       setUploadOpen(true);
@@ -140,13 +136,9 @@ export function ModelBrowser() {
     }
   }, [searchParams, router]);
 
-  // Drive search from URL param.
   const query = searchParams.get("q") ?? "";
 
-  const sortedModels = useMemo(
-    () => sortModels(models, sortBy),
-    [models, sortBy],
-  );
+  const sortedModels = useMemo(() => sortModels(models, "date-desc"), [models]);
   const visibleCollections = useMemo(
     () => childCollections(collections, selectedCollection),
     [collections, selectedCollection],
@@ -155,16 +147,16 @@ export function ModelBrowser() {
     () => collectionBreadcrumbs(collections, selectedCollection),
     [collections, selectedCollection],
   );
+  const selectedName = useMemo(
+    () => selectedCollectionName(collections, selectedCollection),
+    [collections, selectedCollection],
+  );
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [c, t, p] = await Promise.all([
-          listCollections(),
-          listTags(),
-          listPrinters(),
-        ]);
+        const [c, t, p] = await Promise.all([listCollections(), listTags(), listPrinters()]);
         if (!alive) return;
         setCollections(c);
         setTags(t);
@@ -175,19 +167,14 @@ export function ModelBrowser() {
         if (alive) setFacetsLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   useEffect(() => {
     let alive = true;
     const handle = setTimeout(async () => {
-      if (hasLoadedModels.current) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      if (hasLoadedModels.current) setRefreshing(true);
+      else setLoading(true);
       try {
         const data = await listModels({
           limit: PAGE_SIZE,
@@ -206,16 +193,10 @@ export function ModelBrowser() {
       } catch (e: any) {
         if (alive) setError(e.message);
       } finally {
-        if (alive) {
-          setLoading(false);
-          setRefreshing(false);
-        }
+        if (alive) { setLoading(false); setRefreshing(false); }
       }
     }, 200);
-    return () => {
-      alive = false;
-      clearTimeout(handle);
-    };
+    return () => { alive = false; clearTimeout(handle); };
   }, [selectedCollection, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey]);
 
   async function loadMore() {
@@ -240,428 +221,379 @@ export function ModelBrowser() {
     }
   }
 
-  function refresh() {
-    setReloadKey((k) => k + 1);
+  function refresh() { setReloadKey((k) => k + 1); }
+
+  async function refreshCollections() {
+    try {
+      const c = await listCollections();
+      setCollections(c);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function handleCreateCollection() {
+    const name = newCollectionName.trim();
+    if (!name) return;
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    try {
+      const parentId = selectedCollection
+        ? collections.find((c) => c.path === selectedCollection)?.id ?? null
+        : null;
+      await createCollection({ name, parent_id: parentId });
+      setNewCollectionName("");
+      setIsCreatingCollection(false);
+      toast.success(`Collection "${name}" created`);
+      refreshCollections();
+    } catch (e: any) {
+      setError(e.message);
+      toast.error(e);
+    }
+  }
+
+  function handleOpenCreateCollection() {
+    if (isCreatingCollection) {
+      setIsCreatingCollection(false);
+      setNewCollectionName("");
+    } else {
+      setIsCreatingCollection(true);
+    }
   }
 
   return (
     <>
-      <UploadModal
-        open={uploadOpen}
-        onClose={() => setUploadOpen(false)}
-        onUploaded={refresh}
-      />
-
+      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onUploaded={refresh} defaultCollection={selectedCollection} />
       <MobileFilterDrawer
-        open={filterDrawerOpen}
-        onClose={closeDrawer}
-        collections={collections}
-        tags={tags}
-        printers={printers}
-        selectedCollection={selectedCollection}
-        selectedTags={selectedTags}
-        selectedPrinterId={selectedPrinterId}
-        selectedPrinterPresence={selectedPrinterPresence}
-        onCollectionChange={setSelectedCollection}
-        onTagsChange={setSelectedTags}
-        onPrinterChange={setSelectedPrinterId}
-        onPrinterPresenceChange={setSelectedPrinterPresence}
+        open={filterDrawerOpen} onClose={closeDrawer}
+        collections={collections} tags={tags} printers={printers}
+        selectedCollection={selectedCollection} selectedTags={selectedTags}
+        selectedPrinterId={selectedPrinterId} selectedPrinterPresence={selectedPrinterPresence}
+        onCollectionChange={setSelectedCollection} onTagsChange={setSelectedTags}
+        onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
+        onCreateCollection={handleOpenCreateCollection}
         loading={facetsLoading}
       />
 
-      <div className="flex flex-col h-full">
-        {/* Filter sidebar + content split */}
-        <div className="flex flex-1 min-h-0">
-          <FilterSidebar
-            collections={collections}
-            tags={tags}
-            printers={printers}
-            selectedCollection={selectedCollection}
-            selectedTags={selectedTags}
-            selectedPrinterId={selectedPrinterId}
-            selectedPrinterPresence={selectedPrinterPresence}
-            onCollectionChange={setSelectedCollection}
-            onTagsChange={setSelectedTags}
-            onPrinterChange={setSelectedPrinterId}
-            onPrinterPresenceChange={setSelectedPrinterPresence}
-            loading={facetsLoading}
-          />
+      {/* Stitch layout: filter sidebar + main content */}
+      <FilterSidebar
+        collections={collections} models={models} tags={tags} printers={printers}
+        selectedCollection={selectedCollection} selectedTags={selectedTags}
+        selectedPrinterId={selectedPrinterId} selectedPrinterPresence={selectedPrinterPresence}
+        onCollectionChange={setSelectedCollection} onTagsChange={setSelectedTags}
+        onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
+        onCreateCollection={handleOpenCreateCollection}
+        loading={facetsLoading}
+      />
 
-          <section className="flex-1 overflow-y-auto p-4 md:p-6">
-            {/* Header + controls — left aligned */}
-            <div className="flex items-center justify-between mb-5 gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
+      <main className="flex-1 overflow-y-auto bg-background flex flex-col">
+        {/* Breadcrumb */}
+        <nav className="px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-xs tracking-tight">
+          {selectedCollection && breadcrumbs.length > 0 ? (
+            <>
+              <button
+                onClick={() => setSelectedCollection(null)}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                All Models
+              </button>
+              {breadcrumbs.map((crumb) => (
+                <span key={crumb.id} className="flex items-center space-x-2">
+                  <ChevronRight className="h-3 w-3 text-muted-foreground/40" />
                   <button
-                    onClick={openDrawer}
-                    className="md:hidden flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[11px] uppercase tracking-wider active:scale-95"
+                    onClick={() => setSelectedCollection(crumb.path)}
+                    className="text-foreground font-medium"
+                  >
+                    {crumb.name}
+                  </button>
+                </span>
+              ))}
+            </>
+          ) : (
+            <button
+              onClick={() => setSelectedCollection(null)}
+              className="text-foreground font-medium"
+            >
+              All Models
+            </button>
+          )}
+        </nav>
+
+        {/* Content Top Bar */}
+        <div className="px-6 py-8 bg-background border-b border-border">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col space-y-1">
+              <h2 className="text-2xl font-bold text-foreground tracking-tight">
+                {selectedName ?? "All Models"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {loading ? "Loading..." : `${models.length} model${models.length !== 1 ? "s" : ""} total${selectedName ? ` in this collection` : ""}`}
+                {refreshing && <span className="ml-2 font-mono text-xs text-muted-foreground">Updating...</span>}
+              </p>
+            </div>
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={openDrawer}
+                  className="md:hidden flex items-center px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-all"
                 >
-                  <SlidersHorizontal className="h-4 w-4" />
+                  <SlidersHorizontal className="w-4 h-4 mr-1.5 text-muted-foreground" />
                   Filters
                 </button>
-                <h2 className="text-lg font-semibold text-[var(--on-surface)]">
-                  {selectedCollection ? "Collection" : "Vault"}
-                  {!loading && (
-                    <span className="ml-2 text-sm font-normal text-[var(--on-surface-variant)] font-mono">
-                      ({models.length} models)
-                    </span>
-                  )}
-                  {refreshing && (
-                    <span className="ml-2 text-xs font-normal text-[var(--on-surface-variant)] font-mono">
-                      Updating...
-                    </span>
-                  )}
-                </h2>
-              </div>
-
-              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleOpenCreateCollection}
+                  className="hidden md:flex items-center px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-all"
+                >
+                  <Plus className="w-4 h-4 mr-1.5 text-muted-foreground" />
+                  New collection
+                </button>
                 <button
                   onClick={() => setUploadOpen(true)}
-                  className="hidden md:flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[13px]"
+                  className="flex items-center px-3 py-2 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-all shadow-sm"
                 >
-                  <Upload className="h-4 w-4" />
                   Upload
                 </button>
-
-                <div className="relative">
-                  <button
-                    onClick={() => setSortOpen(!sortOpen)}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[13px]"
-                  >
-                    <SlidersHorizontal className="h-4 w-4" />
-                    {SORT_LABELS[sortBy]}
-                  </button>
-                  {sortOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-10"
-                        onClick={() => setSortOpen(false)}
-                      />
-                      <div className="absolute right-0 top-full mt-1 z-20 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 min-w-[140px]">
-                        {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(
-                          ([key, label]) => (
-                            <button
-                              key={key}
-                              onClick={() => {
-                                setSortBy(key);
-                                setSortOpen(false);
-                              }}
-                              className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                                sortBy === key
-                                  ? "text-[var(--primary)] bg-[var(--secondary-container)]"
-                                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ),
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1 bg-[var(--surface-container)] rounded p-0.5">
-                  <button
-                    onClick={() => setViewMode("grid")}
-                    className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
-                      viewMode === "grid"
-                        ? "bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm"
-                        : "text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
-                    }`}
-                  >
-                    <Grid className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => setViewMode("list")}
-                    className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
-                      viewMode === "list"
-                        ? "bg-[var(--surface-container-lowest)] text-[var(--primary)] shadow-sm"
-                        : "text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
-                    }`}
-                  >
-                    <List className="h-4 w-4" />
-                  </button>
-                </div>
+              </div>
+              <div className="h-6 w-px bg-muted mx-1 hidden md:block" />
+              <div className="flex items-center bg-muted p-1 rounded">
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={`p-1.5 rounded transition-all ${viewMode === "grid" ? "bg-background text-blue-600 dark:text-orange-500 shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  title="Grid View"
+                >
+                  <Grid className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={`p-1.5 rounded transition-all ${viewMode === "list" ? "bg-background text-blue-600 dark:text-orange-500 shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  title="List View"
+                >
+                  <List className="w-4 h-4" />
+                </button>
               </div>
             </div>
+          </div>
+        </div>
 
-            {error && (
-              <div className="rounded-md border border-[var(--error)]/50 bg-[var(--error-container)]/30 p-3 text-sm text-[var(--error)] mb-4">
-                {error}
-              </div>
-            )}
+        {isCreatingCollection && (
+          <div className="px-6 py-3 bg-muted border-b border-border">
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleCreateCollection(); }}
+              className="flex items-center gap-2"
+            >
+              <input
+                autoFocus
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                placeholder={auth.isAuthenticated ? (selectedCollection ? `New subcollection in "${selectedName ?? selectedCollection}"...` : "Collection name...") : "Sign in to add"}
+                disabled={!auth.isAuthenticated}
+                className="flex-1 max-w-xs bg-background text-foreground text-sm border border-border rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!newCollectionName.trim() || !auth.isAuthenticated}
+                className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors disabled:opacity-50"
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsCreatingCollection(false); setNewCollectionName(""); }}
+                className="px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+            </form>
+          </div>
+        )}
 
-            <CollectionBreadcrumbs
-              breadcrumbs={breadcrumbs}
-              onRoot={() => setSelectedCollection(null)}
-              onSelect={(path) => setSelectedCollection(path)}
-            />
+        {/* Content */}
+        <div className="flex-1 flex flex-col bg-background">
+          {error && (
+            <div className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+          )}
 
-            {loading ? (
-              viewMode === "grid" ? (
-                <ModelGridSkeleton />
-              ) : (
-                <ModelListSkeleton />
-              )
-            ) : sortedModels.length === 0 && visibleCollections.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-[var(--on-surface-variant)]">
-                <p className="text-lg font-medium text-[var(--on-surface)]">
-                  No models found
-                </p>
-                <p className="text-sm mt-1">
-                  {query || selectedCollection || selectedTags.length
-                    || selectedPrinterId
-                    || selectedPrinterPresence
-                    ? "Try clearing some filters."
-                    : "Upload your first model to get started."}
-                </p>
-              </div>
-            ) : viewMode === "grid" ? (
-              <>
-                {visibleCollections.length > 0 && (
-                  <CollectionFolderGrid
-                    collections={visibleCollections}
+          {loading ? (
+            viewMode === "grid" ? <ModelGridSkeleton /> : <ModelListSkeleton />
+          ) : sortedModels.length === 0 && visibleCollections.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 flex-1 text-muted-foreground">
+              <p className="text-lg font-medium text-foreground">No models found</p>
+              <p className="text-sm mt-1">
+                {query || selectedCollection || selectedTags.length || selectedPrinterId || selectedPrinterPresence
+                  ? "Try clearing some filters."
+                  : "Upload your first model to get started."}
+              </p>
+            </div>
+          ) : viewMode === "grid" ? (
+            <div className="p-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
+                {visibleCollections.map((collection) => (
+                  <CollectionFolderCard
+                    key={collection.id}
+                    collection={collection}
                     onSelect={(path) => setSelectedCollection(path)}
                   />
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-                  {sortedModels.map((model) => (
-                    <ModelCard key={model.id} model={model} />
-                  ))}
+                ))}
+                {sortedModels.map((model) => (
+                  <ModelCard key={model.id} model={model} />
+                ))}
+              </div>
+              <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="flex flex-col">
+                <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
+                  <span className="w-10 flex-shrink-0">Thumb</span>
+                  <span className="flex-1">Name</span>
+                  <span className="w-24 text-right hidden sm:block">Collection</span>
+                  <span className="w-20 text-right">Files</span>
+                  <span className="w-24 text-right hidden md:block">Updated</span>
+                  <span className="w-8" />
                 </div>
-                <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
-              </>
-            ) : (
-              <>
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-3 px-2 md:px-4 py-2 border-b border-[var(--outline-variant)] text-xs font-mono text-[var(--on-surface-variant)] uppercase tracking-wider">
-                    <span className="w-8 md:w-10 flex-shrink-0">Thumb</span>
-                    <span className="flex-1">Name</span>
-                    <span className="w-24 text-right hidden sm:block">Collection</span>
-                    <span className="w-12 md:w-20 text-right">Files</span>
-                    <span className="w-20 md:w-24 text-right hidden md:block">Updated</span>
-                    <span className="w-8" />
-                  </div>
-                  {visibleCollections.map((collection) => (
-                    <CollectionListRow
-                      key={collection.id}
-                      collection={collection}
-                      onSelect={(path) => setSelectedCollection(path)}
-                    />
-                  ))}
-                  {sortedModels.map((model) => (
-                    <ModelListRow key={model.id} model={model} />
-                  ))}
-                </div>
-                <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
-              </>
-            )}
-          </section>
+                {visibleCollections.map((collection) => (
+                  <CollectionListRow
+                    key={collection.id}
+                    collection={collection}
+                    onSelect={(path) => setSelectedCollection(path)}
+                  />
+                ))}
+                {sortedModels.map((model) => (
+                  <ModelListRow key={model.id} model={model} />
+                ))}
+              </div>
+              <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+            </div>
+          )}
         </div>
-      </div>
+      </main>
     </>
   );
 }
 
-function CollectionBreadcrumbs({
-  breadcrumbs,
-  onRoot,
-  onSelect,
-}: {
-  breadcrumbs: CollectionRead[];
-  onRoot: () => void;
-  onSelect: (path: string) => void;
-}) {
+function CollectionFolderCard({ collection, onSelect }: { collection: CollectionRead; onSelect: (path: string) => void }) {
   return (
-    <div className="mb-4 flex min-h-8 flex-wrap items-center gap-1 border-b border-[var(--outline-variant)] pb-3 font-mono text-xs text-[var(--on-surface-variant)]">
-      <button
-        type="button"
-        onClick={onRoot}
-        className="inline-flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
-      >
-        <FolderOpen className="h-3.5 w-3.5 text-[var(--primary)]" />
-        Vault
-      </button>
-      {breadcrumbs.map((collection) => (
-        <span key={collection.id} className="inline-flex items-center gap-1">
-          <ChevronRight className="h-3 w-3 opacity-50" />
-          <button
-            type="button"
-            onClick={() => onSelect(collection.path)}
-            className="rounded px-2 py-1 hover:bg-[var(--surface-container-low)] hover:text-[var(--on-surface)]"
-          >
-            {collection.name}
-          </button>
-        </span>
-      ))}
-    </div>
+    <button
+      type="button"
+      onClick={() => onSelect(collection.path)}
+      className="group flex flex-col text-left bg-muted border border-border rounded-lg hover:border-orange-500 dark:hover:border-orange-500 hover:shadow-sm transition-all relative overflow-hidden"
+    >
+      <div className="flex-1 flex items-center justify-center bg-muted/60 dark:bg-[var(--surface-container-high)] min-h-[140px]">
+        <Folder className="w-16 h-16 text-blue-600/30 dark:text-orange-500/25" />
+      </div>
+      <div className="p-3 border-t border-border">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Folder className="w-3.5 h-3.5 text-blue-600 dark:text-orange-500 shrink-0" />
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Folder</span>
+          </div>
+          <span className="text-[10px] text-muted-foreground font-mono">{collection.model_count} models</span>
+        </div>
+        <p className="text-sm font-bold text-foreground truncate tracking-tight">{collection.name}</p>
+      </div>
+    </button>
   );
 }
 
-function CollectionFolderGrid({
-  collections,
-  onSelect,
-}: {
-  collections: CollectionRead[];
-  onSelect: (path: string) => void;
-}) {
+function CollectionFolderGrid({ collections, onSelect }: { collections: CollectionRead[]; onSelect: (path: string) => void }) {
   return (
-    <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(220px,220px))]">
       {collections.map((collection) => (
         <button
           key={collection.id}
           type="button"
           onClick={() => onSelect(collection.path)}
-          className="group flex h-20 items-center gap-3 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-3 text-left transition-colors hover:border-[var(--primary)] hover:bg-[var(--surface-container-low)]"
+          className="group flex flex-col p-3 bg-muted border border-border rounded-lg hover:border-blue-600 dark:border-orange-500 hover:bg-blue-50/30 dark:hover:bg-orange-950/20 hover:shadow-sm transition-all text-left relative overflow-hidden"
         >
-          <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded bg-[var(--surface-container)] text-[var(--primary)] group-hover:bg-[var(--secondary-container)]">
-            <Folder className="h-5 w-5" />
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-medium text-[var(--on-surface)]">
-              {collection.name}
-            </span>
-            <span className="mt-1 block truncate font-mono text-[11px] text-[var(--on-surface-variant)]">
-              {collection.model_count} models
-            </span>
-          </span>
+          <div className="flex items-center justify-between w-full mb-2">
+            <div className="flex items-center gap-2">
+              <Folder className="w-5 h-5 text-blue-600 dark:text-orange-500" />
+              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Folder</span>
+            </div>
+            <span className="text-[10px] text-foreground font-mono font-bold">{collection.model_count} models</span>
+          </div>
+          <p className="text-base font-bold text-foreground truncate tracking-tight">{collection.name}</p>
+          <p className="text-[9px] text-muted-foreground mt-1 font-mono uppercase">{collection.path}</p>
         </button>
       ))}
     </div>
   );
 }
 
-function CollectionListRow({
-  collection,
-  onSelect,
-}: {
-  collection: CollectionRead;
-  onSelect: (path: string) => void;
-}) {
+function CollectionListRow({ collection, onSelect }: { collection: CollectionRead; onSelect: (path: string) => void }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(collection.path)}
-      className="flex items-center gap-2 md:gap-3 px-2 md:px-4 py-3 border-b border-[var(--surface-variant)] text-left hover:bg-[var(--surface-container-low)] transition-colors group"
+      className="flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border text-left hover:bg-muted transition-colors group"
     >
-      <span className="w-8 h-8 md:w-10 md:h-10 rounded bg-[var(--surface-container)] flex-shrink-0 border border-[var(--outline-variant)] flex items-center justify-center text-[var(--primary)]">
+      <span className="w-8 h-8 md:w-10 md:h-10 rounded bg-blue-50 flex-shrink-0 border border-blue-100 dark:border-orange-900 flex items-center justify-center text-blue-600 dark:text-orange-500">
         <Folder className="h-4 w-4 md:h-5 md:w-5" />
       </span>
       <span className="flex-1 min-w-0">
-        <span className="block text-sm font-medium text-[var(--on-surface)] truncate">
-          {collection.name}
-        </span>
-        <span className="block font-mono text-[10px] text-[var(--on-surface-variant)] truncate">
-          {collection.path}
-        </span>
+        <span className="block text-sm font-medium text-foreground truncate">{collection.name}</span>
+        <span className="block font-mono text-[10px] text-muted-foreground truncate">{collection.path}</span>
       </span>
-      <span className="w-24 text-right text-xs font-mono text-[var(--on-surface-variant)] truncate hidden sm:block">
-        Folder
-      </span>
-      <span className="w-20 text-right text-xs font-mono text-[var(--on-surface-variant)]">
-        {collection.model_count}
-      </span>
-      <span className="w-20 md:w-24 hidden md:block" />
+      <span className="w-24 text-right text-xs font-mono text-muted-foreground truncate hidden sm:block">Folder</span>
+      <span className="w-20 text-right text-xs font-mono text-muted-foreground">{collection.model_count}</span>
+      <span className="w-24 hidden md:block" />
       <span className="w-8 flex justify-center">
-        <ChevronRight className="h-4 w-4 text-[var(--on-surface-variant)] opacity-60 group-hover:opacity-100" />
+        <ChevronRight className="h-4 w-4 text-muted-foreground/50 opacity-60 group-hover:opacity-100" />
       </span>
     </button>
   );
 }
 
 function ModelListRow({ model }: { model: ModelListItem }) {
-  const thumb = model.thumbnail_url
-    ? getAssetUrl(model.thumbnail_url)
-    : null;
+  const thumb = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
   const printerPresence = model.printer_presence ?? [];
-
   return (
     <Link
       href={`/models/${model.id}`}
-      className="flex items-center gap-2 md:gap-3 px-2 md:px-4 py-3 border-b border-[var(--surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors group active:bg-[var(--surface-container)]"
+      className="flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border hover:bg-muted transition-colors group active:bg-muted"
     >
-      <div className="w-8 h-8 md:w-10 md:h-10 rounded bg-[var(--surface-container)] flex-shrink-0 overflow-hidden border border-[var(--outline-variant)]">
+      <div className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border">
         {thumb ? (
-          <img
-            src={thumb}
-            alt={model.name}
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
+          <img src={thumb} alt={model.name} className="h-full w-full object-cover" loading="lazy" />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
-            <FileText className="h-4 w-4 text-[var(--on-surface-variant)] opacity-30" />
+            <FileText className="h-4 w-4 text-muted-foreground/50" />
           </div>
         )}
       </div>
-
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-[var(--on-surface)] truncate">
-          {model.name}
-        </p>
+        <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
         {model.tags.length > 0 && (
           <div className="flex gap-1 mt-0.5">
             {model.tags.slice(0, 2).map((tag) => (
-              <span
-                key={tag}
-                className="bg-[var(--surface-container)] text-[var(--on-surface)] px-1 py-px rounded font-mono text-[9px] uppercase tracking-wider"
-              >
-                {tag}
-              </span>
+              <span key={tag} className="bg-blue-50 text-blue-700 dark:text-orange-400 px-1 py-px rounded font-mono text-[9px] uppercase tracking-wider">{tag}</span>
             ))}
           </div>
         )}
         {printerPresence.length > 0 && (
           <div className="flex gap-1 mt-1">
-            {printerPresence.slice(0, 2).map((presence) => (
-              <span
-                key={presence.printer_id}
-                className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-emerald-600"
-              >
-                <Printer className="h-3 w-3" />
-                {presence.printer_name}
+            {printerPresence.slice(0, 2).map((p) => (
+              <span key={p.printer_id} className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-emerald-600">
+                <Printer className="h-3 w-3" />{p.printer_name}
               </span>
             ))}
           </div>
         )}
       </div>
-
-      <span className="w-24 text-right text-xs font-mono text-[var(--on-surface-variant)] truncate hidden sm:block">
-        {model.collection || "—"}
-      </span>
-
-      <span className="w-20 text-right text-xs font-mono text-[var(--on-surface-variant)]">
-        {model.file_count}
-      </span>
-
-      <span className="w-20 md:w-24 text-right text-xs font-mono text-[var(--on-surface-variant)] hidden md:block">
-        {timeAgo(model.updated_at)}
-      </span>
-
+      <span className="w-24 text-right text-xs font-mono text-muted-foreground truncate hidden sm:block">{model.collection || "—"}</span>
+      <span className="w-20 text-right text-xs font-mono text-muted-foreground">{model.file_count}</span>
+      <span className="w-24 text-right text-xs font-mono text-muted-foreground hidden md:block">{timeAgo(model.updated_at)}</span>
       <span className="w-8 flex justify-center">
-        <MoreVertical className="h-4 w-4 text-[var(--on-surface-variant)] opacity-0 group-hover:opacity-100 transition-opacity" />
+        <MoreVertical className="h-4 w-4 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity" />
       </span>
     </Link>
   );
 }
 
-function LoadMore({
-  hasMore,
-  loading,
-  onClick,
-}: {
-  hasMore: boolean;
-  loading: boolean;
-  onClick: () => void;
-}) {
+function LoadMore({ hasMore, loading, onClick }: { hasMore: boolean; loading: boolean; onClick: () => void }) {
   if (!hasMore) return null;
   return (
-    <div className="flex justify-center mt-6">
-      <button
-        onClick={onClick}
-        disabled={loading}
-        className="px-4 py-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors"
-      >
+    <div className="flex justify-center mt-6 pb-6">
+      <button onClick={onClick} disabled={loading} className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors">
         {loading ? "Loading..." : "Load more"}
       </button>
     </div>
@@ -670,17 +602,17 @@ function LoadMore({
 
 export function ModelGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-4">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div
-          key={i}
-          className="space-y-2 rounded border border-[var(--outline-variant)] p-2"
-        >
-          <Skeleton className="aspect-[16/9] w-full rounded" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-3 w-1/2" />
-        </div>
-      ))}
+    <div className="p-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="space-y-3 rounded-lg border border-border p-3 bg-card">
+            <Skeleton className="h-40 w-full rounded" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="h-12 w-full rounded" />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -689,10 +621,7 @@ function ModelListSkeleton() {
   return (
     <div className="flex flex-col">
       {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className="flex items-center gap-3 px-4 py-3 border-b border-[var(--surface-variant)]"
-        >
+        <div key={i} className="flex items-center gap-3 px-4 py-3 border-b border-border">
           <Skeleton className="w-10 h-10 rounded flex-shrink-0" />
           <div className="flex-1 space-y-1">
             <Skeleton className="h-4 w-1/3" />

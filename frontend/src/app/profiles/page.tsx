@@ -6,12 +6,13 @@ export const metadata = {
 
 export default function ProfilesPage() {
   return (
-    <div className="h-full overflow-y-auto p-4 sm:p-6">
-      <div className="w-full space-y-4 sm:space-y-6">
-        <h2 className="text-xl font-semibold text-[var(--on-surface)]">Profiles</h2>
-        <div className="max-w-6xl">
-          <FilamentProfilesCard />
+    <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
+      <div className="mx-auto w-full max-w-5xl space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground tracking-tight">Profiles</h2>
+          <p className="text-sm text-muted-foreground">Filament and printer presets for cost tracking and slicer defaults</p>
         </div>
+        <FilamentProfilesCard />
       </div>
     </div>
   );
