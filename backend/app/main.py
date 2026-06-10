@@ -68,6 +68,9 @@ async def lifespan(app: FastAPI):
     logger.info("shutting down printer hub")
     app.state.gc_task.cancel()
     await hub.stop_all()
+    from app.services.moonraker import close_http_client
+
+    await close_http_client()
     logger.info("shutting down")
 
 
@@ -75,7 +78,8 @@ async def _gc_loop() -> None:
     while True:
         await asyncio.sleep(3600)
         try:
-            gc_soft_deleted()
+            # Sync DB + storage I/O — keep it off the event loop.
+            await asyncio.to_thread(gc_soft_deleted)
         except Exception:
             logger.exception("scheduled GC failed")
 

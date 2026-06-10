@@ -87,12 +87,71 @@ export function jsonHeaders(): Record<string, string> {
   return { "Content-Type": "application/json", ...authHeaders() };
 }
 
-export async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(getUrl(path), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  return handleResponse<T>(res);
+// ---------------------------------------------------------------------------
+// In-memory GET cache (browser only).
+//
+// Short TTL so back-navigation and repeat renders reuse the last response
+// instead of flashing a loading state; any mutation through this module
+// invalidates the whole cache, so staleness is bounded to TTL for changes
+// made outside this tab.
+// ---------------------------------------------------------------------------
+
+const CACHE_TTL_MS = 30_000;
+
+const responseCache = new Map<string, { value: unknown; expires: number }>();
+const inflight = new Map<string, Promise<unknown>>();
+
+export function invalidateApiCache(): void {
+  responseCache.clear();
+  inflight.clear();
+}
+
+if (isBrowser()) {
+  // A login/logout changes what reads may return — drop everything.
+  window.addEventListener("printstash:auth-changed", invalidateApiCache);
+}
+
+export interface GetJsonOptions {
+  /** Bypass the in-memory cache (polling endpoints, explicit refresh). */
+  fresh?: boolean;
+}
+
+export async function getJson<T>(
+  path: string,
+  options?: GetJsonOptions,
+): Promise<T> {
+  if (!isBrowser() || options?.fresh) {
+    const res = await fetch(getUrl(path), {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    return handleResponse<T>(res);
+  }
+
+  const now = Date.now();
+  const cached = responseCache.get(path);
+  if (cached && cached.expires > now) {
+    return cached.value as T;
+  }
+  const pending = inflight.get(path);
+  if (pending) {
+    return pending as Promise<T>;
+  }
+  const request = (async () => {
+    const res = await fetch(getUrl(path), {
+      headers: authHeaders(),
+      cache: "no-store",
+    });
+    const value = await handleResponse<T>(res);
+    responseCache.set(path, { value, expires: Date.now() + CACHE_TTL_MS });
+    return value;
+  })();
+  inflight.set(path, request);
+  try {
+    return await request;
+  } finally {
+    inflight.delete(path);
+  }
 }
 
 export async function sendJson<T>(
@@ -105,6 +164,7 @@ export async function sendJson<T>(
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
+  invalidateApiCache();
   return handleResponse<T>(res);
 }
 
@@ -117,6 +177,7 @@ export async function sendForm<T>(
     headers: authHeaders(),
     body: formData,
   });
+  invalidateApiCache();
   return handleResponse<T>(res);
 }
 
@@ -128,5 +189,6 @@ export async function sendAction(
     method,
     headers: authHeaders(),
   });
+  invalidateApiCache();
   return expectOk(res);
 }

@@ -130,6 +130,8 @@ class ModelListItem(BaseModel):
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
     file_count: int
+    # Newest mesh file (STL/3MF/OBJ) — lets the UI preload the 3D preview.
+    mesh_file_id: Optional[int] = None
     printer_presence: List[ModelPrinterPresenceRead] = []
     updated_at: datetime
     print_summary: Optional[PrintSummaryRead] = None
@@ -220,6 +222,12 @@ class CollectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)
+    parent_id: Optional[int] = None
+
+
+class CollectionMove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     parent_id: Optional[int] = None
 
 

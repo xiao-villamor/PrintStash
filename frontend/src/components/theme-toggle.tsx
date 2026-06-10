@@ -9,8 +9,11 @@ type Theme = "light" | "dark";
 
 function applyTheme(theme: Theme) {
   const root = document.documentElement;
+  root.classList.add("theme-transitioning");
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
+  const id = window.setTimeout(() => root.classList.remove("theme-transitioning"), 350);
+  return () => window.clearTimeout(id);
 }
 
 export function ThemeToggle() {

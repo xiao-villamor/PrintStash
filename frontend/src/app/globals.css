@@ -149,6 +149,18 @@
   }
 }
 
+/* Smooth theme transitions — only active during the class swap, not on hovers */
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition:
+    background-color 280ms ease,
+    border-color 280ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease !important;
+}
+
 @keyframes theme-icon-in {
   from { opacity: 0; transform: rotate(-45deg) scale(0.6); }
   to   { opacity: 1; transform: rotate(0deg) scale(1); }
@@ -161,6 +173,29 @@
   to {
     transform: translateX(0);
   }
+}
+
+/* Thin styled scrollbars */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 @layer utilities {

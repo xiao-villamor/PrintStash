@@ -110,6 +110,9 @@ def list_models(
     collection: Optional[str] = Query(
         None, description="Collection path e.g. 'functional/brackets'"
     ),
+    direct: bool = Query(
+        False, description="Only return models directly in the collection (or at root if no collection)"
+    ),
     tag: Optional[List[str]] = Query(
         None, description="Tag slug; repeat for AND-filter"
     ),
@@ -127,6 +130,7 @@ def list_models(
     return model_views.list_items(
         session,
         collection=collection,
+        direct=direct,
         tags=tag,
         q=q,
         printer_id=printer_id,

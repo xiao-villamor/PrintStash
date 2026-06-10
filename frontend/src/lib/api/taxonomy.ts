@@ -9,8 +9,13 @@ export function createCollection(payload: CollectionCreate): Promise<CollectionR
   return sendJson<CollectionRead>("/api/v1/collections", "POST", payload);
 }
 
-export function deleteCollection(id: number): Promise<void> {
-  return sendAction(`/api/v1/collections/${id}`, "DELETE");
+export function deleteCollection(id: number, recursive = false): Promise<void> {
+  const url = `/api/v1/collections/${id}${recursive ? "?recursive=true" : ""}`;
+  return sendAction(url, "DELETE");
+}
+
+export function moveCollection(id: number, parentId: number | null): Promise<CollectionRead> {
+  return sendJson<CollectionRead>(`/api/v1/collections/${id}`, "PATCH", { parent_id: parentId });
 }
 
 export function listTags(): Promise<TagRead[]> {

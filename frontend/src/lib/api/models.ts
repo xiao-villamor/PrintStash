@@ -4,6 +4,7 @@ import {
   getJson,
   getUrl,
   handleResponse,
+  invalidateApiCache,
   sendAction,
   sendForm,
   sendJson,
@@ -30,6 +31,7 @@ export async function listModels(
 ): Promise<ModelListItem[]> {
   const search = new URLSearchParams();
   if (params?.collection) search.set("collection", params.collection);
+  if (params?.direct) search.set("direct", "true");
   if (params?.q) search.set("q", params.q);
   if (params?.limit) search.set("limit", String(params.limit));
   if (params?.offset) search.set("offset", String(params.offset));
@@ -121,6 +123,7 @@ export async function purgeModel(id: number): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
+  invalidateApiCache();
   return handleResponse<TrashPurgeRead>(res);
 }
 
@@ -129,6 +132,7 @@ export async function purgeExpiredTrash(): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
+  invalidateApiCache();
   return handleResponse<TrashPurgeRead>(res);
 }
 
@@ -163,5 +167,5 @@ export function ingestModel(formData: FormData): Promise<IngestResponse> {
 }
 
 export function getJobStatus(jobId: string): Promise<IngestJobStatus> {
-  return getJson<IngestJobStatus>(`/api/v1/ingest/jobs/${jobId}`);
+  return getJson<IngestJobStatus>(`/api/v1/ingest/jobs/${jobId}`, { fresh: true });
 }

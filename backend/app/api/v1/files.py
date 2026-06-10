@@ -5,7 +5,14 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Request,
+    Response,
+)
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sqlmodel import Session, select
 
@@ -27,18 +34,29 @@ router = APIRouter(prefix="/files", tags=["files"])
 _MESH_TYPES = {FileType.STL, FileType.THREE_MF, FileType.OBJ}
 
 
-def _serve_file(key: str, filename: str, media_type: str = "application/octet-stream"):
+def _serve_file(
+    key: str,
+    filename: str,
+    media_type: str = "application/octet-stream",
+    *,
+    headers: dict[str, str] | None = None,
+):
     backend = get_backend()
     direct = backend.direct_path(key)
     if direct is not None:
         if not direct.exists():
             raise HTTPException(status_code=410, detail="file_blob_missing")
-        return FileResponse(path=str(direct), filename=filename, media_type=media_type)
+        return FileResponse(
+            path=str(direct), filename=filename, media_type=media_type, headers=headers
+        )
     chunks = backend.stream_chunks(key)
     return StreamingResponse(
         chunks,
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            **(headers or {}),
+        },
     )
 
 
@@ -97,7 +115,14 @@ def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
     thumb_key = get_backend().thumbnail_key(file_id)
     if not get_backend().exists(thumb_key):
         raise HTTPException(status_code=404, detail="thumbnail_not_found")
-    return _serve_file(thumb_key, f"{file_id}.png", "image/png")
+    # Thumbnails only change on explicit rebuilds; let the browser cache them
+    # so the library grid doesn't re-request every image on each visit.
+    return _serve_file(
+        thumb_key,
+        f"{file_id}.png",
+        "image/png",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get(
@@ -108,28 +133,58 @@ def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
         "converted to binary STL on the fly via trimesh."
     ),
 )
-def file_as_stl(file_id: int, session: Session = Depends(get_session)):
-    # Lazy import: trimesh is heavy; pulling it in only for endpoints that need it.
-    from app.services import mesh_processing
-
+def file_as_stl(
+    file_id: int, request: Request, session: Session = Depends(get_session)
+):
     f = get_or_404(session, File, file_id, "file_not_found")
     backend = get_backend()
     if not backend.exists(f.path):
         raise HTTPException(status_code=410, detail="file_blob_missing")
 
     stem = Path(f.original_filename).stem
+    # File blobs are immutable (content-addressed by sha256), so the rendered
+    # STL never changes (content-addressed), but keep the browser TTL modest;
+    # the ETag still lets it revalidate cheaply after expiry.
+    etag = f'"{f.sha256}"'
+    cache_headers = {
+        "Content-Disposition": f'attachment; filename="{stem}.stl"',
+        "Cache-Control": "public, max-age=3600",
+        "ETag": etag,
+    }
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=cache_headers)
+
+    # Already STL: stream the blob straight through, no conversion.
+    if Path(f.original_filename).suffix.lower() == ".stl":
+        data = backend.read_bytes(f.path)
+        return StreamingResponse(
+            io.BytesIO(data), media_type="application/sla", headers=cache_headers
+        )
+
+    # 3MF/OBJ: trimesh conversion is expensive, so cache the result keyed by the
+    # source sha256 and serve the cached STL on every subsequent request.
+    cache_key = backend.stl_cache_key(f.sha256)
+    if backend.exists(cache_key):
+        data = backend.read_bytes(cache_key)
+        return StreamingResponse(
+            io.BytesIO(data), media_type="application/sla", headers=cache_headers
+        )
+
+    # Lazy import: trimesh is heavy; pull it in only when we must convert.
+    from app.services import mesh_processing
+
     with backend.local_path(f.path) as path:
-        if path.suffix.lower() == ".stl":
-            data = path.read_bytes()
-        else:
-            data = mesh_processing.to_stl_bytes(path)
-            if data is None:
-                raise HTTPException(status_code=500, detail="stl_conversion_failed")
+        data = mesh_processing.to_stl_bytes(path)
+    if data is None:
+        raise HTTPException(status_code=500, detail="stl_conversion_failed")
+
+    try:
+        backend.write_bytes(data, cache_key)
+    except Exception:
+        logger.warning("stl cache write failed for file %s", file_id, exc_info=True)
 
     return StreamingResponse(
-        io.BytesIO(data),
-        media_type="application/sla",
-        headers={"Content-Disposition": f'attachment; filename="{stem}.stl"'},
+        io.BytesIO(data), media_type="application/sla", headers=cache_headers
     )
 
 

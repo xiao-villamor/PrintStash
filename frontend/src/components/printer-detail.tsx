@@ -86,9 +86,17 @@ function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
   return out;
 }
 
-export function PrinterDetailPage({ printerId }: { printerId: number }) {
+export function PrinterDetailPage({
+  printerId,
+  initialPrinter,
+}: {
+  printerId: number;
+  initialPrinter?: PrinterRead;
+}) {
   const auth = useRequireAuth();
-  const [printer, setPrinter] = useState<PrinterRead | null>(null);
+  const [printer, setPrinter] = useState<PrinterRead | null>(
+    initialPrinter ?? null,
+  );
   const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
   const [jobs, setJobs] = useState<PrintJobRead[]>([]);
@@ -169,7 +177,8 @@ export function PrinterDetailPage({ printerId }: { printerId: number }) {
   }
 
   useEffect(() => {
-    loadPrinter();
+    // Server-rendered pages pass the printer down; WS keeps it live after that.
+    if (!initialPrinter || initialPrinter.id !== printerId) loadPrinter();
     loadDiagnostics();
     loadJobs();
     loadPrinterFiles();

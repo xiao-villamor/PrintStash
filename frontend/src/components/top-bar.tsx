@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   ChevronDown,
   DollarSign,
-  FolderTree,
   LogOut,
   Loader2,
   Printer,
@@ -223,7 +222,6 @@ function ProfileMenu({
     { href: "/", label: "Vault", icon: Box },
     { href: "/printers", label: "Printers", icon: Printer },
     { href: "/profiles", label: "Profiles", icon: DollarSign },
-    { href: "/organize", label: "Catalog", icon: FolderTree },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 
@@ -244,7 +242,7 @@ function ProfileMenu({
               active
                 ? "bg-blue-50 dark:bg-orange-500/10 text-blue-700 dark:text-orange-400"
                 : "text-foreground hover:bg-muted hover:text-foreground"
-            } ${index === 4 ? "border-t border-border" : ""}`}
+            } ${index === 3 ? "border-t border-border" : ""}`}
           >
             <item.icon className="h-4 w-4" />
             <span>{item.label}</span>

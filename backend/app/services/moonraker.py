@@ -23,6 +23,28 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Shared connection pool for all Moonraker HTTP calls. MoonrakerClient
+# instances are created per request/worker loop, so a per-instance client
+# would still open a fresh TCP connection every call; pooling at module
+# level keeps connections alive across printers and requests.
+_http_client: httpx.AsyncClient | None = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+        )
+    return _http_client
+
+
+async def close_http_client() -> None:
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        await _http_client.aclose()
+    _http_client = None
+
 
 class MoonrakerError(RuntimeError):
     """Raised when a Moonraker request fails."""
@@ -55,13 +77,13 @@ class MoonrakerClient:
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            try:
-                resp = await client.request(
-                    method, url, headers=self._headers(), **kwargs
-                )
-            except httpx.HTTPError as exc:
-                raise MoonrakerError(f"transport error: {exc}") from exc
+        client = get_http_client()
+        try:
+            resp = await client.request(
+                method, url, headers=self._headers(), timeout=self.timeout, **kwargs
+            )
+        except httpx.HTTPError as exc:
+            raise MoonrakerError(f"transport error: {exc}") from exc
         if resp.status_code < 200 or resp.status_code >= 300:
             raise MoonrakerError(f"moonraker {resp.status_code}: {resp.text[:200]}")
         try:
@@ -88,15 +110,15 @@ class MoonrakerClient:
         """Upload a g-code file to Moonraker. Streams from disk."""
         url = f"{self.base_url}/server/files/upload"
         data = {"root": "gcodes", "print": "true" if start_print else "false"}
-        async with httpx.AsyncClient(timeout=None) as client:
-            with local_path.open("rb") as fh:
-                files = {"file": (remote_filename, fh, "application/octet-stream")}
-                try:
-                    resp = await client.post(
-                        url, headers=self._headers(), data=data, files=files
-                    )
-                except httpx.HTTPError as exc:
-                    raise MoonrakerError(f"upload transport error: {exc}") from exc
+        client = get_http_client()
+        with local_path.open("rb") as fh:
+            files = {"file": (remote_filename, fh, "application/octet-stream")}
+            try:
+                resp = await client.post(
+                    url, headers=self._headers(), data=data, files=files, timeout=None
+                )
+            except httpx.HTTPError as exc:
+                raise MoonrakerError(f"upload transport error: {exc}") from exc
         if resp.status_code < 200 or resp.status_code >= 300:
             raise MoonrakerError(f"upload failed {resp.status_code}: {resp.text[:200]}")
         return resp.json()

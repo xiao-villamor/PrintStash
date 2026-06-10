@@ -11,6 +11,7 @@ The hub is intentionally simple — Stage 4 will likely replace it with Redis pu
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any, Dict, Set
 
 from fastapi import Request, WebSocket
@@ -74,6 +75,11 @@ def _derive_printer_status(snapshot: Dict[str, Any]) -> tuple[str, PrinterStatus
     return "", PrinterStatus.UNKNOWN
 
 
+# Re-write an unchanged printer status at most this often; keeps last_seen_at
+# reasonably fresh without a DB commit per Moonraker status tick.
+_STATUS_WRITE_INTERVAL_S = 30.0
+
+
 class PrinterHub:
     def __init__(self) -> None:
         self.snapshots: Dict[int, Dict[str, Any]] = {}
@@ -81,6 +87,8 @@ class PrinterHub:
         self.tasks: Dict[int, asyncio.Task] = {}
         self.stop_events: Dict[int, asyncio.Event] = {}
         self._lock = asyncio.Lock()
+        # printer_id -> (status, error, monotonic time of last DB write)
+        self._last_status_write: Dict[int, tuple[PrinterStatus, str | None, float]] = {}
 
     # -- WS subscriber registry --
 
@@ -134,6 +142,7 @@ class PrinterHub:
             stop = self.stop_events.pop(printer_id, None)
             task = self.tasks.pop(printer_id, None)
             self.snapshots.pop(printer_id, None)
+            self._last_status_write.pop(printer_id, None)
         if stop:
             stop.set()
         if task:
@@ -180,7 +189,7 @@ class PrinterHub:
                 try:
                     client = get_provider_client(printer)
                 except ProviderError as exc:
-                    self._mark_status(
+                    await self._mark_status(
                         printer_id,
                         PrinterStatus.ERROR,
                         error=f"{exc.code}: {exc.detail}",
@@ -200,7 +209,9 @@ class PrinterHub:
                 if isinstance(initial_status, dict) and initial_status:
                     await self._handle_status(printer_id, initial_status)
             except Exception as exc:  # noqa: BLE001 - provider-specific failures
-                self._mark_status(printer_id, PrinterStatus.OFFLINE, error=str(exc))
+                await self._mark_status(
+                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
+                )
                 logger.warning(
                     "printer worker[%s] initial status query failed: %s",
                     printer_id,
@@ -215,7 +226,9 @@ class PrinterHub:
                 logger.exception(
                     "printer worker[%s] subscribe crash: %s", printer_id, exc
                 )
-                self._mark_status(printer_id, PrinterStatus.OFFLINE, error=str(exc))
+                await self._mark_status(
+                    printer_id, PrinterStatus.OFFLINE, error=str(exc)
+                )
                 # back-off before reloading config
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=10.0)
@@ -237,7 +250,7 @@ class PrinterHub:
         progress = float(snap.get("virtual_sdcard", {}).get("progress") or 0.0)
         filename = print_stats.get("filename") or None
 
-        self._mark_status(printer_id, vault_status, error=None)
+        await self._mark_status(printer_id, vault_status, error=None)
         await self._sync_active_job(
             printer_id, ms_state, filename, progress, print_stats
         )
@@ -247,22 +260,41 @@ class PrinterHub:
             {"type": "update", "printer_id": printer_id, "data": snap},
         )
 
-    def _mark_status(
+    async def _mark_status(
         self, printer_id: int, status: PrinterStatus, *, error: str | None
     ) -> None:
+        # Moonraker pushes status updates several times a second; only hit the
+        # DB when something changed or the heartbeat interval elapsed, and run
+        # the sync commit in a worker thread to keep the event loop free.
+        now = time.monotonic()
+        last = self._last_status_write.get(printer_id)
+        if (
+            last is not None
+            and last[0] == status
+            and last[1] == error
+            and now - last[2] < _STATUS_WRITE_INTERVAL_S
+        ):
+            return
+        self._last_status_write[printer_id] = (status, error, now)
         try:
-            with get_session_factory().session() as session:
-                p = session.get(Printer, printer_id)
-                if p is None:
-                    return
-                p.status = status
-                p.last_seen_at = utcnow()
-                p.last_error = error
-                p.updated_at = utcnow()
-                session.add(p)
-                session.commit()
+            await asyncio.to_thread(self._mark_status_db, printer_id, status, error)
         except Exception:
             logger.exception("printer hub: failed to mark status for %s", printer_id)
+
+    @staticmethod
+    def _mark_status_db(
+        printer_id: int, status: PrinterStatus, error: str | None
+    ) -> None:
+        with get_session_factory().session() as session:
+            p = session.get(Printer, printer_id)
+            if p is None:
+                return
+            p.status = status
+            p.last_seen_at = utcnow()
+            p.last_error = error
+            p.updated_at = utcnow()
+            session.add(p)
+            session.commit()
 
     async def _sync_active_job(
         self,
@@ -281,90 +313,107 @@ class PrinterHub:
         if not filename:
             return
         try:
-            with get_session_factory().session() as session:
-                job = session.exec(
-                    select(PrintJob)
-                    .where(
-                        PrintJob.printer_id == printer_id,
-                        PrintJob.remote_filename == filename,
-                    )
-                    .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
-                ).first()
-
-                if job is None:
-                    # No vault-created job — check if printer is actively printing.
-                    if ms_state in (
-                        "printing",
-                        "paused",
-                        "complete",
-                        "cancelled",
-                        "error",
-                    ):
-                        sentinel_file_id, sentinel_model_id = _get_sentinel_ids(session)
-                        job = PrintJob(
-                            printer_id=printer_id,
-                            file_id=sentinel_file_id,
-                            model_id=sentinel_model_id,
-                            remote_filename=filename,
-                            source="external",
-                        )
-                        session.add(job)
-                        session.commit()
-                        session.refresh(job)
-                        logger.info(
-                            "captured external print job %s on printer %s (state=%s)",
-                            filename,
-                            printer_id,
-                            ms_state,
-                        )
-                    else:
-                        return
-
-                new_state: PrintJobState
-                if ms_state == "printing":
-                    new_state = PrintJobState.PRINTING
-                elif ms_state == "paused":
-                    new_state = PrintJobState.PAUSED
-                elif ms_state == "complete":
-                    new_state = PrintJobState.COMPLETED
-                elif ms_state == "cancelled":
-                    new_state = PrintJobState.CANCELLED
-                elif ms_state == "error":
-                    new_state = PrintJobState.FAILED
-                elif ms_state == "failed":
-                    new_state = PrintJobState.FAILED
-                else:
-                    new_state = job.state
-
-                changed = False
-                if new_state != job.state:
-                    job.state = new_state
-                    changed = True
-                if abs(progress - job.progress) > 1e-3:
-                    job.progress = progress
-                    changed = True
-                if new_state == PrintJobState.PRINTING and job.started_at is None:
-                    job.started_at = utcnow()
-                    changed = True
-                if (
-                    new_state
-                    in (
-                        PrintJobState.COMPLETED,
-                        PrintJobState.CANCELLED,
-                        PrintJobState.FAILED,
-                    )
-                    and job.finished_at is None
-                ):
-                    job.finished_at = utcnow()
-                    changed = True
-                if changed:
-                    job.updated_at = utcnow()
-                    if new_state == PrintJobState.FAILED:
-                        job.error = print_stats.get("message")
-                    session.add(job)
-                    session.commit()
+            await asyncio.to_thread(
+                self._sync_active_job_db,
+                printer_id,
+                ms_state,
+                filename,
+                progress,
+                print_stats,
+            )
         except Exception:
             logger.exception("printer hub: job sync failed for printer %s", printer_id)
+
+    @staticmethod
+    def _sync_active_job_db(
+        printer_id: int,
+        ms_state: str,
+        filename: str,
+        progress: float,
+        print_stats: Dict[str, Any],
+    ) -> None:
+        with get_session_factory().session() as session:
+            job = session.exec(
+                select(PrintJob)
+                .where(
+                    PrintJob.printer_id == printer_id,
+                    PrintJob.remote_filename == filename,
+                )
+                .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
+            ).first()
+
+            if job is None:
+                # No vault-created job — check if printer is actively printing.
+                if ms_state in (
+                    "printing",
+                    "paused",
+                    "complete",
+                    "cancelled",
+                    "error",
+                ):
+                    sentinel_file_id, sentinel_model_id = _get_sentinel_ids(session)
+                    job = PrintJob(
+                        printer_id=printer_id,
+                        file_id=sentinel_file_id,
+                        model_id=sentinel_model_id,
+                        remote_filename=filename,
+                        source="external",
+                    )
+                    session.add(job)
+                    session.commit()
+                    session.refresh(job)
+                    logger.info(
+                        "captured external print job %s on printer %s (state=%s)",
+                        filename,
+                        printer_id,
+                        ms_state,
+                    )
+                else:
+                    return
+
+            new_state: PrintJobState
+            if ms_state == "printing":
+                new_state = PrintJobState.PRINTING
+            elif ms_state == "paused":
+                new_state = PrintJobState.PAUSED
+            elif ms_state == "complete":
+                new_state = PrintJobState.COMPLETED
+            elif ms_state == "cancelled":
+                new_state = PrintJobState.CANCELLED
+            elif ms_state == "error":
+                new_state = PrintJobState.FAILED
+            elif ms_state == "failed":
+                new_state = PrintJobState.FAILED
+            else:
+                new_state = job.state
+
+            changed = False
+            if new_state != job.state:
+                job.state = new_state
+                changed = True
+            if abs(progress - job.progress) > 1e-3:
+                job.progress = progress
+                changed = True
+            if new_state == PrintJobState.PRINTING and job.started_at is None:
+                job.started_at = utcnow()
+                changed = True
+            if (
+                new_state
+                in (
+                    PrintJobState.COMPLETED,
+                    PrintJobState.CANCELLED,
+                    PrintJobState.FAILED,
+                )
+                and job.finished_at is None
+            ):
+                job.finished_at = utcnow()
+                changed = True
+            if changed:
+                job.updated_at = utcnow()
+                if new_state == PrintJobState.FAILED:
+                    job.error = print_stats.get("message")
+                session.add(job)
+                session.commit()
 
 
 def get_hub(request: Request) -> PrinterHub:

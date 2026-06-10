@@ -136,8 +136,17 @@ def _normalise_profile_key(value: str | None) -> str | None:
     return stripped or None
 
 
+def _load_filament_profiles(session: Session) -> list[FilamentProfile]:
+    """All filament profiles, loaded once per read-model composition.
+
+    The table holds a handful of presets; matching in memory avoids the
+    per-Metadata lookup queries that turned detail/export into N+1.
+    """
+    return list(session.exec(select(FilamentProfile)).all())
+
+
 def _matching_filament_profile(
-    session: Session,
+    profiles: list[FilamentProfile],
     metadata: Metadata,
 ) -> FilamentProfile | None:
     candidates = [
@@ -147,30 +156,35 @@ def _matching_filament_profile(
     for candidate in candidates:
         if candidate is None:
             continue
-        profile = session.exec(
-            select(FilamentProfile).where(func.lower(FilamentProfile.name) == candidate)
-        ).first()
-        if profile is not None:
-            return profile
+        for profile in profiles:
+            if _normalise_profile_key(profile.name) == candidate:
+                return profile
 
     material_type = _normalise_profile_key(metadata.material_type)
     material_brand = _normalise_profile_key(metadata.material_brand)
     if material_type is None:
         return None
 
-    stmt = select(FilamentProfile).where(
-        func.lower(FilamentProfile.material_type) == material_type
-    )
-    if material_brand is not None:
-        stmt = stmt.where(func.lower(FilamentProfile.material_brand) == material_brand)
-    else:
-        stmt = stmt.where(FilamentProfile.material_brand.is_(None))
-    return session.exec(stmt).first()
+    for profile in profiles:
+        if _normalise_profile_key(profile.material_type) != material_type:
+            continue
+        if material_brand is not None:
+            if _normalise_profile_key(profile.material_brand) == material_brand:
+                return profile
+        elif profile.material_brand is None:
+            return profile
+    return None
 
 
-def metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
+def metadata_read(
+    session: Session,
+    metadata: Metadata,
+    profiles: list[FilamentProfile] | None = None,
+) -> MetadataRead:
     data = metadata.model_dump()
-    profile = _matching_filament_profile(session, metadata)
+    if profiles is None:
+        profiles = _load_filament_profiles(session)
+    profile = _matching_filament_profile(profiles, metadata)
     if profile and profile.cost_per_kg is not None and metadata.filament_weight_g:
         data["filament_cost"] = round(
             metadata.filament_weight_g * profile.cost_per_kg / 1000,
@@ -189,6 +203,7 @@ def _file_reads_with_revisions(
         if f.file_type == FileType.GCODE and f.id is not None:
             gcode_revision_numbers[f.id] = gcode_index
             gcode_index += 1
+    profiles = _load_filament_profiles(session)
     return [
         FileRead(
             id=f.id,  # type: ignore[arg-type]
@@ -204,7 +219,7 @@ def _file_reads_with_revisions(
             revision_notes=f.revision_notes,
             is_recommended=f.is_recommended,
             uploaded_at=f.uploaded_at,
-            metadata=metadata_read(session, md) if md else None,
+            metadata=metadata_read(session, md, profiles) if md else None,
         )
         for f, md in files_with_meta
     ]
@@ -219,6 +234,7 @@ def list_items(
     session: Session,
     *,
     collection: Optional[str] = None,
+    direct: bool = False,
     tags: Optional[List[str]] = None,
     q: Optional[str] = None,
     printer_id: Optional[int] = None,
@@ -241,7 +257,15 @@ def list_items(
         )
     )
 
-    if collection:
+    if direct:
+        # Show only direct children: root→NULL, collection→exact path match.
+        if collection:
+            cat_path = collection.strip().strip("/").lower()
+            matching_cat_ids = select(Collection.id).where(Collection.path == cat_path)
+            stmt = stmt.where(Model.collection_id.in_(matching_cat_ids))  # type: ignore[union-attr]
+        else:
+            stmt = stmt.where(Model.collection_id.is_(None))  # type: ignore[union-attr]
+    elif collection:
         cat_path = collection.strip().strip("/").lower()
         # Match the collection path or any descendant via FK join on Collections.
         matching_cat_ids = select(Collection.id).where(
@@ -287,6 +311,19 @@ def list_items(
             .group_by(File.model_id)
         ).all()
     )
+
+    # Newest mesh file per model, for client-side 3D preview preloading.
+    mesh_file_ids: dict[int, int] = {}
+    for model_id, file_id in session.exec(
+        select(File.model_id, File.id)
+        .where(
+            File.model_id.in_(model_ids),  # type: ignore[union-attr]
+            File.file_type.in_([FileType.STL, FileType.THREE_MF, FileType.OBJ]),  # type: ignore[attr-defined]
+            live(File),
+        )
+        .order_by(File.model_id.asc(), File.version.desc())  # type: ignore[attr-defined]
+    ).all():
+        mesh_file_ids.setdefault(int(model_id), int(file_id))
 
     recommended: dict[int, tuple[FileRevisionStatus | None, str | None]] = {}
     for model_id, rev_status, rev_label in session.exec(
@@ -361,6 +398,7 @@ def list_items(
                 tags=sorted(t.name for t in m.tags),
                 thumbnail_url=thumb_url(m),
                 file_count=int(file_counts.get(m.id, 0)),
+                mesh_file_id=mesh_file_ids.get(m.id),
                 printer_presence=presence_by_model.get(m.id, []),
                 updated_at=m.updated_at,
                 print_summary=summaries.get(m.id),
@@ -449,6 +487,7 @@ def export_payload(session: Session) -> dict:
 
         files_by_model: dict[int, list[dict]] = defaultdict(list)
         gcode_counts: dict[int, int] = defaultdict(int)
+        profiles = _load_filament_profiles(session)
         file_rows = session.exec(
             select(File, Metadata)
             .where(File.model_id.in_(model_ids))  # type: ignore[union-attr]
@@ -476,7 +515,9 @@ def export_payload(session: Session) -> dict:
                     revision_notes=file_row.revision_notes,
                     is_recommended=file_row.is_recommended,
                     uploaded_at=file_row.uploaded_at,
-                    metadata=metadata_read(session, metadata) if metadata else None,
+                    metadata=metadata_read(session, metadata, profiles)
+                    if metadata
+                    else None,
                 ).model_dump(mode="json")
             )
 
@@ -597,16 +638,22 @@ def list_trashed(
         .offset(offset)
         .limit(limit)
     ).all()
+    model_ids = [m.id for m in rows if m.id is not None]
+    file_stats: dict[int, tuple[int, int]] = {}
+    if model_ids:
+        for model_id, count, size in session.exec(
+            select(
+                File.model_id,
+                func.count(File.id),
+                func.coalesce(func.sum(File.size_bytes), 0),
+            )
+            .where(File.model_id.in_(model_ids))  # type: ignore[union-attr]
+            .group_by(File.model_id)
+        ).all():
+            file_stats[int(model_id)] = (int(count or 0), int(size or 0))
     out: List[TrashedModelRead] = []
     for model in rows:
-        file_count = session.exec(
-            select(func.count(File.id)).where(File.model_id == model.id)
-        ).one()
-        size_bytes = session.exec(
-            select(func.coalesce(func.sum(File.size_bytes), 0)).where(
-                File.model_id == model.id
-            )
-        ).one()
+        file_count, size_bytes = file_stats.get(model.id or 0, (0, 0))
         assert model.deleted_at is not None
         out.append(
             TrashedModelRead(
@@ -614,10 +661,10 @@ def list_trashed(
                 name=model.name,
                 slug=model.slug,
                 collection=collection_name_for(model),
-                tags=tag_names_for(session, model.id),  # type: ignore[arg-type]
+                tags=sorted(t.name for t in model.tags),
                 thumbnail_url=thumb_url(model),
-                file_count=int(file_count or 0),
-                size_bytes=int(size_bytes or 0),
+                file_count=file_count,
+                size_bytes=size_bytes,
                 deleted_at=model.deleted_at,
                 expires_at=trash_expires_at(model.deleted_at, retention_days),
             )

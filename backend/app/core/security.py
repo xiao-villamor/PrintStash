@@ -13,8 +13,21 @@ from app.services.auth import get_user_by_id, verify_access_token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 
-def get_current_user(
+def get_token_payload(
     token: str | None = Depends(oauth2_scheme),
+) -> Optional[dict]:
+    """FastAPI dependency: decoded JWT payload, or None.
+
+    FastAPI caches dependency results per request, so stacking
+    `get_current_user` + `require_auth` decodes the token exactly once.
+    """
+    if not token:
+        return None
+    return verify_access_token(token)
+
+
+def get_current_user(
+    payload: Optional[dict] = Depends(get_token_payload),
     session: Session = Depends(get_session),
 ) -> Optional[User]:
     """FastAPI dependency: extract user from JWT Bearer token.
@@ -22,9 +35,6 @@ def get_current_user(
     Returns None when no valid token is present (read endpoints are open).
     Callers that require a user should check the result or use `require_user`.
     """
-    if not token:
-        return None
-    payload = verify_access_token(token)
     if not payload:
         return None
     user_id_str = payload.get("sub")
@@ -42,7 +52,7 @@ def get_current_user(
 
 async def require_auth(
     current_user: Optional[User] = Depends(get_current_user),
-    token: str | None = Depends(oauth2_scheme),
+    payload: Optional[dict] = Depends(get_token_payload),
 ) -> None:
     """FastAPI dependency: require a valid JWT user with write access."""
     if current_user is None:
@@ -50,7 +60,6 @@ async def require_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="not_authenticated",
         )
-    payload = verify_access_token(token) if token else None
     scope = payload.get("scope") if payload else None
     if scope in {"write", "admin"}:
         return

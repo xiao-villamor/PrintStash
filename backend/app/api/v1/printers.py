@@ -133,6 +133,33 @@ def _to_printer_file_read(
     )
 
 
+def _printer_file_reads(
+    session: Session, rows: list[PrinterFile], *, printer_name: str
+) -> list[PrinterFileRead]:
+    """Compose PrinterFileReads with one batched File/Model lookup."""
+    file_ids = {row.file_id for row in rows if row.file_id is not None}
+    files_by_id: dict[int, tuple[File, Model | None]] = {}
+    if file_ids:
+        for file_row, model_row in session.exec(
+            select(File, Model)
+            .outerjoin(Model, Model.id == File.model_id)
+            .where(File.id.in_(file_ids))  # type: ignore[union-attr]
+        ).all():
+            files_by_id[int(file_row.id)] = (file_row, model_row)
+    out: list[PrinterFileRead] = []
+    for row in rows:
+        file_row, model_row = files_by_id.get(row.file_id or 0, (None, None))
+        out.append(
+            _to_printer_file_read(
+                row,
+                printer_name=printer_name,
+                file_row=file_row,
+                model_row=model_row,
+            )
+        )
+    return out
+
+
 async def _diagnostic_check(
     name: str,
     action: Callable[[], Awaitable[object]],
@@ -683,19 +710,8 @@ def list_files_on_printer(
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    out: list[PrinterFileRead] = []
-    for row in list_printer_files(session, printer_id=printer_id):
-        file_row = session.get(File, row.file_id) if row.file_id else None
-        model_row = session.get(Model, file_row.model_id) if file_row else None
-        out.append(
-            _to_printer_file_read(
-                row,
-                printer_name=p.name,
-                file_row=file_row,
-                model_row=model_row,
-            )
-        )
-    return out
+    rows = list(list_printer_files(session, printer_id=printer_id))
+    return _printer_file_reads(session, rows, printer_name=p.name)
 
 
 @router.post(
@@ -725,19 +741,7 @@ async def sync_files_on_printer(
         raise HTTPException(status_code=502, detail=exc.code)
 
     rows = sync_printer_files(session, printer_id=printer_id, remote_files=remote_files)
-    out: list[PrinterFileRead] = []
-    for row in rows:
-        file_row = session.get(File, row.file_id) if row.file_id else None
-        model_row = session.get(Model, file_row.model_id) if file_row else None
-        out.append(
-            _to_printer_file_read(
-                row,
-                printer_name=p.name,
-                file_row=file_row,
-                model_row=model_row,
-            )
-        )
-    return out
+    return _printer_file_reads(session, list(rows), printer_name=p.name)
 
 
 @router.get(

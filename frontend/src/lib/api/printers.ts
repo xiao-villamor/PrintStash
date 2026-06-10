@@ -31,7 +31,10 @@ export function getPrinter(id: number): Promise<PrinterRead> {
 }
 
 export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
-  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`);
+  // Live connectivity check — caching it would defeat the "re-run checks" button.
+  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, {
+    fresh: true,
+  });
 }
 
 export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
@@ -95,7 +98,10 @@ export function cancelPrinter(id: number): Promise<void> {
 }
 
 export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
-  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`);
+  // One-shot live snapshot — always fetch fresh.
+  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`, {
+    fresh: true,
+  });
 }
 
 export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {

@@ -884,8 +884,8 @@ class TestDashboard:
         from app.services.printer_hub import PrinterHub
 
         hub = PrinterHub()
-        hub._mark_status(p1.id, status="printing", error=None)
-        hub._mark_status(p2.id, status="ready", error=None)
+        asyncio.run(hub._mark_status(p1.id, status="printing", error=None))
+        asyncio.run(hub._mark_status(p2.id, status="ready", error=None))
 
         resp = client.get("/api/v1/printers/dashboard")
         assert resp.status_code == 200

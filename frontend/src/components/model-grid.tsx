@@ -22,7 +22,7 @@ import {
   ChevronRight,
   Plus,
 } from "lucide-react";
-import { listCollections, listModels, listPrinters, listTags, createCollection } from "@/lib/api";
+import { listCollections, listModels, listPrinters, listTags, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import Link from "next/link";
@@ -91,31 +91,52 @@ function selectedCollectionName(
   return byPath.get(selectedPath)?.name ?? null;
 }
 
-export function ModelBrowser() {
+export interface BrowserInitialData {
+  models: ModelListItem[];
+  collections: CollectionRead[];
+  tags: TagRead[];
+  printers: PrinterRead[];
+}
+
+export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
-  const [models, setModels] = useState<ModelListItem[]>([]);
-  const [collections, setCollections] = useState<CollectionRead[]>([]);
-  const [tags, setTags] = useState<TagRead[]>([]);
-  const [printers, setPrinters] = useState<PrinterRead[]>([]);
+  const [models, setModels] = useState<ModelListItem[]>(initial?.models ?? []);
+  const [collections, setCollections] = useState<CollectionRead[]>(initial?.collections ?? []);
+  const [tags, setTags] = useState<TagRead[]>(initial?.tags ?? []);
+  const [printers, setPrinters] = useState<PrinterRead[]>(initial?.printers ?? []);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
   const [selectedPrinterPresence, setSelectedPrinterPresence] = useState<"any" | "none" | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initial);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [facetsLoading, setFacetsLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(initial ? initial.models.length === PAGE_SIZE : false);
+  const [facetsLoading, setFacetsLoading] = useState(!initial);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
-  const hasLoadedModels = useRef(false);
+  const hasLoadedModels = useRef(!!initial);
+  // The server already rendered the first page with the current search query;
+  // skip the redundant client fetch on hydration.
+  const skipFirstFetch = useRef(!!initial);
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
+
+  // Navigate into/out of a collection: clear stale models immediately so the
+  // old cards don't flash for the 200 ms debounce window.
+  function handleCollectionChange(path: string | null) {
+    if (path !== selectedCollection) {
+      setModels([]);
+      setLoading(true);
+      hasLoadedModels.current = false;
+    }
+    setSelectedCollection(path);
+  }
 
   useEffect(() => {
     if (searchParams.get("upload") === "1") {
@@ -141,6 +162,7 @@ export function ModelBrowser() {
   );
 
   useEffect(() => {
+    if (initial) return; // facets came down with the server render
     let alive = true;
     (async () => {
       try {
@@ -156,20 +178,27 @@ export function ModelBrowser() {
       }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    if (skipFirstFetch.current) {
+      skipFirstFetch.current = false;
+      return;
+    }
     let alive = true;
     const handle = setTimeout(async () => {
       if (hasLoadedModels.current) setRefreshing(true);
       else setLoading(true);
       try {
+        const searchQuery = query.trim() || undefined;
         const data = await listModels({
           limit: PAGE_SIZE,
           offset: 0,
           collection: selectedCollection ?? undefined,
+          direct: !searchQuery,
           tag: selectedTags.length ? selectedTags : undefined,
-          q: query.trim() || undefined,
+          q: searchQuery,
           printer_id: selectedPrinterId ?? undefined,
           printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
         });
@@ -191,12 +220,14 @@ export function ModelBrowser() {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
+      const searchQuery = query.trim() || undefined;
       const data = await listModels({
         limit: PAGE_SIZE,
         offset: models.length,
         collection: selectedCollection ?? undefined,
+        direct: !searchQuery,
         tag: selectedTags.length ? selectedTags : undefined,
-        q: query.trim() || undefined,
+        q: searchQuery,
         printer_id: selectedPrinterId ?? undefined,
         printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
       });
@@ -239,6 +270,42 @@ export function ModelBrowser() {
     }
   }
 
+  async function handleMoveModel(modelId: number, targetCollection: string | null) {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    try {
+      await updateModel(modelId, { collection: targetCollection ?? "" });
+      toast.success("Moved");
+      refresh();
+      refreshCollections();
+    } catch (e: any) {
+      toast.error(e);
+    }
+  }
+
+  async function handleMoveCollection(collectionId: number, newParentId: number | null) {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    try {
+      await moveCollection(collectionId, newParentId);
+      toast.success("Moved");
+      refresh();
+      refreshCollections();
+    } catch (e: any) {
+      toast.error(e);
+    }
+  }
+
+  async function handleDeleteCollection(id: number, recursive: boolean) {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    try {
+      await deleteCollection(id, recursive);
+      toast.success("Collection deleted");
+      refresh();
+      refreshCollections();
+    } catch (e: any) {
+      toast.error(e);
+    }
+  }
+
   function handleOpenCreateCollection() {
     if (isCreatingCollection) {
       setIsCreatingCollection(false);
@@ -256,7 +323,7 @@ export function ModelBrowser() {
         collections={collections} tags={tags} printers={printers}
         selectedCollection={selectedCollection} selectedTags={selectedTags}
         selectedPrinterId={selectedPrinterId} selectedPrinterPresence={selectedPrinterPresence}
-        onCollectionChange={setSelectedCollection} onTagsChange={setSelectedTags}
+        onCollectionChange={handleCollectionChange} onTagsChange={setSelectedTags}
         onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
         onCreateCollection={handleOpenCreateCollection}
         loading={facetsLoading}
@@ -267,9 +334,12 @@ export function ModelBrowser() {
         collections={collections} models={models} tags={tags} printers={printers}
         selectedCollection={selectedCollection} selectedTags={selectedTags}
         selectedPrinterId={selectedPrinterId} selectedPrinterPresence={selectedPrinterPresence}
-        onCollectionChange={setSelectedCollection} onTagsChange={setSelectedTags}
+        onCollectionChange={handleCollectionChange} onTagsChange={setSelectedTags}
         onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
         onCreateCollection={handleOpenCreateCollection}
+        onMoveModel={handleMoveModel}
+        onMoveCollection={handleMoveCollection}
+        onDeleteCollection={handleDeleteCollection}
         loading={facetsLoading}
       />
 
@@ -279,7 +349,7 @@ export function ModelBrowser() {
           {selectedCollection && breadcrumbs.length > 0 ? (
             <>
               <button
-                onClick={() => setSelectedCollection(null)}
+                onClick={() => handleCollectionChange(null)}
                 className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 All Models
@@ -288,7 +358,7 @@ export function ModelBrowser() {
                 <span key={crumb.id} className="flex items-center space-x-2">
                   <ChevronRight className="h-3 w-3 text-muted-foreground/40" />
                   <button
-                    onClick={() => setSelectedCollection(crumb.path)}
+                    onClick={() => handleCollectionChange(crumb.path)}
                     className="text-foreground font-medium"
                   >
                     {crumb.name}
@@ -298,7 +368,7 @@ export function ModelBrowser() {
             </>
           ) : (
             <button
-              onClick={() => setSelectedCollection(null)}
+              onClick={() => handleCollectionChange(null)}
               className="text-foreground font-medium"
             >
               All Models
@@ -418,7 +488,7 @@ export function ModelBrowser() {
                   <CollectionFolderCard
                     key={collection.id}
                     collection={collection}
-                    onSelect={(path) => setSelectedCollection(path)}
+                    onSelect={handleCollectionChange}
                   />
                 ))}
                 {sortedModels.map((model) => (
@@ -442,7 +512,7 @@ export function ModelBrowser() {
                   <CollectionListRow
                     key={collection.id}
                     collection={collection}
-                    onSelect={(path) => setSelectedCollection(path)}
+                    onSelect={handleCollectionChange}
                   />
                 ))}
                 {sortedModels.map((model) => (
@@ -490,7 +560,7 @@ function CollectionFolderGrid({ collections, onSelect }: { collections: Collecti
           key={collection.id}
           type="button"
           onClick={() => onSelect(collection.path)}
-          className="group flex flex-col p-3 bg-muted border border-border rounded-lg hover:border-blue-600 dark:border-orange-500 hover:bg-blue-50/30 dark:hover:bg-orange-950/20 hover:shadow-sm transition-all text-left relative overflow-hidden"
+          className="group flex flex-col p-3 bg-muted border border-border rounded-lg hover:border-blue-600 dark:hover:border-orange-500 hover:bg-blue-50/30 dark:hover:bg-orange-950/20 hover:shadow-sm transition-all text-left relative overflow-hidden"
         >
           <div className="flex items-center justify-between w-full mb-2">
             <div className="flex items-center gap-2">
@@ -532,11 +602,13 @@ function CollectionListRow({ collection, onSelect }: { collection: CollectionRea
 }
 
 function ModelListRow({ model }: { model: ModelListItem }) {
+  const router = useRouter();
   const thumb = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
   const printerPresence = model.printer_presence ?? [];
   return (
     <Link
       href={`/models/${model.id}`}
+      onMouseEnter={() => router.prefetch(`/models/${model.id}`)}
       className="flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border hover:bg-muted transition-colors group active:bg-muted"
     >
       <div className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border">

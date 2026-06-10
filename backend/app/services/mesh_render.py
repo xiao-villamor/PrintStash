@@ -194,19 +194,23 @@ def render_mesh_thumbnail(
         # ------------------------------------------------------------------
         # 6. Rasterise (z-buffered — no painter's sort needed).
         # ------------------------------------------------------------------
-        # Model colour: a medium slate blue-grey.
-        base_color = np.array([168, 186, 200], dtype=np.float32)
+        # Model colour: warm blue-grey, slightly brighter for dark UI cards.
+        base_color = np.array([185, 200, 215], dtype=np.float32)
 
-        bg_color = np.array([245, 246, 248], dtype=np.uint8)  # off-white bg
-        img = np.broadcast_to(bg_color, (ss_height, ss_width, 3)).copy()
+        # Transparent background — floats cleanly on any card colour.
+        img = np.zeros((ss_height, ss_width, 3), dtype=np.uint8)
         zbuf = np.full((ss_height, ss_width), np.inf, dtype=np.float64)
 
         _rasterise_triangles(img, zbuf, tri, shade_rgb, base_color, ss_width, ss_height)
 
+        # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
+        alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
+        rgba = np.dstack([img, alpha])
+
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
         # ------------------------------------------------------------------
-        pil = Image.frombytes("RGB", (ss_width, ss_height), img.tobytes())
+        pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba.tobytes())
         pil = pil.resize((width, height), Image.LANCZOS)
 
         # Vignette: darken the corners slightly so the model "pops"
@@ -214,8 +218,9 @@ def render_mesh_thumbnail(
         vy = np.linspace(-1, 1, height, dtype=np.float32)
         gx, gy = np.meshgrid(vx, vy)
         vignette = 1.0 - 0.18 * np.clip(gx**2 + gy**2, 0, 1)
-        vig_arr = np.array(pil, dtype=np.float32) * vignette[:, :, None]
-        pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8))
+        vig_arr = np.array(pil, dtype=np.float32)
+        vig_arr[:, :, :3] *= vignette[:, :, None]  # vignette RGB only, keep alpha
+        pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
 
         buf = io.BytesIO()
         pil.save(buf, format="PNG", optimize=True)
@@ -254,18 +259,28 @@ def _select_view_rotation(verts, np):
 
 
 def _front_rotation_for_thin_axis(thin_axis: int, np):
-    """View a flat mesh from its positive thin axis, with the broad face upright."""
+    """View a flat mesh mostly face-on but tilted 25° to reveal depth in recesses."""
+
+    # 25° tilt rotation around the screen-X axis (tips the model top toward camera).
+    tilt = np.radians(25.0)
+    ct, st = float(np.cos(tilt)), float(np.sin(tilt))
 
     if thin_axis == 0:
-        # Screen X/Y = model Y/Z, camera views from +X.
-        rows = ((0, 1, 0), (0, 0, 1), (-1, 0, 0))
+        # Base: camera from +X (screen X=Y, screen Y=Z).
+        base = np.array([[0, 1, 0], [0, 0, 1], [-1, 0, 0]], dtype=np.float64)
     elif thin_axis == 1:
-        # Screen X/Y = model X/Z, camera views from +Y.
-        rows = ((1, 0, 0), (0, 0, 1), (0, -1, 0))
+        # Base: camera from +Y (screen X=X, screen Y=Z).
+        base = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float64)
     else:
-        # Screen X/Y = model X/Y, camera views from +Z like the frontend STL viewer.
-        rows = ((1, 0, 0), (0, 1, 0), (0, 0, -1))
-    return np.array(rows, dtype=np.float64)
+        # Base: camera from +Z (screen X=X, screen Y=Y, top-down).
+        base = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]], dtype=np.float64)
+
+    # Tilt: rotate 25° around the screen-X axis so the far edge dips toward the
+    # viewer, making depth recesses and raised features visible.
+    tilt_mat = np.array(
+        [[1, 0, 0], [0, ct, -st], [0, st, ct]], dtype=np.float64
+    )
+    return tilt_mat @ base
 
 
 # ---------------------------------------------------------------------------

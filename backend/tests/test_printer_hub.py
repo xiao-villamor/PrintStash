@@ -107,7 +107,7 @@ class TestPrinterHubMarkStatus:
         db_session.refresh(p)
         pid = p.id
 
-        hub._mark_status(pid, PrinterStatus.PRINTING, error="nozzle clog")
+        asyncio.run(hub._mark_status(pid, PrinterStatus.PRINTING, error="nozzle clog"))
         db_session.refresh(p)
         assert p.status == PrinterStatus.PRINTING
 
@@ -120,13 +120,13 @@ class TestPrinterHubMarkStatus:
         db_session.refresh(p)
         pid = p.id
 
-        hub._mark_status(pid, PrinterStatus.READY, error=None)
+        asyncio.run(hub._mark_status(pid, PrinterStatus.READY, error=None))
         db_session.refresh(p)
         assert p.status == PrinterStatus.READY
         assert p.last_error is None
 
     def test_mark_status_handles_missing_printer(self, hub):
-        hub._mark_status(99999, PrinterStatus.OFFLINE, error="gone")
+        asyncio.run(hub._mark_status(99999, PrinterStatus.OFFLINE, error="gone"))
 
 
 class TestPrinterHubHandleStatus:

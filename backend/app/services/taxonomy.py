@@ -44,6 +44,13 @@ def resolve_or_create_collection(
             session.add(existing)
             session.commit()
             session.refresh(existing)
+        elif existing.deleted_at is not None:
+            # Revive a trashed node rather than attaching models to a dead row.
+            existing.deleted_at = None
+            existing.deleted_by = None
+            session.add(existing)
+            session.commit()
+            session.refresh(existing)
         parent = existing
     return parent
 

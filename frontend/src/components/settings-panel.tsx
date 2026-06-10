@@ -9,6 +9,7 @@ import {
   HardDrive,
   KeyRound,
   Copy,
+  Loader2,
   Palette,
   RefreshCw,
   RotateCcw,
@@ -20,6 +21,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import {
   createApiKey,
+  createBackup,
   downloadModelExport,
   getVaultConfig,
   getVaultStats,
@@ -39,6 +41,14 @@ import {
   readMetadataPreferences,
   writeMetadataPreferences,
 } from "@/lib/metadata-preferences";
+import {
+  CARD_METRIC_OPTIONS,
+  CardMetricId,
+  CardMetrics,
+  DEFAULT_CARD_METRICS,
+  readCardMetrics,
+  writeCardMetrics,
+} from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
 import type { ApiKeyRead, TrashedModelRead, VaultStatsRead } from "@/types";
 
@@ -95,9 +105,11 @@ export function SettingsPanel() {
   const [trashBusy, setTrashBusy] = useState<number | "expired" | "settings" | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
+  const [backingUp, setBackingUp] = useState(false);
   const [metadataPrefs, setMetadataPrefs] = useState<MetadataPreferences>(
     DEFAULT_METADATA_PREFERENCES,
   );
+  const [cardMetrics, setCardMetrics] = useState<CardMetrics>(DEFAULT_CARD_METRICS);
 
   useEffect(() => {
     fetch("/api/v1/health")
@@ -108,6 +120,7 @@ export function SettingsPanel() {
       .then(setStats)
       .catch(() => {});
     setMetadataPrefs(readMetadataPreferences());
+    setCardMetrics(readCardMetrics());
   }, []);
 
   useEffect(() => {
@@ -143,6 +156,19 @@ export function SettingsPanel() {
       loadTrash();
     }
   }, [activeSection, loadTrash]);
+
+  async function handleBackupNow() {
+    setBackingUp(true);
+    try {
+      const meta = await createBackup();
+      const mb = (meta.size_bytes / 1024 / 1024).toFixed(1);
+      toast.success(`Backup created — ${meta.file_count} files, ${mb} MB`);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBackingUp(false);
+    }
+  }
 
   async function exportData(format: "json" | "csv") {
     setExporting(format);
@@ -201,6 +227,22 @@ export function SettingsPanel() {
     setMetadataPrefs(DEFAULT_METADATA_PREFERENCES);
     writeMetadataPreferences(DEFAULT_METADATA_PREFERENCES);
     toast.success("Metadata display reset.");
+  }
+
+  function updateCardMetric(slot: 0 | 1 | 2, id: CardMetricId) {
+    const next: CardMetrics = [...cardMetrics] as CardMetrics;
+    next[slot] = id;
+    setCardMetrics(next);
+    writeCardMetrics(next);
+    // Notify other tabs / components
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.card.metrics" }));
+  }
+
+  function resetCardMetrics() {
+    setCardMetrics(DEFAULT_CARD_METRICS);
+    writeCardMetrics(DEFAULT_CARD_METRICS);
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.card.metrics" }));
+    toast.success("Card metrics reset.");
   }
 
   async function saveTrashRetention() {
@@ -528,13 +570,86 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "storage" && (
-        <div className="max-w-3xl">
+        <div className="max-w-3xl space-y-4">
           <StorageConfigCard />
+          <div className="bg-card border border-border rounded p-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Manual backup</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Create a full backup of the database and all stored files right now.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleBackupNow}
+              disabled={backingUp}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              {backingUp ? (
+                <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Backing up…</>
+              ) : (
+                <><HardDrive className="h-3.5 w-3.5" /> Backup now</>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
       {activeSection === "design" && (
-        <div className="max-w-5xl">
+        <div className="max-w-5xl space-y-6">
+          {/* Card metrics picker */}
+          <div className="bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-foreground">Model card metrics</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Choose which 3 stats appear on each model card in the grid.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={resetCardMetrics}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 lg:p-6 grid gap-4 sm:grid-cols-3">
+              {([0, 1, 2] as const).map((slot) => (
+                <div key={slot} className="space-y-1.5">
+                  <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Slot {slot + 1}
+                  </p>
+                  <div className="grid grid-cols-1 gap-1">
+                    {CARD_METRIC_OPTIONS.map((opt) => {
+                      const isSelected = cardMetrics[slot] === opt.id;
+                      const usedInOther = cardMetrics.some((id, i) => i !== slot && id === opt.id);
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          disabled={usedInOther}
+                          onClick={() => updateCardMetric(slot, opt.id as CardMetricId)}
+                          className={`flex items-center justify-between px-3 py-2 rounded border text-sm transition-colors ${
+                            isSelected
+                              ? "border-blue-500 dark:border-orange-500 bg-blue-50 dark:bg-orange-950/30 text-blue-700 dark:text-orange-400"
+                              : usedInOther
+                              ? "border-border bg-muted/30 text-muted-foreground/40 cursor-not-allowed"
+                              : "border-border bg-background text-foreground hover:bg-muted"
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{opt.abbr}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           <div className="bg-card border border-border rounded">
             <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div className="min-w-0">

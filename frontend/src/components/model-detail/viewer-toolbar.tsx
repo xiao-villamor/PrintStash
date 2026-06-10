@@ -1,42 +1,29 @@
 "use client";
 
-import {
-  Axis3d,
-  Box,
-  Camera,
-  Crosshair,
-  Grid3x3,
-  Maximize2,
-} from "lucide-react";
-
+import { Camera, Code2, Grid3x3, Layers, Maximize2 } from "lucide-react";
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
+
+export type ViewerMode = "model" | "gcode";
 
 export function ViewerToolbar({
   displayMode,
   setDisplayMode,
   showGrid,
   setShowGrid,
-  showAxes,
-  setShowAxes,
-  showBoundingBox,
-  setShowBoundingBox,
   controls,
+  viewerMode,
+  setViewerMode,
+  hasGcode,
 }: {
   displayMode: ViewerDisplayMode;
   setDisplayMode: (m: ViewerDisplayMode) => void;
   showGrid: boolean;
   setShowGrid: (v: boolean) => void;
-  showAxes: boolean;
-  setShowAxes: (v: boolean) => void;
-  showBoundingBox: boolean;
-  setShowBoundingBox: (v: boolean) => void;
   controls: React.RefObject<STLViewerControls | null>;
+  viewerMode: ViewerMode;
+  setViewerMode: (m: ViewerMode) => void;
+  hasGcode: boolean;
 }) {
-  const modes: { key: ViewerDisplayMode; label: string }[] = [
-    { key: "solid", label: "Solid" },
-    { key: "xray", label: "X-Ray" },
-    { key: "wireframe", label: "Wire" },
-  ];
   const cluster =
     "flex bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded overflow-hidden shadow-sm";
   const iconBtn =
@@ -44,56 +31,78 @@ export function ViewerToolbar({
 
   return (
     <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
-      <div className={cluster}>
-        {modes.map((m) => (
+      {/* 3D ↔ G-code toggle */}
+      {hasGcode && (
+        <div className={cluster}>
           <button
-            key={m.key}
-            onClick={() => setDisplayMode(m.key)}
-            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors ${
-              displayMode === m.key
+            onClick={() => setViewerMode("model")}
+            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+              viewerMode === "model"
                 ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
                 : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
             }`}
-            title={`${m.label} view`}
+            title="3D model view"
           >
-            {m.label}
+            <Code2 className="h-3.5 w-3.5" /> 3D
           </button>
-        ))}
-      </div>
-      <div className={cluster}>
-        <button onClick={() => controls.current?.fit()} className={`${iconBtn} border-r border-[var(--outline-variant)]`} title="Fit view">
-          <Maximize2 className="h-4 w-4" />
-        </button>
-        <button onClick={() => controls.current?.center()} className={`${iconBtn} border-r border-[var(--outline-variant)]`} title="Center">
-          <Crosshair className="h-4 w-4" />
-        </button>
-        <button onClick={() => controls.current?.screenshot()} className={iconBtn} title="Screenshot">
-          <Camera className="h-4 w-4" />
-        </button>
-      </div>
-      <div className={cluster}>
-        <button
-          onClick={() => setShowGrid(!showGrid)}
-          className={`${iconBtn} border-r border-[var(--outline-variant)] ${showGrid ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
-          title="Build plate grid"
-        >
-          <Grid3x3 className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => setShowAxes(!showAxes)}
-          className={`${iconBtn} border-r border-[var(--outline-variant)] ${showAxes ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
-          title="XYZ axes"
-        >
-          <Axis3d className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => setShowBoundingBox(!showBoundingBox)}
-          className={`${iconBtn} ${showBoundingBox ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
-          title="Bounding box"
-        >
-          <Box className="h-4 w-4" />
-        </button>
-      </div>
+          <button
+            onClick={() => setViewerMode("gcode")}
+            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+              viewerMode === "gcode"
+                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+            }`}
+            title="G-code toolpath preview"
+          >
+            <Layers className="h-3.5 w-3.5" /> GCode
+          </button>
+        </div>
+      )}
+
+      {/* 3D model controls */}
+      {viewerMode === "model" && (
+        <>
+          <div className={cluster}>
+            {(["solid", "xray", "wireframe"] as ViewerDisplayMode[]).map((m) => (
+              <button
+                key={m}
+                onClick={() => setDisplayMode(m)}
+                className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                  displayMode === m
+                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
+                    : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                }`}
+              >
+                {m === "wireframe" ? "Wire" : m === "xray" ? "X-Ray" : "Solid"}
+              </button>
+            ))}
+          </div>
+
+          <div className={cluster}>
+            <button
+              onClick={() => controls.current?.fit()}
+              className={`${iconBtn} border-r border-[var(--outline-variant)]`}
+              title="Fit to view"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => controls.current?.screenshot()}
+              className={`${iconBtn} border-r border-[var(--outline-variant)]`}
+              title="Screenshot"
+            >
+              <Camera className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setShowGrid(!showGrid)}
+              className={`${iconBtn} ${showGrid ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
+              title="Build plate grid"
+            >
+              <Grid3x3 className="h-4 w-4" />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

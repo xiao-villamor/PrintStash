@@ -120,6 +120,8 @@ export interface ModelListItem {
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
+  /** Newest mesh file (STL/3MF/OBJ), used to preload the 3D preview. */
+  mesh_file_id: number | null;
   printer_presence: ModelPrinterPresenceRead[];
   updated_at: string;
   print_summary: PrintSummaryRead | null;
@@ -217,6 +219,7 @@ export interface IngestJobStatus {
 
 export interface ListModelsParams {
   collection?: string;
+  direct?: boolean;
   tag?: string[];
   q?: string;
   printer_id?: number;

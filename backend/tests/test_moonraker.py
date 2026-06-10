@@ -19,10 +19,8 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": {"hostname": "mainsail"}}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             result = asyncio.run(client.info())
             assert result["result"]["hostname"] == "mainsail"
 
@@ -32,10 +30,8 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 500
         mock_resp.text = "Internal Server Error"
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             with pytest.raises(MoonrakerError, match="moonraker 500"):
                 asyncio.run(client.info())
 
@@ -45,10 +41,8 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 302
         mock_resp.text = "Found"
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             with pytest.raises(MoonrakerError, match="moonraker 302"):
                 asyncio.run(client.info())
 
@@ -58,14 +52,10 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": {"status": {}}}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             result = asyncio.run(client.query_status())
-            call_args = (
-                MockClient.return_value.__aenter__.return_value.request.call_args
-            )
+            call_args = mock_get_client.return_value.request.call_args
             url = call_args[0][1]
             assert "/printer/objects/query?" in url
             assert "print_stats=" in url
@@ -77,14 +67,10 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": [{"path": "part.gcode", "size": 100}]}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             result = asyncio.run(client.list_gcode_files())
-            url = MockClient.return_value.__aenter__.return_value.request.call_args[0][
-                1
-            ]
+            url = mock_get_client.return_value.request.call_args[0][1]
             assert url.endswith("/server/files/list?root=gcodes")
             assert result["result"][0]["path"] == "part.gcode"
 
@@ -97,10 +83,8 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": "ok"}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.post = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.post = AsyncMock(return_value=mock_resp)
             result = asyncio.run(
                 client.upload_gcode(gcode_path, "test.gcode", start_print=True)
             )
@@ -115,10 +99,8 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 400
         mock_resp.text = "Bad Request"
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.post = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.post = AsyncMock(return_value=mock_resp)
             with pytest.raises(MoonrakerError, match="upload failed 400"):
                 asyncio.run(client.upload_gcode(gcode_path, "test.gcode"))
 
@@ -128,15 +110,11 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": "ok"}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             result = asyncio.run(client.start_print("my_print.gcode"))
             assert result == {"result": "ok"}
-            call_args = (
-                MockClient.return_value.__aenter__.return_value.request.call_args
-            )
+            call_args = mock_get_client.return_value.request.call_args
             assert call_args[0][1].endswith("/printer/print/start")
             assert call_args[1]["params"] == {"filename": "my_print.gcode"}
 
@@ -148,10 +126,8 @@ class TestMoonrakerClientHTTP:
             mock_resp.status_code = 200
             mock_resp.json.return_value = {"result": "ok"}
 
-            with patch("httpx.AsyncClient") as MockClient:
-                MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                    return_value=mock_resp
-                )
+            with patch("app.services.moonraker.get_http_client") as mock_get_client:
+                mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
                 result = asyncio.run(getattr(client, method)())
                 assert result == {"result": "ok"}
 
@@ -161,14 +137,10 @@ class TestMoonrakerClientHTTP:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"result": {}}
 
-        with patch("httpx.AsyncClient") as MockClient:
-            MockClient.return_value.__aenter__.return_value.request = AsyncMock(
-                return_value=mock_resp
-            )
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
             asyncio.run(client.info())
-            call_kwargs = (
-                MockClient.return_value.__aenter__.return_value.request.call_args
-            )
+            call_kwargs = mock_get_client.return_value.request.call_args
             headers = call_kwargs[1].get("headers", {})
             assert headers.get("X-Api-Key") == "secret123"
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PrinterRead } from "@/types";
-import { createPrinter, deletePrinter, listPrinters } from "@/lib/api";
+import { createPrinter, deletePrinter, invalidateApiCache, listPrinters } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,16 +28,23 @@ function providerAddress(p: PrinterRead): string {
     : p.moonraker_url;
 }
 
-export function PrintersPage() {
+export function PrintersPage({
+  initialPrinters,
+}: {
+  initialPrinters?: PrinterRead[];
+}) {
   const auth = useRequireAuth();
-  const [printers, setPrinters] = useState<PrinterRead[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [printers, setPrinters] = useState<PrinterRead[]>(
+    initialPrinters ?? [],
+  );
+  const [loading, setLoading] = useState(!initialPrinters);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
   async function refresh() {
     setLoading(true);
     try {
+      invalidateApiCache();
       setPrinters(await listPrinters());
       setError(null);
     } catch (e: any) {
@@ -48,7 +55,8 @@ export function PrintersPage() {
   }
 
   useEffect(() => {
-    refresh();
+    if (!initialPrinters) refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleDelete(p: PrinterRead, e: React.MouseEvent) {

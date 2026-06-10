@@ -11,12 +11,14 @@
     "test:frontend": "node scripts/frontend-smoke.mjs"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/utilities": "^3.2.2",
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
-    "@types/three": "^0.184.1",
+    "@types/three": "0.182.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
@@ -26,7 +28,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "three": "^0.184.0",
+    "three": "0.182.0",
     "three-stdlib": "^2.36.1"
   },
   "devDependencies": {
@@ -41,9 +43,11 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3"
   },
+  "packageManager": "pnpm@10.18.1",
   "pnpm": {
     "overrides": {
-      "next@16.2.7>postcss": "8.5.15"
+      "next@16.2.7>postcss": "8.5.15",
+      "three": "0.182.0"
     }
   }
 }

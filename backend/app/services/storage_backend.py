@@ -35,6 +35,11 @@ class StorageBackend(ABC):
     def thumbnail_key(self, file_id: int) -> str: ...
 
     @abstractmethod
+    def stl_cache_key(self, sha256: str) -> str:
+        """Key for a derived-STL preview cached by source sha256. Lives outside
+        the blob tree so it is never treated as an orphan blob by the GC."""
+
+    @abstractmethod
     def exists(self, key: str) -> bool: ...
 
     @abstractmethod
@@ -141,6 +146,9 @@ class LocalStorageBackend(StorageBackend):
 
     def thumbnail_key(self, file_id: int) -> str:
         return str(settings.thumb_dir / f"{file_id}.png")
+
+    def stl_cache_key(self, sha256: str) -> str:
+        return str(settings.thumb_dir / "stl-cache" / f"{sha256}.stl")
 
     def exists(self, key: str) -> bool:
         return Path(key).exists()
@@ -338,6 +346,9 @@ class S3StorageBackend(StorageBackend):
 
     def thumbnail_key(self, file_id: int) -> str:
         return f"{self._prefix()}thumbs/{file_id}.png"
+
+    def stl_cache_key(self, sha256: str) -> str:
+        return f"{self._prefix()}stl-cache/{sha256}.stl"
 
     def exists(self, key: str) -> bool:
         import botocore.exceptions

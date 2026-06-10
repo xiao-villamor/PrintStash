@@ -14,7 +14,6 @@ export interface STLViewerControls {
   zoomOut: () => void;
   resetView: () => void;
   fit: () => void;
-  center: () => void;
   screenshot: () => void;
 }
 
@@ -23,8 +22,6 @@ export interface STLViewerProps {
   onControlsReady?: (api: STLViewerControls) => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
-  showAxes?: boolean;
-  showBoundingBox?: boolean;
   screenshotName?: string;
 }
 
@@ -90,45 +87,34 @@ function Mesh({
   );
 }
 
-function BoundingBox({ size }: { size: THREE.Vector3 }) {
-  const geometry = useMemo(() => {
-    const boxGeo = new THREE.BoxGeometry(
-      size.x || 1,
-      size.y || 1,
-      size.z || 1,
-    );
-    const edges = new THREE.EdgesGeometry(boxGeo);
-    boxGeo.dispose();
-    return edges;
-  }, [size]);
-
-  useEffect(() => () => geometry.dispose(), [geometry]);
-
-  return (
-    <lineSegments geometry={geometry}>
-      <lineBasicMaterial color="#2563eb" transparent opacity={0.7} />
-    </lineSegments>
-  );
-}
-
 function Scene({
   url,
   onControlsReady,
+  onLoadedChange,
   displayMode,
   showGrid,
-  showAxes,
-  showBoundingBox,
   screenshotName,
 }: Required<Omit<STLViewerProps, "onControlsReady">> & {
   onControlsReady?: (api: STLViewerControls) => void;
+  onLoadedChange?: (loaded: boolean) => void;
 }) {
   const orbitRef = useRef<any>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
   const { gl, scene, camera } = useThree();
   const [size, setSize] = useState(() => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE));
+  const [loaded, setLoaded] = useState(false);
+  const fittedRef = useRef(false);
+  // Ref so fit() always reads the latest size without stale closure
+  const sizeRef = useRef(size);
+  useEffect(() => { sizeRef.current = size; }, [size]);
 
-  const gridSize = Math.max(size.x, size.z) * 1.6 || NORMALIZED_SIZE * 1.6;
-  const axesLength = Math.max(size.x, size.y, size.z) * 0.75 || NORMALIZED_SIZE * 0.75;
+  const handleSized = (s: THREE.Vector3) => {
+    setSize(s);
+    setLoaded(true);
+    onLoadedChange?.(true);
+  };
+
+  const gridSize = Math.max(size.x, size.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -size.y / 2;
 
   const controlsApi: STLViewerControls = {
@@ -155,19 +141,16 @@ function Scene({
     fit: () => {
       const cam = cameraRef.current;
       if (!cam) return;
-      const maxDim = Math.max(size.x, size.y, size.z) || NORMALIZED_SIZE;
+      const s = sizeRef.current;
+      const maxDim = Math.max(s.x, s.y, s.z) || NORMALIZED_SIZE;
       const fov = (cam.fov * Math.PI) / 180;
-      const distance = (maxDim / 2 / Math.tan(fov / 2)) * 1.6;
-      const dir = cam.position.clone().sub(orbitRef.current?.target ?? new THREE.Vector3());
-      if (dir.lengthSq() === 0) dir.copy(DEFAULT_CAMERA_POSITION);
-      dir.normalize().multiplyScalar(distance);
+      const distance = (maxDim / 2 / Math.tan(fov / 2)) * 1.7;
+      const dir = cam.position.clone().normalize();
+      if (dir.lengthSq() === 0) dir.copy(DEFAULT_CAMERA_POSITION).normalize();
+      dir.multiplyScalar(distance);
       orbitRef.current?.target?.set(0, 0, 0);
       cam.position.copy(dir);
       cam.lookAt(0, 0, 0);
-      orbitRef.current?.update();
-    },
-    center: () => {
-      orbitRef.current?.target?.set(0, 0, 0);
       orbitRef.current?.update();
     },
     screenshot: () => {
@@ -187,6 +170,15 @@ function Scene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onControlsReady, size]);
 
+  // Auto-fit once, after the mesh has actually loaded and reported its size.
+  useEffect(() => {
+    if (loaded && !fittedRef.current) {
+      controlsApi.fit();
+      fittedRef.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, size]);
+
   return (
     <>
       <PerspectiveCamera
@@ -194,20 +186,20 @@ function Scene({
         makeDefault
         position={DEFAULT_CAMERA_POSITION.toArray() as [number, number, number]}
       />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[10, 10, 5]} intensity={1} />
-      <directionalLight position={[-10, -10, -5]} intensity={0.3} />
+      <ambientLight intensity={0.5} />
+      <hemisphereLight args={["#d4e8ff", "#1a1a2e", 0.4]} />
+      <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow />
+      <directionalLight position={[-6, -4, -8]} intensity={0.25} />
+      <directionalLight position={[0, -8, 0]} intensity={0.15} color="#8899bb" />
       <Suspense fallback={null}>
-        <Mesh url={url} displayMode={displayMode} onSized={setSize} />
+        <Mesh url={url} displayMode={displayMode} onSized={handleSized} />
       </Suspense>
-      {showBoundingBox && <BoundingBox size={size} />}
       {showGrid && (
         <gridHelper
-          args={[gridSize, 16, "#94a3b8", "#cbd5e1"]}
+          args={[gridSize, 26, "#94a3b8", "#475569"]}
           position={[0, floorY, 0]}
         />
       )}
-      {showAxes && <axesHelper args={[axesLength]} />}
       <OrbitControls ref={orbitRef} enablePan enableZoom enableRotate />
     </>
   );
@@ -251,33 +243,35 @@ export function STLViewer({
   url,
   onControlsReady,
   displayMode = "solid",
-  showGrid = false,
-  showAxes = false,
-  showBoundingBox = false,
+  showGrid = true,
   screenshotName = "model",
 }: STLViewerProps) {
+  const [meshLoaded, setMeshLoaded] = useState(false);
+
+  useEffect(() => {
+    setMeshLoaded(false);
+  }, [url]);
+
   return (
     <div className="relative h-full w-full">
       <MeshErrorBoundary>
-        <Suspense
-          fallback={
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
-            </div>
-          }
-        >
-          <Canvas className="h-full w-full" gl={{ preserveDrawingBuffer: true }}>
-            <Scene
-              url={url}
-              onControlsReady={onControlsReady}
-              displayMode={displayMode}
-              showGrid={showGrid}
-              showAxes={showAxes}
-              showBoundingBox={showBoundingBox}
-              screenshotName={screenshotName}
-            />
-          </Canvas>
-        </Suspense>
+        <Canvas className="h-full w-full" gl={{ preserveDrawingBuffer: true }}>
+          <Scene
+            url={url}
+            onControlsReady={onControlsReady}
+            onLoadedChange={setMeshLoaded}
+            displayMode={displayMode}
+            showGrid={showGrid}
+            screenshotName={screenshotName}
+          />
+        </Canvas>
+        {/* Overlay while the mesh downloads/parses — the canvas mounts
+            immediately, so without this the viewer is a blank void. */}
+        {!meshLoaded && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
+          </div>
+        )}
       </MeshErrorBoundary>
     </div>
   );

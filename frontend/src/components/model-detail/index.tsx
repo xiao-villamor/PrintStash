@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
+import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
 import {
   createTag,
   deleteModel,
@@ -69,6 +70,32 @@ const STLViewer = dynamic(
   { ssr: false, loading: () => <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" /> },
 );
 
+const GcodeViewer = dynamic(
+  () => import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+  { ssr: false, loading: () => <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" /> },
+);
+
+const PRINTER_BED_SIZES: Record<string, { x: number; y: number }> = {
+  default: { x: 235, y: 235 },
+};
+
+function getBedSize(printerModel: string | null | undefined): { x: number; y: number } {
+  if (!printerModel) return PRINTER_BED_SIZES.default;
+  const m = printerModel.toLowerCase();
+  if (m.includes("a1 mini") || (m.includes("bambu") && m.includes("mini"))) return { x: 180, y: 180 };
+  if (m.includes("bambu") || m.includes("x1") || m.includes("p1s") || m.includes("a1")) return { x: 256, y: 256 };
+  if (m.includes("prusa") && m.includes("mini")) return { x: 180, y: 180 };
+  if (m.includes("prusa") || m.includes("mk3") || m.includes("mk4")) return { x: 250, y: 210 };
+  if (m.includes("voron") || m.includes("v2.4")) {
+    if (m.includes("350")) return { x: 350, y: 350 };
+    if (m.includes("300")) return { x: 300, y: 300 };
+    return { x: 250, y: 250 };
+  }
+  if (m.includes("cr-10") || m.includes("cr10")) return { x: 300, y: 300 };
+  if (m.includes("ender") || m.includes("k1")) return { x: 220, y: 220 };
+  return PRINTER_BED_SIZES.default;
+}
+
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const router = useRouter();
   const auth = useRequireAuth();
@@ -93,12 +120,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [printJobs, setPrintJobs] = useState<ModelPrintJobRead[]>([]);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
-  const [showGrid, setShowGrid] = useState(false);
-  const [showAxes, setShowAxes] = useState(false);
-  const [showBoundingBox, setShowBoundingBox] = useState(false);
+
+  const [showGrid, setShowGrid] = useState(true);
   const [sendOpen, setSendOpen] = useState(false);
   const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
   const viewerControls = useRef<STLViewerControls | null>(null);
 
   // Quick actions on the Overview card (mark failed / recommend).
@@ -280,7 +307,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         />
       )}
       {/* Detail Header */}
-      <header className="h-auto md:h-16 flex flex-wrap items-center justify-between px-4 md:px-6 py-3 md:py-0 gap-2 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] shrink-0">
+      <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] shrink-0">
         <div className="flex items-center gap-4">
           <Link
             href="/"
@@ -318,12 +345,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   </span>
                 )}
                 {meta?.material_type && (
-                  <span className="border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                  <span className="inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider">
                     {meta.material_type}
                   </span>
                 )}
                 {meta?.printer_model && (
-                  <span className="inline-flex items-center gap-1 border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                  <span className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 rounded px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider">
                     <PrinterIcon className="h-3 w-3" /> {meta.printer_model}
                   </span>
                 )}
@@ -386,22 +413,20 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         {/* Left: 3D Model Preview */}
         <div className="flex-1 min-h-[250px] md:min-h-0 bg-[var(--surface-container-low)] relative border-b md:border-b-0 md:border-r border-[var(--outline-variant)] flex items-center justify-center m-2 md:m-4 rounded overflow-hidden"
           style={{ boxShadow: "inset 0 0 0 1px var(--surface-variant)" }}>
-          {meshFile ? (
-            <Suspense fallback={
-              <div className="flex items-center justify-center text-[var(--on-surface-variant)]">
-                <Loader2 className="h-8 w-8 animate-spin" />
-              </div>
-            }>
-              <STLViewer
-                url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
-                onControlsReady={(api) => { viewerControls.current = api; }}
-                displayMode={displayMode}
-                showGrid={showGrid}
-                showAxes={showAxes}
-                showBoundingBox={showBoundingBox}
-                screenshotName={model.slug || model.name}
-              />
-            </Suspense>
+          {viewerMode === "gcode" && hasGcode ? (
+            <GcodeViewer
+              url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/download`}
+              printerBedMm={getBedSize(meta?.printer_model)}
+              screenshotName={model.slug || model.name}
+            />
+          ) : meshFile ? (
+            <STLViewer
+              url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
+              onControlsReady={(api) => { viewerControls.current = api; }}
+              displayMode={displayMode}
+              showGrid={showGrid}
+              screenshotName={model.slug || model.name}
+            />
           ) : thumbUrl ? (
             <img
               src={thumbUrl}
@@ -415,33 +440,45 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           )}
 
           {/* Viewer toolbar (top-left) */}
-          {meshFile && (
+          {(meshFile || hasGcode) && (
             <ViewerToolbar
               displayMode={displayMode}
               setDisplayMode={setDisplayMode}
               showGrid={showGrid}
               setShowGrid={setShowGrid}
-              showAxes={showAxes}
-              setShowAxes={setShowAxes}
-              showBoundingBox={showBoundingBox}
-              setShowBoundingBox={setShowBoundingBox}
               controls={viewerControls}
+              viewerMode={viewerMode}
+              setViewerMode={setViewerMode}
+              hasGcode={hasGcode}
             />
           )}
 
           {/* Viewing label (top-right) */}
-          {meshFile && (
+          {(meshFile || (viewerMode === "gcode" && hasGcode)) && (
             <div className="absolute top-4 right-4 z-10 max-w-[60%]">
               <div className="bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded px-2.5 py-1.5 text-right">
-                <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
-                  Viewing: {meshFile.original_filename}
-                </p>
-                <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
-                  Source model
-                  {recommendedGcode
-                    ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
-                    : ""}
-                </p>
+                {viewerMode === "gcode" ? (
+                  <>
+                    <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+                      {(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])?.original_filename}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                      G-code toolpath
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+                      Viewing: {meshFile?.original_filename}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                      Source model
+                      {recommendedGcode
+                        ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
+                        : ""}
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )}
