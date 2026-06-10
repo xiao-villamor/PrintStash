@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.models import File, FileType, PrintJob, PrinterFile
+from app.db.scopes import live
 
 _VAULT_MARKER_RE = re.compile(
     r"(?:^|__)vault-f(?P<file_id>\d+)-(?P<sha>[a-fA-F0-9]{8,64})(?:\.|$|[-_])"
@@ -102,7 +103,7 @@ def _find_match(
         .where(
             File.file_type == FileType.GCODE,
             File.original_filename == basename,
-            File.deleted_at.is_(None),  # type: ignore[union-attr]
+            live(File),
         )
         .order_by(File.uploaded_at.desc())  # type: ignore[attr-defined]
     ).first()
@@ -115,7 +116,7 @@ def _find_match(
             .where(
                 File.file_type == FileType.GCODE,
                 File.size_bytes == size_bytes,
-                File.deleted_at.is_(None),  # type: ignore[union-attr]
+                live(File),
             )
             .order_by(File.uploaded_at.desc())  # type: ignore[attr-defined]
         ).first()

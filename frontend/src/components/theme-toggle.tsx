@@ -21,7 +21,7 @@ export function ThemeToggle() {
     const stored =
       (localStorage.getItem(STORAGE_KEY) as Theme | null) ??
       (localStorage.getItem(LEGACY_STORAGE_KEY) as Theme | null) ??
-      "light";
+      (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
     setTheme(stored);
     setMounted(true);
   }, []);
@@ -43,11 +43,9 @@ export function ThemeToggle() {
       aria-label="Toggle theme"
       className="text-muted-foreground hover:text-blue-600 dark:text-orange-500 transition-all flex items-center justify-center font-mono"
     >
-      {theme === "dark" ? (
-        <Sun className="h-4 w-4" />
-      ) : (
-        <Moon className="h-4 w-4" />
-      )}
+      <span key={theme} className="animate-theme-icon inline-flex">
+        {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      </span>
     </button>
   );
 }

@@ -16,6 +16,7 @@ import {
   Server,
   Tag,
 } from "lucide-react";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import {
   createApiKey,
@@ -93,6 +94,7 @@ export function SettingsPanel() {
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashBusy, setTrashBusy] = useState<number | "expired" | "settings" | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
+  const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
   const [metadataPrefs, setMetadataPrefs] = useState<MetadataPreferences>(
     DEFAULT_METADATA_PREFERENCES,
   );
@@ -228,7 +230,13 @@ export function SettingsPanel() {
   }
 
   async function purgeTrashItem(id: number) {
-    if (!window.confirm("Permanently delete this model and its files?")) return;
+    setPurgeTarget(id);
+  }
+
+  async function confirmPurge() {
+    if (purgeTarget === null) return;
+    const id = purgeTarget;
+    setPurgeTarget(null);
     setTrashBusy(id);
     try {
       await purgeModel(id);
@@ -273,6 +281,15 @@ export function SettingsPanel() {
 
   return (
     <div className="w-full space-y-6">
+      <ConfirmModal
+        open={purgeTarget !== null}
+        onClose={() => setPurgeTarget(null)}
+        onConfirm={confirmPurge}
+        busy={typeof trashBusy === "number"}
+        title="Permanently delete?"
+        description="This will delete the model and all its files immediately. This cannot be undone."
+        confirmLabel="Delete forever"
+      />
       <div>
         <h2 className="text-2xl font-bold text-foreground tracking-tight">Settings</h2>
         <p className="text-sm text-muted-foreground">Vault configuration and display preferences</p>
@@ -291,7 +308,7 @@ export function SettingsPanel() {
                 className={`inline-flex items-center gap-2 rounded px-3 py-2 text-xs uppercase tracking-wider transition-colors ${
                   active
                     ?  "bg-blue-50 dark:bg-orange-950/50 text-blue-700 dark:text-orange-400 dark:text-orange-400"
-                    : "text-muted-foreground hover:bg-muted/50"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -350,7 +367,7 @@ export function SettingsPanel() {
                     type="button"
                     onClick={() => exportData("json")}
                     disabled={exporting !== null}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Download className="h-3.5 w-3.5" />
                     {exporting === "json" ? "Exporting" : "JSON"}
@@ -359,7 +376,7 @@ export function SettingsPanel() {
                     type="button"
                     onClick={() => exportData("csv")}
                     disabled={exporting !== null}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Download className="h-3.5 w-3.5" />
                     {exporting === "csv" ? "Exporting" : "CSV"}
@@ -456,7 +473,7 @@ export function SettingsPanel() {
                         <button
                           type="button"
                           onClick={copyApiKey}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted/50"
+                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted"
                           title="Copy API key"
                         >
                           <Copy className="h-4 w-4" />
@@ -531,7 +548,7 @@ export function SettingsPanel() {
               <button
                 type="button"
                 onClick={resetMetadataPreferences}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Reset
@@ -578,7 +595,7 @@ export function SettingsPanel() {
                 type="button"
                 onClick={loadTrash}
                 disabled={trashLoading}
-                className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted/50 disabled:opacity-50"
+                className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted disabled:opacity-50"
                 title="Refresh trash"
               >
                 <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
@@ -611,7 +628,7 @@ export function SettingsPanel() {
                 type="button"
                 onClick={purgeExpiredItems}
                 disabled={!user || trashBusy === "expired" || trashRetentionDays < 0}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Eraser className="h-3.5 w-3.5" />
                 {trashBusy === "expired" ? "Purging" : "Purge expired"}
@@ -668,7 +685,7 @@ export function SettingsPanel() {
                         type="button"
                         onClick={() => restoreTrashItem(item.id)}
                         disabled={trashBusy !== null}
-                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted/50 transition-colors text-xs uppercase tracking-wider disabled:opacity-50"
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs uppercase tracking-wider disabled:opacity-50"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         Restore

@@ -23,7 +23,7 @@ from app.services.audit import (
     install_audit_listeners,
     set_audit_context,
 )
-from app.services.lifecycle import gc_soft_deleted
+from app.services.trash import gc_soft_deleted
 from app.services.printer_hub import PrinterHub
 from app.services.runtime_config import apply_overlay, is_configured
 from app.services.storage_backend import init_backend
@@ -128,9 +128,7 @@ async def validation_exception_handler(
 
 
 @app.exception_handler(Exception)
-async def unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     if str(settings.log_level).upper() == "DEBUG":
         logger.exception(
             "unhandled request error method=%s path=%s request_id=%s",
@@ -157,7 +155,7 @@ async def bind_audit_context(request: Request, call_next):
     actor_id = None
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer "):
-        from app.services.auth import verify_access_token
+        from app.services.auth import verify_access_token  # deferred: avoids cycle
 
         payload = verify_access_token(auth.split(" ", 1)[1])
         if payload and payload.get("sub"):

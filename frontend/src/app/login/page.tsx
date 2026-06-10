@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Box, Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export default function LoginPage() {
   const { login, user } = useAuth();
@@ -37,10 +38,13 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)]">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)] relative">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm mx-auto space-y-8">
         <div className="text-center">
-          <div className="w-14 h-14 mx-auto rounded bg-[var(--primary-container)] flex items-center justify-center text-[var(--on-primary-container)] mb-4">
+          <div className="w-14 h-14 mx-auto rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white mb-4">
             <Box className="h-7 w-7" />
           </div>
           <h1 className="text-2xl font-bold text-[var(--on-surface)]">

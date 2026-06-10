@@ -21,6 +21,7 @@ from app.db.session import get_session
 from app.schemas.models import CollectionCreate, CollectionRead, TagCreate, TagRead
 from app.services import taxonomy
 from app.services.taxonomy import slugify
+from app.db.scopes import live
 
 router = APIRouter(tags=["taxonomy"])
 
@@ -36,7 +37,7 @@ def _collection_model_count(session: Session, path: str) -> int:
     )
     count = session.exec(
         select(func.count(Model.id)).where(
-            Model.deleted_at.is_(None),
+            live(Model),
             Model.collection_id.in_(matching_cat_ids),
         )
     ).one()
@@ -50,7 +51,7 @@ def _collection_model_count(session: Session, path: str) -> int:
 )
 def list_collections(session: Session = Depends(get_session)) -> List[CollectionRead]:
     cats = session.exec(
-        select(Collection).where(Collection.deleted_at.is_(None)).order_by(Collection.path)  # type: ignore[union-attr]
+        select(Collection).where(live(Collection)).order_by(Collection.path)  # type: ignore[union-attr]
     ).all()
     return [
         CollectionRead(
@@ -127,7 +128,9 @@ def delete_collection(
 ) -> Response:
     cat = get_or_404(session, Collection, collection_id, "collection_not_found")
 
-    if session.exec(select(Collection).where(Collection.parent_id == collection_id)).first():
+    if session.exec(
+        select(Collection).where(Collection.parent_id == collection_id)
+    ).first():
         raise HTTPException(status_code=409, detail="collection_has_children")
     if _collection_model_count(session, cat.path):
         raise HTTPException(status_code=409, detail="collection_has_models")
@@ -147,7 +150,7 @@ def _tag_model_count(session: Session, tag_id: int) -> int:
     count = session.exec(
         select(func.count(ModelTagLink.model_id))
         .join(Model, Model.id == ModelTagLink.model_id)
-        .where(ModelTagLink.tag_id == tag_id, Model.deleted_at.is_(None))
+        .where(ModelTagLink.tag_id == tag_id, live(Model))
     ).one()
     return int(count or 0)
 
@@ -159,7 +162,7 @@ def _tag_model_count(session: Session, tag_id: int) -> int:
 )
 def list_tags(session: Session = Depends(get_session)) -> List[TagRead]:
     tags = session.exec(
-        select(Tag).where(Tag.deleted_at.is_(None)).order_by(Tag.name)  # type: ignore[union-attr]
+        select(Tag).where(live(Tag)).order_by(Tag.name)  # type: ignore[union-attr]
     ).all()
     return [
         TagRead(

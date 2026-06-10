@@ -21,6 +21,7 @@ import {
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { formatBytes } from "@/lib/format";
 import { CollectionRead, IngestJobStatus, TagRead } from "@/types";
 
 const MESH_EXT = new Set([".stl", ".3mf", ".obj"]);
@@ -40,12 +41,6 @@ function isGcode(name: string): boolean {
   return GCODE_EXT.has(ext(name));
 }
 
-function formatBytes(b: number): string {
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MB`;
-  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -197,13 +192,27 @@ export function UploadModal({
       }
 
       if (status.state === "pending" || status.state === "running") {
+        // Prefer the backend's real per-step progress when available; fall
+        // back to the time-based estimate for older backends.
+        const fraction =
+          typeof status.progress === "number"
+            ? status.progress / 100
+            : Math.min(attempts / 60, 1);
         const progress =
-          progressStart +
-          Math.min(attempts / 60, 1) * (progressEnd - progressStart);
+          progressStart + fraction * (progressEnd - progressStart);
+        const stepDetail = status.label
+          ? `${status.label.replaceAll("_", " ")}${
+              status.step && status.total_steps
+                ? ` (${status.step}/${status.total_steps})`
+                : ""
+            }`
+          : null;
         updateTask(taskId, {
           status: status.state,
           progress,
-          detail: status.state === "pending" ? pendingDetail : runningDetail,
+          detail:
+            stepDetail ??
+            (status.state === "pending" ? pendingDetail : runningDetail),
         });
       }
     }

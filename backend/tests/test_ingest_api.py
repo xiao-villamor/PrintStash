@@ -434,8 +434,13 @@ def test_force_rebuild_refreshes_existing_mesh_thumbnail(
         headers=auth_headers,
     )
 
-    assert response.status_code == 200, response.text
-    assert response.json()["rebuilt"] == [model_id]
+    assert response.status_code == 202, response.text
+    job_id = response.json()["job_id"]
+    job = client.get(f"/api/v1/ingest/jobs/{job_id}")
+    assert job.status_code == 200, job.text
+    payload = job.json()
+    assert payload["state"] == "completed", payload
+    assert payload["result"]["rebuilt"] == [model_id]
 
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text

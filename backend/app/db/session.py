@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import AsyncGenerator, Generator, Iterator, Protocol, runtime_checkable
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -23,11 +24,30 @@ _connect_args = (
     {"check_same_thread": False} if settings.db_url.startswith("sqlite") else {}
 )
 
+
+def _set_sqlite_pragmas(dbapi_conn, _record) -> None:
+    """Per-connection SQLite tuning.
+
+    WAL lets readers proceed while one writer commits (ingestion background
+    tasks vs. browse requests); busy_timeout makes concurrent writers queue
+    instead of failing immediately with 'database is locked'.
+    """
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA temp_store=MEMORY")
+    cursor.close()
+
+
 _engine: Engine = create_engine(
     settings.db_url,
     echo=False,
     connect_args=_connect_args,
 )
+
+if settings.db_url.startswith("sqlite"):
+    event.listen(_engine, "connect", _set_sqlite_pragmas)
 
 _async_engine: AsyncEngine | None = None
 _async_session_maker: async_sessionmaker[AsyncSession] | None = None
@@ -36,11 +56,13 @@ _async_session_maker: async_sessionmaker[AsyncSession] | None = None
 def create_async_engine_for_db(db_url: str) -> AsyncEngine:
     if db_url.startswith("sqlite"):
         async_url = db_url.replace("sqlite://", "sqlite+aiosqlite://", 1)
-        return create_async_engine(
+        engine = create_async_engine(
             async_url,
             echo=False,
             connect_args={"check_same_thread": False},
         )
+        event.listen(engine.sync_engine, "connect", _set_sqlite_pragmas)
+        return engine
     if db_url.startswith("postgresql://"):
         async_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     elif db_url.startswith("postgres://"):

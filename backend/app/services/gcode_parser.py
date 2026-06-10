@@ -42,9 +42,7 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*initial_layer_print_height\s*=\s*([\d.]+)", re.IGNORECASE),
     ),
     "infill_percent": (
-        re.compile(
-            r";\s*sparse_infill_density\s*=\s*([\d.]+)\s*%?", re.IGNORECASE
-        ),
+        re.compile(r";\s*sparse_infill_density\s*=\s*([\d.]+)\s*%?", re.IGNORECASE),
         re.compile(r";\s*infill_density\s*=\s*([\d.]+)\s*%?", re.IGNORECASE),
         re.compile(r";\s*fill density\s*[:=]\s*([\d.]+)\s*%?", re.IGNORECASE),
     ),
@@ -90,15 +88,11 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*time\s*:\s*(\d+)", re.IGNORECASE),
     ),
     "filament_weight_g": (
-        re.compile(
-            r";\s*total filament used \[g\]\s*=\s*([\d.]+)", re.IGNORECASE
-        ),
+        re.compile(r";\s*total filament used \[g\]\s*=\s*([\d.]+)", re.IGNORECASE),
         re.compile(r";\s*filament used \[g\]\s*=\s*([\d.]+)", re.IGNORECASE),
     ),
     "filament_length_mm": (
-        re.compile(
-            r";\s*total filament length \[mm\]\s*=\s*([\d.]+)", re.IGNORECASE
-        ),
+        re.compile(r";\s*total filament length \[mm\]\s*=\s*([\d.]+)", re.IGNORECASE),
         re.compile(r";\s*filament used \[mm\]\s*=\s*([\d.]+)", re.IGNORECASE),
         re.compile(r";\s*filament used\s*:\s*([\d.]+)\s*m", re.IGNORECASE),
     ),

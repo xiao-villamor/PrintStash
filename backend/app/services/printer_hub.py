@@ -21,6 +21,7 @@ from app.core.time import utcnow
 from app.db.models import PrintJob, PrintJobState, Printer, PrinterStatus
 from app.db.session import get_session_factory
 from app.services.printer_provider import ProviderError, get_provider_client
+from app.db.scopes import live
 
 logger = get_logger(__name__)
 
@@ -153,7 +154,7 @@ class PrinterHub:
             ids = [
                 p.id
                 for p in session.exec(
-                    select(Printer).where(Printer.deleted_at.is_(None))  # type: ignore[union-attr]
+                    select(Printer).where(live(Printer))  # type: ignore[union-attr]
                 ).all()
                 if p.id
             ]

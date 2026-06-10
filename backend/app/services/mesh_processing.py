@@ -5,19 +5,27 @@ Callers pass a `Path` and receive plain dicts / bytes — they never touch a
 trimesh object directly.
 
 The software thumbnail rasteriser lives in `mesh_render` and is re-exposed
-here as `render_thumbnail` for backwards compatibility.
+here as `render_thumbnail` for backwards compatibility. Ingestion uses
+`analyze_mesh`, which loads the mesh once for both geometry and thumbnail.
 """
 
 from __future__ import annotations
 
 import io
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
+import zipfile
 
 from app.core.logging import get_logger
 from app.services import mesh_render
 
 logger = get_logger(__name__)
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+# Slicer-generated 3MF archives usually embed a pre-rendered preview
+# (Metadata/thumbnail.png per spec; plate_*.png from Orca/Bambu).
+_3MF_THUMBNAIL_DIRS = ("metadata/", "3d/thumbnails/", "thumbnails/")
 
 
 def _load_mesh(path: Path):
@@ -47,12 +55,7 @@ def _load_mesh(path: Path):
     return None
 
 
-def extract_geometry(path: Path) -> Dict[str, Optional[float]]:
-    """Extract bounding box, volume, and triangle count from a mesh file.
-
-    The returned dict is shaped for direct use as **kwargs to the
-    `Metadata` SQLModel constructor. Missing values are returned as None.
-    """
+def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
     out: Dict[str, Optional[float]] = {
         "bbox_x_mm": None,
         "bbox_y_mm": None,
@@ -61,7 +64,6 @@ def extract_geometry(path: Path) -> Dict[str, Optional[float]]:
         "triangle_count": None,
     }
 
-    mesh = _load_mesh(path)
     if mesh is None:
         return out
 
@@ -85,10 +87,92 @@ def extract_geometry(path: Path) -> Dict[str, Optional[float]]:
     return out
 
 
+def extract_embedded_3mf_thumbnail(path: Path) -> Optional[bytes]:
+    """Return the largest PNG preview embedded in a 3MF archive, or None.
+
+    3MF files are ZIP archives; slicers store a rendered plate preview next to
+    the mesh. Using it skips the software rasteriser entirely and matches what
+    the user saw in the slicer.
+    """
+    if path.suffix.lower() != ".3mf":
+        return None
+    try:
+        with zipfile.ZipFile(path) as zf:
+            candidates = [
+                info
+                for info in zf.infolist()
+                if info.filename.lower().lstrip("/").startswith(_3MF_THUMBNAIL_DIRS)
+                and info.filename.lower().endswith(".png")
+                and info.file_size > 0
+            ]
+            if not candidates:
+                return None
+            best = max(candidates, key=lambda info: info.file_size)
+            data = zf.read(best)
+            if data.startswith(_PNG_MAGIC):
+                logger.info(
+                    "mesh_processing: using embedded 3MF thumbnail %s (%d bytes)",
+                    best.filename,
+                    len(data),
+                )
+                return data
+    except (zipfile.BadZipFile, OSError, KeyError):
+        logger.warning(
+            "mesh_processing: embedded 3MF thumbnail read failed for %s",
+            path.name,
+            exc_info=True,
+        )
+    return None
+
+
+def analyze_mesh(
+    path: Path,
+    *,
+    width: int = 640,
+    height: int = 480,
+    report: Callable[[str], None] | None = None,
+) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
+    """Extract geometry and render a thumbnail with a single mesh load.
+
+    Returns ``(geometry_dict, png_bytes_or_None)``. *report* receives progress
+    labels as the stages run (see ingestion progress hints).
+    """
+
+    def _report(label: str) -> None:
+        if report is not None:
+            report(label)
+
+    _report("loading_mesh")
+    mesh = _load_mesh(path)
+
+    _report("extracting_geometry")
+    geometry = _geometry_from_mesh(mesh)
+
+    _report("rendering_thumbnail")
+    thumb = extract_embedded_3mf_thumbnail(path)
+    if thumb is None:
+        thumb = mesh_render.render_mesh_thumbnail(
+            mesh, path.name, width=width, height=height
+        )
+    return geometry, thumb
+
+
+def extract_geometry(path: Path) -> Dict[str, Optional[float]]:
+    """Extract bounding box, volume, and triangle count from a mesh file.
+
+    The returned dict is shaped for direct use as **kwargs to the
+    `Metadata` SQLModel constructor. Missing values are returned as None.
+    """
+    return _geometry_from_mesh(_load_mesh(path))
+
+
 def render_thumbnail(
     path: Path, width: int = 640, height: int = 480
 ) -> Optional[bytes]:
     """Render a PNG thumbnail of *path*. Returns PNG bytes or None on failure."""
+    thumb = extract_embedded_3mf_thumbnail(path)
+    if thumb is not None:
+        return thumb
     return mesh_render.render_thumbnail(_load_mesh, path, width=width, height=height)
 
 

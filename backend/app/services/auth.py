@@ -176,7 +176,9 @@ def revoke_api_key(session: Session, user_id: int, key_id: int) -> bool:
     return True
 
 
-def authenticate_api_key(session: Session, username: str, api_key: str) -> Optional[User]:
+def authenticate_api_key(
+    session: Session, username: str, api_key: str
+) -> Optional[User]:
     user = get_user_by_username(session, username)
     if not user or not user.is_active:
         logger.info("api key login failed: user=%s not found or inactive", username)

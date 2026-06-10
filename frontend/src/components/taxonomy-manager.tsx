@@ -72,7 +72,7 @@ function CollectionTreeRow({
   return (
     <>
       <div
-        className="flex items-center justify-between py-1.5 pr-2 rounded hover:bg-muted/50 group gap-2"
+        className="flex items-center justify-between py-1.5 pr-2 rounded hover:bg-muted group gap-2"
         style={{ paddingLeft: `${depth * 18 + 8}px` }}
       >
         <div className="flex items-center gap-2 min-w-0 overflow-hidden">

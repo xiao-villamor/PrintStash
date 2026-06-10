@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -25,3 +25,10 @@ class IngestJobStatus(BaseModel):
     error: Optional[str] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
+    # Progress hints — additive, absent for clients that only know the
+    # original state machine.
+    step: Optional[int] = None
+    total_steps: Optional[int] = None
+    label: Optional[str] = None
+    progress: Optional[float] = None  # 0–100
+    result: Optional[dict[str, Any]] = None

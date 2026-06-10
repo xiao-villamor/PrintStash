@@ -88,7 +88,9 @@ def update_filament_profile(
     payload: FilamentProfileUpdate,
     session: Session = Depends(get_session),
 ) -> FilamentProfileRead:
-    profile = get_or_404(session, FilamentProfile, profile_id, "filament_profile_not_found")
+    profile = get_or_404(
+        session, FilamentProfile, profile_id, "filament_profile_not_found"
+    )
 
     if payload.name is not None:
         name = payload.name.strip()
@@ -99,7 +101,9 @@ def update_filament_profile(
             )
         ).first()
         if existing:
-            raise HTTPException(status_code=409, detail="filament_profile_already_exists")
+            raise HTTPException(
+                status_code=409, detail="filament_profile_already_exists"
+            )
         profile.name = name
 
     fields_set = payload.model_fields_set
@@ -130,7 +134,9 @@ def delete_filament_profile(
     profile_id: int,
     session: Session = Depends(get_session),
 ) -> Response:
-    profile = get_or_404(session, FilamentProfile, profile_id, "filament_profile_not_found")
+    profile = get_or_404(
+        session, FilamentProfile, profile_id, "filament_profile_not_found"
+    )
     session.delete(profile)
     session.commit()
     return Response(status_code=204)

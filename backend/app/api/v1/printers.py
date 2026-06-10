@@ -63,6 +63,7 @@ from app.services.printer_files import (
     upsert_printer_file,
 )
 from app.services.storage_backend import get_backend
+from app.db.scopes import live
 
 logger = get_logger(__name__)
 
@@ -169,7 +170,7 @@ def list_printers(
     session: Session = Depends(get_session),
 ) -> List[PrinterRead]:
     stmt = select(Printer).order_by(Printer.name)
-    stmt = stmt.where(Printer.deleted_at.is_(None))  # type: ignore[union-attr]
+    stmt = stmt.where(live(Printer))  # type: ignore[union-attr]
     if group is not None:
         stmt = stmt.where(Printer.group == group)
     return [_to_read(p) for p in session.exec(stmt).all()]

@@ -46,7 +46,9 @@ class TestAuthFlow:
     def test_login_accepts_username_and_api_key(
         self, client: TestClient, db_session: Session
     ):
-        user = _create_user(db_session, "script-user", "Password123", is_superuser=False)
+        user = _create_user(
+            db_session, "script-user", "Password123", is_superuser=False
+        )
         _, raw_key = create_api_key(db_session, user.id, "Orca uploader")
 
         resp = client.post(

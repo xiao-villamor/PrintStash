@@ -116,7 +116,9 @@ class MoonrakerClient:
         return await self._request("POST", "/printer/print/cancel")
 
     async def get_print_history(self, limit: int = 50) -> list[Dict[str, Any]]:
-        data = await self._request("GET", "/server/history/list", params={"limit": limit})
+        data = await self._request(
+            "GET", "/server/history/list", params={"limit": limit}
+        )
         return data.get("result", {}).get("jobs", [])
 
     def _ws_url(self) -> str:

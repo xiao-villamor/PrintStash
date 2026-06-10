@@ -12,6 +12,7 @@ from app.db.models import File, Model, PrintJob, Printer, PrinterProvider
 from app.db.session import get_session_factory
 from app.services.printer_provider import provider_diagnostic_summary
 from app.services.storage_backend import get_backend
+from app.db.scopes import live
 
 router = APIRouter(tags=["health"])
 
@@ -88,9 +89,7 @@ def _provider_probe() -> dict:
     try:
         with get_session_factory().session() as session:
             rows = session.exec(
-                select(Printer.provider, Printer.status).where(
-                    Printer.deleted_at.is_(None)  # type: ignore[union-attr]
-                )
+                select(Printer.provider, Printer.status).where(live(Printer))
             ).all()
         provider_counts: dict[str, int] = {}
         status_counts: dict[str, int] = {}

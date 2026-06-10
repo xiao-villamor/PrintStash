@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { formatBytes, formatDuration } from "@/lib/format";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -50,25 +51,7 @@ const STATUS_COLORS: Record<PrinterStatus, string> = {
   error: "bg-[var(--error)]",
 };
 
-function formatDuration(s?: number | null): string {
-  if (!s || s <= 0) return "—";
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = Math.floor(s % 60);
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${sec}s`;
-  return `${sec}s`;
-}
 
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
 
 function providerLabel(provider: PrinterRead["provider"]): string {
   return provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";

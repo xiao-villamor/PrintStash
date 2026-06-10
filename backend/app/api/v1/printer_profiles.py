@@ -88,7 +88,9 @@ def update_printer_profile(
     payload: PrinterProfileUpdate,
     session: Session = Depends(get_session),
 ) -> PrinterProfileRead:
-    profile = get_or_404(session, PrinterProfile, profile_id, "printer_profile_not_found")
+    profile = get_or_404(
+        session, PrinterProfile, profile_id, "printer_profile_not_found"
+    )
 
     if payload.name is not None:
         name = payload.name.strip()
@@ -99,7 +101,9 @@ def update_printer_profile(
             )
         ).first()
         if existing:
-            raise HTTPException(status_code=409, detail="printer_profile_already_exists")
+            raise HTTPException(
+                status_code=409, detail="printer_profile_already_exists"
+            )
         profile.name = name
 
     fields_set = payload.model_fields_set
@@ -130,7 +134,9 @@ def delete_printer_profile(
     profile_id: int,
     session: Session = Depends(get_session),
 ) -> Response:
-    profile = get_or_404(session, PrinterProfile, profile_id, "printer_profile_not_found")
+    profile = get_or_404(
+        session, PrinterProfile, profile_id, "printer_profile_not_found"
+    )
     session.delete(profile)
     session.commit()
     return Response(status_code=204)

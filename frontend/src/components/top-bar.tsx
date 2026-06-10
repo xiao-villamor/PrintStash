@@ -70,7 +70,7 @@ function TopBarSearch() {
           <Search className="h-5 w-5 text-muted-foreground" />
         </div>
         <input
-          className="block w-full pl-10 pr-14 py-2 border border-border rounded-lg leading-5 bg-muted/50 placeholder-slate-400 focus:outline-none focus:bg-background focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-blue-500 dark:border-orange-500 sm:text-sm transition-colors"
+          className="block w-full pl-10 pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-orange-500 dark:border-orange-500/40 sm:text-sm transition-colors"
           placeholder="Search PrintStash..."
           type="text"
           value={value}
@@ -242,8 +242,8 @@ function ProfileMenu({
             onClick={onNavigate}
             className={`flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
               active
-                ? "bg-blue-50 dark:bg-orange-500/12 text-blue-700 dark:text-orange-400"
-                : "text-foreground hover:bg-muted/50 hover:text-foreground"
+                ? "bg-blue-50 dark:bg-orange-500/10 text-blue-700 dark:text-orange-400"
+                : "text-foreground hover:bg-muted hover:text-foreground"
             } ${index === 4 ? "border-t border-border" : ""}`}
           >
             <item.icon className="h-4 w-4" />

@@ -31,7 +31,9 @@ def resolve_or_create_collection(
         slug = slugify(name)
         materialised_slug.append(slug)
         path = "/".join(materialised_slug)
-        existing = session.exec(select(Collection).where(Collection.path == path)).first()
+        existing = session.exec(
+            select(Collection).where(Collection.path == path)
+        ).first()
         if existing is None:
             existing = Collection(
                 name=name,

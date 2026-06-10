@@ -31,7 +31,7 @@ export default function RootLayout({
         {/* Pre-paint theme application to avoid FOUC. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('printstash.theme')||localStorage.getItem('nexus3d.theme');if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('printstash.theme')||localStorage.getItem('nexus3d.theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`,
           }}
         />
       </head>

@@ -14,12 +14,19 @@ logger = get_logger(__name__)
 _BEGIN_RE = re.compile(r";\s*thumbnail begin\s+(\d+)x(\d+)\s+(\d+)", re.IGNORECASE)
 _END_RE = re.compile(r";\s*thumbnail end", re.IGNORECASE)
 
+# Slicers embed thumbnails in the comment header before any print moves.
+# Once this many non-comment (command) lines have streamed past outside a
+# thumbnail block, stop scanning instead of walking the whole file — G-code
+# bodies routinely run to hundreds of MB.
+_MAX_COMMAND_LINES = 2048
+
 
 def _iter_blocks(path: Path):
     """Yield (width, height, base64_string) for each embedded thumbnail block."""
     in_block = False
     width = height = 0
     buf: List[str] = []
+    command_lines = 0
 
     with path.open("r", encoding="utf-8", errors="replace") as fh:
         for line in fh:
@@ -30,6 +37,12 @@ def _iter_blocks(path: Path):
                     height = int(m.group(2))
                     buf = []
                     in_block = True
+                    continue
+                stripped = line.lstrip()
+                if stripped and not stripped.startswith(";"):
+                    command_lines += 1
+                    if command_lines >= _MAX_COMMAND_LINES:
+                        return
                 continue
 
             if _END_RE.search(line):

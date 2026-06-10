@@ -74,7 +74,7 @@ export function PrintersPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
-            className="px-3 py-2 rounded border border-border bg-background text-xs font-medium text-foreground hover:bg-muted/50 transition-colors flex items-center gap-1.5"
+            className="px-3 py-2 rounded border border-border bg-background text-xs font-medium text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
@@ -336,7 +336,7 @@ function AddPrinterModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded border border-border text-muted-foreground text-xs uppercase tracking-wider hover:bg-muted/50 transition-colors"
+              className="px-4 py-2 rounded border border-border text-muted-foreground text-xs uppercase tracking-wider hover:bg-muted transition-colors"
             >
               Cancel
             </button>

@@ -207,6 +207,12 @@ export interface IngestJobStatus {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  // Progress hints (additive; absent on older backends)
+  step?: number | null;
+  total_steps?: number | null;
+  label?: string | null;
+  progress?: number | null;
+  result?: Record<string, unknown> | null;
 }
 
 export interface ListModelsParams {

@@ -56,7 +56,9 @@ def _find_filament_profile(
         func.lower(FilamentProfile.material_type) == material_type.lower()
     )
     if material_brand is not None:
-        stmt = stmt.where(func.lower(FilamentProfile.material_brand) == material_brand.lower())
+        stmt = stmt.where(
+            func.lower(FilamentProfile.material_brand) == material_brand.lower()
+        )
     else:
         stmt = stmt.where(FilamentProfile.material_brand.is_(None))
     return session.exec(stmt).first()

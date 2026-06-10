@@ -1,10 +1,11 @@
-"""Model browse + detail + edit + soft-delete endpoints."""
+"""Model browse + detail + edit + soft-delete endpoints.
+
+Read-model assembly lives in ``services/model_views``; trash lifecycle in
+``services/trash``. This router keeps HTTP concerns only.
+"""
 
 from __future__ import annotations
 
-from collections import defaultdict
-import csv
-import io
 from pathlib import Path
 import uuid
 from typing import Literal, List, Optional
@@ -19,9 +20,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func
+from fastapi.responses import Response
 from sqlmodel import Session, delete, select
 from starlette.concurrency import run_in_threadpool
 
@@ -29,11 +28,9 @@ from app.core.config import settings
 from app.core.security import require_auth
 from app.core.time import utcnow
 from app.db.models import (
-    Collection,
     File,
     FileRevisionStatus,
     FileType,
-    FilamentProfile,
     Metadata,
     Model,
     ModelTagLink,
@@ -41,114 +38,35 @@ from app.db.models import (
     PrinterFile,
     PrintJob,
     PrintJobState,
-    SENTINEL_MODEL_HASH,
-    Tag,
 )
-from app.services.moonraker import MoonrakerClient, MoonrakerError
+from app.db.scopes import live
 from app.db.session import get_session
 from app.schemas.models import (
-    FileRead,
     FileRevisionUpdate,
     ImportedPrintJobRead,
     ManualPrintJobCreate,
-    MetadataRead,
-    ModelPrinterPresenceRead,
     ModelPrinterFileRead,
     ModelPrintJobRead,
     ModelListItem,
-    PrintSummaryRead,
     ModelRead,
     ModelUpdate,
-    StorageUsageRead,
     TrashPurgeRead,
     TrashedModelRead,
     VaultStatsRead,
 )
-from app.services import storage
+from app.services import model_views, storage, taxonomy
 from app.services.ingestion import add_gcode_revision_to_model
-from app.services import taxonomy
-from app.services.storage_backend import get_backend
+from app.services.moonraker import MoonrakerClient, MoonrakerError
 from app.services.trash import (
     hard_delete_expired_models,
     hard_delete_model,
-    trash_expires_at,
+    restore_model as trash_restore_model,
+    soft_delete_model,
 )
 
 router = APIRouter(prefix="/models", tags=["models"])
 
 _GCODE_SUFFIXES = {".gcode", ".g", ".gco"}
-_EXPORT_CSV_FIELDS = [
-    "model_id",
-    "model_name",
-    "model_slug",
-    "collection",
-    "tags",
-    "file_id",
-    "file_type",
-    "version",
-    "original_filename",
-    "size_bytes",
-    "sha256",
-    "revision_label",
-    "revision_status",
-    "revision_notes",
-    "is_recommended",
-    "uploaded_at",
-    "slicer_name",
-    "slicer_version",
-    "printer_model",
-    "nozzle_diameter_mm",
-    "layer_height_mm",
-    "first_layer_height_mm",
-    "infill_percent",
-    "wall_loops",
-    "top_shell_layers",
-    "bottom_shell_layers",
-    "support_material",
-    "nozzle_temperature_c",
-    "bed_temperature_c",
-    "estimated_time_s",
-    "filament_weight_g",
-    "filament_length_mm",
-    "filament_cost",
-    "material_type",
-    "material_brand",
-    "bbox_x_mm",
-    "bbox_y_mm",
-    "bbox_z_mm",
-    "volume_mm3",
-    "triangle_count",
-]
-
-
-def _tag_names_for(session: Session, model_id: int) -> List[str]:
-    stmt = (
-        select(Tag.name)
-        .join(ModelTagLink, ModelTagLink.tag_id == Tag.id)
-        .where(ModelTagLink.model_id == model_id)
-        .order_by(Tag.name)
-    )
-    return list(session.exec(stmt).all())
-
-
-def _collection_name_for(model: Model) -> Optional[str]:
-    """Resolve the collection name from the FK-joined relationship."""
-    return model.collection_rel.path if model.collection_rel else None
-
-
-def _thumb_url(model: Model) -> Optional[str]:
-    """Stable URL for the model's thumbnail, or None.
-
-    Prefers ``thumbnail_file_id`` (current); falls back to parsing the legacy
-    ``thumbnail_path`` for rows written before the file-id column existed.
-    """
-    if model.thumbnail_file_id:
-        return f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
-    if model.thumbnail_path:
-        stem = Path(model.thumbnail_path).stem
-        if stem.isdigit():
-            return f"/api/v1/files/{stem}/thumbnail"
-    return None
 
 
 def _stage_gcode_upload(upload: UploadFile, suffix: str) -> Path:
@@ -171,156 +89,11 @@ def _live_model(session: Session, model_id: int) -> Model:
     return m
 
 
-def _printer_presence_for(
-    session: Session, model_id: int
-) -> list[ModelPrinterPresenceRead]:
-    rows = session.exec(
-        select(
-            Printer.id,
-            Printer.name,
-            func.count(PrinterFile.id),
-        )
-        .join(PrinterFile, PrinterFile.printer_id == Printer.id)
-        .join(File, File.id == PrinterFile.file_id)
-        .where(
-            File.model_id == model_id,
-            File.file_type == FileType.GCODE,
-            File.deleted_at.is_(None),  # type: ignore[union-attr]
-            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
-            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
-        )
-        .group_by(Printer.id, Printer.name)
-        .order_by(Printer.name.asc())  # type: ignore[attr-defined]
-    ).all()
-    return [
-        ModelPrinterPresenceRead(
-            printer_id=int(printer_id),
-            printer_name=printer_name,
-            file_count=int(file_count or 0),
-        )
-        for printer_id, printer_name, file_count in rows
-    ]
-
-
-def _print_summary_for(session: Session, model_id: int) -> PrintSummaryRead | None:
-    """Return aggregated print metadata from the most recent G-code file."""
-    row = session.exec(
-        select(Metadata)
-        .join(File, File.id == Metadata.file_id)
-        .where(
-            File.model_id == model_id,
-            File.file_type == FileType.GCODE,
-            File.deleted_at.is_(None),  # type: ignore[union-attr]
-        )
-        .order_by(File.uploaded_at.desc())
-        .limit(1)
-    ).first()
-    if row is None:
-        return None
-    return PrintSummaryRead(
-        layer_height_mm=row.layer_height_mm,
-        estimated_time_s=row.estimated_time_s,
-        filament_weight_g=row.filament_weight_g,
-        material_type=row.material_type,
-        slicer_name=row.slicer_name,
-    )
-
-
-def _recommended_revision_for(
-    session: Session, model_id: int
-) -> tuple[FileRevisionStatus | None, str | None]:
-    """Return (revision_status, revision_label) of the recommended file, if any."""
-    f = session.exec(
-        select(File)
-        .where(
-            File.model_id == model_id,
-            File.deleted_at.is_(None),  # type: ignore[union-attr]
-            File.is_recommended == True,  # noqa: E712
-        )
-        .limit(1)
-    ).first()
-    if f:
-        return f.revision_status, f.revision_label
-    return None, None
-
-
-def _trashed_model_read(
-    session: Session,
-    model: Model,
-    *,
-    retention_days: int,
-) -> TrashedModelRead:
-    file_count = session.exec(
-        select(func.count(File.id)).where(File.model_id == model.id)
-    ).one()
-    size_bytes = session.exec(
-        select(func.coalesce(func.sum(File.size_bytes), 0)).where(
-            File.model_id == model.id
-        )
-    ).one()
-    assert model.deleted_at is not None
-    return TrashedModelRead(
-        id=model.id,  # type: ignore[arg-type]
-        name=model.name,
-        slug=model.slug,
-        collection=_collection_name_for(model),
-        tags=_tag_names_for(session, model.id),  # type: ignore[arg-type]
-        thumbnail_url=_thumb_url(model),
-        file_count=int(file_count or 0),
-        size_bytes=int(size_bytes or 0),
-        deleted_at=model.deleted_at,
-        expires_at=trash_expires_at(model.deleted_at, retention_days),
-    )
-
-
-def _normalise_profile_key(value: str | None) -> str | None:
-    if value is None:
-        return None
-    stripped = value.strip().lower()
-    return stripped or None
-
-
-def _matching_filament_profile(
-    session: Session,
-    metadata: Metadata,
-) -> FilamentProfile | None:
-    candidates = [
-        _normalise_profile_key(metadata.material_brand),
-        _normalise_profile_key(metadata.material_type),
-    ]
-    for candidate in candidates:
-        if candidate is None:
-            continue
-        profile = session.exec(
-            select(FilamentProfile).where(func.lower(FilamentProfile.name) == candidate)
-        ).first()
-        if profile is not None:
-            return profile
-
-    material_type = _normalise_profile_key(metadata.material_type)
-    material_brand = _normalise_profile_key(metadata.material_brand)
-    if material_type is None:
-        return None
-
-    stmt = select(FilamentProfile).where(
-        func.lower(FilamentProfile.material_type) == material_type
-    )
-    if material_brand is not None:
-        stmt = stmt.where(func.lower(FilamentProfile.material_brand) == material_brand)
-    else:
-        stmt = stmt.where(FilamentProfile.material_brand.is_(None))
-    return session.exec(stmt).first()
-
-
-def _metadata_read(session: Session, metadata: Metadata) -> MetadataRead:
-    data = metadata.model_dump()
-    profile = _matching_filament_profile(session, metadata)
-    if profile and profile.cost_per_kg is not None and metadata.filament_weight_g:
-        data["filament_cost"] = round(
-            metadata.filament_weight_g * profile.cost_per_kg / 1000,
-            4,
-        )
-    return MetadataRead(**data)
+def _detail_or_404(session: Session, model_id: int) -> ModelRead:
+    view = model_views.detail(session, model_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="model_not_found")
+    return view
 
 
 @router.get(
@@ -351,297 +124,16 @@ def list_models(
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> List[ModelListItem]:
-    stmt = select(Model).where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
-
-    present_model_ids = (
-        select(File.model_id)
-        .join(PrinterFile, PrinterFile.file_id == File.id)
-        .join(Printer, Printer.id == PrinterFile.printer_id)
-        .where(
-            File.file_type == FileType.GCODE,
-            File.deleted_at.is_(None),  # type: ignore[union-attr]
-            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
-            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
-        )
+    return model_views.list_items(
+        session,
+        collection=collection,
+        tags=tag,
+        q=q,
+        printer_id=printer_id,
+        printer_presence=printer_presence,
+        limit=limit,
+        offset=offset,
     )
-
-    if collection:
-        cat_path = collection.strip().strip("/").lower()
-        # Match the collection path or any descendant via FK join on Collections.
-        matching_cat_ids = select(Collection.id).where(
-            (Collection.path == cat_path) | (Collection.path.startswith(cat_path + "/"))
-        )
-        stmt = stmt.where(Model.collection_id.in_(matching_cat_ids))  # type: ignore[union-attr]
-
-    if q:
-        stmt = stmt.where(Model.name.contains(q))  # type: ignore[attr-defined]
-
-    if tag:
-        for slug in (t.strip().lower() for t in tag if t.strip()):
-            # Each tag adds an EXISTS clause => AND semantics across tags.
-            stmt = stmt.where(
-                Model.id.in_(  # type: ignore[union-attr]
-                    select(ModelTagLink.model_id)
-                    .join(Tag, Tag.id == ModelTagLink.tag_id)
-                    .where(Tag.slug == slug)
-                )
-            )
-
-    if printer_id is not None:
-        stmt = stmt.where(
-            Model.id.in_(present_model_ids.where(PrinterFile.printer_id == printer_id))  # type: ignore[union-attr]
-        )
-    elif printer_presence == "any":
-        stmt = stmt.where(Model.id.in_(present_model_ids))  # type: ignore[union-attr]
-    elif printer_presence == "none":
-        stmt = stmt.where(Model.id.not_in(present_model_ids))  # type: ignore[attr-defined]
-
-    stmt = stmt.order_by(Model.updated_at.desc()).offset(offset).limit(limit)  # type: ignore[attr-defined]
-    rows = session.exec(stmt).all()
-
-    out: List[ModelListItem] = []
-    for m in rows:
-        file_count = session.exec(
-            select(func.count(File.id)).where(File.model_id == m.id)
-        ).one()
-        rec_status, rec_label = _recommended_revision_for(session, m.id)  # type: ignore[arg-type]
-        out.append(
-            ModelListItem(
-                id=m.id,  # type: ignore[arg-type]
-                name=m.name,
-                slug=m.slug,
-                collection=_collection_name_for(m),
-                collection_id=m.collection_id,
-                tags=_tag_names_for(session, m.id),  # type: ignore[arg-type]
-                thumbnail_url=_thumb_url(m),
-                file_count=int(file_count or 0),
-                printer_presence=_printer_presence_for(session, m.id),  # type: ignore[arg-type]
-                updated_at=m.updated_at,
-                print_summary=_print_summary_for(session, m.id),  # type: ignore[arg-type]
-                recommended_revision_status=rec_status,
-                recommended_revision_label=rec_label,
-            )
-        )
-    return out
-
-
-def _build_model_read(session: Session, model_id: int) -> ModelRead:
-    m = _live_model(session, model_id)
-
-    files_with_meta = session.exec(
-        select(File, Metadata)
-        .where(File.model_id == model_id)
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .outerjoin(Metadata, Metadata.file_id == File.id)
-        .order_by(File.version.asc())  # type: ignore[attr-defined]
-    ).all()
-    gcode_revision_numbers: dict[int, int] = {}
-    gcode_index = 1
-    for f, _md in files_with_meta:
-        if f.file_type == FileType.GCODE and f.id is not None:
-            gcode_revision_numbers[f.id] = gcode_index
-            gcode_index += 1
-    file_reads = [
-        FileRead(
-            id=f.id,  # type: ignore[arg-type]
-            model_id=f.model_id,
-            original_filename=f.original_filename,
-            file_type=f.file_type,
-            version=f.version,
-            gcode_revision_number=gcode_revision_numbers.get(f.id),
-            size_bytes=f.size_bytes,
-            sha256=f.sha256,
-            revision_label=f.revision_label,
-            revision_status=f.revision_status,
-            revision_notes=f.revision_notes,
-            is_recommended=f.is_recommended,
-            uploaded_at=f.uploaded_at,
-            metadata=_metadata_read(session, md) if md else None,
-        )
-        for f, md in files_with_meta
-    ]
-
-    return ModelRead(
-        id=m.id,  # type: ignore[arg-type]
-        name=m.name,
-        slug=m.slug,
-        hash=m.hash,
-        collection=_collection_name_for(m),
-        collection_id=m.collection_id,
-        description=m.description,
-        tags=_tag_names_for(session, m.id),  # type: ignore[arg-type]
-        thumbnail_url=_thumb_url(m),
-        created_at=m.created_at,
-        updated_at=m.updated_at,
-        files=file_reads,
-    )
-
-
-def _export_models(session: Session) -> dict:
-    model_rows = session.exec(
-        select(Model)
-        .where(Model.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(Model.hash != SENTINEL_MODEL_HASH)
-        .order_by(Model.name.asc())  # type: ignore[attr-defined]
-    ).all()
-    model_ids = [m.id for m in model_rows if m.id is not None]
-    if not model_ids:
-        models = []
-        file_count = 0
-    else:
-        collection_ids = {
-            m.collection_id for m in model_rows if m.collection_id is not None
-        }
-        collections = {}
-        if collection_ids:
-            collections = {
-                c.id: c.path
-                for c in session.exec(
-                    select(Collection).where(Collection.id.in_(collection_ids))  # type: ignore[union-attr]
-                ).all()
-                if c.id is not None
-            }
-
-        tags_by_model: dict[int, list[str]] = defaultdict(list)
-        tag_rows = session.exec(
-            select(ModelTagLink.model_id, Tag.name)
-            .join(Tag, Tag.id == ModelTagLink.tag_id)
-            .where(ModelTagLink.model_id.in_(model_ids))  # type: ignore[union-attr]
-            .order_by(ModelTagLink.model_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
-        ).all()
-        for model_id, tag_name in tag_rows:
-            if model_id is not None:
-                tags_by_model[int(model_id)].append(tag_name)
-
-        files_by_model: dict[int, list[dict]] = defaultdict(list)
-        gcode_counts: dict[int, int] = defaultdict(int)
-        file_rows = session.exec(
-            select(File, Metadata)
-            .where(File.model_id.in_(model_ids))  # type: ignore[union-attr]
-            .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-            .outerjoin(Metadata, Metadata.file_id == File.id)
-            .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
-        ).all()
-        for file_row, metadata in file_rows:
-            gcode_revision_number = None
-            if file_row.file_type == FileType.GCODE:
-                gcode_counts[file_row.model_id] += 1
-                gcode_revision_number = gcode_counts[file_row.model_id]
-            files_by_model[file_row.model_id].append(
-                FileRead(
-                    id=file_row.id,  # type: ignore[arg-type]
-                    model_id=file_row.model_id,
-                    original_filename=file_row.original_filename,
-                    file_type=file_row.file_type,
-                    version=file_row.version,
-                    gcode_revision_number=gcode_revision_number,
-                    size_bytes=file_row.size_bytes,
-                    sha256=file_row.sha256,
-                    revision_label=file_row.revision_label,
-                    revision_status=file_row.revision_status,
-                    revision_notes=file_row.revision_notes,
-                    is_recommended=file_row.is_recommended,
-                    uploaded_at=file_row.uploaded_at,
-                    metadata=_metadata_read(session, metadata) if metadata else None,
-                ).model_dump(mode="json")
-            )
-
-        models = [
-            {
-                "id": model.id,
-                "name": model.name,
-                "slug": model.slug,
-                "hash": model.hash,
-                "collection": collections.get(model.collection_id),
-                "collection_id": model.collection_id,
-                "description": model.description,
-                "tags": tags_by_model.get(model.id or 0, []),
-                "thumbnail_url": _thumb_url(model),
-                "created_at": model.created_at.isoformat(),
-                "updated_at": model.updated_at.isoformat(),
-                "files": files_by_model.get(model.id or 0, []),
-            }
-            for model in model_rows
-        ]
-        file_count = sum(len(model["files"]) for model in models)
-
-    return {
-        "export_version": 1,
-        "app": {"name": settings.app_name, "version": settings.app_version},
-        "generated_at": utcnow().isoformat(),
-        "contents": {
-            "kind": "metadata_only",
-            "includes": [
-                "models",
-                "collections",
-                "tags",
-                "stored file metadata",
-                "slicer/mesh metadata",
-                "G-code revision labels and outcomes",
-            ],
-            "excludes": ["raw STL/3MF/G-code blobs", "secrets", "printer credentials"],
-        },
-        "counts": {"models": len(models), "files": file_count},
-        "models": models,
-    }
-
-
-def _export_models_csv(payload: dict) -> str:
-    out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=_EXPORT_CSV_FIELDS)
-    writer.writeheader()
-    for model in payload["models"]:
-        tags = ",".join(model["tags"])
-        for file_row in model["files"]:
-            metadata = file_row.get("metadata") or {}
-            writer.writerow(
-                {
-                    "model_id": model["id"],
-                    "model_name": model["name"],
-                    "model_slug": model["slug"],
-                    "collection": model.get("collection") or "",
-                    "tags": tags,
-                    "file_id": file_row["id"],
-                    "file_type": file_row["file_type"],
-                    "version": file_row["version"],
-                    "original_filename": file_row["original_filename"],
-                    "size_bytes": file_row["size_bytes"],
-                    "sha256": file_row["sha256"],
-                    "revision_label": file_row.get("revision_label") or "",
-                    "revision_status": file_row.get("revision_status") or "",
-                    "revision_notes": file_row.get("revision_notes") or "",
-                    "is_recommended": file_row["is_recommended"],
-                    "uploaded_at": file_row["uploaded_at"],
-                    "slicer_name": metadata.get("slicer_name") or "",
-                    "slicer_version": metadata.get("slicer_version") or "",
-                    "printer_model": metadata.get("printer_model") or "",
-                    "nozzle_diameter_mm": metadata.get("nozzle_diameter_mm") or "",
-                    "layer_height_mm": metadata.get("layer_height_mm") or "",
-                    "first_layer_height_mm": metadata.get("first_layer_height_mm")
-                    or "",
-                    "infill_percent": metadata.get("infill_percent") or "",
-                    "wall_loops": metadata.get("wall_loops") or "",
-                    "top_shell_layers": metadata.get("top_shell_layers") or "",
-                    "bottom_shell_layers": metadata.get("bottom_shell_layers") or "",
-                    "support_material": metadata.get("support_material")
-                    if metadata.get("support_material") is not None
-                    else "",
-                    "nozzle_temperature_c": metadata.get("nozzle_temperature_c") or "",
-                    "bed_temperature_c": metadata.get("bed_temperature_c") or "",
-                    "estimated_time_s": metadata.get("estimated_time_s") or "",
-                    "filament_weight_g": metadata.get("filament_weight_g") or "",
-                    "filament_length_mm": metadata.get("filament_length_mm") or "",
-                    "filament_cost": metadata.get("filament_cost") or "",
-                    "material_type": metadata.get("material_type") or "",
-                    "material_brand": metadata.get("material_brand") or "",
-                    "bbox_x_mm": metadata.get("bbox_x_mm") or "",
-                    "bbox_y_mm": metadata.get("bbox_y_mm") or "",
-                    "bbox_z_mm": metadata.get("bbox_z_mm") or "",
-                    "volume_mm3": metadata.get("volume_mm3") or "",
-                    "triangle_count": metadata.get("triangle_count") or "",
-                }
-            )
-    return out.getvalue()
 
 
 @router.get(
@@ -658,17 +150,22 @@ def export_models(
     format: Literal["json", "csv"] = Query("json", description="Export format"),
     session: Session = Depends(get_session),
 ) -> Response:
-    payload = _export_models(session)
+    payload = model_views.export_payload(session)
     if format == "csv":
         return Response(
-            content=_export_models_csv(payload),
+            content=model_views.export_csv(payload),
             media_type="text/csv; charset=utf-8",
             headers={
                 "Content-Disposition": 'attachment; filename="printstash-model-export.csv"'
             },
         )
-    return JSONResponse(
-        content=jsonable_encoder(payload),
+    # orjson handles datetimes natively and serialises this potentially large
+    # payload several times faster than jsonable_encoder + stdlib json.
+    import orjson
+
+    return Response(
+        content=orjson.dumps(payload),
+        media_type="application/json",
         headers={
             "Content-Disposition": 'attachment; filename="printstash-model-export.json"'
         },
@@ -685,69 +182,7 @@ def export_models(
     ),
 )
 def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
-    live_model_ids = select(Model.id).where(
-        Model.deleted_at.is_(None),  # type: ignore[union-attr]
-        Model.hash != SENTINEL_MODEL_HASH,
-    )
-    live_files = (
-        select(File)
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-    )
-
-    model_count = session.exec(
-        select(func.count()).select_from(live_model_ids.subquery())
-    ).one()
-    file_count = session.exec(
-        select(func.count()).select_from(live_files.subquery())
-    ).one()
-    indexed_size = session.exec(
-        select(func.coalesce(func.sum(File.size_bytes), 0))
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-    ).one()
-    source_file_count = session.exec(
-        select(func.count(File.id))
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-        .where(File.file_type != FileType.GCODE)
-    ).one()
-    gcode_file_count = session.exec(
-        select(func.count(File.id))
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-        .where(File.file_type == FileType.GCODE)
-    ).one()
-    collection_count = session.exec(
-        select(func.count(Collection.id)).where(Collection.deleted_at.is_(None))  # type: ignore[union-attr]
-    ).one()
-    tag_count = session.exec(
-        select(func.count(Tag.id)).where(Tag.deleted_at.is_(None))  # type: ignore[union-attr]
-    ).one()
-    printer_count = session.exec(
-        select(func.count(Printer.id)).where(Printer.deleted_at.is_(None))  # type: ignore[union-attr]
-    ).one()
-
-    try:
-        storage_usage = StorageUsageRead(**get_backend().usage())
-    except Exception as exc:
-        storage_usage = StorageUsageRead(
-            backend=settings.storage_backend,
-            ok=False,
-            error=exc.__class__.__name__,
-        )
-
-    return VaultStatsRead(
-        model_count=int(model_count or 0),
-        file_count=int(file_count or 0),
-        source_file_count=int(source_file_count or 0),
-        gcode_file_count=int(gcode_file_count or 0),
-        collection_count=int(collection_count or 0),
-        tag_count=int(tag_count or 0),
-        printer_count=int(printer_count or 0),
-        indexed_size_bytes=int(indexed_size or 0),
-        storage=storage_usage,
-    )
+    return model_views.vault_stats(session)
 
 
 @router.get(
@@ -765,21 +200,12 @@ def list_trash(
     offset: int = Query(0, ge=0),
     session: Session = Depends(get_session),
 ) -> List[TrashedModelRead]:
-    rows = session.exec(
-        select(Model)
-        .where(Model.deleted_at.is_not(None))  # type: ignore[union-attr]
-        .order_by(Model.deleted_at.desc())  # type: ignore[attr-defined]
-        .offset(offset)
-        .limit(limit)
-    ).all()
-    return [
-        _trashed_model_read(
-            session,
-            model,
-            retention_days=int(settings.trash_retention_days),
-        )
-        for model in rows
-    ]
+    return model_views.list_trashed(
+        session,
+        limit=limit,
+        offset=offset,
+        retention_days=int(settings.trash_retention_days),
+    )
 
 
 @router.delete(
@@ -806,7 +232,7 @@ def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRe
     summary="Get model detail with files and metadata",
 )
 def get_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
-    return _build_model_read(session, model_id)
+    return _detail_or_404(session, model_id)
 
 
 @router.post(
@@ -839,7 +265,10 @@ async def add_gcode_revision(
 
     staged = await run_in_threadpool(_stage_gcode_upload, file, suffix)
     try:
-        add_gcode_revision_to_model(
+        # Hashing + header parsing + thumbnail extraction are blocking file
+        # I/O — keep them off the event loop.
+        await run_in_threadpool(
+            add_gcode_revision_to_model,
             session=session,
             model=model,
             staged_path=staged,
@@ -852,7 +281,7 @@ async def add_gcode_revision(
     except Exception:
         staged.unlink(missing_ok=True)
         raise
-    return _build_model_read(session, model_id)
+    return _detail_or_404(session, model_id)
 
 
 @router.get(
@@ -871,7 +300,7 @@ def get_model_printer_files(
         .where(
             File.model_id == model_id,
             File.file_type == FileType.GCODE,
-            Printer.deleted_at.is_(None),  # type: ignore[union-attr]
+            live(Printer),
         )
         .order_by(Printer.name.asc(), PrinterFile.remote_filename.asc())  # type: ignore[attr-defined]
     ).all()
@@ -889,6 +318,18 @@ def get_model_printer_files(
     ]
 
 
+def _gcode_revision_numbers(session: Session, model_id: int) -> dict[int, int]:
+    """Derived 1-based revision numbers for live G-code files, by version."""
+    gcode_files = session.exec(
+        select(File)
+        .where(File.model_id == model_id)
+        .where(live(File))
+        .where(File.file_type == FileType.GCODE)
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
+    ).all()
+    return {f.id: i for i, f in enumerate(gcode_files, start=1)}
+
+
 @router.get(
     "/{model_id}/print-jobs",
     response_model=List[ModelPrintJobRead],
@@ -898,16 +339,7 @@ def get_model_print_jobs(
     model_id: int, session: Session = Depends(get_session)
 ) -> List[ModelPrintJobRead]:
     _live_model(session, model_id)
-
-    # Revision numbers are derived, not stored — mirror _build_model_read.
-    gcode_files = session.exec(
-        select(File)
-        .where(File.model_id == model_id)
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.file_type == FileType.GCODE)
-        .order_by(File.version.asc())  # type: ignore[attr-defined]
-    ).all()
-    revision_numbers = {f.id: i for i, f in enumerate(gcode_files, start=1)}
+    revision_numbers = _gcode_revision_numbers(session, model_id)
 
     rows = session.exec(
         select(PrintJob, Printer, File, Metadata)
@@ -916,7 +348,7 @@ def get_model_print_jobs(
         .outerjoin(Metadata, Metadata.file_id == File.id)
         .where(
             PrintJob.model_id == model_id,
-            PrintJob.deleted_at.is_(None),  # type: ignore[union-attr]
+            live(PrintJob),
         )
         .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
         .limit(50)
@@ -981,14 +413,7 @@ def create_manual_print_job(
     session.commit()
     session.refresh(job)
 
-    gcode_files = session.exec(
-        select(File)
-        .where(File.model_id == model_id)
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
-        .where(File.file_type == FileType.GCODE)
-        .order_by(File.version.asc())  # type: ignore[attr-defined]
-    ).all()
-    revision_numbers = {f.id: i for i, f in enumerate(gcode_files, start=1)}
+    revision_numbers = _gcode_revision_numbers(session, model_id)
 
     return ModelPrintJobRead(
         id=job.id,
@@ -1028,7 +453,7 @@ async def import_print_jobs_from_printer(
     gcode_files = session.exec(
         select(File)
         .where(File.model_id == model_id)
-        .where(File.deleted_at.is_(None))  # type: ignore[union-attr]
+        .where(live(File))
         .where(File.file_type == FileType.GCODE)
         .order_by(File.version.asc())  # type: ignore[attr-defined]
     ).all()
@@ -1038,7 +463,9 @@ async def import_print_jobs_from_printer(
     try:
         history = await client.get_print_history(limit=100)
     except MoonrakerError as exc:
-        raise HTTPException(status_code=502, detail={"code": "printer_unreachable", "detail": str(exc)})
+        raise HTTPException(
+            status_code=502, detail={"code": "printer_unreachable", "detail": str(exc)}
+        )
 
     existing_remote = {
         row[0]
@@ -1046,7 +473,7 @@ async def import_print_jobs_from_printer(
             select(PrintJob.remote_filename)
             .where(PrintJob.printer_id == printer_id)
             .where(PrintJob.model_id == model_id)
-            .where(PrintJob.deleted_at.is_(None))  # type: ignore[union-attr]
+            .where(live(PrintJob))
         ).all()
     }
 
@@ -1086,22 +513,26 @@ async def import_print_jobs_from_printer(
             session.add(job)
             session.commit()
 
-            results.append(ImportedPrintJobRead(
-                filename=fname,
-                status=raw_status,
-                print_duration=entry.get("print_duration"),
-                start_time=start_ts,
-                end_time=end_ts,
-                matched_file_id=matched.id,
-                imported=True,
-            ))
+            results.append(
+                ImportedPrintJobRead(
+                    filename=fname,
+                    status=raw_status,
+                    print_duration=entry.get("print_duration"),
+                    start_time=start_ts,
+                    end_time=end_ts,
+                    matched_file_id=matched.id,
+                    imported=True,
+                )
+            )
         elif matched and already_imported:
-            results.append(ImportedPrintJobRead(
-                filename=fname,
-                status=entry.get("status", ""),
-                matched_file_id=matched.id,
-                imported=False,
-            ))
+            results.append(
+                ImportedPrintJobRead(
+                    filename=fname,
+                    status=entry.get("status", ""),
+                    matched_file_id=matched.id,
+                    imported=False,
+                )
+            )
 
     return results
 
@@ -1142,7 +573,7 @@ def update_model(
     m.updated_at = utcnow()
     session.add(m)
     session.commit()
-    return _build_model_read(session, model_id)
+    return _detail_or_404(session, model_id)
 
 
 @router.patch(
@@ -1190,7 +621,7 @@ def update_file_revision(
                     File.model_id == model_id,
                     File.id != file_id,
                     File.file_type == FileType.GCODE,
-                    File.deleted_at.is_(None),  # type: ignore[union-attr]
+                    live(File),
                 )
             ).all()
             for other in other_gcode:
@@ -1201,7 +632,7 @@ def update_file_revision(
     session.add(file_row)
     session.add(m)
     session.commit()
-    return _build_model_read(session, model_id)
+    return _detail_or_404(session, model_id)
 
 
 @router.post(
@@ -1214,13 +645,8 @@ def restore_model(model_id: int, session: Session = Depends(get_session)) -> Mod
     m = session.get(Model, model_id)
     if m is None:
         raise HTTPException(status_code=404, detail="model_not_found")
-    if m.deleted_at is not None:
-        m.deleted_at = None
-        m.deleted_by = None
-        m.updated_at = utcnow()
-        session.add(m)
-        session.commit()
-    return _build_model_read(session, model_id)
+    trash_restore_model(session, m)
+    return _detail_or_404(session, model_id)
 
 
 @router.delete(
@@ -1248,15 +674,9 @@ def purge_model(
     response_class=Response,
     dependencies=[Depends(require_auth)],
     summary="Soft-delete a model",
-    description=(
-        "Marks the model deleted. Files remain on disk; Stage 4 will introduce "
-        "hard delete + GC."
-    ),
+    description="Marks the model deleted; it moves to the trash until purged.",
 )
 def delete_model(model_id: int, session: Session = Depends(get_session)) -> Response:
     m = _live_model(session, model_id)
-    m.deleted_at = utcnow()
-    m.updated_at = utcnow()
-    session.add(m)
-    session.commit()
+    soft_delete_model(session, m)
     return Response(status_code=204)

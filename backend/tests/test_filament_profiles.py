@@ -7,7 +7,9 @@ from app.db.models import File, FileType, FilamentProfile, Metadata, Model
 from app.services.profile_detection import upsert_detected_filament_profile
 
 
-def test_filament_profile_crud(client: TestClient, auth_headers: dict[str, str]) -> None:
+def test_filament_profile_crud(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
     created = client.post(
         "/api/v1/filament-profiles",
         headers=auth_headers,

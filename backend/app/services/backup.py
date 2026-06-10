@@ -24,7 +24,7 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import File as FileModel
 from app.db.session import get_engine, get_session_factory
-from app.services.storage_backend import LocalStorageBackend, get_backend
+from app.services.storage_backend import get_backend
 
 logger = get_logger(__name__)
 
@@ -125,15 +125,11 @@ def _find_blob_keys() -> list[str]:
 
 
 def _add_file_to_tar(tar: tarfile.TarFile, key: str, arcname: str) -> int:
-    backend = get_backend()
-    if isinstance(backend, LocalStorageBackend):
-        tar.add(key, arcname=arcname)
-        return Path(key).stat().st_size
-    data = get_backend().read_bytes(key)
-    info = tarfile.TarInfo(name=arcname)
-    info.size = len(data)
-    tar.addfile(info, io.BytesIO(data))
-    return len(data)
+    # local_path() yields the real file locally, or a self-cleaning temp
+    # download for remote backends — no branching on backend type.
+    with get_backend().local_path(key) as path:
+        tar.add(str(path), arcname=arcname)
+        return path.stat().st_size
 
 
 # ---------------------------------------------------------------------------

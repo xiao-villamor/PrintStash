@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { completeSetup, getSetupStatus } from "@/lib/api";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { storeLogin, type StoredUser } from "@/lib/auth";
 import type { SetupStatus } from "@/types";
 
@@ -247,11 +248,14 @@ export default function SetupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)] px-4 py-10">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)] px-4 py-10 relative">
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-lg mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
-          <div className="w-14 h-14 mx-auto rounded bg-[var(--primary-container)] flex items-center justify-center text-[var(--on-primary-container)] mb-4">
+          <div className="w-14 h-14 mx-auto rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white mb-4">
             <Box className="h-7 w-7" />
           </div>
           <h1 className="text-2xl font-bold text-[var(--on-surface)]">

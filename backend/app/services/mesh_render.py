@@ -9,7 +9,10 @@ Lighting model (view-space, camera at -Z looking toward +Z):
   - Ambient:    constant floor                 → no pure-black faces
 
 This is intentionally Python-only for 0.1 so source installs and Docker builds
-do not need a Rust toolchain.
+do not need a Rust toolchain. Rasterisation is fully vectorised: candidate
+pixels for all triangles are expanded into flat arrays and resolved against
+the z-buffer with a single lexsort per chunk, so cost scales with covered
+pixel area rather than with Python-level triangle count.
 """
 
 from __future__ import annotations
@@ -24,6 +27,13 @@ logger = get_logger(__name__)
 
 FLAT_MESH_THICKNESS_RATIO = 0.35
 
+# Render at 2x and downsample with Lanczos for anti-aliasing.
+_SUPERSAMPLE = 2
+
+# Cap candidate-pixel expansion per rasteriser chunk (~tens of MB of
+# temporaries at this size).
+_CHUNK_PIXEL_BUDGET = 2_000_000
+
 
 def render_thumbnail(
     load_mesh, path: Path, width: int = 640, height: int = 480
@@ -33,26 +43,40 @@ def render_thumbnail(
     `load_mesh` is injected to avoid a circular import on `mesh_processing`.
     Returns raw PNG bytes, or None on failure.
     """
+    mesh = load_mesh(path)
+    return render_mesh_thumbnail(mesh, path.name, width=width, height=height)
+
+
+def render_mesh_thumbnail(
+    mesh, name: str, width: int = 640, height: int = 480
+) -> Optional[bytes]:
+    """Render a PNG thumbnail from an already-loaded mesh.
+
+    Lets callers that need both geometry and a thumbnail load the mesh once.
+    Returns raw PNG bytes, or None on failure.
+    """
     try:
         import numpy as np
-        from PIL import Image, ImageFilter
+        from PIL import Image
     except ImportError:
         logger.error("mesh_render: numpy/Pillow unavailable; cannot render thumbnail")
         return None
 
-    mesh = load_mesh(path)
     if (
         mesh is None
         or len(mesh.vertices) == 0
         or mesh.faces is None
         or len(mesh.faces) == 0
     ):
-        logger.warning("mesh_render: empty mesh for %s", path.name)
+        logger.warning("mesh_render: empty mesh for %s", name)
         return None
 
     try:
         verts = np.asarray(mesh.vertices, dtype=np.float64)
         faces = np.asarray(mesh.faces, dtype=np.int64)
+
+        ss_width = width * _SUPERSAMPLE
+        ss_height = height * _SUPERSAMPLE
 
         # ------------------------------------------------------------------
         # 1. Centre and normalise the mesh to a unit-ish bounding sphere.
@@ -81,11 +105,11 @@ def render_thumbnail(
         extent_y = max(y_max - y_min, 1e-6)
         margin = 0.10
         scale = min(
-            (width * (1 - 2 * margin)) / extent_x,
-            (height * (1 - 2 * margin)) / extent_y,
+            (ss_width * (1 - 2 * margin)) / extent_x,
+            (ss_height * (1 - 2 * margin)) / extent_y,
         )
-        px = (xs - (x_min + x_max) * 0.5) * scale + width * 0.5
-        py = height * 0.5 - (ys - (y_min + y_max) * 0.5) * scale  # flip Y
+        px = (xs - (x_min + x_max) * 0.5) * scale + ss_width * 0.5
+        py = ss_height * 0.5 - (ys - (y_min + y_max) * 0.5) * scale  # flip Y
         pz = view[:, 2]
         screen = np.stack([px, py, pz], axis=1)  # (N, 3)
 
@@ -162,38 +186,28 @@ def render_thumbnail(
 
         if tri.shape[0] == 0:
             logger.warning(
-                "mesh_render: no visible triangles for %s — using silhouette", path.name
+                "mesh_render: no visible triangles for %s — using silhouette", name
             )
             tri = screen[faces]
             shade_rgb = np.tile(ambient_color + 0.4, (faces.shape[0], 1))
 
         # ------------------------------------------------------------------
-        # 6. Painter's sort (far-to-near).
-        # ------------------------------------------------------------------
-        avg_z = tri[:, :, 2].mean(axis=1)
-        order = np.argsort(-avg_z)
-        tri = tri[order]
-        shade_rgb = shade_rgb[order]  # (F, 3) float
-
-        # ------------------------------------------------------------------
-        # 7. Rasterise.
+        # 6. Rasterise (z-buffered — no painter's sort needed).
         # ------------------------------------------------------------------
         # Model colour: a medium slate blue-grey.
         base_color = np.array([168, 186, 200], dtype=np.float32)
 
         bg_color = np.array([245, 246, 248], dtype=np.uint8)  # off-white bg
-        img = np.broadcast_to(bg_color, (height, width, 3)).copy()
-        zbuf = np.full((height, width), np.inf, dtype=np.float32)
+        img = np.broadcast_to(bg_color, (ss_height, ss_width, 3)).copy()
+        zbuf = np.full((ss_height, ss_width), np.inf, dtype=np.float64)
 
-        _rasterise_triangles(img, zbuf, tri, shade_rgb, base_color, width, height)
+        _rasterise_triangles(img, zbuf, tri, shade_rgb, base_color, ss_width, ss_height)
 
         # ------------------------------------------------------------------
-        # 8. Post-process: subtle vignette + very light blur to soften aliasing.
+        # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
         # ------------------------------------------------------------------
-        pil = Image.frombytes("RGB", (width, height), img.tobytes())
-
-        # Mild Gaussian to anti-alias the flat-shaded edges
-        pil = pil.filter(ImageFilter.GaussianBlur(radius=0.6))
+        pil = Image.frombytes("RGB", (ss_width, ss_height), img.tobytes())
+        pil = pil.resize((width, height), Image.LANCZOS)
 
         # Vignette: darken the corners slightly so the model "pops"
         vx = np.linspace(-1, 1, width, dtype=np.float32)
@@ -209,7 +223,7 @@ def render_thumbnail(
 
     except Exception:
         logger.warning(
-            "mesh_render: render_thumbnail failed for %s", path.name, exc_info=True
+            "mesh_render: render_thumbnail failed for %s", name, exc_info=True
         )
         return None
 
@@ -262,7 +276,12 @@ def _front_rotation_for_thin_axis(thin_axis: int, np):
 def _rasterise_triangles(
     img, zbuf, tri, shade_rgb, base_color, width: int, height: int
 ) -> None:
-    """Z-buffered per-face rasteriser. shade_rgb is (F, 3) in [0, 1]."""
+    """Z-buffered rasteriser, vectorised over triangles. shade_rgb is (F, 3) in [0, 1].
+
+    Each triangle's clipped bounding box is expanded into a flat array of
+    candidate pixels; barycentric tests, depth interpolation, and per-pixel
+    z-buffer resolution all run as whole-array numpy operations.
+    """
     import numpy as np
 
     if tri.shape[0] == 0:
@@ -270,72 +289,90 @@ def _rasterise_triangles(
 
     xs = tri[:, :, 0]
     ys = tri[:, :, 1]
-    x0 = np.clip(np.floor(xs.min(axis=1)).astype(np.int32), 0, width - 1)
-    x1 = np.clip(np.ceil(xs.max(axis=1)).astype(np.int32), 0, width - 1)
-    y0 = np.clip(np.floor(ys.min(axis=1)).astype(np.int32), 0, height - 1)
-    y1 = np.clip(np.ceil(ys.max(axis=1)).astype(np.int32), 0, height - 1)
+    x0 = np.clip(np.floor(xs.min(axis=1)).astype(np.int64), 0, width - 1)
+    x1 = np.clip(np.ceil(xs.max(axis=1)).astype(np.int64), 0, width - 1)
+    y0 = np.clip(np.floor(ys.min(axis=1)).astype(np.int64), 0, height - 1)
+    y1 = np.clip(np.ceil(ys.max(axis=1)).astype(np.int64), 0, height - 1)
 
     v0, v1, v2 = tri[:, 0], tri[:, 1], tri[:, 2]
     denom = (v1[:, 1] - v2[:, 1]) * (v0[:, 0] - v2[:, 0]) + (v2[:, 0] - v1[:, 0]) * (
         v0[:, 1] - v2[:, 1]
     )
-    valid = np.abs(denom) > 1e-9
+    keep = (np.abs(denom) > 1e-9) & (x1 >= x0) & (y1 >= y0)
+    if not keep.any():
+        return
 
-    idx = np.where(valid)[0]
-    for i in idx:
-        _rasterise_one(
-            img,
-            zbuf,
-            tri[i],
-            shade_rgb[i],
-            denom[i],
-            int(x0[i]),
-            int(x1[i]),
-            int(y0[i]),
-            int(y1[i]),
-            base_color,
+    v0, v1, v2 = v0[keep], v1[keep], v2[keep]
+    denom = denom[keep]
+    x0, x1, y0, y1 = x0[keep], x1[keep], y0[keep], y1[keep]
+    colours = np.clip(base_color * shade_rgb[keep], 0, 255).astype(np.uint8)  # (F, 3)
+
+    bbox_w = x1 - x0 + 1
+    bbox_h = y1 - y0 + 1
+    areas = bbox_w * bbox_h
+
+    flat_img = img.reshape(-1, 3)
+    flat_z = zbuf.reshape(-1)
+
+    # Chunk triangles so the candidate-pixel expansion stays within budget.
+    cum_areas = np.cumsum(areas)
+    start = 0
+    n_faces = len(areas)
+    consumed = 0
+    while start < n_faces:
+        end = int(
+            np.searchsorted(cum_areas, consumed + _CHUNK_PIXEL_BUDGET, side="right")
         )
+        end = max(end, start + 1)
+        end = min(end, n_faces)
+        consumed = int(cum_areas[end - 1])
 
+        counts = areas[start:end]
+        tri_idx = np.repeat(np.arange(start, end), counts)
+        starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+        offsets = np.arange(int(counts.sum())) - np.repeat(starts, counts)
 
-def _rasterise_one(
-    img,
-    zbuf,
-    tri_i,
-    shade_i,
-    denom_i,
-    xmin,
-    xmax,
-    ymin,
-    ymax,
-    base_color,
-) -> None:
-    """Rasterise one triangle into img/zbuf. shade_i is a (3,) RGB float in [0,1]."""
-    import numpy as np
+        w_per_tri = bbox_w[tri_idx]
+        pix_x = x0[tri_idx] + offsets % w_per_tri
+        pix_y = y0[tri_idx] + offsets // w_per_tri
 
-    if xmax < xmin or ymax < ymin:
-        return
+        fx = pix_x + 0.5
+        fy = pix_y + 0.5
+        a = v0[tri_idx]
+        b = v1[tri_idx]
+        c = v2[tri_idx]
+        d = denom[tri_idx]
 
-    v0, v1, v2 = tri_i[0], tri_i[1], tri_i[2]
+        w0 = (
+            (b[:, 1] - c[:, 1]) * (fx - c[:, 0]) + (c[:, 0] - b[:, 0]) * (fy - c[:, 1])
+        ) / d
+        w1 = (
+            (c[:, 1] - a[:, 1]) * (fx - c[:, 0]) + (a[:, 0] - c[:, 0]) * (fy - c[:, 1])
+        ) / d
+        w2 = 1.0 - w0 - w1
+        inside = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+        if inside.any():
+            z = w0 * a[:, 2] + w1 * b[:, 2] + w2 * c[:, 2]
+            pix = (pix_y * width + pix_x)[inside]
+            z = z[inside]
+            owner = tri_idx[inside]
 
-    xs = np.arange(xmin, xmax + 1) + 0.5
-    ys = np.arange(ymin, ymax + 1) + 0.5
-    gx, gy = np.meshgrid(xs, ys)
+            # Nearest candidate per pixel within this chunk: sort by
+            # (pixel, z) and keep the first occurrence of each pixel.
+            order = np.lexsort((z, pix))
+            pix_s = pix[order]
+            z_s = z[order]
+            owner_s = owner[order]
+            first = np.ones(len(pix_s), dtype=bool)
+            first[1:] = pix_s[1:] != pix_s[:-1]
+            pix_u = pix_s[first]
+            z_u = z_s[first]
+            owner_u = owner_s[first]
 
-    w0 = ((v1[1] - v2[1]) * (gx - v2[0]) + (v2[0] - v1[0]) * (gy - v2[1])) / denom_i
-    w1 = ((v2[1] - v0[1]) * (gx - v2[0]) + (v0[0] - v2[0]) * (gy - v2[1])) / denom_i
-    w2 = 1.0 - w0 - w1
-    inside = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
-    if not inside.any():
-        return
+            # Then resolve against the global z-buffer.
+            nearer = z_u < flat_z[pix_u]
+            target = pix_u[nearer]
+            flat_z[target] = z_u[nearer]
+            flat_img[target] = colours[owner_u[nearer]]
 
-    z = w0 * v0[2] + w1 * v1[2] + w2 * v2[2]
-    sub_z = zbuf[ymin : ymax + 1, xmin : xmax + 1]
-    sub_img = img[ymin : ymax + 1, xmin : xmax + 1]
-    write = inside & (z < sub_z)
-    if not write.any():
-        return
-
-    # shade_i is (3,) RGB multiplier; base_color is (3,) float
-    colour = np.clip(base_color * shade_i, 0, 255).astype(np.uint8)
-    sub_img[write] = colour
-    sub_z[write] = z[write]
+        start = end

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import os
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -18,6 +21,11 @@ class StorageBackend(ABC):
 
     Keys are opaque identifiers: for the local backend they are absolute
     filesystem paths; for S3 they are object keys within the bucket.
+
+    Callers must never branch on the concrete backend type. Anything that
+    needs a real filesystem path uses ``local_path()``; anything moving a
+    staged upload into the vault uses ``move_in()``; HTTP handlers deciding
+    between file and streaming responses use ``direct_path()``.
     """
 
     @abstractmethod
@@ -76,6 +84,48 @@ class StorageBackend(ABC):
     @abstractmethod
     def health_probe(self) -> dict: ...
 
+    @abstractmethod
+    def direct_path(self, key: str) -> Path | None:
+        """Return the on-disk path for *key*, or None when the backend has
+        no direct filesystem representation (S3)."""
+        ...
+
+    @contextmanager
+    def local_path(self, key: str) -> Iterator[Path]:
+        """Yield a local filesystem path for *key*.
+
+        Local backend yields the real path. Remote backends download to a
+        temporary file and remove it on exit. The single owner of the
+        temp-file lifecycle — callers never manage cleanup.
+        """
+        direct = self.direct_path(key)
+        if direct is not None:
+            yield direct
+            return
+        fd, name = tempfile.mkstemp(suffix=Path(key).suffix)
+        os.close(fd)
+        tmp = Path(name)
+        try:
+            self.download_to_path(key, tmp)
+            yield tmp
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def move_in(self, src: Path, dest_key: str) -> None:
+        """Move a local staged file into the vault at *dest_key*.
+
+        Local backend renames; remote backends upload then remove the
+        staged file.
+        """
+        if self.direct_path(dest_key) is not None:
+            self.move(str(src), dest_key)
+            return
+        self.upload_file(src, dest_key)
+        try:
+            src.unlink(missing_ok=True)
+        except OSError:
+            pass
+
 
 # ---------------------------------------------------------------------------
 # Local filesystem backend
@@ -83,6 +133,9 @@ class StorageBackend(ABC):
 
 
 class LocalStorageBackend(StorageBackend):
+    def direct_path(self, key: str) -> Path | None:
+        return Path(key)
+
     def blob_key(self, slug: str, version: int, filename: str) -> str:
         return str(settings.data_dir / slug / f"v{version}" / filename)
 
@@ -276,6 +329,9 @@ class S3StorageBackend(StorageBackend):
 
     def _prefix(self) -> str:
         return "vault-data/"
+
+    def direct_path(self, key: str) -> Path | None:
+        return None
 
     def blob_key(self, slug: str, version: int, filename: str) -> str:
         return f"{self._prefix()}files/{slug}/v{version}/{filename}"

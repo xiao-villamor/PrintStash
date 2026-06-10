@@ -163,7 +163,7 @@ class File(SQLModel, table=True):
     revision_notes: Optional[str] = None
     is_recommended: bool = Field(default=False, index=True)
 
-    uploaded_at: datetime = Field(default_factory=utcnow)
+    uploaded_at: datetime = Field(default_factory=utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
 
@@ -252,7 +252,7 @@ class Model(SQLModel, table=True):
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
-    updated_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
 
     files: List[File] = Relationship(
         back_populates="model",

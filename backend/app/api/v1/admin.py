@@ -17,10 +17,12 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_session
-from app.services.lifecycle import gc_soft_deleted
+from app.services.trash import gc_soft_deleted
 from app.services.storage_backend import get_backend
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)])
+router = APIRouter(
+    prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)]
+)
 
 _RESOURCE_MODEL = {
     "models": Model,
@@ -85,7 +87,12 @@ def list_audit(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict]:
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+    stmt = (
+        select(AuditLog)
+        .order_by(AuditLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     if resource:
         stmt = stmt.where(AuditLog.resource_type == resource)
     if resource_id is not None:
