@@ -253,6 +253,7 @@ export interface FilamentProfileRead {
   material_brand: string | null;
   cost_per_kg: number | null;
   notes: string | null;
+  usage_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -280,6 +281,7 @@ export interface PrinterProfileRead {
   slicer_name: string | null;
   nozzle_diameter_mm: number | null;
   notes: string | null;
+  usage_count: number;
   created_at: string;
   updated_at: string;
 }

@@ -14,23 +14,31 @@ import {
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { Layers, Plus, Printer, Save, Trash2, X, ChevronDown } from "lucide-react";
+import { Check, Layers, Loader2, Plus, Printer, Trash2, X, ChevronDown } from "lucide-react";
 
 type FilamentEdit = {
   name: string;
   materialType: string;
   materialBrand: string;
   cost: string;
+  notes: string;
 };
 
 type PrinterEdit = {
   name: string;
+  model: string;
   nozzle: string;
   notes: string;
 };
 
-const inputClass =
+// Solid-bordered input for the "add preset" panels.
+const formInputClass =
   "h-8 w-full rounded border border-border bg-background px-2.5 text-xs text-foreground outline-none transition-shadow placeholder:text-muted-foreground/60 focus:border-transparent focus:ring-2 focus:ring-ring disabled:opacity-40";
+
+// Ghost input for the inline list rows: reads as plain text, reveals an
+// editable affordance on hover/focus. Edits auto-save on blur.
+const inputClass =
+  "h-8 w-full rounded border border-transparent bg-transparent px-2.5 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 hover:border-border focus:border-transparent focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-40 disabled:hover:border-transparent";
 
 function parseOptionalNumber(value: string): number | null {
   if (!value.trim()) return null;
@@ -39,7 +47,7 @@ function parseOptionalNumber(value: string): number | null {
 }
 
 function formatCost(value: number | null): string {
-  return value == null ? "" : String(Number(value.toFixed(4)));
+  return value == null ? "" : String(Number(value.toFixed(2)));
 }
 
 function formatNozzle(value: number | null): string {
@@ -52,15 +60,38 @@ function filamentEdit(profile: FilamentProfileRead): FilamentEdit {
     materialType: profile.material_type ?? "",
     materialBrand: profile.material_brand ?? "",
     cost: formatCost(profile.cost_per_kg),
+    notes: profile.notes ?? "",
   };
 }
 
 function printerEdit(profile: PrinterProfileRead): PrinterEdit {
   return {
     name: profile.name,
+    model: profile.printer_model ?? "",
     nozzle: formatNozzle(profile.nozzle_diameter_mm),
     notes: profile.notes ?? "",
   };
+}
+
+function filamentDirty(profile: FilamentProfileRead, edit: FilamentEdit): boolean {
+  const base = filamentEdit(profile);
+  return (
+    base.name !== edit.name ||
+    base.materialType !== edit.materialType ||
+    base.materialBrand !== edit.materialBrand ||
+    base.cost !== edit.cost ||
+    base.notes !== edit.notes
+  );
+}
+
+function printerDirty(profile: PrinterProfileRead, edit: PrinterEdit): boolean {
+  const base = printerEdit(profile);
+  return (
+    base.name !== edit.name ||
+    base.model !== edit.model ||
+    base.nozzle !== edit.nozzle ||
+    base.notes !== edit.notes
+  );
 }
 
 const MATERIAL_COLORS: Record<string, string> = {
@@ -82,12 +113,18 @@ function materialColor(type: string): string {
   return MATERIAL_COLORS[key] ?? "bg-slate-400";
 }
 
-function ColLabel({ children }: { children: React.ReactNode }) {
+function ColLabel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <span className={`text-[10px] font-semibold uppercase tracking-wider text-muted-foreground ${className ?? ""}`}>
       {children}
     </span>
   );
+}
+
+function RowStatus({ state }: { state?: "saving" | "saved" }) {
+  if (state === "saving") return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
+  if (state === "saved") return <Check className="h-3.5 w-3.5 text-emerald-500" />;
+  return null;
 }
 
 export function FilamentProfilesCard() {
@@ -98,6 +135,8 @@ export function FilamentProfilesCard() {
   const [printerEdits, setPrinterEdits] = useState<Record<number, PrinterEdit>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Per-row auto-save indicator, keyed "f{id}" / "p{id}".
+  const [rowStatus, setRowStatus] = useState<Record<string, "saving" | "saved">>({});
 
   // add form state — filament
   const [showAddFilament, setShowAddFilament] = useState(false);
@@ -105,12 +144,14 @@ export function FilamentProfilesCard() {
   const [newType, setNewType] = useState("");
   const [newBrand, setNewBrand] = useState("");
   const [newCost, setNewCost] = useState("");
+  const [newNotes, setNewNotes] = useState("");
 
   // add form state — printer
   const [showAddPrinter, setShowAddPrinter] = useState(false);
   const [newPrinterName, setNewPrinterName] = useState("");
   const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("");
+  const [newPrinterNotes, setNewPrinterNotes] = useState("");
 
   async function refresh() {
     try {
@@ -139,14 +180,14 @@ export function FilamentProfilesCard() {
   function updateFilamentEdit(id: number, patch: Partial<FilamentEdit>) {
     setFilamentEdits((cur) => ({
       ...cur,
-      [id]: { ...(cur[id] ?? { name: "", materialType: "", materialBrand: "", cost: "" }), ...patch },
+      [id]: { ...(cur[id] ?? { name: "", materialType: "", materialBrand: "", cost: "", notes: "" }), ...patch },
     }));
   }
 
   function updatePrinterEdit(id: number, patch: Partial<PrinterEdit>) {
     setPrinterEdits((cur) => ({
       ...cur,
-      [id]: { ...(cur[id] ?? { name: "", nozzle: "", notes: "" }), ...patch },
+      [id]: { ...(cur[id] ?? { name: "", model: "", nozzle: "", notes: "" }), ...patch },
     }));
   }
 
@@ -162,30 +203,51 @@ export function FilamentProfilesCard() {
         material_type: newType.trim() || null,
         material_brand: newBrand.trim() || null,
         cost_per_kg: parsedCost,
+        notes: newNotes.trim() || null,
       });
-      setNewName(""); setNewType(""); setNewBrand(""); setNewCost("");
+      setNewName(""); setNewType(""); setNewBrand(""); setNewCost(""); setNewNotes("");
       setShowAddFilament(false);
       toast.success(`Filament preset "${trimmedName}" saved`);
       refresh();
     } catch (e: any) { setError(e.message); toast.error(e); }
   }
 
-  async function handleSaveFilament(profile: FilamentProfileRead) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+  function flashSaved(key: string) {
+    setRowStatus((s) => ({ ...s, [key]: "saved" }));
+    setTimeout(() => setRowStatus((s) => { const n = { ...s }; delete n[key]; return n; }), 1500);
+  }
+
+  function clearStatus(key: string) {
+    setRowStatus((s) => { const n = { ...s }; delete n[key]; return n; });
+  }
+
+  // Save when focus leaves the row entirely (not when tabbing between its fields).
+  function handleRowBlur(e: React.FocusEvent<HTMLDivElement>, save: () => void) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) save();
+  }
+
+  async function autoSaveFilament(profile: FilamentProfileRead) {
+    if (!auth.isAuthenticated) return;
     const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
-    if (!edit.name.trim()) return;
+    if (!filamentDirty(profile, edit) || !edit.name.trim()) return;
     const parsedCost = parseOptionalNumber(edit.cost);
     if (parsedCost !== null && Number.isNaN(parsedCost)) { toast.error("Invalid filament cost"); return; }
+    const key = `f${profile.id}`;
+    setRowStatus((s) => ({ ...s, [key]: "saving" }));
+    const payload = {
+      name: edit.name.trim(),
+      material_type: edit.materialType.trim() || null,
+      material_brand: edit.materialBrand.trim() || null,
+      cost_per_kg: parsedCost,
+      notes: edit.notes.trim() || null,
+    };
     try {
-      await updateFilamentProfile(profile.id, {
-        name: edit.name.trim(),
-        material_type: edit.materialType.trim() || null,
-        material_brand: edit.materialBrand.trim() || null,
-        cost_per_kg: parsedCost,
-      });
-      toast.success("Filament preset saved");
-      refresh();
-    } catch (e: any) { setError(e.message); toast.error(e); }
+      await updateFilamentProfile(profile.id, payload);
+      const saved = { ...profile, ...payload };
+      setFilaments((cur) => cur.map((p) => (p.id === profile.id ? saved : p)));
+      setFilamentEdits((cur) => ({ ...cur, [profile.id]: filamentEdit(saved) }));
+      flashSaved(key);
+    } catch (e: any) { setError(e.message); toast.error(e); clearStatus(key); }
   }
 
   async function handleDeleteFilament(id: number) {
@@ -208,29 +270,36 @@ export function FilamentProfilesCard() {
         name: trimmedName,
         printer_model: newPrinterModel.trim() || null,
         nozzle_diameter_mm: parsedNozzle,
+        notes: newPrinterNotes.trim() || null,
       });
-      setNewPrinterName(""); setNewPrinterModel(""); setNewPrinterNozzle("");
+      setNewPrinterName(""); setNewPrinterModel(""); setNewPrinterNozzle(""); setNewPrinterNotes("");
       setShowAddPrinter(false);
       toast.success(`Printer preset "${trimmedName}" saved`);
       refresh();
     } catch (e: any) { setError(e.message); toast.error(e); }
   }
 
-  async function handleSavePrinter(profile: PrinterProfileRead) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+  async function autoSavePrinter(profile: PrinterProfileRead) {
+    if (!auth.isAuthenticated) return;
     const edit = printerEdits[profile.id] ?? printerEdit(profile);
-    if (!edit.name.trim()) return;
+    if (!printerDirty(profile, edit) || !edit.name.trim()) return;
     const parsedNozzle = parseOptionalNumber(edit.nozzle);
     if (parsedNozzle !== null && Number.isNaN(parsedNozzle)) { toast.error("Invalid nozzle diameter"); return; }
+    const key = `p${profile.id}`;
+    setRowStatus((s) => ({ ...s, [key]: "saving" }));
+    const payload = {
+      name: edit.name.trim(),
+      printer_model: edit.model.trim() || null,
+      nozzle_diameter_mm: parsedNozzle,
+      notes: edit.notes.trim() || null,
+    };
     try {
-      await updatePrinterProfile(profile.id, {
-        name: edit.name.trim(),
-        nozzle_diameter_mm: parsedNozzle,
-        notes: edit.notes.trim() || null,
-      });
-      toast.success("Printer preset saved");
-      refresh();
-    } catch (e: any) { setError(e.message); toast.error(e); }
+      await updatePrinterProfile(profile.id, payload);
+      const saved = { ...profile, ...payload };
+      setPrinters((cur) => cur.map((p) => (p.id === profile.id ? saved : p)));
+      setPrinterEdits((cur) => ({ ...cur, [profile.id]: printerEdit(saved) }));
+      flashSaved(key);
+    } catch (e: any) { setError(e.message); toast.error(e); clearStatus(key); }
   }
 
   async function handleDeletePrinter(id: number) {
@@ -261,7 +330,7 @@ export function FilamentProfilesCard() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-foreground">Filament presets</h3>
-                <span className="rounded-full bg-blue-100 dark:bg-orange-900/50 dark:bg-orange-950/50 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:text-orange-400 dark:text-orange-400">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                   {filaments.length}
                 </span>
               </div>
@@ -289,11 +358,12 @@ export function FilamentProfilesCard() {
             className="border-b border-border bg-accent/30 px-5 py-4"
           >
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New filament preset</p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_7rem_1fr_7rem_auto]">
-              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Preset name *" className={inputClass} autoFocus />
-              <input value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="Type (PLA…)" className={inputClass} />
-              <input value={newBrand} onChange={(e) => setNewBrand(e.target.value)} placeholder="Brand" className={inputClass} />
-              <input value={newCost} onChange={(e) => setNewCost(e.target.value)} inputMode="decimal" placeholder="$/kg" className={inputClass} />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_7rem_1fr_7rem_1fr_auto]">
+              <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Preset name *" className={formInputClass} autoFocus />
+              <input value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="Type (PLA…)" className={formInputClass} />
+              <input value={newBrand} onChange={(e) => setNewBrand(e.target.value)} placeholder="Brand" className={formInputClass} />
+              <input value={newCost} onChange={(e) => setNewCost(e.target.value)} inputMode="decimal" placeholder="$/kg" className={formInputClass} />
+              <input value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="Notes" className={formInputClass} />
               <div className="flex gap-1.5">
                 <button
                   type="submit"
@@ -332,31 +402,43 @@ export function FilamentProfilesCard() {
           ) : (
             <div>
               {/* column labels */}
-              <div className="hidden grid-cols-[1fr_7rem_1fr_7rem_auto] items-center gap-2 border-b border-border px-5 py-2 sm:grid">
-                <ColLabel>Name</ColLabel>
-                <ColLabel>Type</ColLabel>
-                <ColLabel>Brand</ColLabel>
-                <ColLabel>$/kg</ColLabel>
+              <div className="hidden grid-cols-[1fr_7rem_1fr_7rem_1fr_auto] items-center gap-2 border-b border-border px-5 py-2 sm:grid">
+                <ColLabel className="pl-[1.875rem]">Name</ColLabel>
+                <ColLabel className="pl-2.5">Type</ColLabel>
+                <ColLabel className="pl-2.5">Brand</ColLabel>
+                <ColLabel className="pl-2.5">$/kg</ColLabel>
+                <ColLabel className="pl-2.5">Notes</ColLabel>
                 <span className="w-[4.5rem]" />
               </div>
               <div className="divide-y divide-border">
                 {filaments.map((profile) => {
                   const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
                   return (
-                    <div key={profile.id} className="group grid grid-cols-1 items-center gap-2 px-5 py-3 transition-colors hover:bg-muted/30 sm:grid-cols-[1fr_7rem_1fr_7rem_auto]">
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${edit.materialType ? materialColor(edit.materialType) : "bg-slate-300 dark:bg-slate-600"}`}
-                          title={edit.materialType || "Unknown type"}
-                        />
-                        <input
-                          value={edit.name}
-                          onChange={(e) => updateFilamentEdit(profile.id, { name: e.target.value })}
-                          disabled={!auth.isAuthenticated}
-                          aria-label={`Filament preset name ${profile.id}`}
-                          placeholder="Preset name"
-                          className={inputClass}
-                        />
+                    <div
+                      key={profile.id}
+                      onBlur={(e) => handleRowBlur(e, () => autoSaveFilament(profile))}
+                      className="group grid grid-cols-1 items-center gap-2 px-5 py-3 transition-colors hover:bg-muted/30 sm:grid-cols-[1fr_7rem_1fr_7rem_1fr_auto]"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${edit.materialType ? materialColor(edit.materialType) : "bg-slate-300 dark:bg-slate-600"}`}
+                            title={edit.materialType || "Unknown type"}
+                          />
+                          <input
+                            value={edit.name}
+                            onChange={(e) => updateFilamentEdit(profile.id, { name: e.target.value })}
+                            disabled={!auth.isAuthenticated}
+                            aria-label={`Filament preset name ${profile.id}`}
+                            placeholder="Preset name"
+                            className={inputClass}
+                          />
+                        </div>
+                        {profile.usage_count > 0 && (
+                          <p className="mt-1 truncate pl-5 text-[10px] text-muted-foreground">
+                            Used by {profile.usage_count} file{profile.usage_count === 1 ? "" : "s"}
+                          </p>
+                        )}
                       </div>
                       <input
                         value={edit.materialType}
@@ -383,20 +465,21 @@ export function FilamentProfilesCard() {
                         placeholder="0.00"
                         className={inputClass}
                       />
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleSaveFilament(profile)}
-                          disabled={!auth.isAuthenticated}
-                          title="Save"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-blue-300 dark:hover:border-orange-600 hover:bg-blue-50 hover:text-blue-600 dark:text-orange-500 disabled:opacity-40 dark:hover:bg-orange-950/40"
-                        >
-                          <Save className="h-3.5 w-3.5" />
-                        </button>
+                      <input
+                        value={edit.notes}
+                        onChange={(e) => updateFilamentEdit(profile.id, { notes: e.target.value })}
+                        disabled={!auth.isAuthenticated}
+                        aria-label={`Filament notes ${profile.id}`}
+                        placeholder="Notes"
+                        className={inputClass}
+                      />
+                      <div className="flex h-8 w-[4.5rem] items-center justify-end gap-1">
+                        <RowStatus state={rowStatus[`f${profile.id}`]} />
                         <button
                           onClick={() => handleDeleteFilament(profile.id)}
                           disabled={!auth.isAuthenticated}
                           title="Delete"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-950/40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -421,7 +504,7 @@ export function FilamentProfilesCard() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-foreground">Printer presets</h3>
-                <span className="rounded-full bg-muted dark:bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-muted-foreground dark:text-muted-foreground">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                   {printers.length}
                 </span>
               </div>
@@ -449,10 +532,11 @@ export function FilamentProfilesCard() {
             className="border-b border-border bg-accent/30 px-5 py-4"
           >
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New printer preset</p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_7rem_auto]">
-              <input value={newPrinterName} onChange={(e) => setNewPrinterName(e.target.value)} placeholder="Preset name *" className={inputClass} autoFocus />
-              <input value={newPrinterModel} onChange={(e) => setNewPrinterModel(e.target.value)} placeholder="Printer model" className={inputClass} />
-              <input value={newPrinterNozzle} onChange={(e) => setNewPrinterNozzle(e.target.value)} inputMode="decimal" placeholder="Nozzle mm" className={inputClass} />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1.4fr_1fr_1fr_6rem_auto]">
+              <input value={newPrinterName} onChange={(e) => setNewPrinterName(e.target.value)} placeholder="Preset name *" className={formInputClass} autoFocus />
+              <input value={newPrinterModel} onChange={(e) => setNewPrinterModel(e.target.value)} placeholder="Printer model" className={formInputClass} />
+              <input value={newPrinterNotes} onChange={(e) => setNewPrinterNotes(e.target.value)} placeholder="Notes" className={formInputClass} />
+              <input value={newPrinterNozzle} onChange={(e) => setNewPrinterNozzle(e.target.value)} inputMode="decimal" placeholder="Nozzle mm" className={formInputClass} />
               <div className="flex gap-1.5">
                 <button
                   type="submit"
@@ -491,17 +575,22 @@ export function FilamentProfilesCard() {
           ) : (
             <div>
               {/* column labels */}
-              <div className="hidden grid-cols-[1fr_1fr_7rem_auto] items-center gap-2 border-b border-border px-5 py-2 sm:grid">
-                <ColLabel>Name</ColLabel>
-                <ColLabel>Model / Slicer</ColLabel>
-                <ColLabel>Nozzle mm</ColLabel>
+              <div className="hidden grid-cols-[1.4fr_1fr_1fr_6rem_auto] items-center gap-2 border-b border-border px-5 py-2 sm:grid">
+                <ColLabel className="pl-2.5">Preset name</ColLabel>
+                <ColLabel className="pl-2.5">Printer model</ColLabel>
+                <ColLabel className="pl-2.5">Notes</ColLabel>
+                <ColLabel className="pl-2.5">Nozzle mm</ColLabel>
                 <span className="w-[4.5rem]" />
               </div>
               <div className="divide-y divide-border">
                 {printers.map((profile) => {
                   const edit = printerEdits[profile.id] ?? printerEdit(profile);
                   return (
-                    <div key={profile.id} className="group grid grid-cols-1 items-start gap-2 px-5 py-3 transition-colors hover:bg-muted/30 sm:grid-cols-[1fr_1fr_7rem_auto] sm:items-center">
+                    <div
+                      key={profile.id}
+                      onBlur={(e) => handleRowBlur(e, () => autoSavePrinter(profile))}
+                      className="group grid grid-cols-1 items-start gap-2 px-5 py-3 transition-colors hover:bg-muted/30 sm:grid-cols-[1.4fr_1fr_1fr_6rem_auto] sm:items-center"
+                    >
                       <div>
                         <input
                           value={edit.name}
@@ -511,12 +600,25 @@ export function FilamentProfilesCard() {
                           placeholder="Preset name"
                           className={inputClass}
                         />
-                        {(profile.printer_model || profile.slicer_name) && (
+                        {(profile.slicer_name || profile.usage_count > 0) && (
                           <p className="mt-1 truncate pl-0.5 text-[10px] text-muted-foreground">
-                            {[profile.printer_model, profile.slicer_name].filter(Boolean).join(" · ")}
+                            {[
+                              profile.slicer_name ? `Detected from ${profile.slicer_name}` : null,
+                              profile.usage_count > 0
+                                ? `used by ${profile.usage_count} file${profile.usage_count === 1 ? "" : "s"}`
+                                : null,
+                            ].filter(Boolean).join(" · ")}
                           </p>
                         )}
                       </div>
+                      <input
+                        value={edit.model}
+                        onChange={(e) => updatePrinterEdit(profile.id, { model: e.target.value })}
+                        disabled={!auth.isAuthenticated}
+                        aria-label={`Printer model ${profile.id}`}
+                        placeholder="Printer model"
+                        className={inputClass}
+                      />
                       <input
                         value={edit.notes}
                         onChange={(e) => updatePrinterEdit(profile.id, { notes: e.target.value })}
@@ -534,20 +636,13 @@ export function FilamentProfilesCard() {
                         placeholder="0.4"
                         className={inputClass}
                       />
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleSavePrinter(profile)}
-                          disabled={!auth.isAuthenticated}
-                          title="Save"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-blue-300 dark:hover:border-orange-600 hover:bg-blue-50 hover:text-blue-600 dark:text-orange-500 disabled:opacity-40 dark:hover:bg-orange-950/40"
-                        >
-                          <Save className="h-3.5 w-3.5" />
-                        </button>
+                      <div className="flex h-8 w-[4.5rem] items-center justify-end gap-1">
+                        <RowStatus state={rowStatus[`p${profile.id}`]} />
                         <button
                           onClick={() => handleDeletePrinter(profile.id)}
                           disabled={!auth.isAuthenticated}
                           title="Delete"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-40 dark:hover:bg-red-950/40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

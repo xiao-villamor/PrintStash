@@ -21,6 +21,7 @@ from app.services.storage_backend import get_backend
 
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+WEBP_MAGIC = b"RIFF"
 
 
 def _cube_stl() -> bytes:
@@ -174,7 +175,8 @@ def test_ingest_orca_gcode_creates_db_blob_and_thumbnail(
 
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text
-    assert thumbnail.content.startswith(PNG_MAGIC)
+    assert thumbnail.headers["content-type"] == "image/webp"
+    assert thumbnail.content.startswith(WEBP_MAGIC)
 
     filament_profile = db_session.exec(
         select(FilamentProfile).where(FilamentProfile.name == "Generic PLA")
@@ -243,7 +245,8 @@ def test_ingest_stl_creates_db_blob_and_thumbnail(
 
     thumbnail = client.get(f"/api/v1/files/{file_id}/thumbnail")
     assert thumbnail.status_code == 200, thumbnail.text
-    assert thumbnail.content.startswith(PNG_MAGIC)
+    assert thumbnail.headers["content-type"] == "image/webp"
+    assert thumbnail.content.startswith(WEBP_MAGIC)
 
 
 def test_reuploading_deleted_model_restores_it(

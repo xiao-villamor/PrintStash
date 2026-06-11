@@ -35,6 +35,11 @@ class StorageBackend(ABC):
     def thumbnail_key(self, file_id: int) -> str: ...
 
     @abstractmethod
+    def legacy_thumbnail_key(self, file_id: int) -> str:
+        """PNG key used before thumbnails moved to WebP. Read/delete only —
+        new thumbnails are always written under ``thumbnail_key``."""
+
+    @abstractmethod
     def stl_cache_key(self, sha256: str) -> str:
         """Key for a derived-STL preview cached by source sha256. Lives outside
         the blob tree so it is never treated as an orphan blob by the GC."""
@@ -145,6 +150,9 @@ class LocalStorageBackend(StorageBackend):
         return str(settings.data_dir / slug / f"v{version}" / filename)
 
     def thumbnail_key(self, file_id: int) -> str:
+        return str(settings.thumb_dir / f"{file_id}.webp")
+
+    def legacy_thumbnail_key(self, file_id: int) -> str:
         return str(settings.thumb_dir / f"{file_id}.png")
 
     def stl_cache_key(self, sha256: str) -> str:
@@ -345,6 +353,9 @@ class S3StorageBackend(StorageBackend):
         return f"{self._prefix()}files/{slug}/v{version}/{filename}"
 
     def thumbnail_key(self, file_id: int) -> str:
+        return f"{self._prefix()}thumbs/{file_id}.webp"
+
+    def legacy_thumbnail_key(self, file_id: int) -> str:
         return f"{self._prefix()}thumbs/{file_id}.png"
 
     def stl_cache_key(self, sha256: str) -> str:

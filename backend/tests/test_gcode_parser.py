@@ -53,12 +53,14 @@ class TestParse:
         assert result["filament_cost"] == 0.35
         assert result["material_type"] == "PLA"
         assert result["material_brand"] == "Generic PLA"
+        assert result["printer_preset_name"] is None
 
     def test_parse_prusaslicer_fixture(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "prusaslicer_sample.gcode"
         result = parse(fixture)
         assert result["slicer_name"] == "PrusaSlicer"
         assert result["printer_model"] == "MK4 Input Shaper 0.4 nozzle"
+        assert result["printer_preset_name"] == "MK4 Input Shaper 0.4 nozzle"
         assert result["infill_percent"] == 20.0
         assert result["estimated_time_s"] == 3372
         assert result["filament_length_mm"] == 3350.2

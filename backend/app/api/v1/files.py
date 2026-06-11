@@ -24,6 +24,7 @@ from app.db.models import File, FileType, Model
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestResponse
+from app.services import thumbnail
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
 
@@ -108,19 +109,25 @@ def download_direct(file_id: int, session: Session = Depends(get_session)):
 
 @router.get(
     "/{file_id}/thumbnail",
-    summary="Get the PNG thumbnail extracted from the file (if any)",
+    summary="Get the thumbnail extracted from the file (if any)",
 )
 def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
     f = get_or_404(session, File, file_id, "file_not_found")  # noqa: F841
-    thumb_key = get_backend().thumbnail_key(file_id)
-    if not get_backend().exists(thumb_key):
-        raise HTTPException(status_code=404, detail="thumbnail_not_found")
+    backend = get_backend()
+    thumb_key = backend.thumbnail_key(file_id)
+    filename, media_type = f"{file_id}.webp", "image/webp"
+    if not backend.exists(thumb_key):
+        # Thumbnails written before the WebP switch are still PNG on disk.
+        thumb_key = backend.legacy_thumbnail_key(file_id)
+        filename, media_type = f"{file_id}.png", "image/png"
+        if not backend.exists(thumb_key):
+            raise HTTPException(status_code=404, detail="thumbnail_not_found")
     # Thumbnails only change on explicit rebuilds; let the browser cache them
     # so the library grid doesn't re-request every image on each visit.
     return _serve_file(
         thumb_key,
-        f"{file_id}.png",
-        "image/png",
+        filename,
+        media_type,
         headers={"Cache-Control": "public, max-age=3600"},
     )
 
@@ -245,7 +252,10 @@ def _run_thumbnail_rebuild(
 
                 assert mesh_file.id is not None
                 thumb_key = backend.thumbnail_key(mesh_file.id)
-                backend.write_bytes(thumb_bytes, thumb_key)
+                backend.write_bytes(thumbnail.to_webp(thumb_bytes), thumb_key)
+                # Rebuilt thumbnails are WebP; drop the stale PNG variant so
+                # the serving fallback never picks it up again.
+                backend.delete(backend.legacy_thumbnail_key(mesh_file.id))
                 m.thumbnail_path = thumb_key
                 m.thumbnail_file_id = mesh_file.id
                 session.add(m)

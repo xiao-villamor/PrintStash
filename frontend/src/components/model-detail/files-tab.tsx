@@ -6,6 +6,10 @@ import { getAssetUrl } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { FileRead } from "@/types";
 
+import { SlicerOpenButton } from "@/components/slicer-open-button";
+
+const SLICEABLE_TYPES = new Set(["stl", "3mf", "obj"]);
+
 export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
   return (
     <section>
@@ -31,13 +35,18 @@ export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
                 </p>
               </div>
             </div>
-            <a
-              href={getAssetUrl(`/api/v1/files/${f.id}/download`)}
-              download={f.original_filename}
-              className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors flex-shrink-0"
-            >
-              <Download className="h-5 w-5" />
-            </a>
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              {SLICEABLE_TYPES.has(f.file_type) && (
+                <SlicerOpenButton fileId={f.id} />
+              )}
+              <a
+                href={getAssetUrl(`/api/v1/files/${f.id}/download`)}
+                download={f.original_filename}
+                className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
+              >
+                <Download className="h-5 w-5" />
+              </a>
+            </div>
           </div>
         ))}
       </div>

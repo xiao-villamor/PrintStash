@@ -1,6 +1,6 @@
 [project]
 name = "printstash"
-version = "0.1.0"
+version = "0.2.0"
 description = "PrintStash — self-hosted 3D printing asset manager"
 requires-python = ">=3.11"
 dependencies = [

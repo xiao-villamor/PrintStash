@@ -1,0 +1,119 @@
+[tools]
+node = "24"
+python = "3.11"
+pnpm = "10"
+uv = "latest"
+
+[env]
+# Backend
+VAULT_DB_URL = "sqlite:///./dev.sqlite"
+VAULT_DATA_DIR = "./_data/files"
+VAULT_THUMB_DIR = "./_data/thumbs"
+VAULT_API_KEY = "devkey"
+VAULT_JWT_SECRET = "dev-jwt-secret"
+VAULT_LOG_LEVEL = "DEBUG"
+
+# Frontend
+NEXT_PUBLIC_API_URL = "http://localhost:8000"
+NEXT_PUBLIC_WS_URL = "ws://localhost:8000"
+
+[tasks."corepack:enable"]
+description = "Enable corepack for pnpm/yarn shims"
+run = "corepack enable"
+
+[tasks.install]
+description = "Install runtimes + all project dependencies"
+depends = ["corepack:enable"]
+run = """
+  cd frontend && pnpm install
+  cd backend && uv sync --all-extras
+  cd frontend && pnpm exec playwright install chromium
+  """
+
+[tasks.dev]
+description = "Start full dev stack (uvicorn + next dev)"
+depends = ["install"]
+run = "bash dev_start.sh"
+
+[tasks."dev:backend"]
+description = "Start backend only"
+run = """
+  cd backend && uv run uvicorn app.main:app --port 8000 --reload
+  """
+
+[tasks."dev:frontend"]
+description = "Start frontend only"
+run = """
+  cd frontend && pnpm dev
+  """
+
+[tasks."db:postgres"]
+description = "Start optional postgres (port 5432)"
+run = "docker compose --profile postgres up -d postgres"
+
+[tasks."db:migrate"]
+description = "Run alembic migrations"
+run = "cd backend && uv run alembic upgrade head"
+
+[tasks."db:revision"]
+description = "Generate alembic migration"
+run = "cd backend && uv run alembic revision --autogenerate -m"
+
+[tasks."s3:minio"]
+description = "Start optional minio S3 (ports 9000/9001)"
+run = "docker compose --profile s3 up -d minio"
+
+[tasks."docker:up"]
+description = "Start full production stack"
+run = "docker compose up -d"
+
+[tasks."docker:down"]
+description = "Stop production stack"
+run = "docker compose down"
+
+[tasks.lint]
+description = "Run all linters"
+run = """
+  cd backend && uv run ruff check . && uv run ruff format --check .
+  cd frontend && pnpm lint
+  """
+
+[tasks."lint:fix"]
+description = "Auto-fix linter issues"
+run = """
+  cd backend && uv run ruff check --fix . && uv run ruff format .
+  """
+
+[tasks.test]
+description = "Run all tests"
+run = """
+  cd backend && uv run pytest
+  cd frontend && pnpm test:e2e
+  """
+
+[tasks."test:backend"]
+description = "Run backend tests only"
+run = "cd backend && uv run pytest"
+
+[tasks."test:e2e"]
+description = "Run frontend E2E tests"
+run = "cd frontend && pnpm test:e2e"
+
+[tasks.typecheck]
+description = "Run type checking (tsc --noEmit)"
+run = "cd frontend && pnpm exec tsc --noEmit"
+
+[tasks.clean]
+description = "Clean all build artifacts"
+run = """
+  rm -rf frontend/.next frontend/node_modules frontend/playwright-report frontend/test-results
+  rm -rf backend/.venv backend/__pycache__ backend/**/__pycache__
+  """
+
+[tasks.setup]
+description = "First-run: install tools + deps + db + browsers"
+depends = ["install"]
+run = """
+  cd backend && uv run alembic upgrade head
+  echo "Setup complete. Run 'mise run dev' to start."
+  """

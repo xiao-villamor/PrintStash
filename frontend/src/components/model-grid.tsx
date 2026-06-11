@@ -103,6 +103,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const [models, setModels] = useState<ModelListItem[]>(initial?.models ?? []);
+  // Unfiltered model list for the outliner tree. The grid's `models` shrink to
+  // the active collection/tag filter; feeding those to the sidebar made other
+  // folders' leaves vanish (tree branches appeared to collapse on selection).
+  const [outlinerModels, setOutlinerModels] = useState<ModelListItem[]>(initial?.models ?? []);
   const [collections, setCollections] = useState<CollectionRead[]>(initial?.collections ?? []);
   const [tags, setTags] = useState<TagRead[]>(initial?.tags ?? []);
   const [printers, setPrinters] = useState<PrinterRead[]>(initial?.printers ?? []);
@@ -180,6 +184,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    let alive = true;
+    listModels({ limit: 500 })
+      .then((data) => { if (alive) setOutlinerModels(data); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [reloadKey]);
 
   useEffect(() => {
     if (skipFirstFetch.current) {
@@ -331,7 +343,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
       {/* Stitch layout: filter sidebar + main content */}
       <FilterSidebar
-        collections={collections} models={models} tags={tags} printers={printers}
+        collections={collections} models={outlinerModels} tags={tags} printers={printers}
         selectedCollection={selectedCollection} selectedTags={selectedTags}
         selectedPrinterId={selectedPrinterId} selectedPrinterPresence={selectedPrinterPresence}
         onCollectionChange={handleCollectionChange} onTagsChange={setSelectedTags}

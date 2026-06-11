@@ -146,17 +146,20 @@ def upsert_detected_printer_profile(
     if printer_model is None:
         return None
 
+    # The full slicer preset name ("Ender-3 V3 SE 0.4 nozzle") names the
+    # profile; the bare machine model is kept in printer_model.
+    preset_name = _clean(meta.get("printer_preset_name")) or printer_model
     slicer_name = _clean(meta.get("slicer_name"))
     nozzle_diameter_mm = _to_float(meta.get("nozzle_diameter_mm"))
     profile = _find_printer_profile(
         session,
-        name=printer_model,
+        name=preset_name,
         printer_model=printer_model,
     )
 
     if profile is None:
         profile = PrinterProfile(
-            name=printer_model,
+            name=preset_name,
             printer_model=printer_model,
             slicer_name=slicer_name,
             nozzle_diameter_mm=nozzle_diameter_mm,
@@ -167,6 +170,11 @@ def upsert_detected_printer_profile(
         return profile
 
     changed = False
+    if preset_name != printer_model and profile.name.lower() == printer_model.lower():
+        # Auto-created before the preset name was parsed — upgrade the default
+        # name, but never touch a name the user has customised.
+        profile.name = preset_name
+        changed = True
     if profile.printer_model is None:
         profile.printer_model = printer_model
         changed = True

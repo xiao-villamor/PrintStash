@@ -18,10 +18,6 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "PrintStash",
   description: "Self-hosted asset management for 3D printing workflows",
-  icons: {
-    icon: "/icon.svg",
-    shortcut: "/icon.svg",
-  },
 };
 
 export default function RootLayout({
@@ -35,7 +31,7 @@ export default function RootLayout({
         {/* Pre-paint theme application to avoid FOUC. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('printstash.theme')||localStorage.getItem('nexus3d.theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('printstash.theme')||localStorage.getItem('nexus3d.theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(t==='dark'){document.documentElement.classList.add('dark');}var l=document.createElement('link');l.id='app-favicon';l.rel='icon';l.type='image/svg+xml';l.href=t==='dark'?'/icon-dark.svg':'/icon-light.svg';document.head.appendChild(l);}catch(e){}})();`,
           }}
         />
       </head>

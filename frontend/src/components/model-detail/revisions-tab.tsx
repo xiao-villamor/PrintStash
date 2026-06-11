@@ -24,6 +24,7 @@ import {
 import { revisionStatusClass, revisionStatusLabel } from "./presentation";
 import { RevisionCompare } from "./revision-compare";
 import { useRevisionUpdater } from "./use-revision-updater";
+import { SlicerOpenButton } from "@/components/slicer-open-button";
 
 export function RevisionsTab({
   modelId,
@@ -146,7 +147,7 @@ export function RevisionsTab({
                       </p>
                     )}
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-0.5 shrink-0">
                     <button
                       onClick={() => startRevisionEdit(f)}
                       disabled={!auth.isAuthenticated}
@@ -155,6 +156,7 @@ export function RevisionsTab({
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
+                    <SlicerOpenButton fileId={f.id} size="sm" />
                     <a
                       href={getAssetUrl(`/api/v1/files/${f.id}/download`)}
                       download={f.original_filename}

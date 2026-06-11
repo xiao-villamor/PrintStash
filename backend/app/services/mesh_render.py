@@ -277,9 +277,7 @@ def _front_rotation_for_thin_axis(thin_axis: int, np):
 
     # Tilt: rotate 25° around the screen-X axis so the far edge dips toward the
     # viewer, making depth recesses and raised features visible.
-    tilt_mat = np.array(
-        [[1, 0, 0], [0, ct, -st], [0, st, ct]], dtype=np.float64
-    )
+    tilt_mat = np.array([[1, 0, 0], [0, ct, -st], [0, st, ct]], dtype=np.float64)
     return tilt_mat @ base
 
 

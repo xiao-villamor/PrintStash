@@ -7,6 +7,7 @@ import {
   Download,
   Eraser,
   HardDrive,
+  Info,
   KeyRound,
   Copy,
   Loader2,
@@ -50,6 +51,7 @@ import {
   writeCardMetrics,
 } from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
+import { CHANGELOG, GITHUB_REPO } from "@/lib/changelog";
 import type { ApiKeyRead, TrashedModelRead, VaultStatsRead } from "@/types";
 
 interface HealthResponse {
@@ -58,7 +60,7 @@ interface HealthResponse {
   version: string;
 }
 
-type SettingsSection = "overview" | "access" | "storage" | "design" | "trash";
+type SettingsSection = "overview" | "access" | "storage" | "design" | "trash" | "about";
 
 const SETTINGS_SECTIONS: {
   id: SettingsSection;
@@ -70,7 +72,9 @@ const SETTINGS_SECTIONS: {
   { id: "storage", label: "Storage", icon: HardDrive },
   { id: "design", label: "Design", icon: Palette },
   { id: "trash", label: "Trash", icon: Trash2 },
+  { id: "about", label: "About", icon: Info },
 ];
+
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "...";
@@ -818,6 +822,86 @@ export function SettingsPanel() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSection === "about" && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
+          {/* App identity */}
+          <div className="lg:col-span-2 bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 dark:bg-orange-600 text-white">
+                <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-foreground tracking-tight">PrintStash</h3>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                    v{health?.version ?? "0.2.0"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Self-hosted asset management for 3D printing workflows.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={`https://github.com/${GITHUB_REPO}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
+                >
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden>
+                    <path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 4.9 18 4.9c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z" />
+                  </svg>
+                  GitHub
+                </a>
+                <a
+                  href={`https://github.com/${GITHUB_REPO}/stargazers`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  title="Star on GitHub"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element -- remote shields.io badge */}
+                  <img
+                    src={`https://img.shields.io/github/stars/${GITHUB_REPO}?style=flat&logo=github&label=Stars&color=2563eb`}
+                    alt="GitHub stars"
+                    className="h-[22px]"
+                  />
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Changelog */}
+          <div className="lg:col-span-2 bg-card border border-border rounded">
+            <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border dark:bg-[var(--surface-container-high)] rounded-t">
+              <h3 className="text-sm font-semibold text-foreground">Version history</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">What changed in each release</p>
+            </div>
+            <div className="divide-y divide-border">
+              {CHANGELOG.map((release) => (
+                <div key={release.version} className="px-4 sm:px-6 lg:px-8 py-5 grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-3">
+                  <div className="flex items-start gap-2">
+                    <span className="rounded bg-blue-50 dark:bg-orange-950/50 px-2 py-0.5 text-xs font-semibold text-blue-700 dark:text-orange-400">
+                      v{release.version}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground pt-0.5">{release.date}</span>
+                  </div>
+                  <ul className="space-y-1.5">
+                    {release.changes.map((change, i) => (
+                      <li key={i} className="flex gap-2 text-xs text-muted-foreground">
+                        <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-blue-500 dark:bg-orange-500" />
+                        <span>{change}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </div>
           </div>
         </div>
