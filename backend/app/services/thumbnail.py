@@ -12,15 +12,18 @@ from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-_WEBP_QUALITY = 82
-
 
 def to_webp(data: bytes) -> bytes:
-    """Re-encode image bytes (PNG from slicers/rasteriser) as lossy WebP.
+    """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
 
-    Single conversion seam for every thumbnail write. Returns the input
-    unchanged when it is already WebP or when re-encoding fails — a stored
-    thumbnail in the original format beats no thumbnail.
+    Single conversion seam for every thumbnail write. Lossless keeps the
+    output pixel-identical to the source — no colour shift, no edge bleed on
+    the transparent background — while still shrinking these flat-shaded
+    renders below the original PNG. ``exact=True`` preserves the RGB of fully
+    transparent pixels so the encoder can't recolour hidden areas.
+
+    Returns the input unchanged when it is already WebP or when re-encoding
+    fails — a stored thumbnail in the original format beats no thumbnail.
     """
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return data
@@ -31,7 +34,7 @@ def to_webp(data: bytes) -> bytes:
             if img.mode not in ("RGB", "RGBA"):
                 img = img.convert("RGBA")
             buf = io.BytesIO()
-            img.save(buf, format="WEBP", quality=_WEBP_QUALITY, method=6)
+            img.save(buf, format="WEBP", lossless=True, exact=True, method=6)
             return buf.getvalue()
     except Exception:
         logger.warning("thumbnail: webp conversion failed", exc_info=True)
