@@ -66,7 +66,7 @@ function DraggableModelLeaf({
       {...listeners}
       {...attributes}
       onDoubleClick={() => router.push(`/models/${model.id}`)}
-      className={`flex items-center gap-2 rounded px-2 py-1 text-[11px] cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
+      className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
         isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
       }`}
       title={model.name}
@@ -194,7 +194,7 @@ function CollectionTreeRow({
           )}
           <button type="button" onPointerDown={(e) => e.stopPropagation()}
             onClick={() => onSelect(isSelected ? null : node.cat.path)}
-            className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-xs font-medium truncate"
+            className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
             title={node.cat.path} {...attributes}>
             {isOpen || isSelected
               ? <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 dark:text-orange-500" />
@@ -218,7 +218,7 @@ function CollectionTreeRow({
               <Trash2 className="h-2.5 w-2.5" />
             </button>
           )}
-          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-[10px] font-medium text-muted-foreground">
+          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-[11px] font-medium text-muted-foreground">
             {node.cat.model_count}
           </span>
         </div>
@@ -563,7 +563,7 @@ export function FilterSidebarContent({
         {/* Collections */}
         <section>
           <div className="flex items-center justify-between mb-2 pl-2 pr-1">
-            <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
               Collections
             </h3>
             <button
@@ -614,7 +614,7 @@ export function FilterSidebarContent({
 
         {/* Printer */}
         <section>
-          <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
             Printer
           </h3>
           <div className="space-y-0.5">
@@ -699,7 +699,7 @@ export function FilterSidebarContent({
         {/* Tags */}
         {tags.length > 0 && (
           <section>
-            <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
               Tags
             </h3>
             <div className="relative mb-2">
@@ -709,7 +709,7 @@ export function FilterSidebarContent({
                 placeholder="Filter tags..."
                 value={tagFilter}
                 onChange={(e) => { setTagFilter(e.target.value); setShowAllTags(false); }}
-                className="w-full pl-7 pr-2 py-1 text-xs border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-blue-500 dark:border-orange-500 transition-colors"
+                className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-blue-500 dark:border-orange-500 transition-colors"
               />
               {tagFilter && (
                 <button
@@ -732,7 +732,7 @@ export function FilterSidebarContent({
                       type="button"
                       key={t.id}
                       onClick={() => toggleTag(t.slug)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-[10px] tracking-wider uppercase border transition-colors ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-[11px] tracking-wider uppercase border transition-colors ${
                         active
                           ? "border-blue-500 dark:border-orange-500 bg-blue-50 dark:bg-orange-950/50 text-blue-700 dark:text-orange-400"
                           : "border-border text-muted-foreground hover:border-border hover:bg-muted"
@@ -821,7 +821,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
             <Search className="h-3.5 w-3.5" />
           </span>
           <input
-            className="block w-full pl-7 pr-6 py-1 text-xs border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500"
+            className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500"
             placeholder="Filter outliner..."
             type="text"
             value={outlinerFilter}

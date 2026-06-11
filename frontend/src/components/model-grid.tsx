@@ -131,21 +131,39 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const skipFirstFetch = useRef(!!initial);
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
 
-  // Navigate into/out of a collection: clear stale models immediately so the
-  // old cards don't flash for the 200 ms debounce window.
-  function handleCollectionChange(path: string | null) {
-    if (path !== selectedCollection) {
+  // Collection selection lives in the URL (`?c=<path>`) so it resets when the
+  // user navigates away (e.g. to Settings) and clicks "Vault" again — that link
+  // points at "/" with no param. Without this, Next's router cache kept the
+  // component mounted and the old folder stuck around.
+  const collectionParam = searchParams.get("c");
+  useEffect(() => {
+    const next = collectionParam || null;
+    if (next !== selectedCollection) {
+      // Clear stale models immediately so old cards don't flash for the 200 ms
+      // debounce window before the new collection loads.
       setModels([]);
       setLoading(true);
       hasLoadedModels.current = false;
+      setSelectedCollection(next);
     }
-    setSelectedCollection(path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collectionParam]);
+
+  function handleCollectionChange(path: string | null) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (path) params.set("c", path);
+    else params.delete("c");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
 
   useEffect(() => {
     if (searchParams.get("upload") === "1") {
       setUploadOpen(true);
-      router.replace("/", { scroll: false });
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("upload");
+      const qs = params.toString();
+      router.replace(qs ? `/?${qs}` : "/", { scroll: false });
     }
   }, [searchParams, router]);
 
@@ -357,7 +375,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
       <main className="flex-1 overflow-y-auto bg-background flex flex-col">
         {/* Breadcrumb */}
-        <nav className="px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-xs tracking-tight">
+        <nav className="px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-sm tracking-tight">
           {selectedCollection && breadcrumbs.length > 0 ? (
             <>
               <button

@@ -83,8 +83,8 @@ function MetricCell({ id, model, isLast }: { id: CardMetricId; model: ModelListI
   const cfg = METRIC_CONFIG[id];
   return (
     <div className={`py-2 px-1 text-center bg-muted/50 ${isLast ? "" : "border-r border-border"}`}>
-      <p className="text-[7px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">{cfg.abbr}</p>
-      <p className="text-[10px] font-bold text-foreground font-mono truncate">{cfg.getValue(model)}</p>
+      <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">{cfg.abbr}</p>
+      <p className="text-[11px] font-bold text-foreground font-mono truncate">{cfg.getValue(model)}</p>
     </div>
   );
 }
@@ -137,7 +137,7 @@ function ModelCardInner({ model, metrics }: { model: ModelListItem; metrics: Car
 
         {/* Title + revision */}
         <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
-          <h4 className="text-xs font-bold text-foreground uppercase tracking-tight truncate leading-tight">
+          <h4 className="text-sm font-bold text-foreground uppercase tracking-tight truncate leading-tight">
             {model.name}
           </h4>
           <RevisionBadge
@@ -148,7 +148,7 @@ function ModelCardInner({ model, metrics }: { model: ModelListItem; metrics: Car
 
         {/* Subtitle */}
         {(ps?.slicer_name || hasPrinter || ps?.material_type) && (
-          <p className="px-3 pb-1 text-[10px] text-muted-foreground truncate">
+          <p className="px-3 pb-1 text-xs text-muted-foreground truncate">
             {[printerPresence[0]?.printer_name, ps?.material_type, ps?.slicer_name]
               .filter(Boolean)
               .join(" · ")}
@@ -168,35 +168,35 @@ function ModelCardInner({ model, metrics }: { model: ModelListItem; metrics: Car
         <div className="px-3 pb-3 mt-auto flex items-end justify-between gap-2 border-t border-border pt-2">
           <div className="flex flex-wrap gap-1.5 min-w-0">
             {model.collection && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-[11px] font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
                 {model.collection}
               </span>
             )}
             {ps?.slicer_name && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-[11px] font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
                 GCODE
               </span>
             )}
-            <span className="px-2 py-0.5 bg-muted border border-border rounded text-[11px] font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+            <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
               {model.file_count} {model.file_count === 1 ? "File" : "Files"}
             </span>
             {ps?.material_type && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-[11px] font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
                 {ps.material_type}
               </span>
             )}
             {model.tags.slice(0, 2).map((tag) => (
-              <span key={tag} className="px-2 py-0.5 bg-blue-50 dark:bg-orange-950/40 border border-blue-200 dark:border-orange-800 rounded text-[11px] font-mono font-semibold text-blue-700 dark:text-orange-400 uppercase tracking-tight">
+              <span key={tag} className="px-2 py-0.5 bg-blue-50 dark:bg-orange-950/40 border border-blue-200 dark:border-orange-800 rounded text-xs font-mono font-semibold text-blue-700 dark:text-orange-400 uppercase tracking-tight">
                 {tag}
               </span>
             ))}
             {model.tags.length > 2 && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-[11px] font-mono font-semibold text-muted-foreground">
+              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground">
                 +{model.tags.length - 2}
               </span>
             )}
           </div>
-          <p className="text-[10px] text-muted-foreground font-mono uppercase shrink-0">
+          <p className="text-[11px] text-muted-foreground font-mono uppercase shrink-0">
             {timeAgoShort(model.updated_at)}
           </p>
         </div>
