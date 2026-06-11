@@ -111,7 +111,8 @@ def list_models(
         None, description="Collection path e.g. 'functional/brackets'"
     ),
     direct: bool = Query(
-        False, description="Only return models directly in the collection (or at root if no collection)"
+        False,
+        description="Only return models directly in the collection (or at root if no collection)",
     ),
     tag: Optional[List[str]] = Query(
         None, description="Tag slug; repeat for AND-filter"

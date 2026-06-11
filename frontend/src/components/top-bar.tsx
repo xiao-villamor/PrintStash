@@ -8,7 +8,7 @@ import {
   Box,
   CheckCircle2,
   ChevronDown,
-  DollarSign,
+  SlidersHorizontal,
   LogOut,
   Loader2,
   Printer,
@@ -221,7 +221,7 @@ function ProfileMenu({
   const items = [
     { href: "/", label: "Vault", icon: Box },
     { href: "/printers", label: "Printers", icon: Printer },
-    { href: "/profiles", label: "Profiles", icon: DollarSign },
+    { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
     { href: "/settings", label: "Settings", icon: Settings },
   ];
 

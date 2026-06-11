@@ -397,7 +397,7 @@ export function TaxonomyManager() {
               {tags.map((t) => (
                 <span
                   key={t.id}
-                  className="inline-flex items-center gap-1.5 bg-muted text-foreground px-2.5 py-1.5 rounded text-xs uppercase tracking-wider group"
+                  className="inline-flex items-center gap-1.5 bg-muted text-foreground pl-2.5 pr-1.5 py-1.5 rounded text-xs uppercase tracking-wider"
                 >
                   {t.name}
                   <span className="text-[10px] text-muted-foreground">
@@ -406,9 +406,19 @@ export function TaxonomyManager() {
                   <button
                     onClick={() => {
                       if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+                      if (
+                        t.model_count > 0 &&
+                        !window.confirm(
+                          `Delete tag "${t.name}"? It will be removed from ${t.model_count} model${t.model_count === 1 ? "" : "s"}.`,
+                        )
+                      ) {
+                        return;
+                      }
                       handleDeleteTag(t.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:text-red-600"
+                    title={`Delete tag "${t.name}"`}
+                    aria-label={`Delete tag ${t.name}`}
+                    className="rounded p-0.5 text-muted-foreground/60 transition-colors hover:bg-red-500/10 hover:text-red-600"
                   >
                     <X className="h-3 w-3" />
                   </button>

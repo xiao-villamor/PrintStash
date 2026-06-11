@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, DollarSign, FolderTree, Printer, Settings } from "lucide-react";
+import { Box, SlidersHorizontal, FolderTree, Printer, Settings } from "lucide-react";
 
 const items = [
   { href: "/", label: "Vault", icon: Box },
   { href: "/printers", label: "Printers", icon: Printer },
-  { href: "/profiles", label: "Profiles", icon: DollarSign },
+  { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
   { href: "/organize", label: "Catalog", icon: FolderTree },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

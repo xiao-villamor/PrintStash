@@ -127,6 +127,22 @@ def persist_artifact(
     backend.move_in(staged_path, dest_key)
     size_bytes = backend.stat_size(dest_key)
 
+    if file_type == FileType.GCODE and not is_recommended:
+        # A model with G-code always has exactly one recommended revision:
+        # the first upload claims the marker unless one already exists.
+        has_recommended = (
+            session.exec(
+                select(File).where(
+                    File.model_id == model.id,
+                    File.file_type == FileType.GCODE,
+                    File.is_recommended == True,  # noqa: E712
+                    live(File),
+                )
+            ).first()
+            is not None
+        )
+        is_recommended = not has_recommended
+
     file_row = File(
         model_id=model.id,
         path=dest_key,
@@ -147,13 +163,16 @@ def persist_artifact(
 
     if thumb_bytes:
         thumb_key = backend.thumbnail_key(file_row.id)
-        backend.write_bytes(thumb_bytes, thumb_key)
+        backend.write_bytes(thumbnail.to_webp(thumb_bytes), thumb_key)
         if overwrite_thumbnail or not model.thumbnail_path:
             model.thumbnail_path = thumb_key
             model.thumbnail_file_id = file_row.id
             session.add(model)
 
-    md = Metadata(file_id=file_row.id, **meta)
+    # The parser may carry detection-only keys (e.g. printer_preset_name)
+    # that have no Metadata column.
+    md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
+    md = Metadata(file_id=file_row.id, **md_fields)
     session.add(md)
     session.commit()
     session.refresh(file_row)
@@ -410,6 +429,8 @@ def add_gcode_revision_to_model(
         is_recommended=is_recommended,
     )
     assert file_row.id is not None
+
+    upsert_detected_profiles(session, meta)
 
     if is_recommended:
         other_gcode = session.exec(

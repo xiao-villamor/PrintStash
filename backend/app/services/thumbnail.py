@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -10,6 +11,32 @@ from typing import List, Optional, Tuple
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_WEBP_QUALITY = 82
+
+
+def to_webp(data: bytes) -> bytes:
+    """Re-encode image bytes (PNG from slicers/rasteriser) as lossy WebP.
+
+    Single conversion seam for every thumbnail write. Returns the input
+    unchanged when it is already WebP or when re-encoding fails — a stored
+    thumbnail in the original format beats no thumbnail.
+    """
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return data
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as img:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA")
+            buf = io.BytesIO()
+            img.save(buf, format="WEBP", quality=_WEBP_QUALITY, method=6)
+            return buf.getvalue()
+    except Exception:
+        logger.warning("thumbnail: webp conversion failed", exc_info=True)
+        return data
+
 
 _BEGIN_RE = re.compile(r";\s*thumbnail begin\s+(\d+)x(\d+)\s+(\d+)", re.IGNORECASE)
 _END_RE = re.compile(r";\s*thumbnail end", re.IGNORECASE)

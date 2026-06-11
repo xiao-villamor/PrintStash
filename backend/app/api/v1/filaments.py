@@ -17,6 +17,7 @@ from app.schemas.models import (
     FilamentProfileRead,
     FilamentProfileUpdate,
 )
+from app.services import model_views
 
 router = APIRouter(prefix="/filament-profiles", tags=["filament-profiles"])
 
@@ -28,8 +29,8 @@ def _clean(value: str | None) -> str | None:
     return stripped or None
 
 
-def _read(profile: FilamentProfile) -> FilamentProfileRead:
-    return FilamentProfileRead(**profile.model_dump())
+def _read(profile: FilamentProfile, usage_count: int = 0) -> FilamentProfileRead:
+    return FilamentProfileRead(**profile.model_dump(), usage_count=usage_count)
 
 
 @router.get(
@@ -43,7 +44,8 @@ def list_filament_profiles(
     profiles = session.exec(
         select(FilamentProfile).order_by(FilamentProfile.name.asc())  # type: ignore[attr-defined]
     ).all()
-    return [_read(profile) for profile in profiles]
+    usage = model_views.filament_profile_usage(session)
+    return [_read(profile, usage.get(profile.id or 0, 0)) for profile in profiles]
 
 
 @router.post(

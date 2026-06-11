@@ -176,6 +176,49 @@ def _matching_filament_profile(
     return None
 
 
+def _live_file_metadata(session: Session) -> list[Metadata]:
+    """Metadata rows attached to live (non-trashed) files."""
+    return list(
+        session.exec(
+            select(Metadata).join(File, File.id == Metadata.file_id).where(live(File))
+        ).all()
+    )
+
+
+def filament_profile_usage(session: Session) -> dict[int, int]:
+    """Live-file count per filament profile id, using the same brand/type
+    matching that drives cost estimates."""
+    profiles = _load_filament_profiles(session)
+    counts: dict[int, int] = defaultdict(int)
+    for metadata in _live_file_metadata(session):
+        profile = _matching_filament_profile(profiles, metadata)
+        if profile is not None and profile.id is not None:
+            counts[profile.id] += 1
+    return dict(counts)
+
+
+def printer_profile_usage(session: Session) -> dict[int, int]:
+    """Live-file count per printer profile id, matched on preset name or
+    bare printer model."""
+    from app.db.models import PrinterProfile
+
+    profiles = list(session.exec(select(PrinterProfile)).all())
+    counts: dict[int, int] = defaultdict(int)
+    for metadata in _live_file_metadata(session):
+        key = _normalise_profile_key(metadata.printer_model)
+        if key is None:
+            continue
+        for profile in profiles:
+            if key in (
+                _normalise_profile_key(profile.name),
+                _normalise_profile_key(profile.printer_model),
+            ):
+                if profile.id is not None:
+                    counts[profile.id] += 1
+                break
+    return dict(counts)
+
+
 def metadata_read(
     session: Session,
     metadata: Metadata,

@@ -569,7 +569,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   filteredTags: editFilteredTags,
                   canCreate: editCanCreate,
                 }}
-                recommendedFile={recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? null}
+                recommendedFile={recommendedGcode}
                 hasGcode={hasGcode}
                 revisionSaving={revisionUpdater.saving}
                 onSend={requestSend}

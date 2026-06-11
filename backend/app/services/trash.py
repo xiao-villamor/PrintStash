@@ -72,6 +72,7 @@ def hard_delete_model(session: Session, model: Model) -> None:
         backend.delete(file_row.path)
         if file_row.id is not None:
             backend.delete(backend.thumbnail_key(file_row.id))
+            backend.delete(backend.legacy_thumbnail_key(file_row.id))
 
     model.thumbnail_file_id = None
     model.thumbnail_path = None

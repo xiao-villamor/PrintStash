@@ -17,6 +17,7 @@ from app.schemas.models import (
     PrinterProfileRead,
     PrinterProfileUpdate,
 )
+from app.services import model_views
 
 router = APIRouter(prefix="/printer-profiles", tags=["printer-profiles"])
 
@@ -28,8 +29,8 @@ def _clean(value: str | None) -> str | None:
     return stripped or None
 
 
-def _read(profile: PrinterProfile) -> PrinterProfileRead:
-    return PrinterProfileRead(**profile.model_dump())
+def _read(profile: PrinterProfile, usage_count: int = 0) -> PrinterProfileRead:
+    return PrinterProfileRead(**profile.model_dump(), usage_count=usage_count)
 
 
 @router.get(
@@ -43,7 +44,8 @@ def list_printer_profiles(
     profiles = session.exec(
         select(PrinterProfile).order_by(PrinterProfile.name.asc())  # type: ignore[attr-defined]
     ).all()
-    return [_read(profile) for profile in profiles]
+    usage = model_views.printer_profile_usage(session)
+    return [_read(profile, usage.get(profile.id or 0, 0)) for profile in profiles]
 
 
 @router.post(

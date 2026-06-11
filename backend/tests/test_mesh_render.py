@@ -8,6 +8,14 @@ import numpy as np
 from app.services import mesh_render
 
 
+def _tilt_matrix() -> np.ndarray:
+    # Flat meshes are viewed face-on but tipped 25° around screen-X
+    # (see mesh_render._front_rotation_for_thin_axis).
+    tilt = np.radians(25.0)
+    ct, st = np.cos(tilt), np.sin(tilt)
+    return np.array([[1, 0, 0], [0, ct, -st], [0, st, ct]], dtype=np.float64)
+
+
 def test_flat_z_mesh_uses_front_view_like_stl_viewer() -> None:
     verts = np.array(
         [
@@ -22,9 +30,10 @@ def test_flat_z_mesh_uses_front_view_like_stl_viewer() -> None:
     rotation = mesh_render._select_view_rotation(verts, np)
     view = verts @ rotation.T
 
-    np.testing.assert_allclose(rotation, np.diag([1.0, 1.0, -1.0]))
-    np.testing.assert_allclose(view[:, :2], verts[:, :2])
-    np.testing.assert_allclose(view[:, 2], -verts[:, 2])
+    expected = _tilt_matrix() @ np.diag([1.0, 1.0, -1.0])
+    np.testing.assert_allclose(rotation, expected, atol=1e-12)
+    # Screen-X is untouched by the tilt: the broad face still spans the view.
+    np.testing.assert_allclose(view[:, 0], verts[:, 0])
 
 
 def test_cube_keeps_isometric_thumbnail_view() -> None:
@@ -72,16 +81,15 @@ def test_flat_x_mesh_uses_broad_face_view() -> None:
 
     rotation = mesh_render._select_view_rotation(verts, np)
 
-    np.testing.assert_allclose(
-        rotation,
-        np.array(
-            [
-                [0.0, 1.0, 0.0],
-                [0.0, 0.0, 1.0],
-                [-1.0, 0.0, 0.0],
-            ]
-        ),
+    expected = _tilt_matrix() @ np.array(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+        ],
+        dtype=np.float64,
     )
+    np.testing.assert_allclose(rotation, expected, atol=1e-12)
 
 
 def test_front_facing_flat_mesh_does_not_fall_back_to_silhouette(monkeypatch) -> None:

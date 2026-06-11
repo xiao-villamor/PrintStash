@@ -28,6 +28,11 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*printer_settings_id\s*=\s*(.+)", re.IGNORECASE),
         re.compile(r";\s*machine_name\s*=\s*(.+)", re.IGNORECASE),
     ),
+    # Full slicer preset name (e.g. "Ender-3 V3 SE 0.4 nozzle"), as opposed to
+    # the bare machine model above. Detection-only — not a Metadata column.
+    "printer_preset_name": (
+        re.compile(r";\s*printer_settings_id\s*=\s*(.+)", re.IGNORECASE),
+    ),
     "nozzle_diameter_mm": (
         re.compile(r";\s*nozzle_diameter\s*=\s*([\d.]+)", re.IGNORECASE),
         re.compile(r";\s*nozzle diameter\s*[:=]\s*([\d.]+)", re.IGNORECASE),
@@ -203,6 +208,7 @@ def parse(path: Path) -> Dict[str, Any]:
         "filament_cost": None,
         "material_type": None,
         "material_brand": None,
+        "printer_preset_name": None,
     }
 
     try:
