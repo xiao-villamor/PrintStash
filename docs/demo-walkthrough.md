@@ -11,6 +11,7 @@ Show that PrintStash can answer:
 - What did I slice?
 - Which G-code revision was the good one?
 - What slicer/material/printer settings were used?
+- What does the sliced toolpath look like?
 - Can I find it again later?
 - Can I see whether a printer/provider is ready?
 - Can I export my metadata?
@@ -47,7 +48,9 @@ printer hostnames, or screenshots that reveal private network details.
 - Open the model detail page.
 - Point at slicer metadata: slicer, layer height, infill, material, estimated
   time, filament usage, and printer model where available.
-- Open the STL viewer if the model has a mesh file.
+- Open the mesh viewer if the model has an STL, 3MF, or OBJ file.
+- Toggle to the G-code toolpath viewer, scrub layers, and show travel/bed
+  overlays when available.
 
 ### 3. Revision Story
 
@@ -55,6 +58,8 @@ printer hostnames, or screenshots that reveal private network details.
 - Mark one revision as `needs_test`, `known_good`, or `failed`.
 - Add a short note such as `PETG baseline` or `Tighter fit`.
 - Mark the best file as recommended.
+- Add or import a print-history entry for the recommended revision if a safe
+  Moonraker printer or disposable test data is available.
 
 ### 4. Find It Again
 
@@ -75,6 +80,7 @@ printer hostnames, or screenshots that reveal private network details.
 
 - Open Settings.
 - Use Data export to download JSON and CSV.
+- Show vault stats, storage usage, and model-card metric choices.
 - Explain that exports are metadata-only and require auth because filenames,
   materials, and print history can still be sensitive.
 
@@ -90,7 +96,8 @@ printer hostnames, or screenshots that reveal private network details.
 
 - Asset grid with at least one populated model card.
 - Model detail showing files, metadata, and revisions.
-- STL viewer with a safe model.
+- Mesh viewer with a safe model.
+- G-code toolpath viewer with safe non-private G-code.
 - Search or category filter.
 - Setup wizard or login screen.
 - Printer diagnostics if a safe provider is available.

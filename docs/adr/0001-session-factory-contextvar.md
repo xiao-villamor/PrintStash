@@ -18,13 +18,13 @@ Two reasons collided:
    This is fragile and forces every new background task author to guess which
    mechanism to use.
 
-2. **Stage 4:** Postgres introduces `AsyncSession`. A Protocol that defines both
+2. **Async support:** Postgres introduces `AsyncSession`. A Protocol that defines both
    `session()` and `async_session()` lets us swap adapters without changing
    call sites.
 
 ## Considered Options
 
-- **Module-level singleton** (simpler, but breaks async isolation in Stage 4
+- **Module-level singleton** (simpler, but breaks async isolation under Postgres
   and perpetuates the monkeypatch pattern)
 - **FastAPI app.state** (works for request handlers but not for long-lived
   asyncio workers like PrinterHub that outlive a single request)

@@ -8,10 +8,10 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current App Stage: 0.1 Initial Self-Hosted Release
+## Current Release: 0.1 Initial Self-Hosted Release
 
-Stage 4 production hardening is implemented. The app is currently in the 0.1
-initial self-hosted release stage: useful for local-first 3D print library
+Production hardening is in place. The app is currently in the 0.1
+initial self-hosted release: useful for local-first 3D print library
 workflows, installable through Docker Compose, and ready for real homelab
 feedback. SQLite plus local filesystem storage remain the default path.
 Postgres, S3/R2-compatible storage, cloud backups, and provider adapters are
@@ -19,18 +19,20 @@ available as optional deployment paths.
 
 Developed features in the current app:
 
-- STL, 3MF, and G-code ingestion through the web UI, REST API, and OrcaSlicer post-processing hook
+- STL, 3MF, OBJ, and G-code ingestion through the web UI, REST API, and OrcaSlicer post-processing hook
 - G-code parser coverage for OrcaSlicer, PrusaSlicer, Bambu Studio, Cura, and Klipper/Orca samples
-- Content-hash deduplication, logical model grouping, version history, thumbnails, and in-browser STL preview
-- Categories, tags, search, model editing, printer-presence filters, and model-to-printer file badges
+- Content-hash deduplication, logical model grouping, version history, thumbnails, cached STL conversion for 3MF/OBJ preview, and in-browser mesh/G-code previews
+- Categories, tags, search, model editing, printer-presence filters, model-to-printer file badges, collection counts, collection moves, and drag-and-drop library organization
 - G-code revision upload, labels, outcome status, notes, recommended marker, and metadata comparison
-- First-run setup wizard, JWT auth for UI/scripts, refresh/logout flow, role-aware admin access, and audit logs
+- Model print history with automatic Moonraker import for matching filenames and manual print-job logging
+- First-run setup wizard, JWT auth for UI/scripts, refresh/logout flow, per-user API keys, role-aware admin access, and audit logs
 - Alembic migrations, optional Postgres support, SQLite-to-Postgres migration script, and documented upgrade flow
-- Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, lifecycle policy configuration, and backup/restore endpoints
+- Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, cached mesh conversion, lifecycle policy configuration, and backup/restore endpoints
+- Vault stats, storage usage reporting, configurable card metrics, trash retention controls, restore/purge actions, and thumbnail rebuild jobs
 - Operational health output for database, storage, backup, and printer provider readiness
 - Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history
 - Bambu LAN beta provider with local status plus pause/resume/cancel controls; upload/send, remote file inventory, and remote-file start remain unsupported
-- Responsive Next.js UI for the library, model detail, upload, taxonomy management, settings, setup, printer list, and printer detail workflows
+- Responsive Next.js 16 UI for the library, model detail, upload, taxonomy management, settings, setup, printer list, and printer detail workflows
 
 ## Now: Release Validation and Feedback
 
@@ -70,8 +72,8 @@ Goal: make the vault better as a daily-use 3D print library.
 
 - Better bulk editing for tags/categories and revision labels
 - Saved filters or views for common searches
-- Cleaner model/version comparison beyond the initial G-code metadata compare
-- More useful model detail pages for repeated reprints
+- Richer model/version comparison beyond the current G-code metadata compare
+- More useful model detail pages for repeated reprints, including deeper print-history analytics
 - Import/export paths for people migrating from folders or other tools
 
 ## R4: Fleet and Scheduling

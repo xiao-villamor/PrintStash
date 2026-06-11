@@ -15,6 +15,7 @@ Expected 0.1 behavior:
 - pause, resume, and cancel active prints
 - sync remote G-code file inventory
 - start an already-present remote G-code file
+- import matching print-history entries into a model's print history
 
 Recommended smoke test:
 
@@ -54,3 +55,9 @@ curl http://localhost:8000/api/v1/printers/<printer-id>/diagnostics
 The response reports provider support level, capabilities, unsupported actions,
 configuration checks, and live-status connectivity checks without returning stored
 secrets.
+
+## Model-Level History
+
+Moonraker print-history import is model-scoped. PrintStash matches recent
+Moonraker history entries to the model's known G-code filenames, records new
+matches as `printer_history` jobs, and skips already-imported remote filenames.

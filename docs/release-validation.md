@@ -30,7 +30,9 @@ Expected:
 
 - existing models/files are still visible
 - thumbnails still load
+- 3MF/OBJ files can open through the cached STL preview endpoint
 - a new G-code upload creates or updates the expected model
+- Settings shows vault stats and the trash page can load
 
 ## Backend
 
@@ -55,6 +57,19 @@ Current intentional lint warnings:
   URLs are not yet routed through Next image optimization.
 - `stl-viewer.tsx` keeps the viewer controls effect scoped to the loaded model
   URL.
+
+## Feature Smoke Checks
+
+- Open Settings, confirm vault stats load, create a backup, and export JSON/CSV.
+- Create and revoke an API key, then verify username plus API key can log in.
+- Upload a mesh and G-code pair, open model detail, toggle mesh/G-code viewer,
+  edit revision fields, and mark a recommended G-code.
+- Soft-delete a model, restore it from Settings Trash, then soft-delete and
+  purge it only on disposable data.
+- Register or mock a Moonraker printer, sync files, and import matching print
+  history into one model.
+- Queue `POST /api/v1/files/thumbnails/rebuild` on a small library and poll the
+  returned ingest job until completion.
 
 ## Release Content
 

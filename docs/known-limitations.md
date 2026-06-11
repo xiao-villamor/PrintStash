@@ -39,6 +39,9 @@ manufacturing platform yet.
   STL/3MF/G-code blobs, secrets, API keys, or printer credentials.
 - Full backup/restore is available separately for moving or recovering an
   install.
+- The G-code toolpath viewer is a browser-side visualization aid. It is not a
+  slicer-grade simulator and does not validate firmware-specific macros,
+  acceleration, pressure advance, or printer safety.
 
 ## UI And Workflow
 

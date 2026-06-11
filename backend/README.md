@@ -1,6 +1,6 @@
 # PrintStash — Backend
 
-FastAPI backend for the vault. Ingests STL / 3MF / G-code, extracts
+FastAPI backend for the vault. Ingests STL / 3MF / OBJ / G-code, extracts
 metadata, deduplicates by hash, and serves everything through a versioned
 REST API. Used by the Next.js frontend and the OrcaSlicer post-processing
 hook.
@@ -11,7 +11,7 @@ See the [root README](../README.md) for the big picture.
 
 - Python 3.11+, FastAPI, SQLModel, Uvicorn
 - SQLite by default, optional Postgres for larger installs
-- Trimesh for mesh geometry and STL export
+- Trimesh for mesh geometry, thumbnails, and cached STL conversion
 
 ## Quick start (development)
 
@@ -19,7 +19,7 @@ See the [root README](../README.md) for the big picture.
 cd backend
 
 # First time — create venv and install deps
-uv sync
+uv sync --extra dev
 
 # Run the server
 VAULT_DB_URL=sqlite:///./dev.sqlite \
@@ -32,7 +32,7 @@ Open <http://localhost:8000/docs> for the Swagger UI.
 
 ## Migrations
 
-Stage 4 switches schema upgrades to Alembic so self-hosted installs have a
+Schema upgrades run through Alembic so self-hosted installs have a
 predictable upgrade path.
 
 ```bash
@@ -94,7 +94,7 @@ backend/
     ├── db/                ← SQLModel tables, session, DB bootstrap
     ├── schemas/           ← Pydantic DTOs
     ├── services/          ← business logic
-    └── api/v1/            ← routers (files, ingest, models, printers, taxonomy, auth)
+    └── api/v1/            ← routers (files, ingest, models, printers, taxonomy, auth, backups, config)
 ```
 
 ## Environment variables
@@ -181,13 +181,17 @@ VAULT_S3_ACCESS_KEY=minioadmin
 VAULT_S3_SECRET_KEY=minioadmin
 ```
 
-### Phase 4e storage capabilities
+### Storage and file capabilities
 
 - S3 health probe exposed via `GET /api/v1/health`
 - Multipart upload threshold (default: 50MB) via `VAULT_S3_MULTIPART_THRESHOLD_MB`
 - Pre-signed direct downloads:
   - `GET /api/v1/files/{id}/download-url`
   - `GET /api/v1/files/{id}/download-direct`
+- Cached mesh preview conversion:
+  - `GET /api/v1/files/{id}/stl`
+- Thumbnail rebuild job:
+  - `POST /api/v1/files/thumbnails/rebuild`
 - Optional bucket lifecycle policy:
   - `VAULT_S3_LIFECYCLE_EXPIRATION_DAYS`
   - `VAULT_S3_LIFECYCLE_TRANSITION_DAYS`
