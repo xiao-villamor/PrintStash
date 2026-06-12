@@ -1,7 +1,7 @@
 # Community Starter Issues
 
 These are release-ready GitHub issue drafts for early contributors. They are
-intentionally small, useful, and aligned with the 0.1 local-first scope.
+intentionally small, useful, and aligned with the local-first project scope.
 
 ## 1. Add Safe Parser Fixtures From Real Slicer Output
 
@@ -64,8 +64,8 @@ Labels: `provider`, `hardware`, `help wanted`
 
 ### Context
 
-Moonraker/Klipper is the stable provider for 0.1, but hardware validation across
-real setups is still the most valuable feedback.
+Moonraker/Klipper is the stable provider, but hardware validation across real
+setups is still the most valuable feedback.
 
 ### Task
 
@@ -93,7 +93,7 @@ Labels: `ui`, `provider`, `good first issue`
 ### Context
 
 Some actions are unavailable depending on the provider. Bambu LAN is beta and
-status/control-only in 0.1. The UI should make unavailable actions feel explicit
+currently status/control-only. The UI should make unavailable actions feel explicit
 rather than broken.
 
 ### Task

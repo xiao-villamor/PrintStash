@@ -8,8 +8,8 @@ Lighting model (view-space, camera at -Z looking toward +Z):
   - Rim light:  grazing angle (edge on)        → silhouette separation
   - Ambient:    constant floor                 → no pure-black faces
 
-This is intentionally Python-only for 0.1 so source installs and Docker builds
-do not need a Rust toolchain. Rasterisation is fully vectorised: candidate
+This is intentionally Python-only so source installs and Docker builds do not
+need a Rust toolchain. Rasterisation is fully vectorised: candidate
 pixels for all triangles are expanded into flat arrays and resolved against
 the z-buffer with a single lexsort per chunk, so cost scales with covered
 pixel area rather than with Python-level triangle count.

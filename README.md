@@ -16,7 +16,7 @@ and print history.
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&style=flat-square)
 ![Next.js 16](https://img.shields.io/badge/next.js-16-black?logo=next.js&style=flat-square)
 ![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&style=flat-square)
-![Status](https://img.shields.io/badge/status-0.1%20initial%20self--hosted-f59e0b?style=flat-square)
+![Status](https://img.shields.io/badge/status-early%20self--hosted-f59e0b?style=flat-square)
 
 [**Quick Start**](#quick-start) · [**Features**](#features) · [**Documentation**](#documentation) · [**Development**](#development) · [**Contributing**](#contributing) · [**Security**](#security)
 
@@ -110,7 +110,7 @@ model detail, printer list/detail, profiles, and upload/task flows.
 
 **Known rough spots** (full list in [docs/known-limitations.md](./docs/known-limitations.md)):
 
-- Bambu LAN upload/send parity is not done yet — Bambu is beta and status/control-only in 0.1
+- Bambu LAN upload/send parity is not done yet — Bambu is beta and status/control-only today
 - Printer integrations need more real-world hardware testing
 - The UI is functional, but workflow polish is still in progress
 

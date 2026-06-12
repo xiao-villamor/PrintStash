@@ -1,18 +1,18 @@
-# Known Limitations For 0.1
+# Known Limitations
 
-PrintStash 0.1 is an initial self-hosted release for local 3D printing asset
+PrintStash is an early self-hosted release for local 3D printing asset
 management. It is useful today, but it is deliberately not trying to be a full
-manufacturing platform yet.
+manufacturing platform.
 
 ## Printer Providers
 
-- Moonraker/Klipper is the primary supported provider for 0.1.
+- Moonraker/Klipper is the primary supported provider.
 - Moonraker support includes live status, upload/send, optional start, remote
   file inventory sync, remote file start, pause/resume/cancel, and job history.
 - Bambu LAN support is beta. It is limited to local status plus
   pause/resume/cancel controls.
 - Bambu LAN upload, send-to-print, remote file inventory, and remote-file start
-  are not implemented in 0.1.
+  are not implemented today.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups.
 
@@ -52,7 +52,7 @@ manufacturing platform yet.
 - The app is not a slicer, not a firmware replacement, and not a full queue
   manager.
 
-## Out Of Scope For 0.1
+## Not Current Project Goals
 
 - Public cloud service.
 - CNC, laser, vinyl, PCB, or non-3D-printing adapters.

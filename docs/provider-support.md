@@ -1,13 +1,13 @@
 # Printer Provider Support
 
-PrintStash 0.1 is Moonraker/Klipper-first. Other printer providers can exist, but
+PrintStash is Moonraker/Klipper-first. Other printer providers can exist, but
 they must make unsupported actions explicit in the API and UI.
 
 ## Moonraker / Klipper
 
 Support level: stable.
 
-Expected 0.1 behavior:
+Current behavior:
 
 - live printer status over WebSocket
 - upload Vault G-code to Moonraker
@@ -29,12 +29,12 @@ Recommended smoke test:
 
 Support level: beta.
 
-Expected 0.1 behavior:
+Current behavior:
 
 - local status polling
 - pause, resume, and cancel controls
 
-Not supported in 0.1:
+Not supported today:
 
 - upload/send from the Vault
 - start remote files

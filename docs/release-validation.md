@@ -1,6 +1,6 @@
-# 0.1 Release Validation
+# Release Validation
 
-Run these checks before tagging a 0.1.x release.
+Run these checks before tagging a release.
 
 ## Clean Install
 
@@ -13,7 +13,7 @@ curl -fsS http://localhost:8000/api/v1/health
 Expected:
 
 - the setup page is reachable at `http://localhost:3000/setup`
-- `/api/v1/health` returns version `0.1.0`
+- `/api/v1/health` returns the current app version
 - health components include database, storage, backup, and printer providers
 - Docker containers, networks, volumes, and default SQLite path use PrintStash
   naming for new installs

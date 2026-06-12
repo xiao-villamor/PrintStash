@@ -1,7 +1,7 @@
 # Clean Demo Walkthrough
 
 Use this flow for screenshots, a short GIF, a README demo, or a first community
-post. It is designed to show PrintStash's 0.1 value without promising features
+post. It is designed to show PrintStash's current value without promising features
 that are still future work.
 
 ## Goal
@@ -73,8 +73,8 @@ printer hostnames, or screenshots that reveal private network details.
 - If a Moonraker printer is available, add it and open the printer detail page.
 - Open the Diagnostics tab.
 - Show provider support level, capability checks, and unsupported actions.
-- If no printer is available, use this section to explain that 0.1 is
-  Moonraker-first and Bambu LAN is beta/status-control-only.
+- If no printer is available, use this section to explain that PrintStash is
+  Moonraker-first and Bambu LAN is currently beta/status-control-only.
 
 ### 6. Data Portability
 
@@ -84,7 +84,7 @@ printer hostnames, or screenshots that reveal private network details.
 - Explain that exports are metadata-only and require auth because filenames,
   materials, and print history can still be sensitive.
 
-## What Not To Claim In 0.1
+## What Not To Claim
 
 - Do not claim PrintStash is a slicer.
 - Do not claim Bambu LAN upload/send/start parity.

@@ -8,12 +8,11 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current Release: 0.1 Initial Self-Hosted Release
+## Current Release: Initial Self-Hosted Release
 
-Production hardening is in place. The app is currently in the 0.1
-initial self-hosted release: useful for local-first 3D print library
-workflows, installable through Docker Compose, and ready for real homelab
-feedback. SQLite plus local filesystem storage remain the default path.
+Production hardening is in place. The app is useful for local-first 3D print
+library workflows, installable through Docker Compose, and ready for real
+homelab feedback. SQLite plus local filesystem storage remain the default path.
 Postgres, S3/R2-compatible storage, cloud backups, and provider adapters are
 available as optional deployment paths.
 
