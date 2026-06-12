@@ -1,7 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  outputFileTracingRoot: __dirname,
   reactStrictMode: true,
+  turbopack: {
+    root: __dirname,
+  },
   async rewrites() {
     return [
       {

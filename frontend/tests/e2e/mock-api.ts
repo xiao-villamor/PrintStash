@@ -287,6 +287,25 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     ]);
     return;
   }
+  if (url.pathname === "/api/v1/models/1/print-jobs") {
+    sendJson(res, [
+      {
+        id: 1,
+        printer_id: printer.id,
+        printer_name: printer.name,
+        file_id: 2,
+        gcode_revision_number: 1,
+        revision_label: null,
+        state: "completed",
+        material_type: "PLA",
+        error: null,
+        started_at: "2026-06-04T00:00:00.000000",
+        finished_at: now,
+        created_at: "2026-06-04T00:00:00.000000",
+      },
+    ]);
+    return;
+  }
   if (url.pathname === "/api/v1/filament-profiles") {
     sendJson(res, filamentProfiles);
     return;

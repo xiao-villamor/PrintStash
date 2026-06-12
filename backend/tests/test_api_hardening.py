@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.core.config import get_config
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -69,7 +70,7 @@ def test_health_reports_release_components(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "PrintStash"
-    assert body["version"] == "0.1.0"
+    assert body["version"] == get_config().app_version
     assert body["components"]["database"]["ok"] is True
     assert body["components"]["storage"]["backend"] == "local"
     assert body["components"]["backup"]["s3_configured"] is False

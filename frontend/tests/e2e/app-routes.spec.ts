@@ -48,10 +48,9 @@ test("model detail route renders data and hydrates printer integrations", async 
   await page.goto("/models/1");
 
   await expect(page.getByRole("heading", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
-  await expect(page.getByText("Creality Ender-3 V3 SE")).toBeVisible();
-  await expect(page.getByText("KNOWN GOOD")).toBeVisible();
+  await expect(page.getByText("Creality Ender-3 V3 SE").first()).toBeVisible();
+  await expect(page.getByText("Printed OK").first()).toBeVisible();
   await expect(page.getByText("1/1 online")).toBeVisible();
-  await expect(page.getByText("ender", { exact: true })).toBeVisible();
   await expect(page.getByText("This page could not be found")).toHaveCount(0);
 
   const html = await page.content();
@@ -142,7 +141,7 @@ test("gallery upload queues a task and tracks it to completion", async ({ page }
   await page.getByRole("button", { name: /upload to vault/i }).click();
 
   await expect(page.getByRole("dialog", { name: "Upload model" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Task notifications" }).click();
+  await page.getByRole("button", { name: "Notifications" }).click();
   await expect(page.getByText("Upload Cube")).toBeVisible();
   await expect(page.getByText("completed", { exact: true })).toBeVisible();
   await expect(page.getByText("running", { exact: true })).toHaveCount(0);

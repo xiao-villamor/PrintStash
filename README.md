@@ -11,24 +11,29 @@ and print history.
 
 ![PrintStash demo](screenshots/00-demo.gif)
 
+[![CI](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml/badge.svg)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&style=flat-square)
 ![Next.js 16](https://img.shields.io/badge/next.js-16-black?logo=next.js&style=flat-square)
 ![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&style=flat-square)
 ![Status](https://img.shields.io/badge/status-0.1%20initial%20self--hosted-f59e0b?style=flat-square)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Screenshots**](#screenshots) · [**Roadmap**](#roadmap) · [**Contributing**](#contributing) · [**Discussions**](https://github.com/xiao-villamor/PrintStash/discussions)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Documentation**](#documentation) · [**Development**](#development) · [**Contributing**](#contributing) · [**Security**](#security)
 
 </div>
 
 ---
 
-## Like the idea?
+## Project status
 
-PrintStash is brand new and built in the open. If "a small, boring library that just
-*remembers* my prints" sounds useful, star the repo, [open a discussion](https://github.com/xiao-villamor/PrintStash/discussions),
-and tell us what your homelab looks like. Every printer report, parser fixture, and
-clunky-UI complaint genuinely shapes where 0.2 goes.
+PrintStash is an early open-source, self-hosted project. The current release is
+usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
+as the primary install path. SQLite plus local disk is the default; Postgres,
+S3/R2 storage, backups, and audit logs are optional.
+
+The project is built in the open. Hardware reports, parser fixtures, install
+notes, docs fixes, and UX feedback are welcome in
+[Discussions](https://github.com/xiao-villamor/PrintStash/discussions) or issues.
 
 ## Why this exists
 
@@ -72,10 +77,36 @@ home — no cloud account, no subscription, no telemetry.
 - Metadata-only JSON/CSV export for portability, audits, spreadsheets, and local AI context
 - Optional Postgres, S3/R2 storage, backup/restore archives, health probes, and audit logs
 
-> **Current state — 0.1 initial self-hosted release.** Production hardening is in place;
-> current focus is release validation, real-world homelab feedback, and
-> printer-provider maturity. Docker Compose is the main install path. SQLite + local disk
-> are the default. Postgres, S3, backups, and audit logs stay optional while the project matures.
+## Documentation
+
+| Document | Purpose |
+| --- | --- |
+| [Demo walkthrough](./docs/demo-walkthrough.md) | A clean first-run tour for evaluating the app |
+| [UI feature map](./docs/ui-feature-map.md) | Route-by-route map of the current Playwright-verified UI |
+| [Provider support](./docs/provider-support.md) | Moonraker and Bambu LAN capability notes |
+| [Known limitations](./docs/known-limitations.md) | Current rough edges and non-goals |
+| [Release validation](./docs/release-validation.md) | Smoke checks before publishing a release |
+| [Disaster recovery](./docs/disaster-recovery.md) | Backup and restore recovery notes |
+| [Upgrade guide](./UPGRADE.md) | Upgrade guidance for existing installs |
+| [Architecture decisions](./docs/adr) | Accepted technical decisions |
+
+## What the app can do today
+
+The current UI was smoke-tested with Playwright across the core routes: vault,
+model detail, printer list/detail, profiles, and upload/task flows.
+
+| Area | Current workflows |
+| --- | --- |
+| Vault | Browse models in grid/list view; search by name/metadata; filter by collection, tag, printer, or printer presence; sort; create collections; drag models between collections; upload mesh/G-code files with collection and tag assignment. |
+| Uploads | Upload STL/3MF/OBJ, G-code, or mesh+G-code together; override model name; create tags inline; track background ingestion through task notifications. |
+| Model detail | Inspect source files, recommended G-code, print settings, mesh metadata, thumbnails, and printer presence from one screen. |
+| Viewers | Switch between 3D model and G-code toolpath view; use solid, X-ray, and wireframe display modes; fit, zoom, reset, screenshot, and build-plate grid controls. |
+| Revisions | Add G-code revisions; mark known-good/needs-test/failed/archived; add labels and notes; choose the recommended revision; compare two revisions side by side. |
+| Print history | Manually log completed/failed jobs and import matching Moonraker history for known G-code files. |
+| Printers | Manage Moonraker/Klipper and beta Bambu LAN printers; view live status, temperatures, current print, progress, jobs, diagnostics, and provider capability checks. |
+| Printer files | Sync Moonraker remote file inventory, match remote files back to vault models, and start supported remote files from the UI. |
+| Profiles | Manage filament presets with cost/kg and printer presets with nozzle/profile metadata; see live usage counts from indexed files. |
+| Settings | Export JSON/CSV metadata, manage API keys, configure storage/backups, choose card metrics and metadata visibility, restore or purge trash, and view version history. |
 
 **Known rough spots** (full list in [docs/known-limitations.md](./docs/known-limitations.md)):
 
@@ -137,6 +168,8 @@ After that, exported G-code is pushed into PrintStash automatically.
 ## Demo Path
 
 For a clean first look, follow [docs/demo-walkthrough.md](./docs/demo-walkthrough.md).
+For a route-by-route view of the current UI, see
+[docs/ui-feature-map.md](./docs/ui-feature-map.md).
 The short version:
 
 1. Start Docker Compose and complete first-run setup.
@@ -222,6 +255,14 @@ Release smoke checks are listed in [docs/release-validation.md](./docs/release-v
 
 ## Development
 
+Prerequisites:
+
+- Python 3.11+
+- `uv`
+- Node.js 24+
+- `pnpm`
+- Docker and Docker Compose for full-stack local runs
+
 Backend:
 
 ```bash
@@ -242,7 +283,7 @@ pnpm install
 pnpm dev
 ```
 
-Tests and formatting:
+Backend checks:
 
 ```bash
 cd backend
@@ -251,9 +292,14 @@ uv run ruff check app/ tests/
 uv run ruff format app/ tests/
 ```
 
+Frontend checks:
+
 ```bash
 cd frontend
+pnpm exec tsc --noEmit
 pnpm lint
+pnpm build
+pnpm test:e2e
 ```
 
 ## Architecture
@@ -306,6 +352,13 @@ idea fits, open a discussion first — we'd rather talk early than turn good wor
 - Tighten UI flows that feel clunky after repeated use
 
 Not sure where to start? Check [docs/community-starter-issues.md](./docs/community-starter-issues.md).
+
+## Security
+
+Please read [SECURITY.md](./SECURITY.md) before reporting vulnerabilities.
+PrintStash is designed for trusted self-hosted networks; do not expose it
+directly to the public internet without a reverse proxy, TLS, and your own
+access controls.
 
 ## License
 
