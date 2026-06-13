@@ -7,6 +7,8 @@ import * as THREE from "three";
 import { STLLoader } from "three-stdlib";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
+import { authHeaders } from "@/lib/api/request";
+
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
 export interface STLViewerControls {
@@ -43,7 +45,9 @@ function Mesh({
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
 }) {
-  const geometry = useLoader(STLLoader, url);
+  const geometry = useLoader(STLLoader, url, (loader) => {
+    loader.setRequestHeader(authHeaders());
+  });
   const meshRef = useRef<THREE.Mesh>(null);
 
   useEffect(() => {

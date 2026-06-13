@@ -1,4 +1,4 @@
-@config "../../tailwind.config.cjs";
+@config "../tailwind.config.cjs";
 
 @tailwind base;
 @tailwind components;
@@ -6,6 +6,9 @@
 
 @layer base {
   :root {
+    /* Font families (previously injected by next/font; now from @fontsource). */
+    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, monospace;
     --background: #ffffff;
     --foreground: #1e293b;
     --card: #ffffff;

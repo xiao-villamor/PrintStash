@@ -1,8 +1,8 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState, useTransition } from "react";
-import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import Link from "next/link";
+import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
+import { Link } from "@/lib/navigation";
 import {
   Bell,
   Box,

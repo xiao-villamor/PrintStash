@@ -1,9 +1,5 @@
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
 
-export const metadata = {
-  title: "Profiles — PrintStash",
-};
-
 export default function ProfilesPage() {
   return (
     <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">

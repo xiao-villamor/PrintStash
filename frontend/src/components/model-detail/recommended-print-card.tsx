@@ -10,7 +10,8 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { getAssetUrl } from "@/lib/api";
+import { downloadAuthenticatedFile } from "@/lib/api";
+import { toast } from "@/lib/toast";
 import { formatDuration, formatGrams, formatMillimeters } from "@/lib/format";
 import { FileRead, FileRevisionUpdate } from "@/types";
 
@@ -118,13 +119,18 @@ export function RecommendedPrintCard({
             </button>
           )}
           <div className="grid grid-cols-2 gap-2">
-            <a
-              href={getAssetUrl(`/api/v1/files/${file.id}/download`)}
-              download={file.original_filename}
+            <button
+              type="button"
+              onClick={() =>
+                downloadAuthenticatedFile(
+                  `/api/v1/files/${file.id}/download`,
+                  file.original_filename,
+                ).catch((e) => toast.error(e))
+              }
               className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
             >
               <Download className="h-4 w-4" /> Download
-            </a>
+            </button>
             <button
               onClick={onCompare}
               className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"

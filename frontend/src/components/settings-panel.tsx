@@ -1294,7 +1294,7 @@ export function SettingsPanel() {
                   rel="noreferrer noopener"
                   title="Star on GitHub"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element -- remote shields.io badge */}
+                  {/* remote shields.io badge */}
                   <img
                     src={`https://img.shields.io/github/stars/${GITHUB_REPO}?style=flat&logo=github&label=Stars&color=2563eb`}
                     alt="GitHub stars"

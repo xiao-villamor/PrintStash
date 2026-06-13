@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { Link } from "@/lib/navigation";
 import { PrinterRead } from "@/types";
 import { createPrinter, deletePrinter, invalidateApiCache, listPrinters } from "@/lib/api";
 import { toast } from "@/lib/toast";

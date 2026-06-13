@@ -3,14 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3210);
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
 const apiBase = `http://127.0.0.1:${apiPort}`;
-const testApiEnv = `NEXT_PUBLIC_API_URL=${apiBase}`;
-const webServerCommand = [
-  `${testApiEnv} ./node_modules/.bin/next build`,
-  "rm -rf .next/standalone/.next/static",
-  "mkdir -p .next/standalone/.next",
-  "cp -R .next/static .next/standalone/.next/static",
-  `${testApiEnv} PORT=${port} HOSTNAME=127.0.0.1 node .next/standalone/server.js`,
-].join(" && ");
+// Vite dev server carries the /api/v1 proxy (target from VITE_API_URL).
+const webServerCommand = `VITE_API_URL=${apiBase} ./node_modules/.bin/vite --port ${port} --strictPort --host 127.0.0.1`;
 
 export default defineConfig({
   testDir: "./tests/e2e",

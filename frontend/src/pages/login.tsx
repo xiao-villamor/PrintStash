@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Navigate } from "react-router-dom";
+import { useRouter } from "@/lib/navigation";
 import { Box, Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -15,8 +16,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   if (user) {
-    router.replace("/");
-    return null;
+    return <Navigate to="/" replace />;
   }
 
   async function handleSubmit(e: React.FormEvent) {

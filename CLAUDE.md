@@ -11,8 +11,8 @@ ALL agent output ultra-compressed:
 
 ## Project: PrintStash
 
-Self-hosted 3D printing asset manager. FastAPI backend + Next.js 16 frontend.
-Stack: Python 3.11+/SQLModel+Alembic | React 19/Tailwind 3 | SQLite(local)/Postgres(opt)/S3(opt).
+Self-hosted 3D printing asset manager. FastAPI backend + Vite/React SPA frontend.
+Stack: Python 3.11+/SQLModel+Alembic | React 19 + React Router 7 + TanStack Query / Vite / Tailwind 3 | SQLite(local)/Postgres(opt)/S3(opt).
 Printers: Moonraker/Klipper (stable), Bambu LAN (beta).
 
 ## Skill: printstash

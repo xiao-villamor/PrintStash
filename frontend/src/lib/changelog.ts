@@ -19,6 +19,27 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.4.0",
+    date: "Jun 2026",
+    changes: [
+      "Frontend rebuilt on Vite + React Router (migrated off Next.js)",
+      "TanStack Query caching: shared collections/tags cache, refetch on window focus, auto-refresh after edits",
+      "Fixes the model detail page error and broken 3D preview / downloads under multi-user access",
+      "Served by nginx with a same-origin API + WebSocket proxy",
+    ],
+  },
+  {
+    version: "0.3.0",
+    date: "Jun 2026",
+    changes: [
+      "Multi-user access: collection-level roles (view / edit / admin) per user",
+      "Admin user management and access controls",
+      "Authenticated assets: thumbnails, 3D previews, and downloads now require sign-in",
+      "Lossless WebP thumbnails",
+      "Settings refinements and collections sidebar fixes",
+    ],
+  },
+  {
     version: "0.2.0",
     date: "Jun 2026",
     changes: [

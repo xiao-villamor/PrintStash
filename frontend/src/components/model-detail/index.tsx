@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "@/lib/navigation";
+import { useRouter } from "@/lib/navigation";
 import {
   ArrowLeft,
   Check,
@@ -27,10 +26,9 @@ import {
   getAssetUrl,
   getModelPrinterFiles,
   getModelPrintJobs,
-  listCollections,
-  listTags,
   updateModel,
 } from "@/lib/api";
+import { useCollections, useTags } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import {
   DEFAULT_METADATA_PREFERENCES,
@@ -39,13 +37,12 @@ import {
 } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
+import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import {
-  CollectionRead,
   ModelPrinterFileRead,
   ModelPrintJobRead,
   ModelRead,
-  TagRead,
 } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -66,14 +63,16 @@ import { SettingsTab } from "./settings-tab";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
 
-const STLViewer = dynamic(
-  () => import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
-  { ssr: false, loading: () => <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" /> },
+const STLViewer = lazy(() =>
+  import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
 
-const GcodeViewer = dynamic(
-  () => import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
-  { ssr: false, loading: () => <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" /> },
+const GcodeViewer = lazy(() =>
+  import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+);
+
+const ViewerFallback = (
+  <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
 );
 
 const PRINTER_BED_SIZES: Record<string, { x: number; y: number }> = {
@@ -112,9 +111,10 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
   const [catOpen, setCatOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
-  const [collections, setCollections] = useState<CollectionRead[]>([]);
-  const [tags, setTags] = useState<TagRead[]>([]);
-  const [catLoaded, setCatLoaded] = useState(false);
+  // Shared taxonomy lists come from the TanStack Query cache (deduped across
+  // the app, refetched on focus + after any mutation).
+  const { data: collections = [] } = useCollections();
+  const { data: tags = [] } = useTags();
   const [metadataPreferences, setMetadataPreferences] = useState<MetadataPreferences>(
     DEFAULT_METADATA_PREFERENCES,
   );
@@ -179,10 +179,6 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
-    if (!catLoaded) {
-      listCollections().then((c) => { setCollections(c); setCatLoaded(true); }).catch(() => {});
-      listTags().then(setTags).catch(() => {});
-    }
     setActiveTab("overview");
     setEditing(true);
   }
@@ -234,7 +230,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     }
     try {
       const t = await createTag({ name: trimmed });
-      setTags((p) => [...p, t]);
+      // createTag invalidates the query cache, so useTags() refetches the new
+      // tag automatically; we just select it here.
       setEditTags((p) => [...p, t.name]);
     } catch {
       /* ignored */
@@ -277,7 +274,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     (f) => f.file_type === "stl" || f.file_type === "3mf" || f.file_type === "obj",
   );
   const hasGcode = gcodeFiles.length > 0;
-  const thumbUrl = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
+  const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerFilesByFileId = useMemo(() => {
     const grouped = new Map<number, ModelPrinterFileRead[]>();
     for (const row of printerFiles) {
@@ -435,19 +432,23 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         <div className="flex-1 min-h-[250px] md:min-h-0 bg-[var(--surface-container-low)] relative border-b md:border-b-0 md:border-r border-[var(--outline-variant)] flex items-center justify-center m-2 md:m-4 rounded overflow-hidden"
           style={{ boxShadow: "inset 0 0 0 1px var(--surface-variant)" }}>
           {viewerMode === "gcode" && hasGcode ? (
-            <GcodeViewer
-              url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/download`}
-              printerBedMm={getBedSize(meta?.printer_model)}
-              screenshotName={model.slug || model.name}
-            />
+            <Suspense fallback={ViewerFallback}>
+              <GcodeViewer
+                url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/download`}
+                printerBedMm={getBedSize(meta?.printer_model)}
+                screenshotName={model.slug || model.name}
+              />
+            </Suspense>
           ) : meshFile ? (
-            <STLViewer
-              url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
-              onControlsReady={(api) => { viewerControls.current = api; }}
-              displayMode={displayMode}
-              showGrid={showGrid}
-              screenshotName={model.slug || model.name}
-            />
+            <Suspense fallback={ViewerFallback}>
+              <STLViewer
+                url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
+                onControlsReady={(api) => { viewerControls.current = api; }}
+                displayMode={displayMode}
+                showGrid={showGrid}
+                screenshotName={model.slug || model.name}
+              />
+            </Suspense>
           ) : thumbUrl ? (
             <img
               src={thumbUrl}

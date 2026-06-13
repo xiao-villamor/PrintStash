@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PrintStash</title>
+    <meta
+      name="description"
+      content="Self-hosted asset management for 3D printing workflows"
+    />
+    <!-- Pre-paint theme + favicon application to avoid FOUC. -->
+    <script>
+      (function () {
+        try {
+          var t =
+            localStorage.getItem("printstash.theme") ||
+            localStorage.getItem("nexus3d.theme") ||
+            (window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light");
+          if (t === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+          var l = document.createElement("link");
+          l.id = "app-favicon";
+          l.rel = "icon";
+          l.type = "image/svg+xml";
+          l.href = t === "dark" ? "/icon-dark.svg" : "/icon-light.svg";
+          document.head.appendChild(l);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

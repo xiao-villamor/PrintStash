@@ -7,11 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    environment:
-      NEXT_PUBLIC_API_URL: http://api:8000
-      # Browser-side WebSocket URL (Next.js rewrites do NOT proxy WS).
-      # Override in .env to your public host/port (e.g. ws://printstash.lan:8000).
-      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
+    # The SPA is served by nginx, which proxies /api/v1 (incl. WebSockets) to
+    # the api service same-origin — so no browser-side API/WS URL is needed.
     networks:
       - printstash_net
     depends_on:

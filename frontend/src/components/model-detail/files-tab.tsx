@@ -2,8 +2,9 @@
 
 import { Download, FileText } from "lucide-react";
 
-import { getAssetUrl } from "@/lib/api";
+import { downloadAuthenticatedFile } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import { FileRead } from "@/types";
 
 import { SlicerOpenButton } from "@/components/slicer-open-button";
@@ -39,13 +40,19 @@ export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
               {SLICEABLE_TYPES.has(f.file_type) && (
                 <SlicerOpenButton fileId={f.id} />
               )}
-              <a
-                href={getAssetUrl(`/api/v1/files/${f.id}/download`)}
-                download={f.original_filename}
+              <button
+                type="button"
+                onClick={() =>
+                  downloadAuthenticatedFile(
+                    `/api/v1/files/${f.id}/download`,
+                    f.original_filename,
+                  ).catch((e) => toast.error(e))
+                }
+                title="Download"
                 className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
               >
                 <Download className="h-5 w-5" />
-              </a>
+              </button>
             </div>
           </div>
         ))}

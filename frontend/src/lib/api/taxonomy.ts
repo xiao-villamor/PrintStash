@@ -1,4 +1,4 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import { getJson, sendAction, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import {
   CollectionCreate,
   CollectionPermissionRead,
@@ -8,8 +8,8 @@ import {
   TagRead,
 } from "@/types";
 
-export function listCollections(): Promise<CollectionRead[]> {
-  return getJson<CollectionRead[]>("/api/v1/collections");
+export function listCollections(options?: GetJsonOptions): Promise<CollectionRead[]> {
+  return getJson<CollectionRead[]>("/api/v1/collections", options);
 }
 
 export function createCollection(payload: CollectionCreate): Promise<CollectionRead> {
@@ -45,8 +45,8 @@ export function deleteCollectionPermission(collectionId: number, userId: number)
   return sendAction(`/api/v1/collections/${collectionId}/permissions/${userId}`, "DELETE");
 }
 
-export function listTags(): Promise<TagRead[]> {
-  return getJson<TagRead[]>("/api/v1/tags");
+export function listTags(options?: GetJsonOptions): Promise<TagRead[]> {
+  return getJson<TagRead[]>("/api/v1/tags", options);
 }
 
 export function createTag(payload: TagCreate): Promise<TagRead> {

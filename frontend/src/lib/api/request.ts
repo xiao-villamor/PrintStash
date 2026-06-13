@@ -1,8 +1,9 @@
 import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
+import { queryClient } from "@/lib/query-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "";
+const API_BASE = import.meta.env.VITE_API_URL || "";
+const WS_BASE = import.meta.env.VITE_WS_URL || "";
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -28,6 +29,40 @@ export function getUrl(path: string): string {
 
 export function getAssetUrl(path: string): string {
   return getUrl(path);
+}
+
+export async function getAuthenticatedBlob(path: string): Promise<Blob> {
+  const res = await fetch(getUrl(path), {
+    headers: authHeaders(),
+    cache: "force-cache",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.blob();
+}
+
+/**
+ * Download a protected file. Plain <a href> links can't carry the bearer
+ * token, so reads gated behind auth (post-RBAC) 401. Fetch the blob with the
+ * token, then trigger a save via a temporary object URL.
+ */
+export async function downloadAuthenticatedFile(
+  path: string,
+  filename?: string,
+): Promise<void> {
+  const res = await fetch(getUrl(path), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await parseError(res);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  if (filename) a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export function getWsUrl(path: string): string {
@@ -104,6 +139,10 @@ const inflight = new Map<string, Promise<unknown>>();
 export function invalidateApiCache(): void {
   responseCache.clear();
   inflight.clear();
+  // Any mutation through this module busts the TanStack Query cache too, so
+  // useQuery-backed views (collections, tags, …) refetch and stay coherent
+  // with the legacy in-memory cache during the incremental migration.
+  queryClient.invalidateQueries();
 }
 
 if (isBrowser()) {

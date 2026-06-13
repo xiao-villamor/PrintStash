@@ -1,9 +1,5 @@
 import { TaxonomyManager } from "@/components/taxonomy-manager";
 
-export const metadata = {
-  title: "Catalog — PrintStash",
-};
-
 export default function OrganizePage() {
   return (
     <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
