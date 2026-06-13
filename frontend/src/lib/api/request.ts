@@ -32,9 +32,14 @@ export function getAssetUrl(path: string): string {
 }
 
 export async function getAuthenticatedBlob(path: string): Promise<Blob> {
+  // `no-cache` (revalidate, don't blindly reuse) instead of `force-cache`:
+  // thumbnail URLs are stable (e.g. /files/1/thumbnail) but their content
+  // changes when a file id is reused (re-upload / DB reset). force-cache served
+  // the stale image forever; the backend sends an ETag, so revalidation here is
+  // a cheap 304 when unchanged and a fresh fetch when it actually changed.
   const res = await fetch(getUrl(path), {
     headers: authHeaders(),
-    cache: "force-cache",
+    cache: "no-cache",
   });
   if (!res.ok) throw await parseError(res);
   return res.blob();
