@@ -54,7 +54,7 @@ pnpm build
 Current intentional lint warnings:
 
 - model thumbnails use plain `<img>` because authenticated/local API thumbnail
-  URLs are not yet routed through Next image optimization.
+  URLs are served directly by the API.
 - `stl-viewer.tsx` keeps the viewer controls effect scoped to the loaded model
   URL.
 

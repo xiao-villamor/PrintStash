@@ -31,7 +31,7 @@ Developed features in the current app:
 - Operational health output for database, storage, backup, and printer provider readiness
 - Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history
 - Bambu LAN beta provider with local status plus pause/resume/cancel controls; upload/send, remote file inventory, and remote-file start remain unsupported
-- Responsive Next.js 16 UI for the library, model detail, upload, taxonomy management, settings, setup, printer list, and printer detail workflows
+- Responsive Vite/React UI for the library, model detail, upload, taxonomy management, settings, setup, printer list, and printer detail workflows
 
 ## Now: Release Validation and Feedback
 
