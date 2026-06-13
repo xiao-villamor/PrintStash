@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { listCollections, listTags } from "@/lib/api";
+import { queryKeys } from "@/lib/query-client";
 import type { CollectionRead, TagRead } from "@/types";
 
 /**
@@ -8,18 +9,13 @@ import type { CollectionRead, TagRead } from "@/types";
  *
  * These were previously fetched into local `useState` in ~5 places; now they
  * share one TanStack Query cache entry, dedupe in-flight requests, and
- * revalidate on window focus. Mutations go through the api layer, whose
- * `invalidateApiCache()` invalidates the whole query cache, so these refetch
- * automatically after a create/move/delete.
+ * revalidate on window focus. Mutations go through the api layer, whose keyed
+ * invalidation (`invalidateQueriesForPath`) busts these after a
+ * create/move/delete, so they refetch automatically.
  *
  * The `queryFn`s pass `{ fresh: true }` to bypass the legacy in-memory cache in
  * `request.ts`, making TanStack Query the single source of truth for them.
  */
-
-export const queryKeys = {
-  collections: ["collections"] as const,
-  tags: ["tags"] as const,
-};
 
 export function useCollections() {
   return useQuery<CollectionRead[]>({

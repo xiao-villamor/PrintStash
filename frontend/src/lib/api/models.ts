@@ -123,7 +123,7 @@ export async function purgeModel(id: number): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache(`/api/v1/models/${id}/purge`);
   return handleResponse<TrashPurgeRead>(res);
 }
 
@@ -132,7 +132,7 @@ export async function purgeExpiredTrash(): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache("/api/v1/models/trash/expired");
   return handleResponse<TrashPurgeRead>(res);
 }
 

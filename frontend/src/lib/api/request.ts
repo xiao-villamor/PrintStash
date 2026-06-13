@@ -1,6 +1,6 @@
 import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
-import { queryClient } from "@/lib/query-client";
+import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 const WS_BASE = import.meta.env.VITE_WS_URL || "";
@@ -141,18 +141,31 @@ const CACHE_TTL_MS = 30_000;
 const responseCache = new Map<string, { value: unknown; expires: number }>();
 const inflight = new Map<string, Promise<unknown>>();
 
-export function invalidateApiCache(): void {
+/**
+ * Bust caches after a mutation. Pass the mutated `path` for keyed,
+ * resource-scoped query invalidation (the good-practice path); omit it for a
+ * blanket invalidation (manual callers that don't know the affected resource).
+ * Either way the legacy in-memory GET cache is fully cleared — it's a 30s TTL
+ * map, so dropping it wholesale is cheap and keeps it coherent.
+ */
+export function invalidateApiCache(path?: string): void {
   responseCache.clear();
   inflight.clear();
-  // Any mutation through this module busts the TanStack Query cache too, so
-  // useQuery-backed views (collections, tags, …) refetch and stay coherent
-  // with the legacy in-memory cache during the incremental migration.
-  queryClient.invalidateQueries();
+  if (typeof path === "string") {
+    invalidateQueriesForPath(path);
+  } else {
+    queryClient.invalidateQueries();
+  }
 }
 
 if (isBrowser()) {
-  // A login/logout changes what reads may return — drop everything.
-  window.addEventListener("printstash:auth-changed", invalidateApiCache);
+  // Login/logout changes identity — drop all cached data (not just invalidate)
+  // so the previous user's reads can't linger under RBAC.
+  window.addEventListener("printstash:auth-changed", () => {
+    responseCache.clear();
+    inflight.clear();
+    queryClient.clear();
+  });
 }
 
 export interface GetJsonOptions {
@@ -208,7 +221,7 @@ export async function sendJson<T>(
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return handleResponse<T>(res);
 }
 
@@ -221,7 +234,7 @@ export async function sendForm<T>(
     headers: authHeaders(),
     body: formData,
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return handleResponse<T>(res);
 }
 
@@ -233,6 +246,6 @@ export async function sendAction(
     method,
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return expectOk(res);
 }

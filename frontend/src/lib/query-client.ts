@@ -25,3 +25,60 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// ---------------------------------------------------------------------------
+// Query keys — one factory, mirroring the backend resource roots so keys stay
+// consistent and invalidation can target a whole resource by prefix.
+//
+// Invalidating a prefix (e.g. ["models"]) matches every more specific key
+// (["models", id], ["models", "list", params]) by React Query's default
+// partial matching, so a single entry covers a resource's lists + details.
+// ---------------------------------------------------------------------------
+export const queryKeys = {
+  models: ["models"] as const,
+  model: (id: number) => ["models", id] as const,
+  collections: ["collections"] as const,
+  tags: ["tags"] as const,
+  printers: ["printers"] as const,
+  printer: (id: number) => ["printers", id] as const,
+  filaments: ["filaments"] as const,
+  printerProfiles: ["printer-profiles"] as const,
+  adminUsers: ["admin", "users"] as const,
+  vaultStats: ["vault-stats"] as const,
+} as const;
+
+/**
+ * Invalidate the query keys a mutated API path can affect.
+ *
+ * Keyed (not blanket) invalidation: a collection/tag write also touches how
+ * models are listed/labelled, so those fan out to ["models"]. Anything not
+ * recognised here falls back to a full invalidation in `invalidateApiCache`.
+ */
+export function invalidateQueriesForPath(path: string): void {
+  const bust = (queryKey: readonly unknown[]) =>
+    queryClient.invalidateQueries({ queryKey });
+
+  if (/\/collections(\/|$|\?)/.test(path)) {
+    bust(queryKeys.collections);
+    bust(queryKeys.models);
+  }
+  if (/\/tags(\/|$|\?)/.test(path)) {
+    bust(queryKeys.tags);
+    bust(queryKeys.models);
+  }
+  if (/\/(models|files|ingest|gcode)(\/|$|\?|-)/.test(path)) {
+    bust(queryKeys.models);
+  }
+  if (/\/printers(\/|$|\?)/.test(path)) {
+    bust(queryKeys.printers);
+  }
+  if (/\/filaments(\/|$|\?)/.test(path)) {
+    bust(queryKeys.filaments);
+  }
+  if (/\/printer-profiles(\/|$|\?)/.test(path)) {
+    bust(queryKeys.printerProfiles);
+  }
+  if (/\/admin\/users(\/|$|\?)/.test(path)) {
+    bust(queryKeys.adminUsers);
+  }
+}

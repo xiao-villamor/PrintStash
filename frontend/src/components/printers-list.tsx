@@ -44,7 +44,7 @@ export function PrintersPage({
   async function refresh() {
     setLoading(true);
     try {
-      invalidateApiCache();
+      invalidateApiCache("/api/v1/printers");
       setPrinters(await listPrinters());
       setError(null);
     } catch (e: any) {
