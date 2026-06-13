@@ -30,7 +30,7 @@ def test_printer_profile_crud(client: TestClient, auth_headers: dict[str, str]) 
     assert updated.json()["notes"] == "Garage enclosed printer"
     assert updated.json()["nozzle_diameter_mm"] == 0.6
 
-    listed = client.get("/api/v1/printer-profiles")
+    listed = client.get("/api/v1/printer-profiles", headers=auth_headers)
     assert listed.status_code == 200
     assert listed.json()[0]["printer_model"] == "Voron 2.4 350 Klipper"
 

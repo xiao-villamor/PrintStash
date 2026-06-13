@@ -8,22 +8,58 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.db.models import PrintJob, PrintJobState, Printer, PrinterStatus
+from app.db.models import (
+    Collection,
+    CollectionPermission,
+    CollectionRole,
+    File,
+    FileType,
+    Model,
+    PrintJob,
+    PrintJobState,
+    Printer,
+    PrinterFile,
+    PrinterStatus,
+    User,
+)
+from app.services.auth import create_access_token, hash_password
+
+
+def _user_headers(
+    db_session: Session,
+    username: str,
+    *,
+    is_superuser: bool = False,
+    scope: str = "write",
+) -> dict[str, str]:
+    user = User(
+        username=username,
+        hashed_password=hash_password("Password123"),
+        is_active=True,
+        is_superuser=is_superuser,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    token = create_access_token(user.id, user.username, scope=scope)
+    return {"Authorization": f"Bearer {token}"}
 
 
 class TestListPrinters:
-    def test_list_empty(self, client: TestClient):
-        resp = client.get("/api/v1/printers")
+    def test_list_empty(self, client: TestClient, auth_headers):
+        resp = client.get("/api/v1/printers", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_list_with_printer(self, client: TestClient, db_session: Session):
+    def test_list_with_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
         p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
         db_session.add(p)
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.get("/api/v1/printers")
+        resp = client.get("/api/v1/printers", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -69,18 +105,20 @@ class TestCreatePrinter:
 
 
 class TestGetPrinter:
-    def test_get_returns_printer(self, client: TestClient, db_session: Session):
+    def test_get_returns_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
         p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
         db_session.add(p)
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.get(f"/api/v1/printers/{p.id}")
+        resp = client.get(f"/api/v1/printers/{p.id}", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json()["name"] == "Ender 3"
 
-    def test_get_404(self, client: TestClient):
-        resp = client.get("/api/v1/printers/99999")
+    def test_get_404(self, client: TestClient, auth_headers):
+        resp = client.get("/api/v1/printers/99999", headers=auth_headers)
         assert resp.status_code == 404
         assert resp.json()["detail"] == "printer_not_found"
 
@@ -139,7 +177,7 @@ class TestDeletePrinter:
         resp = client.delete(f"/api/v1/printers/{p.id}", headers=auth_headers)
         assert resp.status_code == 204
 
-        resp2 = client.get(f"/api/v1/printers/{p.id}")
+        resp2 = client.get(f"/api/v1/printers/{p.id}", headers=auth_headers)
         assert resp2.status_code == 404
 
     def test_delete_404(self, client: TestClient, auth_headers):
@@ -305,7 +343,7 @@ class TestBambuPrinter:
             assert resp.json() == {"ok": True}
 
     def test_bambu_diagnostics_reports_beta_without_send_parity(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, auth_headers, db_session: Session
     ):
         p = Printer(
             name="Bambu",
@@ -324,7 +362,9 @@ class TestBambuPrinter:
             new_callable=AsyncMock,
         ) as mock_status:
             mock_status.return_value = {"result": {"status": {}}}
-            resp = client.get(f"/api/v1/printers/{p.id}/diagnostics")
+            resp = client.get(
+                f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -338,7 +378,7 @@ class TestBambuPrinter:
         ]
 
     def test_diagnostics_timeout_returns_check_failure(
-        self, client: TestClient, db_session: Session, monkeypatch
+        self, client: TestClient, auth_headers, db_session: Session, monkeypatch
     ):
         p = Printer(
             name="Bambu",
@@ -363,7 +403,9 @@ class TestBambuPrinter:
             "app.services.printer_provider.BambuLanProvider.query_status",
             new=slow_status,
         ):
-            resp = client.get(f"/api/v1/printers/{p.id}/diagnostics")
+            resp = client.get(
+                f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers
+            )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -377,36 +419,38 @@ class TestBambuPrinter:
 
 class TestPrinterStatus:
     def test_status_returns_printer_and_snapshot(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, auth_headers, db_session: Session
     ):
         p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
         db_session.add(p)
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.get(f"/api/v1/printers/{p.id}/status")
+        resp = client.get(f"/api/v1/printers/{p.id}/status", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["printer"]["name"] == "Ender 3"
         assert data["snapshot"] == {}
 
-    def test_status_404(self, client: TestClient):
-        resp = client.get("/api/v1/printers/99999/status")
+    def test_status_404(self, client: TestClient, auth_headers):
+        resp = client.get("/api/v1/printers/99999/status", headers=auth_headers)
         assert resp.status_code == 404
 
 
 class TestPrinterJobs:
-    def test_jobs_empty(self, client: TestClient, db_session: Session):
+    def test_jobs_empty(self, client: TestClient, auth_headers, db_session: Session):
         p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
         db_session.add(p)
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.get(f"/api/v1/printers/{p.id}/jobs")
+        resp = client.get(f"/api/v1/printers/{p.id}/jobs", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json() == []
 
-    def test_jobs_lists_in_order(self, client: TestClient, db_session: Session):
+    def test_jobs_lists_in_order(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
         from app.db.models import File, Model
 
         m = Model(name="Model", slug="model", hash="i" * 64)
@@ -443,12 +487,95 @@ class TestPrinterJobs:
         db_session.add(job)
         db_session.commit()
 
-        resp = client.get(f"/api/v1/printers/{p.id}/jobs")
+        resp = client.get(f"/api/v1/printers/{p.id}/jobs", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
         assert data[0]["state"] == "completed"
         assert data[0]["remote_filename"] == "model.gcode"
+
+    def test_non_superuser_cannot_list_jobs(
+        self, client: TestClient, db_session: Session
+    ):
+        headers = _user_headers(db_session, "job-viewer")
+        viewer = db_session.exec(select(User).where(User.username == "job-viewer")).one()
+        allowed = Collection(name="Allowed", slug="allowed", path="allowed")
+        denied = Collection(name="Denied", slug="denied", path="denied")
+        db_session.add_all([allowed, denied])
+        db_session.commit()
+        db_session.refresh(allowed)
+        db_session.refresh(denied)
+        db_session.add(
+            CollectionPermission(
+                user_id=viewer.id,
+                collection_id=allowed.id,
+                role=CollectionRole.VIEW,
+            )
+        )
+        allowed_model = Model(
+            name="Allowed job model",
+            slug="allowed-job-model",
+            hash="7" * 64,
+            collection_id=allowed.id,
+        )
+        denied_model = Model(
+            name="Denied job model",
+            slug="denied-job-model",
+            hash="8" * 64,
+            collection_id=denied.id,
+        )
+        printer = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add_all([allowed_model, denied_model, printer])
+        db_session.commit()
+        db_session.refresh(allowed_model)
+        db_session.refresh(denied_model)
+        allowed_file = File(
+            model_id=allowed_model.id,
+            path="/data/allowed-job.gcode",
+            original_filename="allowed-job.gcode",
+            file_type=FileType.GCODE,
+            version=1,
+            size_bytes=100,
+            sha256="9" * 64,
+        )
+        denied_file = File(
+            model_id=denied_model.id,
+            path="/data/denied-job.gcode",
+            original_filename="denied-job.gcode",
+            file_type=FileType.GCODE,
+            version=1,
+            size_bytes=100,
+            sha256="a" * 64,
+        )
+        db_session.add_all([allowed_file, denied_file])
+        db_session.commit()
+        db_session.refresh(allowed_file)
+        db_session.refresh(denied_file)
+        db_session.refresh(printer)
+        db_session.add_all(
+            [
+                PrintJob(
+                    printer_id=printer.id,
+                    file_id=allowed_file.id,
+                    model_id=allowed_model.id,
+                    remote_filename="allowed.gcode",
+                    state=PrintJobState.COMPLETED,
+                ),
+                PrintJob(
+                    printer_id=printer.id,
+                    file_id=denied_file.id,
+                    model_id=denied_model.id,
+                    remote_filename="denied.gcode",
+                    state=PrintJobState.COMPLETED,
+                ),
+            ]
+        )
+        db_session.commit()
+
+        resp = client.get(f"/api/v1/printers/{printer.id}/jobs", headers=headers)
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "admin_required"
 
 
 class TestPrinterFiles:
@@ -474,7 +601,7 @@ class TestPrinterFiles:
         return m, f
 
     def test_list_printer_files_returns_matched_and_external(
-        self, client: TestClient, db_session: Session
+        self, client: TestClient, auth_headers, db_session: Session
     ):
         from app.db.models import PrinterFile
 
@@ -502,7 +629,7 @@ class TestPrinterFiles:
         )
         db_session.commit()
 
-        resp = client.get(f"/api/v1/printers/{p.id}/files")
+        resp = client.get(f"/api/v1/printers/{p.id}/files", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 2
@@ -565,6 +692,133 @@ class TestPrinterFiles:
         resp = client.post(f"/api/v1/printers/{p.id}/files/sync", headers=auth_headers)
         assert resp.status_code == 409
         assert resp.json()["detail"] == "operation_not_supported_for_provider"
+
+    def test_non_superuser_cannot_list_printer_files(
+        self, client: TestClient, db_session: Session
+    ):
+        headers = _user_headers(db_session, "viewer")
+        viewer = db_session.exec(select(User).where(User.username == "viewer")).one()
+        allowed = Collection(name="Allowed", slug="allowed", path="allowed")
+        denied = Collection(name="Denied", slug="denied", path="denied")
+        db_session.add_all([allowed, denied])
+        db_session.commit()
+        db_session.refresh(allowed)
+        db_session.refresh(denied)
+        db_session.add(
+            CollectionPermission(
+                user_id=viewer.id,
+                collection_id=allowed.id,
+                role=CollectionRole.VIEW,
+            )
+        )
+        allowed_model = Model(
+            name="Allowed model",
+            slug="allowed-model",
+            hash="1" * 64,
+            collection_id=allowed.id,
+        )
+        denied_model = Model(
+            name="Denied model",
+            slug="denied-model",
+            hash="2" * 64,
+            collection_id=denied.id,
+        )
+        db_session.add_all([allowed_model, denied_model])
+        db_session.commit()
+        db_session.refresh(allowed_model)
+        db_session.refresh(denied_model)
+        allowed_file = File(
+            model_id=allowed_model.id,
+            path="/data/allowed.gcode",
+            original_filename="allowed.gcode",
+            file_type=FileType.GCODE,
+            version=1,
+            size_bytes=100,
+            sha256="3" * 64,
+        )
+        denied_file = File(
+            model_id=denied_model.id,
+            path="/data/denied.gcode",
+            original_filename="denied.gcode",
+            file_type=FileType.GCODE,
+            version=1,
+            size_bytes=100,
+            sha256="4" * 64,
+        )
+        printer = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add_all([allowed_file, denied_file, printer])
+        db_session.commit()
+        db_session.refresh(allowed_file)
+        db_session.refresh(denied_file)
+        db_session.refresh(printer)
+        db_session.add_all(
+            [
+                PrinterFile(
+                    printer_id=printer.id,
+                    file_id=allowed_file.id,
+                    remote_filename="allowed.gcode",
+                    matched_by="filename",
+                ),
+                PrinterFile(
+                    printer_id=printer.id,
+                    file_id=denied_file.id,
+                    remote_filename="denied.gcode",
+                    matched_by="filename",
+                ),
+                PrinterFile(
+                    printer_id=printer.id,
+                    remote_filename="external.gcode",
+                    matched_by="external",
+                ),
+            ]
+        )
+        db_session.commit()
+
+        resp = client.get(f"/api/v1/printers/{printer.id}/files", headers=headers)
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "admin_required"
+
+    def test_non_superuser_cannot_send_to_printer(
+        self, client: TestClient, db_session: Session
+    ):
+        headers = _user_headers(db_session, "editor")
+        collection = Collection(name="Private", slug="private", path="private")
+        db_session.add(collection)
+        db_session.commit()
+        db_session.refresh(collection)
+        model = Model(
+            name="Private model",
+            slug="private-model",
+            hash="5" * 64,
+            collection_id=collection.id,
+        )
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        file_row = File(
+            model_id=model.id,
+            path="/data/private.gcode",
+            original_filename="private.gcode",
+            file_type=FileType.GCODE,
+            version=1,
+            size_bytes=100,
+            sha256="6" * 64,
+        )
+        printer = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add_all([file_row, printer])
+        db_session.commit()
+        db_session.refresh(file_row)
+        db_session.refresh(printer)
+
+        resp = client.post(
+            f"/api/v1/printers/{printer.id}/send",
+            json={"file_id": file_row.id, "start_print": False},
+            headers=headers,
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "admin_required"
 
     def test_start_matched_printer_file_creates_vault_job(
         self, client: TestClient, auth_headers, db_session: Session
@@ -862,8 +1116,8 @@ class TestSendToPrinter:
 
 
 class TestDashboard:
-    def test_dashboard_empty(self, client: TestClient):
-        resp = client.get("/api/v1/printers/dashboard")
+    def test_dashboard_empty(self, client: TestClient, auth_headers):
+        resp = client.get("/api/v1/printers/dashboard", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_printers"] == 0
@@ -871,7 +1125,9 @@ class TestDashboard:
         assert data["active_jobs"] == 0
         assert data["groups"] == []
 
-    def test_dashboard_with_printers(self, client: TestClient, db_session: Session):
+    def test_dashboard_with_printers(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
         p1 = Printer(name="P1", moonraker_url="http://10.0.0.1:7125", group="garage")
         p2 = Printer(name="P2", moonraker_url="http://10.0.0.2:7125", group="garage")
         p3 = Printer(name="P3", moonraker_url="http://10.0.0.3:7125")
@@ -887,7 +1143,7 @@ class TestDashboard:
         asyncio.run(hub._mark_status(p1.id, status="printing", error=None))
         asyncio.run(hub._mark_status(p2.id, status="ready", error=None))
 
-        resp = client.get("/api/v1/printers/dashboard")
+        resp = client.get("/api/v1/printers/dashboard", headers=auth_headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total_printers"] == 3
@@ -900,7 +1156,9 @@ class TestDashboard:
 
 
 class TestGroupFilter:
-    def test_filter_by_group(self, client: TestClient, db_session: Session):
+    def test_filter_by_group(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
         p1 = Printer(name="Prusa", moonraker_url="http://10.0.0.1:7125", group="garage")
         p2 = Printer(
             name="Ender", moonraker_url="http://10.0.0.2:7125", group="workshop"
@@ -908,16 +1166,16 @@ class TestGroupFilter:
         db_session.add_all([p1, p2])
         db_session.commit()
 
-        resp = client.get("/api/v1/printers")
+        resp = client.get("/api/v1/printers", headers=auth_headers)
         assert len(resp.json()) == 2
 
-        resp = client.get("/api/v1/printers?group=garage")
+        resp = client.get("/api/v1/printers?group=garage", headers=auth_headers)
         data = resp.json()
         assert len(data) == 1
         assert data[0]["name"] == "Prusa"
         assert data[0]["group"] == "garage"
 
-        resp = client.get("/api/v1/printers?group=workshop")
+        resp = client.get("/api/v1/printers?group=workshop", headers=auth_headers)
         assert len(resp.json()) == 1
 
     def test_create_with_group(self, client: TestClient, auth_headers):

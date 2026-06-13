@@ -13,7 +13,7 @@ interface MobileNavDrawerProps {
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
   { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
   { href: "/organize", label: "Catalog", icon: FolderTree },
 ];
@@ -25,6 +25,7 @@ const bottomItems = [
 export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   useEffect(() => {
     if (open) {
@@ -69,7 +70,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
         </div>
 
         <nav className="flex flex-col gap-1 flex-1 p-3">
-          {mainItems.map((item) => {
+          {visibleMainItems.map((item) => {
             const isActive =
               item.href === "/"
                 ? pathname === "/"

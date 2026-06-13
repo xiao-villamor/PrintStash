@@ -14,17 +14,28 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.http import get_or_404
-from app.core.security import require_auth
+from app.core.security import require_auth, require_user
 from app.core.time import utcnow
-from app.db.models import Collection, Model, ModelTagLink, Tag
+from app.db.models import (
+    Collection,
+    CollectionPermission,
+    CollectionRole,
+    Model,
+    ModelTagLink,
+    Tag,
+    User,
+)
 from app.db.session import get_session
 from app.schemas.models import (
     CollectionCreate,
     CollectionMove,
+    CollectionPermissionRead,
+    CollectionPermissionUpdate,
     CollectionRead,
     TagCreate,
     TagRead,
 )
+from app.services import rbac
 from app.services import taxonomy
 from app.services.taxonomy import slugify
 from app.db.scopes import live
@@ -37,10 +48,13 @@ router = APIRouter(tags=["taxonomy"])
 # ---------------------------------------------------------------------------
 
 
-def _collection_model_count(session: Session, path: str) -> int:
+def _collection_model_count(session: Session, path: str, user: User) -> int:
     matching_cat_ids = select(Collection.id).where(
         (Collection.path == path) | (Collection.path.startswith(path + "/"))
     )
+    if not user.is_superuser:
+        accessible_ids = rbac.accessible_collection_ids(session, user)
+        matching_cat_ids = matching_cat_ids.where(Collection.id.in_(accessible_ids))  # type: ignore[union-attr]
     count = session.exec(
         select(func.count(Model.id)).where(
             live(Model),
@@ -55,17 +69,28 @@ def _collection_model_count(session: Session, path: str) -> int:
     response_model=List[CollectionRead],
     summary="List all collections with model counts",
 )
-def list_collections(session: Session = Depends(get_session)) -> List[CollectionRead]:
-    cats = session.exec(
-        select(Collection).where(live(Collection)).order_by(Collection.path)  # type: ignore[union-attr]
-    ).all()
+def list_collections(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> List[CollectionRead]:
+    stmt = select(Collection).where(live(Collection)).order_by(Collection.path)  # type: ignore[union-attr]
+    if not current_user.is_superuser:
+        accessible_ids = rbac.accessible_collection_ids(session, current_user)
+        if not accessible_ids:
+            return []
+        stmt = stmt.where(Collection.id.in_(accessible_ids))  # type: ignore[union-attr]
+    cats = session.exec(stmt).all()
     # One grouped query for direct counts; subtree totals aggregate in memory.
+    model_count_stmt = select(Model.collection_id, func.count(Model.id)).where(
+        live(Model),
+        Model.collection_id.is_not(None),  # type: ignore[union-attr]
+    )
+    if not current_user.is_superuser:
+        model_count_stmt = model_count_stmt.where(
+            Model.collection_id.in_(accessible_ids)
+        )  # type: ignore[union-attr]
     direct_counts: dict[int, int] = dict(
-        session.exec(
-            select(Model.collection_id, func.count(Model.id))
-            .where(live(Model), Model.collection_id.is_not(None))  # type: ignore[union-attr]
-            .group_by(Model.collection_id)
-        ).all()
+        session.exec(model_count_stmt.group_by(Model.collection_id)).all()
     )
     count_by_path = {c.path: direct_counts.get(c.id, 0) for c in cats if c.id}
     return [
@@ -80,6 +105,7 @@ def list_collections(session: Session = Depends(get_session)) -> List[Collection
                 for path, n in count_by_path.items()
                 if path == c.path or path.startswith(c.path + "/")
             ),
+            effective_role=rbac.effective_collection_role(session, current_user, c.id),
         )
         for c in cats
     ]
@@ -94,10 +120,16 @@ def list_collections(session: Session = Depends(get_session)) -> List[Collection
 )
 def create_collection(
     payload: CollectionCreate,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> CollectionRead:
     name = payload.name.strip()
     if "/" in name and payload.parent_id is None:
+        if not current_user.is_superuser:
+            raise HTTPException(
+                status_code=403, detail="root_collection_admin_required"
+            )
         collection = taxonomy.resolve_or_create_collection(session, name)
         if collection is None:
             raise HTTPException(status_code=400, detail="collection_name_required")
@@ -107,7 +139,10 @@ def create_collection(
             slug=collection.slug,
             path=collection.path,
             parent_id=collection.parent_id,
-            model_count=_collection_model_count(session, collection.path),
+            model_count=_collection_model_count(session, collection.path, current_user),
+            effective_role=rbac.effective_collection_role(
+                session, current_user, collection.id
+            ),
         )
 
     slug = slugify(name)
@@ -115,7 +150,12 @@ def create_collection(
     path = slug
     if parent_id is not None:
         parent = get_or_404(session, Collection, payload.parent_id, "parent_not_found")
+        rbac.require_collection_role(
+            session, current_user, parent.id, CollectionRole.ADMIN
+        )
         path = f"{parent.path}/{slug}"
+    elif not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="root_collection_admin_required")
 
     existing = session.exec(select(Collection).where(Collection.path == path)).first()
     if existing is not None:
@@ -136,7 +176,10 @@ def create_collection(
             slug=existing.slug,
             path=existing.path,
             parent_id=existing.parent_id,
-            model_count=_collection_model_count(session, existing.path),
+            model_count=_collection_model_count(session, existing.path, current_user),
+            effective_role=rbac.effective_collection_role(
+                session, current_user, existing.id
+            ),
         )
 
     collection = Collection(name=name, slug=slug, parent_id=parent_id, path=path)
@@ -150,6 +193,9 @@ def create_collection(
         path=collection.path,
         parent_id=collection.parent_id,
         model_count=0,
+        effective_role=rbac.effective_collection_role(
+            session, current_user, collection.id
+        ),
     )
 
 
@@ -162,17 +208,27 @@ def create_collection(
 def move_collection(
     collection_id: int,
     payload: CollectionMove,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> CollectionRead:
     col = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(session, current_user, col.id, CollectionRole.ADMIN)
 
     new_parent_id = payload.parent_id
     if new_parent_id is not None:
         parent = get_or_404(session, Collection, new_parent_id, "parent_not_found")
+        rbac.require_collection_role(
+            session, current_user, parent.id, CollectionRole.ADMIN
+        )
         if parent.path == col.path or parent.path.startswith(col.path + "/"):
             raise HTTPException(status_code=400, detail="circular_reference")
         new_path = f"{parent.path}/{col.slug}"
     else:
+        if not current_user.is_superuser:
+            raise HTTPException(
+                status_code=403, detail="root_collection_admin_required"
+            )
         new_path = col.slug
 
     if new_path == col.path:
@@ -182,7 +238,10 @@ def move_collection(
             slug=col.slug,
             path=col.path,
             parent_id=col.parent_id,
-            model_count=_collection_model_count(session, col.path),
+            model_count=_collection_model_count(session, col.path, current_user),
+            effective_role=rbac.effective_collection_role(
+                session, current_user, col.id
+            ),
         )
 
     if session.exec(
@@ -213,7 +272,8 @@ def move_collection(
         slug=col.slug,
         path=col.path,
         parent_id=col.parent_id,
-        model_count=_collection_model_count(session, col.path),
+        model_count=_collection_model_count(session, col.path, current_user),
+        effective_role=rbac.effective_collection_role(session, current_user, col.id),
     )
 
 
@@ -227,9 +287,12 @@ def move_collection(
 def delete_collection(
     collection_id: int,
     recursive: bool = Query(False),
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> Response:
     cat = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(session, current_user, cat.id, CollectionRole.ADMIN)
     now = utcnow()
 
     if recursive:
@@ -258,7 +321,7 @@ def delete_collection(
             select(Collection).where(Collection.parent_id == collection_id)
         ).first():
             raise HTTPException(status_code=409, detail="collection_has_children")
-        if _collection_model_count(session, cat.path):
+        if _collection_model_count(session, cat.path, current_user):
             raise HTTPException(status_code=409, detail="collection_has_models")
 
     cat.deleted_at = now
@@ -277,18 +340,27 @@ def delete_collection(
     response_model=List[TagRead],
     summary="List all tags with model counts",
 )
-def list_tags(session: Session = Depends(get_session)) -> List[TagRead]:
+def list_tags(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> List[TagRead]:
     tags = session.exec(
         select(Tag).where(live(Tag)).order_by(Tag.name)  # type: ignore[union-attr]
     ).all()
-    counts: dict[int, int] = dict(
-        session.exec(
-            select(ModelTagLink.tag_id, func.count(ModelTagLink.model_id))
-            .join(Model, Model.id == ModelTagLink.model_id)
-            .where(live(Model))
-            .group_by(ModelTagLink.tag_id)
-        ).all()
+    count_stmt = (
+        select(ModelTagLink.tag_id, func.count(ModelTagLink.model_id))
+        .join(Model, Model.id == ModelTagLink.model_id)
+        .where(live(Model))
     )
+    if not current_user.is_superuser:
+        accessible_ids = rbac.accessible_collection_ids(session, current_user)
+        if not accessible_ids:
+            counts = {}
+        else:
+            count_stmt = count_stmt.where(Model.collection_id.in_(accessible_ids))  # type: ignore[union-attr]
+            counts = dict(session.exec(count_stmt.group_by(ModelTagLink.tag_id)).all())
+    else:
+        counts = dict(session.exec(count_stmt.group_by(ModelTagLink.tag_id)).all())
     return [
         TagRead(
             id=t.id,
@@ -309,6 +381,7 @@ def list_tags(session: Session = Depends(get_session)) -> List[TagRead]:
 )
 def create_tag(
     payload: TagCreate,
+    _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> TagRead:
     slug = slugify(payload.name)
@@ -331,6 +404,7 @@ def create_tag(
 )
 def delete_tag(
     tag_id: int,
+    _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> Response:
     from sqlmodel import delete
@@ -339,5 +413,111 @@ def delete_tag(
     session.exec(delete(ModelTagLink).where(ModelTagLink.tag_id == tag_id))  # type: ignore[call-overload]
     tag.deleted_at = utcnow()
     session.add(tag)
+    session.commit()
+    return Response(status_code=204)
+
+
+@router.get(
+    "/collections/{collection_id}/permissions",
+    response_model=List[CollectionPermissionRead],
+    summary="List direct permissions for a collection",
+)
+def list_collection_permissions(
+    collection_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> List[CollectionPermissionRead]:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection.id, CollectionRole.ADMIN
+    )
+    rows = session.exec(
+        select(CollectionPermission, User)
+        .join(User, User.id == CollectionPermission.user_id)
+        .where(CollectionPermission.collection_id == collection_id)
+        .order_by(User.username)
+    ).all()
+    return [
+        CollectionPermissionRead(
+            user_id=user.id,  # type: ignore[arg-type]
+            username=user.username,
+            collection_id=permission.collection_id,
+            role=permission.role,
+            inherited=False,
+        )
+        for permission, user in rows
+    ]
+
+
+@router.put(
+    "/collections/{collection_id}/permissions/{user_id}",
+    response_model=CollectionPermissionRead,
+    summary="Grant or update a collection permission",
+)
+def upsert_collection_permission(
+    collection_id: int,
+    user_id: int,
+    payload: CollectionPermissionUpdate,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
+    session: Session = Depends(get_session),
+) -> CollectionPermissionRead:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection.id, CollectionRole.ADMIN
+    )
+    target_user = get_or_404(session, User, user_id, "user_not_found")
+    permission = session.exec(
+        select(CollectionPermission).where(
+            CollectionPermission.collection_id == collection_id,
+            CollectionPermission.user_id == user_id,
+        )
+    ).first()
+    if permission is None:
+        permission = CollectionPermission(
+            collection_id=collection_id,
+            user_id=user_id,
+            role=payload.role,
+        )
+    else:
+        permission.role = payload.role
+        permission.updated_at = utcnow()
+    session.add(permission)
+    session.commit()
+    return CollectionPermissionRead(
+        user_id=target_user.id,  # type: ignore[arg-type]
+        username=target_user.username,
+        collection_id=collection_id,
+        role=permission.role,
+        inherited=False,
+    )
+
+
+@router.delete(
+    "/collections/{collection_id}/permissions/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    summary="Remove a direct collection permission",
+)
+def delete_collection_permission(
+    collection_id: int,
+    user_id: int,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
+    session: Session = Depends(get_session),
+) -> Response:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection.id, CollectionRole.ADMIN
+    )
+    permission = session.exec(
+        select(CollectionPermission).where(
+            CollectionPermission.collection_id == collection_id,
+            CollectionPermission.user_id == user_id,
+        )
+    ).first()
+    if permission is None:
+        raise HTTPException(status_code=404, detail="permission_not_found")
+    session.delete(permission)
     session.commit()
     return Response(status_code=204)

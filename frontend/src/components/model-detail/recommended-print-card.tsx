@@ -26,6 +26,7 @@ export function RecommendedPrintCard({
   hasGcode,
   saving,
   onSend,
+  canSend,
   onCompare,
   onMark,
   onAddRevision,
@@ -34,6 +35,7 @@ export function RecommendedPrintCard({
   hasGcode: boolean;
   saving: number | null;
   onSend: (fileId: number) => void;
+  canSend: boolean;
   onCompare: () => void;
   onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
   onAddRevision: () => void;
@@ -107,12 +109,14 @@ export function RecommendedPrintCard({
             ))}
           </div>
 
-          <button
-            onClick={() => onSend(file.id)}
-            className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
-          >
-            <Send className="h-4 w-4" /> Send to printer
-          </button>
+          {canSend && (
+            <button
+              onClick={() => onSend(file.id)}
+              className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+            >
+              <Send className="h-4 w-4" /> Send to printer
+            </button>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <a
               href={getAssetUrl(`/api/v1/files/${file.id}/download`)}

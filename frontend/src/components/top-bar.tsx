@@ -197,6 +197,7 @@ export function TopBar() {
               {profileOpen && (
                 <ProfileMenu
                   pathname={pathname}
+                  isAdmin={!!user?.is_superuser}
                   onNavigate={() => setProfileOpen(false)}
                   onLogout={handleLogout}
                 />
@@ -211,19 +212,21 @@ export function TopBar() {
 
 function ProfileMenu({
   pathname,
+  isAdmin,
   onNavigate,
   onLogout,
 }: {
   pathname: string;
+  isAdmin: boolean;
   onNavigate: () => void;
   onLogout: () => void;
 }) {
   const items = [
     { href: "/", label: "Vault", icon: Box },
-    { href: "/printers", label: "Printers", icon: Printer },
+    { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
     { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
     { href: "/settings", label: "Settings", icon: Settings },
-  ];
+  ].filter((item) => !item.adminOnly || isAdmin);
 
   return (
     <div

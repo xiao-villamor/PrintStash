@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
   { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
   { href: "/organize", label: "Catalog", icon: FolderTree },
 ];
@@ -19,6 +19,7 @@ const bottomItems = [
 export function SidebarNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (
     <nav className="bg-card border-r border-border h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
@@ -37,7 +38,7 @@ export function SidebarNav() {
       </div>
 
       <div className="flex flex-col gap-1 flex-1">
-        {mainItems.map((item) => {
+        {visibleMainItems.map((item) => {
           const isActive =
             item.href === "/"
               ? pathname === "/"

@@ -217,3 +217,75 @@ class TestAdminEnforcement:
         )
         assert resp.status_code == 403
         assert resp.json()["detail"] == "admin_required"
+
+
+class TestAdminUserManagement:
+    def test_superuser_can_create_update_reset_and_disable_user(
+        self, client: TestClient, db_session: Session
+    ):
+        _create_user(db_session, "admin", "Password123", is_superuser=True)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "Password123"},
+        ).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+        created = client.post(
+            "/api/v1/admin/users",
+            headers=headers,
+            json={
+                "username": "new-user",
+                "password": "Password123",
+                "email": "new@example.com",
+            },
+        )
+        assert created.status_code == 201
+        user_id = created.json()["id"]
+
+        updated = client.patch(
+            f"/api/v1/admin/users/{user_id}",
+            headers=headers,
+            json={"is_superuser": True},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["is_superuser"] is True
+
+        reset = client.post(
+            f"/api/v1/admin/users/{user_id}/password",
+            headers=headers,
+            json={"password": "NewPassword123"},
+        )
+        assert reset.status_code == 200
+
+        relogin = client.post(
+            "/api/v1/auth/login",
+            json={"username": "new-user", "password": "NewPassword123"},
+        )
+        assert relogin.status_code == 200
+
+        disabled = client.delete(f"/api/v1/admin/users/{user_id}", headers=headers)
+        assert disabled.status_code == 204
+
+        denied = client.post(
+            "/api/v1/auth/login",
+            json={"username": "new-user", "password": "NewPassword123"},
+        )
+        assert denied.status_code == 401
+
+    def test_cannot_disable_last_active_superuser(
+        self, client: TestClient, db_session: Session
+    ):
+        admin = _create_user(db_session, "solo-admin", "Password123", is_superuser=True)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "solo-admin", "password": "Password123"},
+        ).json()
+        headers = {"Authorization": f"Bearer {login['access_token']}"}
+
+        response = client.patch(
+            f"/api/v1/admin/users/{admin.id}",
+            headers=headers,
+            json={"is_superuser": False},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "last_superuser_required"

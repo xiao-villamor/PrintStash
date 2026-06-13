@@ -20,11 +20,14 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.core.security import require_auth
-from app.db.models import SUFFIX_TO_FILE_TYPE
-from app.db.session import SessionFactory, get_session_factory
+from sqlmodel import Session, select
+
+from app.core.security import require_auth, require_user
+from app.db.models import Collection, CollectionRole, SUFFIX_TO_FILE_TYPE, User
+from app.db.scopes import live
+from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestJobStatus, IngestResponse
-from app.services import storage
+from app.services import rbac, storage, taxonomy
 from app.services.ingestion import ingest_mesh, ingest_orca_gcode
 from app.services.jobs import registry
 
@@ -34,6 +37,34 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 
 _GCODE_SUFFIXES = {".gcode", ".g", ".gco"}
 _MESH_SUFFIXES = {".stl", ".3mf", ".obj"}
+
+
+def _collection_path_for(raw_path: str) -> str:
+    segments = [taxonomy.slugify(s.strip()) for s in raw_path.split("/") if s.strip()]
+    return "/".join(segments)
+
+
+def _require_ingest_collection(
+    session: Session,
+    user: User,
+    collection: str | None,
+) -> None:
+    if not collection or not collection.strip():
+        if not user.is_superuser:
+            raise HTTPException(status_code=403, detail="collection_required")
+        return
+    collection_path = _collection_path_for(collection)
+    row = session.exec(
+        select(Collection).where(Collection.path == collection_path, live(Collection))
+    ).first()
+    if row is None:
+        if not user.is_superuser:
+            raise HTTPException(
+                status_code=403,
+                detail="collection_permission_denied",
+            )
+        return
+    rbac.require_collection_role(session, user, row.id, CollectionRole.EDIT)
 
 
 def _stage_upload(upload: UploadFile, suffix: str) -> Path:
@@ -79,6 +110,8 @@ async def ingest_orca(
     source_hash: Optional[str] = Form(
         None, description="Optional sha256 of the source mesh for dedup"
     ),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     if not file.filename:
@@ -88,9 +121,10 @@ async def ingest_orca(
     suffix = Path(original_filename).suffix.lower() or ".gcode"
     if suffix not in _GCODE_SUFFIXES:
         raise HTTPException(status_code=400, detail="unsupported_file_type")
+    _require_ingest_collection(session, current_user, collection)
 
     staged = await run_in_threadpool(_stage_upload, file, suffix)
-    job_id = registry.create()
+    job_id = registry.create(owner_user_id=current_user.id)
     background_tasks.add_task(
         ingest_orca_gcode,
         job_id=job_id,
@@ -100,6 +134,7 @@ async def ingest_orca(
         collection=collection,
         tags=tags,
         source_hash=source_hash,
+        actor_user_id=current_user.id,
         session_factory=session_factory,
     )
     return IngestResponse(job_id=job_id, state="pending")
@@ -127,6 +162,8 @@ async def ingest_model(
     ),
     tags: Optional[str] = Form(None, description="Comma-separated tag list"),
     source_hash: Optional[str] = Form(None, description="Optional sha256 for dedup"),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     if not file.filename:
@@ -136,9 +173,10 @@ async def ingest_model(
     suffix = Path(original_filename).suffix.lower()
     if suffix not in _MESH_SUFFIXES:
         raise HTTPException(status_code=400, detail="unsupported_file_type")
+    _require_ingest_collection(session, current_user, collection)
 
     staged = await run_in_threadpool(_stage_upload, file, suffix)
-    job_id = registry.create()
+    job_id = registry.create(owner_user_id=current_user.id)
     background_tasks.add_task(
         ingest_mesh,
         job_id=job_id,
@@ -149,6 +187,7 @@ async def ingest_model(
         tags=tags,
         file_type=SUFFIX_TO_FILE_TYPE[suffix],
         source_hash=source_hash,
+        actor_user_id=current_user.id,
         session_factory=session_factory,
     )
     return IngestResponse(job_id=job_id, state="pending")
@@ -159,8 +198,17 @@ async def ingest_model(
     response_model=IngestJobStatus,
     summary="Get the status of an ingestion job",
 )
-def get_job(job_id: str) -> IngestJobStatus:
+def get_job(
+    job_id: str,
+    current_user: User = Depends(require_user),
+) -> IngestJobStatus:
     job = registry.get(job_id)
     if job is None:
+        raise HTTPException(status_code=404, detail="job_not_found")
+    if (
+        job.owner_user_id is not None
+        and job.owner_user_id != current_user.id
+        and not current_user.is_superuser
+    ):
         raise HTTPException(status_code=404, detail="job_not_found")
     return job

@@ -49,6 +49,10 @@ test("model detail route renders data and hydrates printer integrations", async 
 
   await expect(page.getByRole("heading", { name: "skadis_kitchen-roll_screw" })).toBeVisible();
   await expect(page.getByText("Creality Ender-3 V3 SE").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /source model/i })).toHaveAttribute(
+    "href",
+    /printables\.com\/model\/123-skadis-kitchen-roll-screw/,
+  );
   await expect(page.getByText("Printed OK").first()).toBeVisible();
   await expect(page.getByText("1/1 online")).toBeVisible();
   await expect(page.getByText("This page could not be found")).toHaveCount(0);

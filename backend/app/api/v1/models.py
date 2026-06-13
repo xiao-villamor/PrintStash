@@ -25,7 +25,7 @@ from sqlmodel import Session, delete, select
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
-from app.core.security import require_auth
+from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import (
     File,
@@ -38,6 +38,9 @@ from app.db.models import (
     PrinterFile,
     PrintJob,
     PrintJobState,
+    Collection,
+    CollectionRole,
+    User,
 )
 from app.db.scopes import live
 from app.db.session import get_session
@@ -54,7 +57,7 @@ from app.schemas.models import (
     TrashedModelRead,
     VaultStatsRead,
 )
-from app.services import model_views, storage, taxonomy
+from app.services import model_views, rbac, storage, taxonomy
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services.moonraker import MoonrakerClient, MoonrakerError
 from app.services.trash import (
@@ -89,11 +92,27 @@ def _live_model(session: Session, model_id: int) -> Model:
     return m
 
 
-def _detail_or_404(session: Session, model_id: int) -> ModelRead:
-    view = model_views.detail(session, model_id)
+def _require_model_role(
+    session: Session,
+    user: User,
+    model_id: int,
+    minimum: CollectionRole,
+) -> Model:
+    model = _live_model(session, model_id)
+    rbac.require_model_collection_role(session, user, model.collection_id, minimum)
+    return model
+
+
+def _detail_or_404(session: Session, model_id: int, user: User) -> ModelRead:
+    view = model_views.detail(session, model_id, user)
     if view is None:
         raise HTTPException(status_code=404, detail="model_not_found")
     return view
+
+
+def _collection_path_for(raw_path: str) -> str:
+    segments = [taxonomy.slugify(s.strip()) for s in raw_path.split("/") if s.strip()]
+    return "/".join(segments)
 
 
 @router.get(
@@ -126,10 +145,14 @@ def list_models(
     ),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[ModelListItem]:
+    if (printer_id is not None or printer_presence is not None) and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="admin_required")
     return model_views.list_items(
         session,
+        current_user,
         collection=collection,
         direct=direct,
         tags=tag,
@@ -153,9 +176,10 @@ def list_models(
 )
 def export_models(
     format: Literal["json", "csv"] = Query("json", description="Export format"),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    payload = model_views.export_payload(session)
+    payload = model_views.export_payload(session, current_user)
     if format == "csv":
         return Response(
             content=model_views.export_csv(payload),
@@ -186,8 +210,11 @@ def export_models(
         "local or S3-compatible backend."
     ),
 )
-def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
-    return model_views.vault_stats(session)
+def vault_stats(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> VaultStatsRead:
+    return model_views.vault_stats(session, current_user)
 
 
 @router.get(
@@ -203,10 +230,12 @@ def vault_stats(session: Session = Depends(get_session)) -> VaultStatsRead:
 def list_trash(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[TrashedModelRead]:
     return model_views.list_trashed(
         session,
+        current_user,
         limit=limit,
         offset=offset,
         retention_days=int(settings.trash_retention_days),
@@ -216,7 +245,7 @@ def list_trash(
 @router.delete(
     "/trash/expired",
     response_model=TrashPurgeRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Permanently delete expired trash items",
 )
 def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRead:
@@ -236,8 +265,12 @@ def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRe
     response_model=ModelRead,
     summary="Get model detail with files and metadata",
 )
-def get_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
-    return _detail_or_404(session, model_id)
+def get_model(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    return _detail_or_404(session, model_id, current_user)
 
 
 @router.post(
@@ -257,9 +290,10 @@ async def add_gcode_revision(
     revision_status: Optional[FileRevisionStatus] = Form(FileRevisionStatus.NEEDS_TEST),
     revision_notes: Optional[str] = Form(None, max_length=4096),
     is_recommended: bool = Form(False),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    model = _live_model(session, model_id)
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     if not file.filename:
         raise HTTPException(status_code=400, detail="filename_required")
 
@@ -286,7 +320,7 @@ async def add_gcode_revision(
     except Exception:
         staged.unlink(missing_ok=True)
         raise
-    return _detail_or_404(session, model_id)
+    return _detail_or_404(session, model_id, current_user)
 
 
 @router.get(
@@ -295,9 +329,11 @@ async def add_gcode_revision(
     summary="List printers where this model's G-code files are present",
 )
 def get_model_printer_files(
-    model_id: int, session: Session = Depends(get_session)
+    model_id: int,
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
 ) -> List[ModelPrinterFileRead]:
-    _live_model(session, model_id)
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     rows = session.exec(
         select(PrinterFile, Printer)
         .join(File, File.id == PrinterFile.file_id)
@@ -341,9 +377,11 @@ def _gcode_revision_numbers(session: Session, model_id: int) -> dict[int, int]:
     summary="List recent print jobs for this model (print history)",
 )
 def get_model_print_jobs(
-    model_id: int, session: Session = Depends(get_session)
+    model_id: int,
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
 ) -> List[ModelPrintJobRead]:
-    _live_model(session, model_id)
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     revision_numbers = _gcode_revision_numbers(session, model_id)
 
     rows = session.exec(
@@ -380,15 +418,16 @@ def get_model_print_jobs(
 @router.post(
     "/{model_id}/print-jobs",
     response_model=ModelPrintJobRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Manually log a print job for this model",
 )
 def create_manual_print_job(
     model_id: int,
     payload: ManualPrintJobCreate,
+    current_user: User = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> ModelPrintJobRead:
-    _live_model(session, model_id)
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
 
     file_row = session.get(File, payload.file_id)
     if file_row is None or file_row.model_id != model_id:
@@ -439,15 +478,16 @@ def create_manual_print_job(
 @router.post(
     "/{model_id}/print-jobs/import-printer/{printer_id}",
     response_model=List[ImportedPrintJobRead],
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Fetch and import matching print history from a Moonraker printer",
 )
 async def import_print_jobs_from_printer(
     model_id: int,
     printer_id: int,
+    current_user: User = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> List[ImportedPrintJobRead]:
-    _live_model(session, model_id)
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
 
     printer = session.get(Printer, printer_id)
     if printer is None or printer.deleted_at is not None:
@@ -546,26 +586,50 @@ async def import_print_jobs_from_printer(
     "/{model_id}",
     response_model=ModelRead,
     dependencies=[Depends(require_auth)],
-    summary="Update a model's name, description, collection, or tags",
+    summary="Update a model's name, description, source URL, collection, or tags",
 )
 def update_model(
     model_id: int,
     payload: ModelUpdate,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    m = _live_model(session, model_id)
+    m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
 
     if payload.name is not None:
         m.name = payload.name.strip() or m.name
     if payload.description is not None:
         m.description = payload.description
+    if "source_url" in payload.model_fields_set:
+        m.source_url = payload.source_url
 
     if payload.collection is not None:
         if payload.collection.strip() == "":
+            if not current_user.is_superuser:
+                raise HTTPException(
+                    status_code=403, detail="root_collection_admin_required"
+                )
             m.collection_id = None
         else:
-            cat = taxonomy.resolve_or_create_collection(session, payload.collection)
+            collection_path = _collection_path_for(payload.collection)
+            cat = session.exec(
+                select(Collection).where(
+                    Collection.path == collection_path, live(Collection)
+                )
+            ).first()
+            if cat is None:
+                if not current_user.is_superuser:
+                    raise HTTPException(
+                        status_code=403, detail="collection_permission_denied"
+                    )
+                cat = taxonomy.resolve_or_create_collection(session, payload.collection)
             if cat is not None:
+                rbac.require_collection_role(
+                    session,
+                    current_user,
+                    cat.id,
+                    CollectionRole.EDIT,
+                )
                 m.collection_id = cat.id
 
     if payload.tags is not None:
@@ -578,7 +642,7 @@ def update_model(
     m.updated_at = utcnow()
     session.add(m)
     session.commit()
-    return _detail_or_404(session, model_id)
+    return _detail_or_404(session, model_id, current_user)
 
 
 @router.patch(
@@ -596,9 +660,10 @@ def update_file_revision(
     model_id: int,
     file_id: int,
     payload: FileRevisionUpdate,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    m = _live_model(session, model_id)
+    m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     file_row = session.get(File, file_id)
     if (
         file_row is None
@@ -637,7 +702,7 @@ def update_file_revision(
     session.add(file_row)
     session.add(m)
     session.commit()
-    return _detail_or_404(session, model_id)
+    return _detail_or_404(session, model_id, current_user)
 
 
 @router.post(
@@ -646,12 +711,22 @@ def update_file_revision(
     dependencies=[Depends(require_auth)],
     summary="Restore a model from the trash",
 )
-def restore_model(model_id: int, session: Session = Depends(get_session)) -> ModelRead:
+def restore_model(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
     m = session.get(Model, model_id)
     if m is None:
         raise HTTPException(status_code=404, detail="model_not_found")
+    rbac.require_model_collection_role(
+        session,
+        current_user,
+        m.collection_id,
+        CollectionRole.EDIT,
+    )
     trash_restore_model(session, m)
-    return _detail_or_404(session, model_id)
+    return _detail_or_404(session, model_id, current_user)
 
 
 @router.delete(
@@ -661,13 +736,21 @@ def restore_model(model_id: int, session: Session = Depends(get_session)) -> Mod
     summary="Permanently delete a model from the trash",
 )
 def purge_model(
-    model_id: int, session: Session = Depends(get_session)
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> TrashPurgeRead:
     m = session.get(Model, model_id)
     if m is None:
         raise HTTPException(status_code=404, detail="model_not_found")
     if m.deleted_at is None:
         raise HTTPException(status_code=400, detail="model_not_in_trash")
+    rbac.require_model_collection_role(
+        session,
+        current_user,
+        m.collection_id,
+        CollectionRole.EDIT,
+    )
     hard_delete_model(session, m)
     session.commit()
     return TrashPurgeRead(purged_model_ids=[model_id], purged_count=1)
@@ -681,7 +764,11 @@ def purge_model(
     summary="Soft-delete a model",
     description="Marks the model deleted; it moves to the trash until purged.",
 )
-def delete_model(model_id: int, session: Session = Depends(get_session)) -> Response:
-    m = _live_model(session, model_id)
+def delete_model(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     soft_delete_model(session, m)
     return Response(status_code=204)

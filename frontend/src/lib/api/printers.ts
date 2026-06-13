@@ -4,6 +4,7 @@ import {
   sendAction,
   sendJson,
 } from "@/lib/api/request";
+import { getStoredToken } from "@/lib/auth";
 import {
   Dashboard,
   PrinterDiagnostics,
@@ -124,5 +125,9 @@ export function listPrinterJobs(
 }
 
 export function openPrinterWS(id: number): WebSocket {
-  return new WebSocket(getWsUrl(`/api/v1/printers/${id}/ws`));
+  const token = getStoredToken();
+  const path = token
+    ? `/api/v1/printers/${id}/ws?token=${encodeURIComponent(token)}`
+    : `/api/v1/printers/${id}/ws`;
+  return new WebSocket(getWsUrl(path));
 }

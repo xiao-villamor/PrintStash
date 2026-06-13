@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlparse
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.db.models import FileRevisionStatus, FileType, PrintJobState
+from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
 
 
 class MetadataRead(BaseModel):
@@ -71,6 +72,8 @@ class ModelRead(BaseModel):
     collection: Optional[str] = None
     collection_id: Optional[int] = None
     description: Optional[str] = None
+    source_url: Optional[str] = None
+    effective_role: Optional[CollectionRole] = None
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
     created_at: datetime
@@ -127,6 +130,8 @@ class ModelListItem(BaseModel):
     slug: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    source_url: Optional[str] = None
+    effective_role: Optional[CollectionRole] = None
     tags: List[str] = []
     thumbnail_url: Optional[str] = None
     file_count: int
@@ -184,8 +189,22 @@ class ModelUpdate(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=4096)
+    source_url: Optional[str] = Field(default=None, max_length=2048)
     collection: Optional[str] = Field(default=None, max_length=1024)
     tags: Optional[List[str]] = Field(default=None, max_length=100)
+
+    @field_validator("source_url")
+    @classmethod
+    def normalise_source_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        parsed = urlparse(stripped)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("source_url_must_be_http_url")
+        return stripped
 
 
 class ManualPrintJobCreate(BaseModel):
@@ -216,6 +235,7 @@ class CollectionRead(BaseModel):
     path: str
     parent_id: Optional[int] = None
     model_count: int = 0
+    effective_role: Optional[CollectionRole] = None
 
 
 class CollectionCreate(BaseModel):
@@ -229,6 +249,20 @@ class CollectionMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parent_id: Optional[int] = None
+
+
+class CollectionPermissionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: CollectionRole
+
+
+class CollectionPermissionRead(BaseModel):
+    user_id: int
+    username: str
+    collection_id: int
+    role: CollectionRole
+    inherited: bool = False
 
 
 class TagCreate(BaseModel):

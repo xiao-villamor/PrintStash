@@ -1,23 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CollectionRead, TagRead } from "@/types";
+import {
+  CollectionPermissionRead,
+  CollectionRead,
+  CollectionRole,
+  TagRead,
+  UserRead,
+} from "@/types";
 import {
   listCollections,
   listTags,
+  listAdminUsers,
   createCollection,
   createTag,
   deleteCollection,
   deleteTag,
+  deleteCollectionPermission,
+  listCollectionPermissions,
+  updateCollectionPermission,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { useAuth } from "@/lib/auth-context";
 import {
   ChevronRight,
   Folder,
   FolderOpen,
   FolderTree,
   Plus,
+  Share2,
   Tag as TagIcon,
   X,
 } from "lucide-react";
@@ -57,6 +69,7 @@ function CollectionTreeRow({
   onToggle,
   onAddChild,
   onDelete,
+  onShare,
 }: {
   node: CollectionNode;
   depth: number;
@@ -65,10 +78,12 @@ function CollectionTreeRow({
   onToggle: (id: number) => void;
   onAddChild: (collection: CollectionRead) => void;
   onDelete: (collection: CollectionRead) => void;
+  onShare: (collection: CollectionRead) => void;
 }) {
   const collection = node.collection;
   const hasChildren = node.children.length > 0;
   const isOpen = expanded.has(collection.id);
+  const canAdmin = collection.effective_role === "admin";
   return (
     <>
       <div
@@ -104,12 +119,28 @@ function CollectionTreeRow({
           <span className="text-xs text-muted-foreground">
             {collection.model_count} models
           </span>
+          {collection.effective_role && (
+            <span className="font-mono text-[10px] uppercase text-muted-foreground">
+              {collection.effective_role}
+            </span>
+          )}
+          {canAdmin && (
+            <button
+              type="button"
+              onClick={() => onShare(collection)}
+              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground"
+              title={`Share ${collection.name}`}
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
               if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
               onAddChild(collection);
             }}
+            disabled={!canAdmin}
             className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground"
             title={`Add subcollection to ${collection.name}`}
           >
@@ -121,6 +152,7 @@ function CollectionTreeRow({
               if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
               onDelete(collection);
             }}
+            disabled={!canAdmin}
             className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-red-50/30 text-red-600"
             title={`Delete ${collection.name}`}
           >
@@ -138,6 +170,7 @@ function CollectionTreeRow({
           onToggle={onToggle}
           onAddChild={onAddChild}
           onDelete={onDelete}
+          onShare={onShare}
         />
       ))}
     </>
@@ -146,6 +179,7 @@ function CollectionTreeRow({
 
 export function TaxonomyManager() {
   const auth = useRequireAuth();
+  const { user } = useAuth();
   const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [newCollection, setNewCollection] = useState("");
@@ -154,6 +188,11 @@ export function TaxonomyManager() {
   const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sharingCollection, setSharingCollection] = useState<CollectionRead | null>(null);
+  const [permissionRows, setPermissionRows] = useState<CollectionPermissionRead[]>([]);
+  const [permissionUsers, setPermissionUsers] = useState<UserRead[]>([]);
+  const [permissionUserId, setPermissionUserId] = useState<number | "">("");
+  const [permissionRole, setPermissionRole] = useState<CollectionRole>("view");
 
   async function refresh() {
     try {
@@ -222,6 +261,47 @@ export function TaxonomyManager() {
     }
   }
 
+  async function openPermissions(collection: CollectionRead) {
+    setSharingCollection(collection);
+    setPermissionUserId("");
+    setPermissionRole("view");
+    try {
+      const [users, permissions] = await Promise.all([
+        listAdminUsers(),
+        listCollectionPermissions(collection.id),
+      ]);
+      setPermissionUsers(users);
+      setPermissionRows(permissions);
+    } catch (e: any) {
+      setError(e.message);
+      toast.error(e);
+    }
+  }
+
+  async function savePermission() {
+    if (!sharingCollection || !permissionUserId) return;
+    try {
+      await updateCollectionPermission(sharingCollection.id, Number(permissionUserId), {
+        role: permissionRole,
+      });
+      setPermissionRows(await listCollectionPermissions(sharingCollection.id));
+      toast.success("Permission saved");
+    } catch (e: any) {
+      toast.error(e);
+    }
+  }
+
+  async function removePermission(userId: number) {
+    if (!sharingCollection) return;
+    try {
+      await deleteCollectionPermission(sharingCollection.id, userId);
+      setPermissionRows((rows) => rows.filter((row) => row.user_id !== userId));
+      toast.success("Permission removed");
+    } catch (e: any) {
+      toast.error(e);
+    }
+  }
+
   const tree = useMemo(() => buildCollectionTree(collections), [collections]);
   const assignedCollectionModels = collections.reduce((sum, collection) => sum + collection.model_count, 0);
   const assignedTagModels = tags.reduce((sum, tag) => sum + tag.model_count, 0);
@@ -243,6 +323,21 @@ export function TaxonomyManager() {
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+      {sharingCollection && (
+        <PermissionsModal
+          collection={sharingCollection}
+          users={permissionUsers}
+          permissions={permissionRows}
+          selectedUserId={permissionUserId}
+          selectedRole={permissionRole}
+          currentUserId={user?.id ?? null}
+          setSelectedUserId={setPermissionUserId}
+          setSelectedRole={setPermissionRole}
+          onSave={savePermission}
+          onRemove={removePermission}
+          onClose={() => setSharingCollection(null)}
+        />
+      )}
       {error && (
         <div className="rounded border border-red-300/30 bg-red-50/20 p-3 text-xs text-red-600">
           {error}
@@ -346,6 +441,7 @@ export function TaxonomyManager() {
                     }
                     handleDeleteCollection(collection.id);
                   }}
+                  onShare={openPermissions}
                 />
               ))}
             </div>
@@ -474,6 +570,129 @@ export function TaxonomyManager() {
                   </span>
                 ))}
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermissionsModal({
+  collection,
+  users,
+  permissions,
+  selectedUserId,
+  selectedRole,
+  currentUserId,
+  setSelectedUserId,
+  setSelectedRole,
+  onSave,
+  onRemove,
+  onClose,
+}: {
+  collection: CollectionRead;
+  users: UserRead[];
+  permissions: CollectionPermissionRead[];
+  selectedUserId: number | "";
+  selectedRole: CollectionRole;
+  currentUserId: number | null;
+  setSelectedUserId: (id: number | "") => void;
+  setSelectedRole: (role: CollectionRole) => void;
+  onSave: () => void;
+  onRemove: (userId: number) => void;
+  onClose: () => void;
+}) {
+  const grantedIds = new Set(permissions.map((row) => row.user_id));
+  const availableUsers = users.filter(
+    (row) => !row.is_superuser && !grantedIds.has(row.id),
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      <div className="relative w-full max-w-lg rounded bg-card border border-border shadow-xl">
+        <div className="flex items-center justify-between border-b border-border px-5 py-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-foreground">
+              Collection access
+            </h3>
+            <p className="font-mono text-[11px] text-muted-foreground truncate">
+              {collection.path}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:bg-muted"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-4 p-5">
+          <div className="flex gap-2">
+            <select
+              value={selectedUserId}
+              onChange={(e) =>
+                setSelectedUserId(e.target.value ? Number(e.target.value) : "")
+              }
+              className="min-w-0 flex-1 rounded border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Select user</option>
+              {availableUsers.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.username}
+                </option>
+              ))}
+            </select>
+            <select
+              value={selectedRole}
+              onChange={(e) => setSelectedRole(e.target.value as CollectionRole)}
+              className="rounded border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="view">View</option>
+              <option value="edit">Edit</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={!selectedUserId}
+              className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-orange-600"
+            >
+              Save
+            </button>
+          </div>
+          <div className="divide-y divide-border rounded border border-border">
+            {permissions.length === 0 ? (
+              <p className="p-3 text-xs text-muted-foreground">
+                No direct permissions.
+              </p>
+            ) : (
+              permissions.map((row) => (
+                <div
+                  key={row.user_id}
+                  className="flex items-center justify-between gap-3 px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-foreground">
+                      {row.username}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase text-muted-foreground">
+                      {row.role}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(row.user_id)}
+                    disabled={row.user_id === currentUserId}
+                    className="rounded p-1 text-red-600 hover:bg-red-500/10 disabled:opacity-30"
+                    title="Remove permission"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))
             )}
           </div>
         </div>

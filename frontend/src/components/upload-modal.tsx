@@ -21,6 +21,7 @@ import {
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
 import { CollectionRead, IngestJobStatus, TagRead } from "@/types";
 
@@ -49,6 +50,10 @@ function sleep(ms: number): Promise<void> {
 const POLL_INTERVAL_MS = 1_000;
 const POLL_TIMEOUT_MS = 15 * 60_000;
 
+function canWriteCollection(collection: CollectionRead): boolean {
+  return collection.effective_role === "edit" || collection.effective_role === "admin";
+}
+
 export function UploadModal({
   open,
   onClose,
@@ -61,6 +66,7 @@ export function UploadModal({
   defaultCollection?: string | null;
 }) {
   const auth = useRequireAuth();
+  const { user } = useAuth();
   const meshRef = useRef<HTMLInputElement>(null);
   const gcodeRef = useRef<HTMLInputElement>(null);
   const [meshFile, setMeshFile] = useState<File | null>(null);
@@ -73,6 +79,10 @@ export function UploadModal({
   const [collections, setCollections] = useState<CollectionRead[]>([]);
   const [tags, setTags] = useState<TagRead[]>([]);
   const [catOpen, setCatOpen] = useState(false);
+  const writableCollections = useMemo(
+    () => collections.filter(canWriteCollection),
+    [collections],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -337,6 +347,10 @@ export function UploadModal({
       auth.showAuthRequiredToast();
       return;
     }
+    if (!user?.is_superuser && !collectionPath) {
+      toast.warning("Collection required", "Choose a collection you can edit.");
+      return;
+    }
     const taskId = createTask({
       title: `Upload ${modelName || meshFile?.name || gcodeFile?.name || "model"}`,
       detail: "Preparing upload",
@@ -487,7 +501,7 @@ export function UploadModal({
                           : "text-[var(--on-surface-variant)]/60"
                       }
                     >
-                      {collectionPath || "None"}
+                  {collectionPath || (user?.is_superuser ? "None" : "Choose collection")}
                     </span>
                     <ChevronDown className="h-4 w-4 text-[var(--on-surface-variant)]" />
                   </button>
@@ -498,22 +512,24 @@ export function UploadModal({
                         onClick={() => setCatOpen(false)}
                       />
                       <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 max-h-56 overflow-y-auto">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setCollectionPath("");
-                            setCatOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
-                        >
-                          None
-                        </button>
-                        {collections.length === 0 ? (
+                        {user?.is_superuser && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCollectionPath("");
+                              setCatOpen(false);
+                            }}
+                            className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                          >
+                            None
+                          </button>
+                        )}
+                        {writableCollections.length === 0 ? (
                           <div className="px-3 py-2 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
-                            No collections yet. Create one in Settings.
+                            No editable collections.
                           </div>
                         ) : (
-                          collections.map((c) => (
+                          writableCollections.map((c) => (
                             <button
                               key={c.id}
                               type="button"
@@ -635,7 +651,7 @@ export function UploadModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || (!meshFile && !gcodeFile)}
+                  disabled={submitting || (!meshFile && !gcodeFile) || (!user?.is_superuser && !collectionPath)}
                   className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {submitting ? (

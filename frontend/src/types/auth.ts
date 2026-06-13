@@ -21,6 +21,22 @@ export interface UserRead {
   updated_at: string;
 }
 
+export interface UserCreate {
+  username: string;
+  password: string;
+  email?: string | null;
+}
+
+export interface UserUpdate {
+  email?: string | null;
+  is_superuser?: boolean;
+  is_active?: boolean;
+}
+
+export interface UserPasswordUpdate {
+  password: string;
+}
+
 export interface ApiKeyRead {
   id: number;
   name: string;

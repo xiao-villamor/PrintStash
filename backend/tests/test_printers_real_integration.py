@@ -171,6 +171,7 @@ def _stored_gcode(
 
 def test_diagnostics_hits_real_moonraker_http_server(
     client: TestClient,
+    auth_headers: dict[str, str],
     db_session: Session,
 ) -> None:
     with moonraker_server() as server:
@@ -179,7 +180,9 @@ def test_diagnostics_hits_real_moonraker_http_server(
         db_session.commit()
         db_session.refresh(printer)
 
-        resp = client.get(f"/api/v1/printers/{printer.id}/diagnostics")
+        resp = client.get(
+            f"/api/v1/printers/{printer.id}/diagnostics", headers=auth_headers
+        )
 
         assert resp.status_code == 200
         body = resp.json()

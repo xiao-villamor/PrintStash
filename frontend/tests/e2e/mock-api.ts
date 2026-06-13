@@ -37,6 +37,8 @@ const model = {
   collection: "maraio",
   collection_id: 1,
   description: null,
+  source_url: "https://www.printables.com/model/123-skadis-kitchen-roll-screw",
+  effective_role: "admin",
   tags: ["tete"],
   thumbnail_url: "/api/v1/files/1/thumbnail",
   created_at: "2026-05-31T10:46:55.658492",
@@ -163,11 +165,17 @@ const modelList = [
     slug: model.slug,
     collection: model.collection,
     collection_id: model.collection_id,
+    source_url: model.source_url,
+    effective_role: model.effective_role,
     tags: model.tags,
     thumbnail_url: model.thumbnail_url,
     file_count: model.files.length,
     printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
     updated_at: model.updated_at,
+    mesh_file_id: 1,
+    print_summary: null,
+    recommended_revision_status: "known_good",
+    recommended_revision_label: null,
   },
 ];
 
@@ -254,10 +262,39 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       email: null,
       is_superuser: true,
       created_at: now,
+      updated_at: now,
     });
     return;
   }
+  if (url.pathname === "/api/v1/admin/users") {
+    sendJson(res, [
+      {
+        id: 1,
+        username: "tester",
+        email: null,
+        is_superuser: true,
+        is_active: true,
+        created_at: now,
+        updated_at: now,
+      },
+    ]);
+    return;
+  }
   if (url.pathname === "/api/v1/collections") {
+    sendJson(res, [
+      {
+        id: 1,
+        name: "maraio",
+        slug: "maraio",
+        path: "maraio",
+        parent_id: null,
+        model_count: 1,
+        effective_role: "admin",
+      },
+    ]);
+    return;
+  }
+  if (url.pathname === "/api/v1/collections/1/permissions") {
     sendJson(res, []);
     return;
   }

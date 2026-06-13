@@ -14,6 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.core.time import utcnow
@@ -67,6 +68,12 @@ class PrintJobState(str, Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     FAILED = "failed"
+
+
+class CollectionRole(str, Enum):
+    VIEW = "view"
+    EDIT = "edit"
+    ADMIN = "admin"
 
 
 class Metadata(SQLModel, table=True):
@@ -206,6 +213,25 @@ class Collection(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class CollectionPermission(SQLModel, table=True):
+    __tablename__ = "collection_permissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "collection_id",
+            name="uq_collection_permissions_user_collection",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    collection_id: int = Field(foreign_key="collections.id", index=True)
+    role: CollectionRole = Field(index=True)
+
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class Tag(SQLModel, table=True):
     __tablename__ = "tags"
 
@@ -244,6 +270,7 @@ class Model(SQLModel, table=True):
         default=None, foreign_key="collections.id", index=True
     )
     description: Optional[str] = None
+    source_url: Optional[str] = Field(default=None, max_length=2048)
     thumbnail_path: Optional[str] = Field(default=None, max_length=512)
     thumbnail_file_id: Optional[int] = Field(default=None, foreign_key="files.id")
 

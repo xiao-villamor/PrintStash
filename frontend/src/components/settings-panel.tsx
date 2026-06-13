@@ -15,26 +15,38 @@ import {
   Loader2,
   Palette,
   Printer,
+  ShieldCheck,
   RefreshCw,
   RotateCcw,
   Trash2,
   Server,
   Tag,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { StorageConfigCard } from "@/components/storage-config-card";
 import {
   createApiKey,
+  createAdminUser,
   createBackup,
+  deactivateAdminUser,
+  deleteCollectionPermission,
   downloadModelExport,
   getVaultConfig,
   getVaultStats,
+  listCollectionPermissions,
+  listCollections,
   listApiKeys,
+  listAdminUsers,
   listTrash,
   purgeExpiredTrash,
   purgeModel,
+  resetAdminUserPassword,
   restoreModel,
   revokeApiKey,
+  updateCollectionPermission,
+  updateAdminUser,
   updateVaultConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -55,7 +67,15 @@ import {
 } from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
 import { CHANGELOG, GITHUB_REPO } from "@/lib/changelog";
-import type { ApiKeyRead, TrashedModelRead, VaultStatsRead } from "@/types";
+import type {
+  ApiKeyRead,
+  CollectionPermissionRead,
+  CollectionRead,
+  CollectionRole,
+  TrashedModelRead,
+  UserRead,
+  VaultStatsRead,
+} from "@/types";
 
 interface HealthResponse {
   status: string;
@@ -71,7 +91,7 @@ const SETTINGS_SECTIONS: {
   icon: typeof Server;
 }[] = [
   { id: "overview", label: "Overview", icon: Server },
-  { id: "access", label: "Access", icon: KeyRound },
+  { id: "access", label: "Users & Access", icon: Users },
   { id: "storage", label: "Storage", icon: HardDrive },
   { id: "design", label: "Design", icon: Palette },
   { id: "trash", label: "Trash", icon: Trash2 },
@@ -152,6 +172,18 @@ export function SettingsPanel() {
   const [stats, setStats] = useState<VaultStatsRead | null>(null);
   const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeyRead[]>([]);
+  const [users, setUsers] = useState<UserRead[]>([]);
+  const [usersBusy, setUsersBusy] = useState<number | "create" | null>(null);
+  const [newUsername, setNewUsername] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
+  const [accessCollections, setAccessCollections] = useState<CollectionRead[]>([]);
+  const [collectionPermissions, setCollectionPermissions] = useState<CollectionPermissionRead[]>([]);
+  const [accessUserId, setAccessUserId] = useState<number | "">("");
+  const [accessCollectionId, setAccessCollectionId] = useState<number | "">("");
+  const [accessRole, setAccessRole] = useState<CollectionRole>("view");
+  const [accessBusy, setAccessBusy] = useState<"load" | "save" | string | null>(null);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("Programmatic access");
   const [keyBusy, setKeyBusy] = useState(false);
@@ -165,6 +197,28 @@ export function SettingsPanel() {
     DEFAULT_METADATA_PREFERENCES,
   );
   const [cardMetrics, setCardMetrics] = useState<CardMetrics>(DEFAULT_CARD_METRICS);
+
+  const refreshUsers = useCallback(async () => {
+    if (!user?.is_superuser) return;
+    setUsers(await listAdminUsers());
+  }, [user]);
+
+  const refreshCollectionAccess = useCallback(async () => {
+    if (!user?.is_superuser) return;
+    setAccessBusy("load");
+    try {
+      const rows = await listCollections();
+      const permissionGroups = await Promise.all(
+        rows.map((collection) => listCollectionPermissions(collection.id)),
+      );
+      setAccessCollections(rows);
+      setCollectionPermissions(permissionGroups.flat());
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAccessBusy(null);
+    }
+  }, [user]);
 
   useEffect(() => {
     fetch("/api/v1/health")
@@ -187,7 +241,11 @@ export function SettingsPanel() {
     listApiKeys()
       .then(setApiKeys)
       .catch(() => {});
-  }, [user]);
+    if (user.is_superuser) {
+      refreshUsers().catch(() => {});
+      refreshCollectionAccess().catch(() => {});
+    }
+  }, [user, refreshUsers, refreshCollectionAccess]);
 
   const loadTrash = useCallback(async () => {
     if (!user) {
@@ -267,6 +325,105 @@ export function SettingsPanel() {
     if (!newApiKey) return;
     await navigator.clipboard.writeText(newApiKey);
     toast.success("API key copied.");
+  }
+
+  async function saveCollectionAccess() {
+    if (!accessUserId || !accessCollectionId) return;
+    setAccessBusy("save");
+    try {
+      await updateCollectionPermission(Number(accessCollectionId), Number(accessUserId), {
+        role: accessRole,
+      });
+      await refreshCollectionAccess();
+      toast.success("Collection access saved.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAccessBusy(null);
+    }
+  }
+
+  async function removeCollectionAccess(collectionId: number, userId: number) {
+    setAccessBusy(`${collectionId}:${userId}`);
+    try {
+      await deleteCollectionPermission(collectionId, userId);
+      setCollectionPermissions((current) =>
+        current.filter((row) => row.collection_id !== collectionId || row.user_id !== userId),
+      );
+      toast.success("Collection access removed.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAccessBusy(null);
+    }
+  }
+
+  async function createUser() {
+    const username = newUsername.trim();
+    const password = newUserPassword.trim();
+    if (!username || !password) return;
+    setUsersBusy("create");
+    try {
+      await createAdminUser({
+        username,
+        password,
+        email: newUserEmail.trim() || null,
+      });
+      setNewUsername("");
+      setNewUserEmail("");
+      setNewUserPassword("");
+      await refreshUsers();
+      toast.success("User created.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUsersBusy(null);
+    }
+  }
+
+  async function patchUser(id: number, payload: Partial<UserRead>) {
+    setUsersBusy(id);
+    try {
+      await updateAdminUser(id, {
+        email: payload.email,
+        is_active: payload.is_active,
+        is_superuser: payload.is_superuser,
+      });
+      await refreshUsers();
+      toast.success("User updated.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUsersBusy(null);
+    }
+  }
+
+  async function resetUserPassword(id: number) {
+    const password = passwordDrafts[id]?.trim();
+    if (!password) return;
+    setUsersBusy(id);
+    try {
+      await resetAdminUserPassword(id, { password });
+      setPasswordDrafts((current) => ({ ...current, [id]: "" }));
+      toast.success("Password reset.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUsersBusy(null);
+    }
+  }
+
+  async function deactivateUser(id: number) {
+    setUsersBusy(id);
+    try {
+      await deactivateAdminUser(id);
+      await refreshUsers();
+      toast.success("User deactivated.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUsersBusy(null);
+    }
   }
 
   function updateMetadataPreference(
@@ -376,6 +533,21 @@ export function SettingsPanel() {
     { label: "Collections", value: stats ? `${stats.collection_count}` : "...", desc: "Hierarchical tree entries", icon: FolderTree },
     { label: "Tags", value: stats ? `${stats.tag_count}` : "...", desc: "Flat tag vocabulary size", icon: Tag },
   ];
+
+  const nonSuperUsers = users.filter((row) => !row.is_superuser);
+  const activeAccessUser = accessUserId
+    ? users.find((row) => row.id === Number(accessUserId))
+    : null;
+  const selectedUserPermissions = accessUserId
+    ? collectionPermissions.filter((row) => row.user_id === Number(accessUserId))
+    : [];
+  const collectionById = new Map(accessCollections.map((row) => [row.id, row]));
+  const selectedUserGrantedCollectionIds = new Set(
+    selectedUserPermissions.map((row) => row.collection_id),
+  );
+  const grantableCollections = accessCollections.filter(
+    (row) => !selectedUserGrantedCollectionIds.has(row.id),
+  );
 
   return (
     <div className="w-full space-y-6">
@@ -509,99 +681,347 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "access" && (
-        <SettingsCard
-          icon={KeyRound}
-          title="API keys"
-          description="Create credentials for scripts and integrations, then exchange them for a JWT at login."
-        >
-          <div className="p-4 sm:p-5 space-y-4">
-            {!user ? (
-              <p className="text-sm text-muted-foreground">
-                Sign in to create API keys.
-              </p>
-            ) : (
-              <>
-                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+        <div className="space-y-6">
+          {user?.is_superuser && (
+            <SettingsCard
+              icon={Users}
+              title="Users"
+              description="Create users, assign vault admins, disable accounts, and reset passwords."
+            >
+              <div className="p-4 sm:p-5 space-y-4">
+                <div className="grid gap-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
                   <input
-                    value={keyName}
-                    onChange={(event) => setKeyName(event.target.value)}
+                    value={newUsername}
+                    onChange={(event) => setNewUsername(event.target.value)}
                     className={INPUT}
                     maxLength={128}
+                    placeholder="Username"
+                  />
+                  <input
+                    value={newUserEmail}
+                    onChange={(event) => setNewUserEmail(event.target.value)}
+                    className={INPUT}
+                    maxLength={255}
+                    placeholder="Email"
+                  />
+                  <input
+                    value={newUserPassword}
+                    onChange={(event) => setNewUserPassword(event.target.value)}
+                    className={INPUT}
+                    type="password"
+                    maxLength={256}
+                    placeholder="Initial password"
                   />
                   <button
                     type="button"
-                    onClick={generateApiKey}
-                    disabled={keyBusy}
+                    onClick={createUser}
+                    disabled={usersBusy === "create" || !newUsername.trim() || newUserPassword.trim().length < 8}
                     className={BTN_PRIMARY}
                   >
-                    <KeyRound className="h-3.5 w-3.5" />
-                    Generate
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Create
                   </button>
                 </div>
 
-                {newApiKey && (
-                  <div className="border border-[var(--primary)]/40 bg-[var(--primary)]/10 rounded p-3 space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Copy this key now. It will only be shown once.
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
-                        {newApiKey}
-                      </code>
-                      <button
-                        type="button"
-                        onClick={copyApiKey}
-                        className={BTN_ICON}
-                        title="Copy API key"
-                      >
-                        <Copy className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
                 <div className="space-y-2">
-                  {apiKeys.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No active API keys.
-                    </p>
+                  {users.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No users.</p>
                   ) : (
-                    apiKeys.map((key) => (
+                    users.map((row) => (
                       <div
-                        key={key.id}
-                        className="flex items-center gap-3 border border-border rounded px-3 py-2"
+                        key={row.id}
+                        className="rounded border border-border p-3 space-y-3"
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-foreground">
-                            {key.name}
-                          </p>
-                          <p className="font-mono text-[11px] text-muted-foreground">
-                            {key.prefix}... · {key.last_used_at ? "Used" : "Never used"}
-                          </p>
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {row.username}
+                              </p>
+                              {row.is_superuser && (
+                                <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Admin
+                                </span>
+                              )}
+                              {!row.is_active && (
+                                <span className="rounded bg-red-500/10 px-2 py-0.5 font-mono text-[10px] uppercase text-red-600">
+                                  Disabled
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {row.email || "No email"} · Created {formatDate(row.created_at)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              disabled={usersBusy === row.id}
+                              onClick={() => patchUser(row.id, { is_superuser: !row.is_superuser })}
+                              className={BTN_SECONDARY}
+                            >
+                              {row.is_superuser ? "Remove admin" : "Make admin"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={usersBusy === row.id}
+                              onClick={() =>
+                                row.is_active
+                                  ? deactivateUser(row.id)
+                                  : patchUser(row.id, { is_active: true })
+                              }
+                              className={BTN_SECONDARY}
+                            >
+                              {row.is_active ? "Disable" : "Enable"}
+                            </button>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => deleteApiKey(key.id)}
-                          disabled={keyBusy}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-                          title="Revoke API key"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+                          <input
+                            value={passwordDrafts[row.id] ?? ""}
+                            onChange={(event) =>
+                              setPasswordDrafts((current) => ({
+                                ...current,
+                                [row.id]: event.target.value,
+                              }))
+                            }
+                            className={INPUT}
+                            type="password"
+                            placeholder="New password"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => resetUserPassword(row.id)}
+                            disabled={usersBusy === row.id || (passwordDrafts[row.id]?.trim().length ?? 0) < 8}
+                            className={BTN_SECONDARY}
+                          >
+                            Reset password
+                          </button>
+                        </div>
                       </div>
                     ))
                   )}
                 </div>
+              </div>
+            </SettingsCard>
+          )}
 
-                <div className="rounded border border-border bg-muted/40 p-3">
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Use your username with this API key on <code className="font-mono">/api/v1/auth/login</code>. The response is the same JWT Bearer token used by the app, so later requests only need the normal <code className="font-mono">Authorization</code> header.
-                  </p>
+          {user?.is_superuser && (
+            <SettingsCard
+              icon={FolderTree}
+              title="Collection access"
+              description="Assign view, edit, or admin access per user. Child collections inherit parent grants."
+              action={
+                <button
+                  type="button"
+                  onClick={refreshCollectionAccess}
+                  disabled={accessBusy === "load"}
+                  className={BTN_ICON}
+                  title="Refresh collection access"
+                >
+                  <RefreshCw className={`h-4 w-4 ${accessBusy === "load" ? "animate-spin" : ""}`} />
+                </button>
+              }
+            >
+              <div className="p-4 sm:p-5 space-y-4">
+                <div className="grid gap-2 lg:grid-cols-[1fr_1.4fr_auto_auto]">
+                  <select
+                    value={accessUserId}
+                    onChange={(event) => {
+                      setAccessUserId(event.target.value ? Number(event.target.value) : "");
+                      setAccessCollectionId("");
+                    }}
+                    className={INPUT}
+                    disabled={accessBusy === "load"}
+                  >
+                    <option value="">Select user</option>
+                    {nonSuperUsers.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.username}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={accessCollectionId}
+                    onChange={(event) => setAccessCollectionId(event.target.value ? Number(event.target.value) : "")}
+                    className={INPUT}
+                    disabled={!accessUserId || accessBusy === "load"}
+                  >
+                    <option value="">Select collection</option>
+                    {grantableCollections.map((row) => (
+                      <option key={row.id} value={row.id}>
+                        {row.path}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={accessRole}
+                    onChange={(event) => setAccessRole(event.target.value as CollectionRole)}
+                    className={INPUT}
+                    disabled={!accessUserId || !accessCollectionId || accessBusy === "load"}
+                  >
+                    <option value="view">View</option>
+                    <option value="edit">Edit</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={saveCollectionAccess}
+                    disabled={!accessUserId || !accessCollectionId || accessBusy === "save"}
+                    className={BTN_PRIMARY}
+                  >
+                    {accessBusy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                    Grant
+                  </button>
                 </div>
-              </>
-            )}
-          </div>
-        </SettingsCard>
+
+                <div className="rounded border border-border overflow-hidden">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span>Collection</span>
+                    <span>Role</span>
+                    <span>Remove</span>
+                  </div>
+                  {!accessUserId ? (
+                    <p className="px-3 py-4 text-sm text-muted-foreground">
+                      Select a user to review collection grants.
+                    </p>
+                  ) : selectedUserPermissions.length === 0 ? (
+                    <p className="px-3 py-4 text-sm text-muted-foreground">
+                      {activeAccessUser?.username ?? "User"} has no direct collection access.
+                    </p>
+                  ) : (
+                    selectedUserPermissions.map((row) => {
+                      const collection = collectionById.get(row.collection_id);
+                      const busyKey = `${row.collection_id}:${row.user_id}`;
+                      return (
+                        <div
+                          key={`${row.collection_id}:${row.user_id}`}
+                          className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-foreground">
+                              {collection?.path ?? `Collection #${row.collection_id}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {collection?.model_count ?? 0} models
+                            </p>
+                          </div>
+                          <span className="rounded bg-muted px-2 py-1 font-mono text-[10px] uppercase text-muted-foreground">
+                            {row.role}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeCollectionAccess(row.collection_id, row.user_id)}
+                            disabled={accessBusy === busyKey}
+                            className="rounded p-1 text-red-600 hover:bg-red-500/10 disabled:opacity-50"
+                            title="Remove collection access"
+                          >
+                            {accessBusy === busyKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </SettingsCard>
+          )}
+
+          <SettingsCard
+            icon={KeyRound}
+            title="API keys"
+            description="Create credentials for scripts and integrations, then exchange them for a JWT at login."
+          >
+            <div className="p-4 sm:p-5 space-y-4">
+              {!user ? (
+                <p className="text-sm text-muted-foreground">
+                  Sign in to create API keys.
+                </p>
+              ) : (
+                <>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                    <input
+                      value={keyName}
+                      onChange={(event) => setKeyName(event.target.value)}
+                      className={INPUT}
+                      maxLength={128}
+                    />
+                    <button
+                      type="button"
+                      onClick={generateApiKey}
+                      disabled={keyBusy}
+                      className={BTN_PRIMARY}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Generate
+                    </button>
+                  </div>
+
+                  {newApiKey && (
+                    <div className="border border-[var(--primary)]/40 bg-[var(--primary)]/10 rounded p-3 space-y-2">
+                      <p className="text-xs text-muted-foreground">
+                        Copy this key now. It will only be shown once.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
+                          {newApiKey}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={copyApiKey}
+                          className={BTN_ICON}
+                          title="Copy API key"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {apiKeys.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No active API keys.
+                      </p>
+                    ) : (
+                      apiKeys.map((key) => (
+                        <div
+                          key={key.id}
+                          className="flex items-center gap-3 border border-border rounded px-3 py-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm text-foreground">
+                              {key.name}
+                            </p>
+                            <p className="font-mono text-[11px] text-muted-foreground">
+                              {key.prefix}... · {key.last_used_at ? "Used" : "Never used"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => deleteApiKey(key.id)}
+                            disabled={keyBusy}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
+                            title="Revoke API key"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="rounded border border-border bg-muted/40 p-3">
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Use your username with this API key on <code className="font-mono">/api/v1/auth/login</code>. The response is the same JWT Bearer token used by the app, so later requests only need the normal <code className="font-mono">Authorization</code> header.
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </SettingsCard>
+        </div>
       )}
 
       {activeSection === "storage" && (

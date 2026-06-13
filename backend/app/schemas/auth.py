@@ -54,6 +54,20 @@ class UserCreate(BaseModel):
     email: Optional[str] = Field(default=None, max_length=255)
 
 
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: Optional[str] = Field(default=None, max_length=255)
+    is_superuser: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+
+class UserPasswordUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    password: str = Field(min_length=8, max_length=256)
+
+
 class ApiKeyRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

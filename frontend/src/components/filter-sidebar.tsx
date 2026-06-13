@@ -349,6 +349,7 @@ export function FilterSidebarContent({
   onDeleteCollection,
   loading,
   outlinerFilter,
+  canViewPrinters = true,
 }: FilterSidebarProps) {
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
@@ -613,6 +614,7 @@ export function FilterSidebarContent({
         </section>
 
         {/* Printer */}
+        {canViewPrinters && (
         <section>
           <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
             Printer
@@ -695,6 +697,7 @@ export function FilterSidebarContent({
             </button>
           </div>
         </section>
+        )}
 
         {/* Tags */}
         {tags.length > 0 && (
@@ -780,6 +783,7 @@ export interface FilterSidebarProps {
   onMoveModel?: (modelId: number, targetCollection: string | null) => void;
   onMoveCollection?: (collectionId: number, newParentId: number | null) => void;
   onDeleteCollection?: (id: number, recursive: boolean) => void;
+  canViewPrinters?: boolean;
   loading?: boolean;
   outlinerFilter?: string;
 }

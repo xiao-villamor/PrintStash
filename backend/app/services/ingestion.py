@@ -17,10 +17,13 @@ from app.db.models import (
     Metadata,
     Model,
     ModelTagLink,
+    CollectionRole,
+    User,
 )
 from app.db.scopes import live
 from app.db.session import SessionFactory
 from app.services import gcode_parser, storage, taxonomy, thumbnail
+from app.services import rbac
 from app.services.hashing import sha256_file
 from app.services.jobs import registry
 from app.services.profile_detection import upsert_detected_profiles
@@ -189,6 +192,7 @@ def run_ingestion_pipeline(
     tags: Optional[str],
     source_hash: Optional[str],
     strategy: IngestionStrategy,
+    actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
 ) -> None:
     """Full ingestion pipeline.
@@ -243,6 +247,9 @@ def run_ingestion_pipeline(
 
         report("persisting")
         with session_factory.scoped_session() as session:
+            actor = (
+                session.get(User, actor_user_id) if actor_user_id is not None else None
+            )
             existing = session.exec(
                 select(Model).where(Model.hash == dedup_hash)
             ).first()
@@ -260,6 +267,13 @@ def run_ingestion_pipeline(
                     "ingest[%s] new model id=%s slug=%s", job_id, model.id, model.slug
                 )
             else:
+                if actor is not None:
+                    rbac.require_model_collection_role(
+                        session,
+                        actor,
+                        existing.collection_id,
+                        CollectionRole.EDIT,
+                    )
                 model = existing
                 model.deleted_at = None
                 model.deleted_by = None
@@ -351,6 +365,7 @@ def ingest_orca_gcode(
     collection: Optional[str],
     tags: Optional[str],
     source_hash: Optional[str],
+    actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
 ) -> None:
     """Public entry point for G-code ingestion (called from the OrcaSlicer router)."""
@@ -363,6 +378,7 @@ def ingest_orca_gcode(
         tags=tags,
         source_hash=source_hash,
         strategy=_gcode_strategy(),
+        actor_user_id=actor_user_id,
         session_factory=session_factory,
     )
 
@@ -377,6 +393,7 @@ def ingest_mesh(
     tags: Optional[str],
     file_type: FileType,
     source_hash: Optional[str],
+    actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
 ) -> None:
     """Public entry point for mesh ingestion (called from the model upload router)."""
@@ -389,6 +406,7 @@ def ingest_mesh(
         tags=tags,
         source_hash=source_hash,
         strategy=_mesh_strategy(file_type),
+        actor_user_id=actor_user_id,
         session_factory=session_factory,
     )
 

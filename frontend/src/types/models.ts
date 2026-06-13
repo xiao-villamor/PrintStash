@@ -33,6 +33,8 @@ export type FileRevisionStatus =
   | "failed"
   | "archived";
 
+export type CollectionRole = "view" | "edit" | "admin";
+
 export interface FileRead {
   id: number;
   model_id: number;
@@ -65,6 +67,8 @@ export interface ModelRead {
   collection: string | null;
   collection_id: number | null;
   description: string | null;
+  source_url: string | null;
+  effective_role: CollectionRole | null;
   tags: string[];
   thumbnail_url: string | null;
   created_at: string;
@@ -117,6 +121,8 @@ export interface ModelListItem {
   slug: string;
   collection: string | null;
   collection_id: number | null;
+  source_url: string | null;
+  effective_role: CollectionRole | null;
   tags: string[];
   thumbnail_url: string | null;
   file_count: number;
@@ -172,6 +178,7 @@ export interface VaultStatsRead {
 export interface ModelUpdate {
   name?: string;
   description?: string;
+  source_url?: string | null;
   collection?: string;
   tags?: string[];
 }
@@ -244,6 +251,19 @@ export interface CollectionRead {
   path: string;
   parent_id: number | null;
   model_count: number;
+  effective_role: CollectionRole | null;
+}
+
+export interface CollectionPermissionRead {
+  user_id: number;
+  username: string;
+  collection_id: number;
+  role: CollectionRole;
+  inherited: boolean;
+}
+
+export interface CollectionPermissionUpdate {
+  role: CollectionRole;
 }
 
 export interface FilamentProfileRead {

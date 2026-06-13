@@ -25,6 +25,7 @@ import {
 import { listCollections, listModels, listPrinters, listTags, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
 import { getAssetUrl } from "@/lib/api";
 import { timeAgo } from "@/lib/format";
@@ -102,6 +103,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
+  const { user } = useAuth();
   const [models, setModels] = useState<ModelListItem[]>(initial?.models ?? []);
   // Unfiltered model list for the outliner tree. The grid's `models` shrink to
   // the active collection/tag filter; feeding those to the sidebar made other
@@ -182,13 +184,28 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     () => selectedCollectionName(collections, selectedCollection),
     [collections, selectedCollection],
   );
+  const selectedCollectionRow = useMemo(
+    () => collections.find((c) => c.path === selectedCollection) ?? null,
+    [collections, selectedCollection],
+  );
+  const canAdminSelectedCollection =
+    user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
+  const canUploadToSelection =
+    user?.is_superuser ||
+    selectedCollectionRow?.effective_role === "edit" ||
+    selectedCollectionRow?.effective_role === "admin";
+  const canViewPrinters = !!user?.is_superuser;
 
   useEffect(() => {
     if (initial) return; // facets came down with the server render
     let alive = true;
     (async () => {
       try {
-        const [c, t, p] = await Promise.all([listCollections(), listTags(), listPrinters()]);
+        const [c, t, p] = await Promise.all([
+          listCollections(),
+          listTags(),
+          canViewPrinters ? listPrinters() : Promise.resolve([]),
+        ]);
         if (!alive) return;
         setCollections(c);
         setTags(t);
@@ -200,8 +217,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
     })();
     return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canViewPrinters, initial]);
 
   useEffect(() => {
     let alive = true;
@@ -229,8 +245,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           direct: !searchQuery,
           tag: selectedTags.length ? selectedTags : undefined,
           q: searchQuery,
-          printer_id: selectedPrinterId ?? undefined,
-          printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
+          printer_id: canViewPrinters ? selectedPrinterId ?? undefined : undefined,
+          printer_presence:
+            canViewPrinters && selectedPrinterId === null
+              ? selectedPrinterPresence ?? undefined
+              : undefined,
         });
         if (!alive) return;
         setModels(data);
@@ -244,7 +263,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       }
     }, 200);
     return () => { alive = false; clearTimeout(handle); };
-  }, [selectedCollection, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey]);
+  }, [selectedCollection, selectedTags, selectedPrinterId, selectedPrinterPresence, query, reloadKey, canViewPrinters]);
 
   async function loadMore() {
     if (loadingMore || !hasMore) return;
@@ -258,8 +277,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         direct: !searchQuery,
         tag: selectedTags.length ? selectedTags : undefined,
         q: searchQuery,
-        printer_id: selectedPrinterId ?? undefined,
-        printer_presence: selectedPrinterId === null ? selectedPrinterPresence ?? undefined : undefined,
+        printer_id: canViewPrinters ? selectedPrinterId ?? undefined : undefined,
+        printer_presence:
+          canViewPrinters && selectedPrinterId === null
+            ? selectedPrinterPresence ?? undefined
+            : undefined,
       });
       setModels((prev) => [...prev, ...data]);
       setHasMore(data.length === PAGE_SIZE);
@@ -285,6 +307,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const name = newCollectionName.trim();
     if (!name) return;
     if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!canAdminSelectedCollection) {
+      toast.warning("Admin access required");
+      return;
+    }
     try {
       const parentId = selectedCollection
         ? collections.find((c) => c.path === selectedCollection)?.id ?? null
@@ -356,6 +382,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         onCollectionChange={handleCollectionChange} onTagsChange={setSelectedTags}
         onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
         onCreateCollection={handleOpenCreateCollection}
+        canViewPrinters={canViewPrinters}
         loading={facetsLoading}
       />
 
@@ -370,6 +397,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         onMoveModel={handleMoveModel}
         onMoveCollection={handleMoveCollection}
         onDeleteCollection={handleDeleteCollection}
+        canViewPrinters={canViewPrinters}
         loading={facetsLoading}
       />
 
@@ -429,6 +457,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </button>
                 <button
                   onClick={handleOpenCreateCollection}
+                  disabled={!canAdminSelectedCollection}
                   className="hidden md:flex items-center px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-all"
                 >
                   <Plus className="w-4 h-4 mr-1.5 text-muted-foreground" />
@@ -436,7 +465,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </button>
                 <button
                   onClick={() => setUploadOpen(true)}
-                  className="flex items-center px-3 py-2 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-all shadow-sm"
+                  disabled={!canUploadToSelection}
+                  className="flex items-center px-3 py-2 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Upload
                 </button>

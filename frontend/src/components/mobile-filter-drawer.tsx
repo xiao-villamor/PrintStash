@@ -20,6 +20,7 @@ interface MobileFilterDrawerProps {
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
   onCreateCollection: () => void;
+  canViewPrinters?: boolean;
   loading?: boolean;
 }
 

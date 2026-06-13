@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from app.core.http import get_or_404
-from app.core.security import require_auth
+from app.core.security import require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import FilamentProfile
 from app.db.session import get_session
@@ -39,6 +39,7 @@ def _read(profile: FilamentProfile, usage_count: int = 0) -> FilamentProfileRead
     summary="List local filament presets",
 )
 def list_filament_profiles(
+    _: object = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[FilamentProfileRead]:
     profiles = session.exec(
@@ -52,7 +53,7 @@ def list_filament_profiles(
     "",
     response_model=FilamentProfileRead,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Create a local filament preset",
 )
 def create_filament_profile(
@@ -82,7 +83,7 @@ def create_filament_profile(
 @router.patch(
     "/{profile_id}",
     response_model=FilamentProfileRead,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Update a local filament preset",
 )
 def update_filament_profile(
@@ -129,7 +130,7 @@ def update_filament_profile(
     "/{profile_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Delete a local filament preset",
 )
 def delete_filament_profile(

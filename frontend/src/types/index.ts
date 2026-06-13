@@ -2,6 +2,7 @@ export type {
   MetadataRead,
   FileRead,
   FileRevisionStatus,
+  CollectionRole,
   FileRevisionUpdate,
   ModelRead,
   ModelPrinterFileRead,
@@ -21,6 +22,8 @@ export type {
   CollectionCreate,
   TagCreate,
   CollectionRead,
+  CollectionPermissionRead,
+  CollectionPermissionUpdate,
   TagRead,
   FilamentProfileRead,
   FilamentProfileCreate,
@@ -55,7 +58,10 @@ export type {
   ApiKeyRead,
   LoginRequest,
   TokenResponse,
+  UserCreate,
+  UserPasswordUpdate,
   UserRead,
+  UserUpdate,
 } from "./auth";
 
 export type {

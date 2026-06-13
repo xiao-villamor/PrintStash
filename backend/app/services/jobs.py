@@ -44,11 +44,15 @@ class JobRegistry:
             for job_id in finished[: len(self._jobs) - _MAX_JOBS]:
                 del self._jobs[job_id]
 
-    def create(self) -> str:
+    def create(self, owner_user_id: int | None = None) -> str:
         job_id = uuid.uuid4().hex
         with self._lock:
             self._prune_locked()
-            self._jobs[job_id] = IngestJobStatus(job_id=job_id, state="pending")
+            self._jobs[job_id] = IngestJobStatus(
+                job_id=job_id,
+                owner_user_id=owner_user_id,
+                state="pending",
+            )
         return job_id
 
     def update(

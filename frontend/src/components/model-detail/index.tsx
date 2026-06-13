@@ -38,6 +38,7 @@ import {
   readMetadataPreferences,
 } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
+import { useAuth } from "@/lib/auth-context";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import {
   CollectionRead,
@@ -99,12 +100,14 @@ function getBedSize(printerModel: string | null | undefined): { x: number; y: nu
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const router = useRouter();
   const auth = useRequireAuth();
+  const { user } = useAuth();
   const [model, setModel] = useState(initialModel);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editName, setEditName] = useState(model.name);
   const [editDescription, setEditDescription] = useState(model.description || "");
+  const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
   const [editCollection, setEditCollection] = useState(model.collection || "");
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
   const [catOpen, setCatOpen] = useState(false);
@@ -127,18 +130,33 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
   const viewerControls = useRef<STLViewerControls | null>(null);
+  const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
+  const canViewPrinters = !!user?.is_superuser;
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => tab.key !== "history" || canViewPrinters),
+    [canViewPrinters],
+  );
 
   // Quick actions on the Overview card (mark failed / recommend).
   const revisionUpdater = useRevisionUpdater(model.id, setModel);
 
   useEffect(() => {
+    if (!canViewPrinters) {
+      setPrinterFiles([]);
+      setPrintJobs([]);
+      return;
+    }
     getModelPrinterFiles(model.id).then(setPrinterFiles).catch(() => {});
     getModelPrintJobs(model.id).then(setPrintJobs).catch(() => {});
-  }, [model.id]);
+  }, [model.id, canViewPrinters]);
 
   useEffect(() => {
     setMetadataPreferences(readMetadataPreferences());
   }, []);
+
+  useEffect(() => {
+    if (!canViewPrinters && activeTab === "history") setActiveTab("overview");
+  }, [activeTab, canViewPrinters]);
 
   async function doDelete() {
     setDeleting(true);
@@ -156,6 +174,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   function enterEdit() {
     setEditName(model.name);
     setEditDescription(model.description || "");
+    setEditSourceUrl(model.source_url || "");
     setEditCollection(model.collection || "");
     setEditTags([...model.tags]);
     setTagInput("");
@@ -178,6 +197,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       const updated = await updateModel(model.id, {
         name: editName.trim() || undefined,
         description: editDescription.trim() || undefined,
+        source_url: editSourceUrl.trim() || null,
         collection: editCollection || undefined,
         tags: editTags.length ? editTags : undefined,
       });
@@ -272,12 +292,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       auth.showAuthRequiredToast();
       return;
     }
+    if (!canViewPrinters) return;
     setSendFileId(fileId);
     setSendOpen(true);
   }
 
   function requestAddRevision() {
-    if (!auth.isAuthenticated) {
+    if (!auth.isAuthenticated || !canEditModel) {
       auth.showAuthRequiredToast();
       return;
     }
@@ -382,17 +403,17 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           ) : (
             <>
               <button
-                onClick={auth.isAuthenticated ? enterEdit : auth.showAuthRequiredToast}
-                disabled={!auth.isAuthenticated}
-                title={auth.blockReason ?? "Edit model"}
+                onClick={auth.isAuthenticated && canEditModel ? enterEdit : auth.showAuthRequiredToast}
+                disabled={!auth.isAuthenticated || !canEditModel}
+                title={auth.blockReason ?? (canEditModel ? "Edit model" : "Edit access required")}
                 className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Pencil className="h-4 w-4" /> {auth.isAuthenticated ? "Edit" : "Sign in to edit"}
               </button>
               <button
-                onClick={auth.isAuthenticated ? () => setConfirmDeleteOpen(true) : auth.showAuthRequiredToast}
-                disabled={deleting || !auth.isAuthenticated}
-                title={auth.blockReason ?? "Delete model"}
+                onClick={auth.isAuthenticated && canEditModel ? () => setConfirmDeleteOpen(true) : auth.showAuthRequiredToast}
+                disabled={deleting || !auth.isAuthenticated || !canEditModel}
+                title={auth.blockReason ?? (canEditModel ? "Delete model" : "Edit access required")}
                 className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? (
@@ -527,7 +548,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         <div className="md:w-[480px] bg-[var(--surface-container-lowest)] border-l-0 md:border-l border-t md:border-t-0 border-[var(--outline-variant)] flex flex-col h-auto md:h-full shrink-0 min-h-0">
           {/* Segmented tab navigation */}
           <nav className="flex shrink-0 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            {TABS.map((tab) => (
+            {visibleTabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
@@ -560,6 +581,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   collections,
                   description: editDescription,
                   setDescription: setEditDescription,
+                  sourceUrl: editSourceUrl,
+                  setSourceUrl: setEditSourceUrl,
                   tagInput,
                   setTagInput,
                   tags: editTags,
@@ -573,6 +596,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 hasGcode={hasGcode}
                 revisionSaving={revisionUpdater.saving}
                 onSend={requestSend}
+                canSend={canViewPrinters}
                 onCompare={() => setActiveTab("revisions")}
                 onMark={(file, patch) => void revisionUpdater.update(file, patch)}
                 onAddRevision={requestAddRevision}
@@ -599,7 +623,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
             {activeTab === "files" && <FilesTab sourceFiles={sourceFiles} />}
 
-            {activeTab === "history" && (
+            {activeTab === "history" && canViewPrinters && (
               <PrintHistorySection
                 jobs={printJobs}
                 modelId={model.id}
@@ -611,7 +635,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
           {/* Klipper Sync Panel */}
           <div className="p-4 md:p-6 border-t border-[var(--outline-variant)] bg-[var(--surface-container-low)] shrink-0 space-y-3">
-            {hasGcode && (
+            {hasGcode && canViewPrinters && (
               <SendToButtons
                 modelId={model.id}
                 gcodeFiles={gcodeFiles}

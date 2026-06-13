@@ -23,6 +23,7 @@ from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import (
     Collection,
+    CollectionRole,
     File,
     FileRevisionStatus,
     FileType,
@@ -34,6 +35,7 @@ from app.db.models import (
     PrinterFile,
     SENTINEL_MODEL_HASH,
     Tag,
+    User,
 )
 from app.db.scopes import live, trashed
 from app.schemas.models import (
@@ -49,11 +51,13 @@ from app.schemas.models import (
 )
 from app.services.storage_backend import get_backend
 from app.services.trash import trash_expires_at
+from app.services import rbac
 
 _EXPORT_CSV_FIELDS = [
     "model_id",
     "model_name",
     "model_slug",
+    "model_source_url",
     "collection",
     "tags",
     "file_id",
@@ -127,6 +131,23 @@ def thumb_url(model: Model) -> Optional[str]:
         if stem.isdigit():
             return f"/api/v1/files/{stem}/thumbnail"
     return None
+
+
+def _apply_model_access(stmt, session: Session, user: User):
+    if user.is_superuser:
+        return stmt
+    collection_ids = rbac.accessible_collection_ids(session, user, CollectionRole.VIEW)
+    if not collection_ids:
+        return stmt.where(Model.id == -1)
+    return stmt.where(Model.collection_id.in_(collection_ids))  # type: ignore[union-attr]
+
+
+def _effective_model_role(
+    session: Session,
+    user: User,
+    model: Model,
+) -> CollectionRole | None:
+    return rbac.effective_collection_role(session, user, model.collection_id)
 
 
 def _normalise_profile_key(value: str | None) -> str | None:
@@ -275,6 +296,7 @@ def _file_reads_with_revisions(
 
 def list_items(
     session: Session,
+    user: User,
     *,
     collection: Optional[str] = None,
     direct: bool = False,
@@ -287,6 +309,7 @@ def list_items(
 ) -> List[ModelListItem]:
     """Filtered, paginated library browse with batched per-model facets."""
     stmt = select(Model).where(live(Model))
+    stmt = _apply_model_access(stmt, session, user)
 
     present_model_ids = (
         select(File.model_id)
@@ -379,32 +402,33 @@ def list_items(
         recommended.setdefault(int(model_id), (rev_status, rev_label))
 
     presence_by_model: dict[int, list[ModelPrinterPresenceRead]] = defaultdict(list)
-    for model_id, p_id, printer_name, file_count in session.exec(
-        select(
-            File.model_id,
-            Printer.id,
-            Printer.name,
-            func.count(PrinterFile.id),
-        )
-        .join(PrinterFile, PrinterFile.file_id == File.id)
-        .join(Printer, Printer.id == PrinterFile.printer_id)
-        .where(
-            File.model_id.in_(model_ids),  # type: ignore[union-attr]
-            File.file_type == FileType.GCODE,
-            live(File),
-            live(Printer),
-            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
-        )
-        .group_by(File.model_id, Printer.id, Printer.name)
-        .order_by(Printer.name.asc())  # type: ignore[attr-defined]
-    ).all():
-        presence_by_model[int(model_id)].append(
-            ModelPrinterPresenceRead(
-                printer_id=int(p_id),
-                printer_name=printer_name,
-                file_count=int(file_count or 0),
+    if user.is_superuser:
+        for model_id, p_id, printer_name, file_count in session.exec(
+            select(
+                File.model_id,
+                Printer.id,
+                Printer.name,
+                func.count(PrinterFile.id),
             )
-        )
+            .join(PrinterFile, PrinterFile.file_id == File.id)
+            .join(Printer, Printer.id == PrinterFile.printer_id)
+            .where(
+                File.model_id.in_(model_ids),  # type: ignore[union-attr]
+                File.file_type == FileType.GCODE,
+                live(File),
+                live(Printer),
+                PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+            )
+            .group_by(File.model_id, Printer.id, Printer.name)
+            .order_by(Printer.name.asc())  # type: ignore[attr-defined]
+        ).all():
+            presence_by_model[int(model_id)].append(
+                ModelPrinterPresenceRead(
+                    printer_id=int(p_id),
+                    printer_name=printer_name,
+                    file_count=int(file_count or 0),
+                )
+            )
 
     summaries: dict[int, PrintSummaryRead] = {}
     for model_id, md in session.exec(
@@ -438,6 +462,8 @@ def list_items(
                 slug=m.slug,
                 collection=collection_name_for(m),
                 collection_id=m.collection_id,
+                source_url=m.source_url,
+                effective_role=_effective_model_role(session, user, m),
                 tags=sorted(t.name for t in m.tags),
                 thumbnail_url=thumb_url(m),
                 file_count=int(file_counts.get(m.id, 0)),
@@ -457,10 +483,15 @@ def list_items(
 # ---------------------------------------------------------------------------
 
 
-def detail(session: Session, model_id: int) -> ModelRead | None:
+def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
     """Full model detail with files + metadata. None when missing or trashed."""
     m = session.get(Model, model_id)
     if m is None or m.deleted_at is not None:
+        return None
+    if not rbac.role_allows(
+        _effective_model_role(session, user, m),
+        CollectionRole.VIEW,
+    ):
         return None
 
     files_with_meta = session.exec(
@@ -479,6 +510,8 @@ def detail(session: Session, model_id: int) -> ModelRead | None:
         collection=collection_name_for(m),
         collection_id=m.collection_id,
         description=m.description,
+        source_url=m.source_url,
+        effective_role=_effective_model_role(session, user, m),
         tags=tag_names_for(session, m.id),  # type: ignore[arg-type]
         thumbnail_url=thumb_url(m),
         created_at=m.created_at,
@@ -492,13 +525,15 @@ def detail(session: Session, model_id: int) -> ModelRead | None:
 # ---------------------------------------------------------------------------
 
 
-def export_payload(session: Session) -> dict:
-    model_rows = session.exec(
+def export_payload(session: Session, user: User) -> dict:
+    stmt = (
         select(Model)
         .where(live(Model))
         .where(Model.hash != SENTINEL_MODEL_HASH)
         .order_by(Model.name.asc())  # type: ignore[attr-defined]
-    ).all()
+    )
+    stmt = _apply_model_access(stmt, session, user)
+    model_rows = session.exec(stmt).all()
     model_ids = [m.id for m in model_rows if m.id is not None]
     if not model_ids:
         models = []
@@ -573,6 +608,7 @@ def export_payload(session: Session) -> dict:
                 "collection": collections.get(model.collection_id),
                 "collection_id": model.collection_id,
                 "description": model.description,
+                "source_url": model.source_url,
                 "tags": tags_by_model.get(model.id or 0, []),
                 "thumbnail_url": thumb_url(model),
                 "created_at": model.created_at.isoformat(),
@@ -617,6 +653,7 @@ def export_csv(payload: dict) -> str:
                     "model_id": model["id"],
                     "model_name": model["name"],
                     "model_slug": model["slug"],
+                    "model_source_url": model.get("source_url") or "",
                     "collection": model.get("collection") or "",
                     "tags": tags,
                     "file_id": file_row["id"],
@@ -669,18 +706,21 @@ def export_csv(payload: dict) -> str:
 
 def list_trashed(
     session: Session,
+    user: User,
     *,
     limit: int = 50,
     offset: int = 0,
     retention_days: int,
 ) -> List[TrashedModelRead]:
-    rows = session.exec(
+    stmt = (
         select(Model)
         .where(trashed(Model))
         .order_by(Model.deleted_at.desc())  # type: ignore[attr-defined]
         .offset(offset)
         .limit(limit)
-    ).all()
+    )
+    stmt = _apply_model_access(stmt, session, user)
+    rows = session.exec(stmt).all()
     model_ids = [m.id for m in rows if m.id is not None]
     file_stats: dict[int, tuple[int, int]] = {}
     if model_ids:
@@ -720,11 +760,12 @@ def list_trashed(
 # ---------------------------------------------------------------------------
 
 
-def vault_stats(session: Session) -> VaultStatsRead:
+def vault_stats(session: Session, user: User) -> VaultStatsRead:
     live_model_ids = select(Model.id).where(
         live(Model),
         Model.hash != SENTINEL_MODEL_HASH,
     )
+    live_model_ids = _apply_model_access(live_model_ids, session, user)
     live_files = (
         select(File).where(live(File)).where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
     )

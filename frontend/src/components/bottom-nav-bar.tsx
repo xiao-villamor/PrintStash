@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Box, SlidersHorizontal, FolderTree, Printer, Settings } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
 
 const items = [
   { href: "/", label: "Vault", icon: Box },
-  { href: "/printers", label: "Printers", icon: Printer },
+  { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
   { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
   { href: "/organize", label: "Catalog", icon: FolderTree },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -14,10 +15,12 @@ const items = [
 
 export function BottomNavBar() {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const visibleItems = items.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 w-full flex justify-around items-center h-[72px] px-4 bg-card border-t border-border z-40 pb-safe">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         const isActive =
           item.href === "/"
             ? pathname === "/"

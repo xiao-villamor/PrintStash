@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Plus, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Plus, X } from "lucide-react";
 
 import {
   CollectionRead,
@@ -21,6 +21,8 @@ export type ModelMetaEditor = {
   collections: CollectionRead[];
   description: string;
   setDescription: (v: string) => void;
+  sourceUrl: string;
+  setSourceUrl: (v: string) => void;
   tagInput: string;
   setTagInput: (v: string) => void;
   tags: string[];
@@ -39,6 +41,7 @@ export function OverviewTab({
   hasGcode,
   revisionSaving,
   onSend,
+  canSend,
   onCompare,
   onMark,
   onAddRevision,
@@ -50,6 +53,7 @@ export function OverviewTab({
   hasGcode: boolean;
   revisionSaving: number | null;
   onSend: (fileId: number) => void;
+  canSend: boolean;
   onCompare: () => void;
   onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
   onAddRevision: () => void;
@@ -61,6 +65,7 @@ export function OverviewTab({
         hasGcode={hasGcode}
         saving={revisionSaving}
         onSend={onSend}
+        canSend={canSend}
         onCompare={onCompare}
         onMark={onMark}
         onAddRevision={onAddRevision}
@@ -127,6 +132,19 @@ export function OverviewTab({
               placeholder="Optional description"
             />
           </div>
+          {/* Source URL */}
+          <div>
+            <label className="block font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+              Source URL
+            </label>
+            <input
+              type="url"
+              value={editor.sourceUrl}
+              onChange={(e) => editor.setSourceUrl(e.target.value)}
+              className="w-full h-10 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+              placeholder="https://www.printables.com/model/..."
+            />
+          </div>
           {/* Tags */}
           <div>
             <label className="block font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
@@ -189,6 +207,17 @@ export function OverviewTab({
         </div>
       ) : (
         <div className="flex flex-wrap gap-2">
+          {model.source_url && (
+            <a
+              href={model.source_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 bg-[var(--surface-container)] text-[var(--on-surface)] px-3 py-1 rounded font-mono text-xs uppercase tracking-wider hover:text-[var(--primary)] transition-colors"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+              Source model
+            </a>
+          )}
           {model.collection && (
             <span className="bg-[var(--surface-container)] text-[var(--on-surface)] px-3 py-1 rounded font-mono text-xs uppercase tracking-wider">
               {model.collection}

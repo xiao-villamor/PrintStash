@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 JobState = Literal["pending", "running", "completed", "failed"]
@@ -19,6 +19,7 @@ class IngestResponse(BaseModel):
 
 class IngestJobStatus(BaseModel):
     job_id: str
+    owner_user_id: Optional[int] = Field(default=None, exclude=True)
     state: JobState
     model_id: Optional[int] = None
     file_id: Optional[int] = None

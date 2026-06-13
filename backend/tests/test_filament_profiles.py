@@ -23,7 +23,7 @@ def test_filament_profile_crud(
     assert created.status_code == 201
     assert created.json()["name"] == "Generic PLA"
 
-    listed = client.get("/api/v1/filament-profiles")
+    listed = client.get("/api/v1/filament-profiles", headers=auth_headers)
     assert listed.status_code == 200
     assert listed.json()[0]["cost_per_kg"] == 20
 
@@ -31,6 +31,7 @@ def test_filament_profile_crud(
 def test_model_metadata_estimates_cost_from_local_filament_profile(
     client: TestClient,
     db_session: Session,
+    auth_headers: dict[str, str],
 ) -> None:
     model = Model(name="Bracket", slug="bracket", hash="a" * 64)
     db_session.add(model)
@@ -68,7 +69,7 @@ def test_model_metadata_estimates_cost_from_local_filament_profile(
     )
     db_session.commit()
 
-    response = client.get(f"/api/v1/models/{model.id}")
+    response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
     assert response.status_code == 200
     metadata = response.json()["files"][0]["metadata"]
     assert metadata["filament_cost"] == 0.2
@@ -77,6 +78,7 @@ def test_model_metadata_estimates_cost_from_local_filament_profile(
 def test_model_metadata_profile_cost_overrides_slicer_cost(
     client: TestClient,
     db_session: Session,
+    auth_headers: dict[str, str],
 ) -> None:
     model = Model(name="Hook", slug="hook", hash="c" * 64)
     db_session.add(model)
@@ -115,7 +117,7 @@ def test_model_metadata_profile_cost_overrides_slicer_cost(
     )
     db_session.commit()
 
-    response = client.get(f"/api/v1/models/{model.id}")
+    response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
     assert response.status_code == 200
     metadata = response.json()["files"][0]["metadata"]
     assert metadata["filament_cost"] == 0.2

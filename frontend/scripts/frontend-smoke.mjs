@@ -48,7 +48,7 @@ if (printers.length > 0) {
 }
 
 if (model.thumbnail_url) {
-  await fetchOk(model.thumbnail_url, "image/png");
+  await fetchOk(model.thumbnail_url, "image/");
 }
 
 console.log(

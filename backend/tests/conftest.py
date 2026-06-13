@@ -48,6 +48,7 @@ _TRUNCATE_TABLES_ORDER = [
     "tags",
     "metadata",
     "models",
+    "collection_permissions",
     "collections",
     "api_keys",
     "refresh_tokens",
@@ -165,9 +166,10 @@ def auth_headers(db_session: Session) -> dict[str, str]:
         username="test-writer",
         hashed_password=hash_password("Password123"),
         is_active=True,
+        is_superuser=True,
     )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
-    token = create_access_token(user.id, user.username, scope="write")
+    token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}

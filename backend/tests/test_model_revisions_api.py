@@ -83,7 +83,7 @@ def test_update_revision_status_notes_and_recommended(
 
 
 def test_model_printer_files_lists_printers_for_gcode(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     model = _model(db_session)
     file_row = _file(db_session, model)
@@ -101,7 +101,7 @@ def test_model_printer_files_lists_printers_for_gcode(
     )
     db_session.commit()
 
-    resp = client.get(f"/api/v1/models/{model.id}/printer-files")
+    resp = client.get(f"/api/v1/models/{model.id}/printer-files", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json() == [
         {
@@ -117,17 +117,17 @@ def test_model_printer_files_lists_printers_for_gcode(
 
 
 def test_model_print_jobs_empty_when_none(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     model = _model(db_session)
 
-    resp = client.get(f"/api/v1/models/{model.id}/print-jobs")
+    resp = client.get(f"/api/v1/models/{model.id}/print-jobs", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json() == []
 
 
 def test_model_print_jobs_lists_history_enriched(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     model = _model(db_session)
     file_row = _file(db_session, model)
@@ -151,7 +151,7 @@ def test_model_print_jobs_lists_history_enriched(
     )
     db_session.commit()
 
-    resp = client.get(f"/api/v1/models/{model.id}/print-jobs")
+    resp = client.get(f"/api/v1/models/{model.id}/print-jobs", headers=auth_headers)
     assert resp.status_code == 200
     rows = resp.json()
     assert len(rows) == 1
@@ -163,7 +163,7 @@ def test_model_print_jobs_lists_history_enriched(
 
 
 def test_list_models_can_filter_by_printer(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     present_model = _model(db_session, slug="present")
     absent_model = _model(db_session, slug="absent")
@@ -183,7 +183,7 @@ def test_list_models_can_filter_by_printer(
     )
     db_session.commit()
 
-    resp = client.get(f"/api/v1/models?printer_id={printer.id}")
+    resp = client.get(f"/api/v1/models?printer_id={printer.id}", headers=auth_headers)
 
     assert resp.status_code == 200
     data = resp.json()
@@ -198,7 +198,7 @@ def test_list_models_can_filter_by_printer(
 
 
 def test_list_models_can_filter_by_missing_printer_presence(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     present_model = _model(db_session, slug="present-none")
     absent_model = _model(db_session, slug="absent-none")
@@ -218,7 +218,7 @@ def test_list_models_can_filter_by_missing_printer_presence(
     )
     db_session.commit()
 
-    resp = client.get("/api/v1/models?printer_presence=none")
+    resp = client.get("/api/v1/models?printer_presence=none", headers=auth_headers)
 
     assert resp.status_code == 200
     ids = {row["id"] for row in resp.json()}

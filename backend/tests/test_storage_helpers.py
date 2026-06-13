@@ -19,7 +19,9 @@ def test_ensure_unique_slug_keeps_first_free_candidate() -> None:
     assert slug == "gear-4"
 
 
-def test_stream_to_path_creates_parent_dirs_and_returns_byte_count(tmp_path: Path) -> None:
+def test_stream_to_path_creates_parent_dirs_and_returns_byte_count(
+    tmp_path: Path,
+) -> None:
     dest = tmp_path / "nested" / "upload.gcode"
     payload = b"G1 X0\n" * 3
 

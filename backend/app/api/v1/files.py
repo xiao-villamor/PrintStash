@@ -19,13 +19,14 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.logging import get_logger
-from app.core.security import require_auth
-from app.db.models import File, FileType, Model
+from app.core.security import require_superuser, require_user
+from app.db.models import CollectionRole, File, FileType, Model, User
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestResponse
 from app.services import thumbnail
 from app.services.jobs import registry
+from app.services import rbac
 from app.services.storage_backend import get_backend
 
 logger = get_logger(__name__)
@@ -33,6 +34,20 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/files", tags=["files"])
 
 _MESH_TYPES = {FileType.STL, FileType.THREE_MF, FileType.OBJ}
+
+
+def _accessible_file(session: Session, file_id: int, user: User) -> File:
+    f = get_or_404(session, File, file_id, "file_not_found")
+    model = session.get(Model, f.model_id)
+    if model is None or model.deleted_at is not None or f.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    rbac.require_model_collection_role(
+        session,
+        user,
+        model.collection_id,
+        CollectionRole.VIEW,
+    )
+    return f
 
 
 def _serve_file(
@@ -66,8 +81,12 @@ def _serve_file(
     summary="Download the raw file blob",
     description="Streams the underlying artifact (G-code/STL/3MF/OBJ) from storage.",
 )
-def download_file(file_id: int, session: Session = Depends(get_session)):
-    f = get_or_404(session, File, file_id, "file_not_found")
+def download_file(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    f = _accessible_file(session, file_id, current_user)
     if not get_backend().exists(f.path):
         raise HTTPException(status_code=410, detail="file_blob_missing")
     return _serve_file(f.path, f.original_filename)
@@ -81,8 +100,12 @@ def download_file(file_id: int, session: Session = Depends(get_session)):
         "Falls back to API streaming URL for local storage."
     ),
 )
-def download_url(file_id: int, session: Session = Depends(get_session)) -> dict:
-    f = get_or_404(session, File, file_id, "file_not_found")
+def download_url(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    f = _accessible_file(session, file_id, current_user)
     backend = get_backend()
     url = backend.presigned_download_url(f.path, f.original_filename)
     if url:
@@ -98,8 +121,12 @@ def download_url(file_id: int, session: Session = Depends(get_session)) -> dict:
     "/{file_id}/download-direct",
     summary="Redirect to pre-signed URL when available",
 )
-def download_direct(file_id: int, session: Session = Depends(get_session)):
-    f = get_or_404(session, File, file_id, "file_not_found")
+def download_direct(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    f = _accessible_file(session, file_id, current_user)
     backend = get_backend()
     url = backend.presigned_download_url(f.path, f.original_filename)
     if url:
@@ -111,8 +138,12 @@ def download_direct(file_id: int, session: Session = Depends(get_session)):
     "/{file_id}/thumbnail",
     summary="Get the thumbnail extracted from the file (if any)",
 )
-def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
-    f = get_or_404(session, File, file_id, "file_not_found")  # noqa: F841
+def file_thumbnail(
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    _accessible_file(session, file_id, current_user)
     backend = get_backend()
     thumb_key = backend.thumbnail_key(file_id)
     filename, media_type = f"{file_id}.webp", "image/webp"
@@ -141,9 +172,12 @@ def file_thumbnail(file_id: int, session: Session = Depends(get_session)):
     ),
 )
 def file_as_stl(
-    file_id: int, request: Request, session: Session = Depends(get_session)
+    file_id: int,
+    request: Request,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ):
-    f = get_or_404(session, File, file_id, "file_not_found")
+    f = _accessible_file(session, file_id, current_user)
     backend = get_backend()
     if not backend.exists(f.path):
         raise HTTPException(status_code=410, detail="file_blob_missing")
@@ -286,7 +320,7 @@ def _run_thumbnail_rebuild(
     "/thumbnails/rebuild",
     response_model=IngestResponse,
     status_code=202,
-    dependencies=[Depends(require_auth)],
+    dependencies=[Depends(require_superuser)],
     summary="Regenerate mesh thumbnails for existing models",
     description=(
         "Walks non-soft-deleted models and tries to render a thumbnail from "
@@ -300,9 +334,10 @@ def _run_thumbnail_rebuild(
 def rebuild_missing_thumbnails(
     background_tasks: BackgroundTasks,
     force: bool = False,
+    current_user: User = Depends(require_superuser),
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
-    job_id = registry.create()
+    job_id = registry.create(owner_user_id=current_user.id)
     background_tasks.add_task(_run_thumbnail_rebuild, job_id, force, session_factory)
     return IngestResponse(
         job_id=job_id, state="pending", message="thumbnail rebuild queued"
