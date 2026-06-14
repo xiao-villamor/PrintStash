@@ -17,6 +17,25 @@ test.afterAll(async () => {
   });
 });
 
+// The app shell redirects unauthenticated users to /login for every non-public
+// route, so seed a token + user before each navigation. The mock /auth/me
+// returns this same superuser, so the auth bootstrap resolves and the app
+// renders the requested route instead of the login screen.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("printstash.token", "test-token");
+    localStorage.setItem(
+      "printstash.user",
+      JSON.stringify({
+        id: 1,
+        username: "tester",
+        email: null,
+        is_superuser: true,
+      }),
+    );
+  });
+});
+
 async function collectPageProblems(page: Page): Promise<string[]> {
   const problems: string[] = [];
   page.on("console", (message) => {
@@ -117,19 +136,7 @@ test("printer detail route preserves the dynamic id and renders live status", as
 test("gallery upload queues a task and tracks it to completion", async ({ page }) => {
   const problems = await collectPageProblems(page);
 
-  await page.addInitScript(() => {
-    localStorage.setItem("printstash.token", "test-token");
-    localStorage.setItem(
-      "printstash.user",
-      JSON.stringify({
-        id: 1,
-        username: "tester",
-        email: null,
-        is_superuser: true,
-      }),
-    );
-  });
-
+  // Auth is seeded in beforeEach.
   await page.goto("/");
 
   await expect(page.getByRole("link", { name: /upload/i })).toHaveCount(0);

@@ -49,9 +49,9 @@ export function SendToButtons({
     error ??
     (printersQuery.error instanceof Error ? printersQuery.error.message : null);
 
-  // Default-select a capable printer when the panel opens / once printers load.
+  // Default-select a capable printer once printers load (not gated on the panel
+  // being open) so the collapsed "x/y online" indicator reflects a selection.
   useEffect(() => {
-    if (!showSend) return;
     setSelectedPrinterIds((current) => {
       const capableIds = printers
         .filter((printer) => printer.capabilities.can_upload)
@@ -60,8 +60,7 @@ export function SendToButtons({
       const kept = current.filter((id) => capableIds.includes(id));
       return kept.length > 0 ? kept : [capableIds[0]];
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showSend, printers]);
+  }, [printers]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
