@@ -214,13 +214,23 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const canViewPrinters = !!user?.is_superuser;
   // Collections + tags are fetched by useCollections()/useTags() above.
 
+  // The outliner tree mirrors the active tag/printer filters so the collections
+  // sidebar narrows to matching models instead of always listing everything.
   useEffect(() => {
     let alive = true;
-    listModels({ limit: 500 })
+    listModels({
+      limit: 500,
+      tag: selectedTags.length ? selectedTags : undefined,
+      printer_id: canViewPrinters ? selectedPrinterId ?? undefined : undefined,
+      printer_presence:
+        canViewPrinters && selectedPrinterId === null
+          ? selectedPrinterPresence ?? undefined
+          : undefined,
+    })
       .then((data) => { if (alive) setOutlinerModels(data); })
       .catch(() => {});
     return () => { alive = false; };
-  }, [reloadKey]);
+  }, [reloadKey, selectedTags, selectedPrinterId, selectedPrinterPresence, canViewPrinters]);
 
   useEffect(() => {
     if (skipFirstFetch.current) {

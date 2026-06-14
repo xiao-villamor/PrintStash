@@ -353,18 +353,24 @@ export function FilterSidebarContent({
 }: FilterSidebarProps) {
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
+  // When a tag/printer filter is active the `models` list is already narrowed to
+  // matching models, so the tree should collapse to the collections that hold
+  // them (mirroring how the text filter narrows the outliner).
+  const facetFilterActive =
+    selectedTags.length > 0 || selectedPrinterId !== null || selectedPrinterPresence !== null;
+  const treeFiltered = !!outlinerQ || facetFilterActive;
 
   const visibleModelIds = useMemo<Set<number> | null>(() => {
-    if (!outlinerQ) return null;
+    if (!treeFiltered) return null;
     const result = new Set<number>();
     for (const m of models) {
-      if (m.name.toLowerCase().includes(outlinerQ)) result.add(m.id);
+      if (!outlinerQ || m.name.toLowerCase().includes(outlinerQ)) result.add(m.id);
     }
     return result;
-  }, [models, outlinerQ]);
+  }, [models, outlinerQ, treeFiltered]);
 
   const visibleCollectionIds = useMemo<Set<number> | null>(() => {
-    if (!outlinerQ) return null;
+    if (!treeFiltered) return null;
     const byId = new Map(collections.map((c) => [c.id, c]));
     const result = new Set<number>();
     const addWithAncestors = (c: CollectionRead) => {
@@ -372,8 +378,12 @@ export function FilterSidebarContent({
       let cur = c.parent_id != null ? byId.get(c.parent_id) : undefined;
       while (cur) { result.add(cur.id); cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined; }
     };
-    for (const c of collections) {
-      if (c.name.toLowerCase().includes(outlinerQ)) addWithAncestors(c);
+    // A text query also matches collections by name; a tag/printer filter only
+    // surfaces collections that actually contain matching models.
+    if (outlinerQ) {
+      for (const c of collections) {
+        if (c.name.toLowerCase().includes(outlinerQ)) addWithAncestors(c);
+      }
     }
     for (const m of models) {
       if (!m.collection || !visibleModelIds?.has(m.id)) continue;
@@ -381,7 +391,7 @@ export function FilterSidebarContent({
       if (col) addWithAncestors(col);
     }
     return result;
-  }, [collections, models, outlinerQ, visibleModelIds]);
+  }, [collections, models, outlinerQ, treeFiltered, visibleModelIds]);
 
   const visibleRoots = visibleCollectionIds
     ? tree.filter((n) => visibleCollectionIds.has(n.cat.id))
@@ -589,7 +599,7 @@ export function FilterSidebarContent({
               visibleModelIds={visibleModelIds}
             />
             <div className="ml-5 border-l border-border pl-4 min-w-0">
-              {visibleRoots.length === 0 && outlinerQ && (visibleModelIds?.size ?? 0) === 0 ? (
+              {visibleRoots.length === 0 && treeFiltered && (visibleModelIds?.size ?? 0) === 0 ? (
                 <p className="py-2 text-[10px] text-muted-foreground font-mono">No results.</p>
               ) : (
                 visibleRoots.map((node) => (

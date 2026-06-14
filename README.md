@@ -1,6 +1,9 @@
 <div align="center">
 
-<img src="frontend/public/logo.svg" alt="PrintStash logo" width="420" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/public/logo-dark.svg" />
+  <img src="frontend/public/logo.svg" alt="PrintStash logo" width="420" />
+</picture>
 
 # PrintStash
 
@@ -103,13 +106,35 @@ username or password.
 
 ## Screenshots
 
-| Asset grid | Model detail | 3D viewer |
-| --- | --- | --- |
-| ![Asset grid](screenshots/01-asset-grid.png) | ![Model detail](screenshots/04-model-detail.png) | ![3D viewer](screenshots/05-3d-viewer.png) |
+### Library & organization
 
-| Search | Categories | Setup |
+| Asset grid | Search | Collections & filters |
 | --- | --- | --- |
-| ![Search](screenshots/03-search.png) | ![Categories](screenshots/02-category-filter.png) | ![Setup wizard](screenshots/06-setup-wizard.png) |
+| ![Asset grid](screenshots/01-asset-grid.png) | ![Search](screenshots/03-search.png) | ![Collections filter](screenshots/02-collections-filter.png) |
+
+### Model detail
+
+| Overview | 3D viewer | G-code toolpaths |
+| --- | --- | --- |
+| ![Model detail](screenshots/04-model-detail.png) | ![3D viewer](screenshots/05-3d-viewer.png) | ![G-code viewer](screenshots/06-gcode-viewer.png) |
+
+### Revisions & printers
+
+| G-code revisions | Live printer status | Printer files | Printer diagnostics |
+| --- | --- | --- | --- |
+| ![Revisions](screenshots/07-revisions.png) | ![Printer status](screenshots/09-printers.png) | ![Printer files](screenshots/17-printer-files.png) | ![Printer diagnostics](screenshots/13-printer-diagnostics.png) |
+
+### Settings & administration
+
+| Overview | Users & access | Storage | Design |
+| --- | --- | --- | --- |
+| ![Settings overview](screenshots/10-settings.png) | ![Users & access](screenshots/14-settings-access.png) | ![Storage](screenshots/15-settings-storage.png) | ![Design](screenshots/16-settings-design.png) |
+
+### In motion
+
+| Compare G-code revisions | Filter by tag |
+| --- | --- |
+| ![Revision compare](screenshots/11-revision-compare.gif) | ![Tag filter](screenshots/12-tag-filter.gif) |
 
 ## Contributing
 
