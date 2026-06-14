@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - release/0.4
     paths:
       - "docs/wiki/**"
       - ".github/workflows/wiki.yml"
