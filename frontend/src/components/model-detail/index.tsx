@@ -23,6 +23,7 @@ import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
 import {
   createTag,
   deleteModel,
+  deleteTag,
   getAssetUrl,
   getModelPrinterFiles,
   getModelPrintJobs,
@@ -43,6 +44,7 @@ import {
   ModelPrinterFileRead,
   ModelPrintJobRead,
   ModelRead,
+  TagRead,
 } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -235,6 +237,33 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       setEditTags((p) => [...p, t.name]);
     } catch {
       /* ignored */
+    }
+  }
+
+  // Delete a tag globally (not just unassign it from this model). Lives here
+  // now that the Catalog page is gone; deleteTag invalidates the query cache,
+  // so useTags() refetches the list automatically.
+  async function editDeleteTag(tag: TagRead) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    if (
+      tag.model_count > 0 &&
+      !window.confirm(
+        `Delete tag "${tag.name}"? It will be removed from ${tag.model_count} model${tag.model_count === 1 ? "" : "s"}.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteTag(tag.id);
+      setEditTags((p) =>
+        p.filter((n) => n.toLowerCase() !== tag.name.toLowerCase()),
+      );
+      toast.success(`Tag "${tag.name}" deleted`);
+    } catch (e) {
+      toast.error(e);
     }
   }
 
@@ -590,6 +619,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   setTags: setEditTags,
                   toggleTag: editToggleTag,
                   createTag: editCreateTag,
+                  deleteTag: editDeleteTag,
                   filteredTags: editFilteredTags,
                   canCreate: editCanCreate,
                 }}
