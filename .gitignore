@@ -44,3 +44,10 @@ frontend/coverage/
 docs/feature-inventory.md
 docs/internal/
 docs/*-internal.md
+
+# AI assistant tooling (kept local, not published)
+.claude/
+.opencode/
+AGENTS.md
+CLAUDE.md
+docs/agents/
