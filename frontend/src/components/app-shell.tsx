@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/navigation";
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 
 import { AuthBanner } from "@/components/auth-banner";
 import { BottomNavBar } from "@/components/bottom-nav-bar";

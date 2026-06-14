@@ -34,7 +34,6 @@ import {
   deleteCollectionPermission,
   downloadModelExport,
   getVaultConfig,
-  getVaultStats,
   listCollectionPermissions,
   listCollections,
   listApiKeys,
@@ -50,6 +49,7 @@ import {
   updateVaultConfig,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { useVaultStats } from "@/lib/queries";
 import {
   DEFAULT_METADATA_PREFERENCES,
   METADATA_FIELDS,
@@ -74,7 +74,6 @@ import type {
   CollectionRole,
   TrashedModelRead,
   UserRead,
-  VaultStatsRead,
 } from "@/types";
 
 interface HealthResponse {
@@ -169,7 +168,9 @@ export function SettingsPanel() {
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [stats, setStats] = useState<VaultStatsRead | null>(null);
+  // Vault totals refresh automatically when models change (model writes
+  // invalidate queryKeys.vaultStats), so no manual refetch on this screen.
+  const stats = useVaultStats().data ?? null;
   const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [apiKeys, setApiKeys] = useState<ApiKeyRead[]>([]);
   const [users, setUsers] = useState<UserRead[]>([]);
@@ -224,9 +225,6 @@ export function SettingsPanel() {
     fetch("/api/v1/health")
       .then((r) => r.json())
       .then(setHealth)
-      .catch(() => {});
-    getVaultStats()
-      .then(setStats)
       .catch(() => {});
     setMetadataPrefs(readMetadataPreferences());
     setCardMetrics(readCardMetrics());
@@ -1294,7 +1292,7 @@ export function SettingsPanel() {
                   rel="noreferrer noopener"
                   title="Star on GitHub"
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element -- remote shields.io badge */}
+                  {/* remote shields.io badge */}
                   <img
                     src={`https://img.shields.io/github/stars/${GITHUB_REPO}?style=flat&logo=github&label=Stars&color=2563eb`}
                     alt="GitHub stars"

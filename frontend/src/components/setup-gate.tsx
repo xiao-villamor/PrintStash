@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/lib/navigation";
 import { Loader2 } from "lucide-react";
 
 import { getSetupStatus } from "@/lib/api";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "@/lib/navigation";
 import { CollectionRead, ModelListItem, PrinterRead, TagRead } from "@/types";
 import { ModelCard } from "@/components/model-card";
 import { FilterSidebar } from "@/components/filter-sidebar";
@@ -22,13 +22,14 @@ import {
   ChevronRight,
   Plus,
 } from "lucide-react";
-import { listCollections, listModels, listPrinters, listTags, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
+import { listModels, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
+import { useCollections, usePrinters, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
-import Link from "next/link";
-import { getAssetUrl } from "@/lib/api";
+import { Link } from "@/lib/navigation";
 import { timeAgo } from "@/lib/format";
+import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 
 type SortKey = "date-desc" | "date-asc" | "name-asc" | "name-desc";
 type ViewMode = "grid" | "list";
@@ -92,6 +93,10 @@ function selectedCollectionName(
   return byPath.get(selectedPath)?.name ?? null;
 }
 
+function canWriteCollection(collection: CollectionRead | null | undefined): boolean {
+  return collection?.effective_role === "edit" || collection?.effective_role === "admin";
+}
+
 export interface BrowserInitialData {
   models: ModelListItem[];
   collections: CollectionRead[];
@@ -109,9 +114,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // the active collection/tag filter; feeding those to the sidebar made other
   // folders' leaves vanish (tree branches appeared to collapse on selection).
   const [outlinerModels, setOutlinerModels] = useState<ModelListItem[]>(initial?.models ?? []);
-  const [collections, setCollections] = useState<CollectionRead[]>(initial?.collections ?? []);
-  const [tags, setTags] = useState<TagRead[]>(initial?.tags ?? []);
-  const [printers, setPrinters] = useState<PrinterRead[]>(initial?.printers ?? []);
+  // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
+  // with the detail/upload views, revalidated on focus, and refetched after any
+  // collection/tag mutation (the api layer invalidates the query cache).
+  const collectionsQuery = useCollections();
+  const tagsQuery = useTags();
+  const collections = collectionsQuery.data ?? [];
+  const tags = tagsQuery.data ?? [];
+  // Printers (superuser-only filter) share the same cache as the printers page
+  // and send-to dialog; gated so non-admins don't fetch a list they can't use.
+  const printers =
+    usePrinters({ enabled: !!user?.is_superuser }).data ?? initial?.printers ?? [];
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
@@ -122,7 +135,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initial ? initial.models.length === PAGE_SIZE : false);
-  const [facetsLoading, setFacetsLoading] = useState(!initial);
+  const facetsLoading = collectionsQuery.isLoading || tagsQuery.isLoading;
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
@@ -190,34 +203,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   );
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
-  const canUploadToSelection =
-    user?.is_superuser ||
-    selectedCollectionRow?.effective_role === "edit" ||
-    selectedCollectionRow?.effective_role === "admin";
+  const hasWritableCollection = collections.some(canWriteCollection);
+  const canUploadToVault =
+    auth.isAuthenticated &&
+    (user?.is_superuser || canWriteCollection(selectedCollectionRow) || hasWritableCollection);
+  const uploadDefaultCollection =
+    user?.is_superuser || canWriteCollection(selectedCollectionRow)
+      ? selectedCollection
+      : null;
   const canViewPrinters = !!user?.is_superuser;
-
-  useEffect(() => {
-    if (initial) return; // facets came down with the server render
-    let alive = true;
-    (async () => {
-      try {
-        const [c, t, p] = await Promise.all([
-          listCollections(),
-          listTags(),
-          canViewPrinters ? listPrinters() : Promise.resolve([]),
-        ]);
-        if (!alive) return;
-        setCollections(c);
-        setTags(t);
-        setPrinters(p);
-      } catch (e: any) {
-        if (alive) setError(e.message);
-      } finally {
-        if (alive) setFacetsLoading(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [canViewPrinters, initial]);
+  // Collections + tags are fetched by useCollections()/useTags() above.
 
   useEffect(() => {
     let alive = true;
@@ -294,15 +289,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function refresh() { setReloadKey((k) => k + 1); }
 
-  async function refreshCollections() {
-    try {
-      const c = await listCollections();
-      setCollections(c);
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }
-
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
     if (!name) return;
@@ -319,7 +305,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       setNewCollectionName("");
       setIsCreatingCollection(false);
       toast.success(`Collection "${name}" created`);
-      refreshCollections();
     } catch (e: any) {
       setError(e.message);
       toast.error(e);
@@ -332,7 +317,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       await updateModel(modelId, { collection: targetCollection ?? "" });
       toast.success("Moved");
       refresh();
-      refreshCollections();
     } catch (e: any) {
       toast.error(e);
     }
@@ -344,7 +328,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       await moveCollection(collectionId, newParentId);
       toast.success("Moved");
       refresh();
-      refreshCollections();
     } catch (e: any) {
       toast.error(e);
     }
@@ -356,7 +339,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       await deleteCollection(id, recursive);
       toast.success("Collection deleted");
       refresh();
-      refreshCollections();
     } catch (e: any) {
       toast.error(e);
     }
@@ -373,7 +355,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   return (
     <>
-      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onUploaded={refresh} defaultCollection={selectedCollection} />
+      <UploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} onUploaded={refresh} defaultCollection={uploadDefaultCollection} />
       <MobileFilterDrawer
         open={filterDrawerOpen} onClose={closeDrawer}
         collections={collections} tags={tags} printers={printers}
@@ -465,7 +447,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </button>
                 <button
                   onClick={() => setUploadOpen(true)}
-                  disabled={!canUploadToSelection}
+                  disabled={!canUploadToVault}
                   className="flex items-center px-3 py-2 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Upload
@@ -663,7 +645,7 @@ function CollectionListRow({ collection, onSelect }: { collection: CollectionRea
 
 function ModelListRow({ model }: { model: ModelListItem }) {
   const router = useRouter();
-  const thumb = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
+  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
     <Link

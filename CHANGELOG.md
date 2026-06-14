@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.4.0 - Vite + React Router Frontend
+
+The frontend is rebuilt as a Vite single-page app on React Router, migrated off
+Next.js. The app was already ~95% client-rendered behind auth, so server
+rendering added complexity without benefit — and under multi-user RBAC it broke
+outright, because server-side renders had no access to the browser-held token.
+
+### Highlights
+
+- Frontend migrated from Next.js to Vite + React Router (client SPA). All reads
+  now fetch client-side with the stored token.
+- Fixes the model detail page server error and the broken 3D preview / file
+  downloads that appeared once assets required authentication.
+- TanStack Query is the cache layer: shared `collections`/`tags` cache across the
+  grid, detail, and upload views; revalidation on window focus (so another
+  user's edits surface); and automatic refetch after any mutation.
+- Production image now serves the static build via nginx, which proxies
+  `/api/v1` and WebSockets to the API same-origin (replacing the Next rewrites).
+- Tooling moved to Vite build, `tsc` typecheck, and a standard ESLint flat
+  config.
+
+## 0.3.0 - Multi-User & RBAC
+
+PrintStash gains real multi-user support with per-collection access control.
+
+### Highlights
+
+- Collection-level role-based access control: each user can be granted `view`,
+  `edit`, or `admin` on a collection, and the UI gates actions accordingly.
+- Admin user management and access controls.
+- Authenticated asset delivery: thumbnails, mesh/STL previews, and file
+  downloads now require a signed-in user and carry the access token.
+- Lossless WebP thumbnails.
+- Settings UI refinements and collections sidebar (outliner) fixes.
+
+### Upgrade Notes
+
+Read [UPGRADE.md](./UPGRADE.md) before upgrading an existing install.
+
 ## 0.1.0 - Initial Self-Hosted Release
 
 PrintStash 0.1 is the first tagged self-hosted release. It is focused on the

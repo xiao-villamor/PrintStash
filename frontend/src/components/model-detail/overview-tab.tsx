@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ExternalLink, Plus, X } from "lucide-react";
+import { ChevronDown, ExternalLink, Plus, Trash2, X } from "lucide-react";
 
 import {
   CollectionRead,
@@ -29,6 +29,7 @@ export type ModelMetaEditor = {
   setTags: React.Dispatch<React.SetStateAction<string[]>>;
   toggleTag: (name: string) => void;
   createTag: (name: string) => void;
+  deleteTag: (tag: TagRead) => void;
   filteredTags: TagRead[];
   canCreate: boolean;
 };
@@ -169,15 +170,28 @@ export function OverviewTab({
               {editor.tagInput && (editor.filteredTags.length > 0 || editor.canCreate) && (
                 <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 max-h-40 overflow-y-auto">
                   {editor.filteredTags.slice(0, 6).map((t) => (
-                    <button
+                    <div
                       key={t.id}
-                      type="button"
-                      onClick={() => { editor.toggleTag(t.name); editor.setTagInput(""); }}
-                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] flex justify-between"
+                      className="group flex items-center hover:bg-[var(--surface-container-low)]"
                     >
-                      <span>{t.name}</span>
-                      <span className="opacity-50">({t.model_count})</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => { editor.toggleTag(t.name); editor.setTagInput(""); }}
+                        className="flex-1 min-w-0 text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] flex justify-between gap-2"
+                      >
+                        <span className="truncate">{t.name}</span>
+                        <span className="opacity-50">({t.model_count})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => editor.deleteTag(t)}
+                        title={`Delete tag "${t.name}"`}
+                        aria-label={`Delete tag ${t.name}`}
+                        className="px-2 py-1.5 text-[var(--on-surface-variant)]/50 hover:text-[var(--error)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
                   ))}
                   {editor.canCreate && (
                     <button

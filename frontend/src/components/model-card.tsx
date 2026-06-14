@@ -1,12 +1,13 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Link } from "@/lib/navigation";
+import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
 import { FileText } from "lucide-react";
 import { getAssetUrl } from "@/lib/api";
 import { timeAgoShort } from "@/lib/format";
+import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 
 // STL blobs already warmed this session (the /stl endpoint serves
 // Cache-Control'd responses, so a hover fetch lands in the HTTP cache and the
@@ -91,7 +92,7 @@ function MetricCell({ id, model, isLast }: { id: CardMetricId; model: ModelListI
 
 function ModelCardInner({ model, metrics }: { model: ModelListItem; metrics: CardMetrics }) {
   const router = useRouter();
-  const thumb = model.thumbnail_url ? getAssetUrl(model.thumbnail_url) : null;
+  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;

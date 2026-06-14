@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { Link } from "@/lib/navigation";
+import { usePathname } from "@/lib/navigation";
 import { Box, SlidersHorizontal, FolderTree, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 

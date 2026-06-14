@@ -15,15 +15,14 @@ import {
   getModel,
   ingestModel,
   ingestOrca,
-  listCollections,
-  listTags,
 } from "@/lib/api";
+import { useCollections, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
-import { CollectionRead, IngestJobStatus, TagRead } from "@/types";
+import { CollectionRead, IngestJobStatus } from "@/types";
 
 const MESH_EXT = new Set([".stl", ".3mf", ".obj"]);
 const GCODE_EXT = new Set([".gcode", ".g", ".gco"]);
@@ -76,8 +75,10 @@ export function UploadModal({
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [collections, setCollections] = useState<CollectionRead[]>([]);
-  const [tags, setTags] = useState<TagRead[]>([]);
+  // Shared taxonomy lists from the TanStack Query cache (deduped with the grid
+  // and detail views; refetched after any create/delete).
+  const { data: collections = [] } = useCollections();
+  const { data: tags = [] } = useTags();
   const [catOpen, setCatOpen] = useState(false);
   const writableCollections = useMemo(
     () => collections.filter(canWriteCollection),
@@ -86,13 +87,16 @@ export function UploadModal({
 
   useEffect(() => {
     if (!open) return;
-    listCollections().then(setCollections).catch(() => {});
-    listTags().then(setTags).catch(() => {});
-  }, [open]);
-
-  useEffect(() => {
-    if (open) setCollectionPath(defaultCollection ?? "");
-  }, [open, defaultCollection]);
+    if (defaultCollection) {
+      setCollectionPath(defaultCollection);
+      return;
+    }
+    if (!user?.is_superuser && writableCollections.length > 0) {
+      setCollectionPath(writableCollections[0].path);
+      return;
+    }
+    setCollectionPath("");
+  }, [open, defaultCollection, user?.is_superuser, writableCollections]);
 
   useEffect(() => {
     if (!open) return;
@@ -382,7 +386,8 @@ export function UploadModal({
     }
     try {
       const t = await createTag({ name: trimmed });
-      setTags((p) => [...p, t]);
+      // createTag invalidates the query cache → useTags() refetches the new
+      // tag; we just select it here.
       setSelectedTags((p) => [...p, t.slug]);
     } catch (err) {
       // 401 is surfaced by AuthBanner; duplicate slug is harmless.

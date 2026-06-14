@@ -1,12 +1,19 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import {
+  getJson,
+  GetJsonOptions,
+  sendAction,
+  sendJson,
+} from "@/lib/api/request";
 import {
   PrinterProfileCreate,
   PrinterProfileRead,
   PrinterProfileUpdate,
 } from "@/types";
 
-export function listPrinterProfiles(): Promise<PrinterProfileRead[]> {
-  return getJson<PrinterProfileRead[]>("/api/v1/printer-profiles");
+export function listPrinterProfiles(
+  options?: GetJsonOptions,
+): Promise<PrinterProfileRead[]> {
+  return getJson<PrinterProfileRead[]>("/api/v1/printer-profiles", options);
 }
 
 export function createPrinterProfile(

@@ -1,0 +1,57 @@
+---
+title: PrintStash
+description: Self-hosted asset manager for people who 3D print more things than they can remember.
+template: splash
+hero:
+  tagline: Keep files, versions, metadata, thumbnails, printer presence, and print history together in one local app. No cloud account, no subscription, no telemetry.
+  actions:
+    - text: Install
+      link: /PrintStash/getting-started/installation/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/xiao-villamor/PrintStash
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## Why this exists
+
+Most 3D printing workflows produce files faster than they help you remember
+them. Slicers know settings, printers know what is running now, and folders know
+where blobs live. PrintStash keeps it all in one place you host yourself.
+
+<CardGrid stagger>
+  <Card title="Ingest & organize" icon="open-book">
+    Upload STL, 3MF, OBJ, and G-code. Push exported G-code from OrcaSlicer,
+    deduplicate by content hash, and sort with collections, tags, search, and
+    thumbnails.
+  </Card>
+  <Card title="Inspect every model" icon="magnifier">
+    View slicer settings and mesh metadata, preview meshes and G-code toolpaths
+    in the browser, and track revisions, notes, and recommended versions.
+  </Card>
+  <Card title="Talk to printers" icon="rocket">
+    Manage Moonraker/Klipper printers with live status and send-to-print, sync
+    remote file inventories, and use beta Bambu LAN status and controls.
+  </Card>
+  <Card title="Run locally" icon="laptop">
+    First-run setup wizard, JWT auth, API keys, trash restore/purge,
+    JSON/CSV export, backups, and optional Postgres and S3/R2 storage.
+  </Card>
+</CardGrid>
+
+## Where to next
+
+<CardGrid>
+  <Card title="Get it running" icon="rocket">
+    Follow the [installation guide](/PrintStash/getting-started/installation/)
+    to bring up the Docker Compose stack and create the first admin.
+  </Card>
+  <Card title="Learn the workflow" icon="open-book">
+    The [user guide](/PrintStash/guides/user-guide/) walks the ingest →
+    inspect → find-again loop end to end.
+  </Card>
+</CardGrid>

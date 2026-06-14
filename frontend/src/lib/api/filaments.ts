@@ -1,12 +1,19 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import {
+  getJson,
+  GetJsonOptions,
+  sendAction,
+  sendJson,
+} from "@/lib/api/request";
 import {
   FilamentProfileCreate,
   FilamentProfileRead,
   FilamentProfileUpdate,
 } from "@/types";
 
-export function listFilamentProfiles(): Promise<FilamentProfileRead[]> {
-  return getJson<FilamentProfileRead[]>("/api/v1/filament-profiles");
+export function listFilamentProfiles(
+  options?: GetJsonOptions,
+): Promise<FilamentProfileRead[]> {
+  return getJson<FilamentProfileRead[]>("/api/v1/filament-profiles", options);
 }
 
 export function createFilamentProfile(

@@ -27,6 +27,7 @@ frontend/.next/
 frontend/tsconfig.tsbuildinfo
 frontend/out/
 frontend/dist/
+frontend/coverage/
 
 # OS / editors
 .DS_Store
@@ -43,3 +44,12 @@ frontend/dist/
 docs/feature-inventory.md
 docs/internal/
 docs/*-internal.md
+
+# AI assistant tooling (kept local, not published)
+.claude/
+.opencode/
+AGENTS.md
+CLAUDE.md
+docs/agents/
+frontend/test-results/
+frontend/playwright-report/

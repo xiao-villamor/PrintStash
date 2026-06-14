@@ -15,28 +15,23 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "incremental": true,
-    "tsBuildInfoFile": ".next/cache/tsconfig.tsbuildinfo",
-    "plugins": [
-      {
-        "name": "next"
-      }
+    "useDefineForClassFields": true,
+    "types": [
+      "vite/client"
     ],
     "paths": {
       "@/*": [
         "./src/*"
       ]
     },
-    "target": "ES2017"
+    "target": "ES2020"
   },
   "include": [
-    "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    "src",
+    "vite.config.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "dist"
   ]
 }

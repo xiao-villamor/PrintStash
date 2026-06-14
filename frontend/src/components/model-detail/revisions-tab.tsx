@@ -12,8 +12,9 @@ import {
   Wifi,
 } from "lucide-react";
 
-import { getAssetUrl } from "@/lib/api";
+import { downloadAuthenticatedFile } from "@/lib/api";
 import { formatBytes, formatDuration, timeAgo } from "@/lib/format";
+import { toast } from "@/lib/toast";
 import {
   FileRead,
   FileRevisionStatus,
@@ -157,13 +158,19 @@ export function RevisionsTab({
                       <Pencil className="h-4 w-4" />
                     </button>
                     <SlicerOpenButton fileId={f.id} size="sm" />
-                    <a
-                      href={getAssetUrl(`/api/v1/files/${f.id}/download`)}
-                      download={f.original_filename}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        downloadAuthenticatedFile(
+                          `/api/v1/files/${f.id}/download`,
+                          f.original_filename,
+                        ).catch((e) => toast.error(e))
+                      }
+                      title="Download"
                       className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
                     >
                       <Download className="h-4 w-4" />
-                    </a>
+                    </button>
                   </div>
                 </div>
 

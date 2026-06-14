@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: u.email,
           is_superuser: u.is_superuser,
         };
-        storeLogin(getToken()!, stored);
+        storeLogin(getToken()!, stored, { silent: true });
         setUser(stored);
       })
       .catch(() => {
@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: me.email,
         is_superuser: me.is_superuser,
       };
-      storeLogin(getToken()!, stored);
+      storeLogin(getToken()!, stored, { silent: true });
       setUser(stored);
     } catch {
       clearLogin();

@@ -1,8 +1,9 @@
 import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
+import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
-const WS_BASE = process.env.NEXT_PUBLIC_WS_URL || "";
+const API_BASE = import.meta.env.VITE_API_URL || "";
+const WS_BASE = import.meta.env.VITE_WS_URL || "";
 
 function isBrowser(): boolean {
   return typeof window !== "undefined";
@@ -28,6 +29,45 @@ export function getUrl(path: string): string {
 
 export function getAssetUrl(path: string): string {
   return getUrl(path);
+}
+
+export async function getAuthenticatedBlob(path: string): Promise<Blob> {
+  // `no-cache` (revalidate, don't blindly reuse) instead of `force-cache`:
+  // thumbnail URLs are stable (e.g. /files/1/thumbnail) but their content
+  // changes when a file id is reused (re-upload / DB reset). force-cache served
+  // the stale image forever; the backend sends an ETag, so revalidation here is
+  // a cheap 304 when unchanged and a fresh fetch when it actually changed.
+  const res = await fetch(getUrl(path), {
+    headers: authHeaders(),
+    cache: "no-cache",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.blob();
+}
+
+/**
+ * Download a protected file. Plain <a href> links can't carry the bearer
+ * token, so reads gated behind auth (post-RBAC) 401. Fetch the blob with the
+ * token, then trigger a save via a temporary object URL.
+ */
+export async function downloadAuthenticatedFile(
+  path: string,
+  filename?: string,
+): Promise<void> {
+  const res = await fetch(getUrl(path), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await parseError(res);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  if (filename) a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export function getWsUrl(path: string): string {
@@ -101,14 +141,31 @@ const CACHE_TTL_MS = 30_000;
 const responseCache = new Map<string, { value: unknown; expires: number }>();
 const inflight = new Map<string, Promise<unknown>>();
 
-export function invalidateApiCache(): void {
+/**
+ * Bust caches after a mutation. Pass the mutated `path` for keyed,
+ * resource-scoped query invalidation (the good-practice path); omit it for a
+ * blanket invalidation (manual callers that don't know the affected resource).
+ * Either way the legacy in-memory GET cache is fully cleared — it's a 30s TTL
+ * map, so dropping it wholesale is cheap and keeps it coherent.
+ */
+export function invalidateApiCache(path?: string): void {
   responseCache.clear();
   inflight.clear();
+  if (typeof path === "string") {
+    invalidateQueriesForPath(path);
+  } else {
+    queryClient.invalidateQueries();
+  }
 }
 
 if (isBrowser()) {
-  // A login/logout changes what reads may return — drop everything.
-  window.addEventListener("printstash:auth-changed", invalidateApiCache);
+  // Login/logout changes identity — drop all cached data (not just invalidate)
+  // so the previous user's reads can't linger under RBAC.
+  window.addEventListener("printstash:auth-changed", () => {
+    responseCache.clear();
+    inflight.clear();
+    queryClient.clear();
+  });
 }
 
 export interface GetJsonOptions {
@@ -164,7 +221,7 @@ export async function sendJson<T>(
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return handleResponse<T>(res);
 }
 
@@ -177,7 +234,7 @@ export async function sendForm<T>(
     headers: authHeaders(),
     body: formData,
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return handleResponse<T>(res);
 }
 
@@ -189,6 +246,6 @@ export async function sendAction(
     method,
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache(path);
   return expectOk(res);
 }

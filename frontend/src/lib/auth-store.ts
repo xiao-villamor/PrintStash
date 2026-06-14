@@ -50,14 +50,23 @@ export function isLoggedIn(): boolean {
   return !!getToken();
 }
 
-export function storeLogin(token: string, user: StoredUser): void {
+export function storeLogin(
+  token: string,
+  user: StoredUser,
+  options?: { silent?: boolean },
+): void {
   if (!isBrowser()) return;
   try {
     localStorage.setItem(TOKEN_KEY, token);
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(LEGACY_USER_KEY);
-    emit();
+    // `silent` persists the latest user without broadcasting an identity
+    // change. The auth-changed event makes the API layer wipe the whole query
+    // cache (so one user's data never leaks to the next); the bootstrap/refresh
+    // getMe is the *same* identity, so firing it there would needlessly nuke
+    // freshly-loaded queries on every page load.
+    if (!options?.silent) emit();
   } catch { /* ignore */ }
 }
 

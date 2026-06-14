@@ -2,6 +2,7 @@ import {
   authHeaders,
   expectOk,
   getJson,
+  GetJsonOptions,
   getUrl,
   handleResponse,
   invalidateApiCache,
@@ -49,8 +50,10 @@ export function getModel(id: number): Promise<ModelRead> {
   return getJson<ModelRead>(`/api/v1/models/${id}`);
 }
 
-export function getVaultStats(): Promise<VaultStatsRead> {
-  return getJson<VaultStatsRead>("/api/v1/models/stats");
+export function getVaultStats(
+  options?: GetJsonOptions,
+): Promise<VaultStatsRead> {
+  return getJson<VaultStatsRead>("/api/v1/models/stats", options);
 }
 
 export async function downloadModelExport(format: "json" | "csv"): Promise<void> {
@@ -123,7 +126,7 @@ export async function purgeModel(id: number): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache(`/api/v1/models/${id}/purge`);
   return handleResponse<TrashPurgeRead>(res);
 }
 
@@ -132,7 +135,7 @@ export async function purgeExpiredTrash(): Promise<TrashPurgeRead> {
     method: "DELETE",
     headers: authHeaders(),
   });
-  invalidateApiCache();
+  invalidateApiCache("/api/v1/models/trash/expired");
   return handleResponse<TrashPurgeRead>(res);
 }
 

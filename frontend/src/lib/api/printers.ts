@@ -1,5 +1,6 @@
 import {
   getJson,
+  GetJsonOptions,
   getWsUrl,
   sendAction,
   sendJson,
@@ -18,9 +19,12 @@ import {
   StartPrinterFile,
 } from "@/types";
 
-export function listPrinters(group?: string): Promise<PrinterRead[]> {
+export function listPrinters(
+  group?: string,
+  options?: GetJsonOptions,
+): Promise<PrinterRead[]> {
   const query = group ? `?group=${encodeURIComponent(group)}` : "";
-  return getJson<PrinterRead[]>(`/api/v1/printers${query}`);
+  return getJson<PrinterRead[]>(`/api/v1/printers${query}`, options);
 }
 
 export function getDashboard(): Promise<Dashboard> {

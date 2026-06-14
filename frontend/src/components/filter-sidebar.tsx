@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/navigation";
 import { CollectionRead, ModelListItem, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Box, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
