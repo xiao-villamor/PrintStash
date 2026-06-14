@@ -19,7 +19,7 @@ print history.
 ![Docker ready](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&style=flat-square)
 ![Status](https://img.shields.io/badge/status-early%20self--hosted-f59e0b?style=flat-square)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Wiki**](#wiki) · [**Contributing**](#contributing) · [**Security**](#security)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Contributing**](#contributing) · [**Security**](#security)
 
 </div>
 
@@ -104,27 +104,6 @@ username or password.
 | Search | Categories | Setup |
 | --- | --- | --- |
 | ![Search](screenshots/03-search.png) | ![Categories](screenshots/02-category-filter.png) | ![Setup wizard](screenshots/06-setup-wizard.png) |
-
-## Wiki
-
-The README stays short. Setup, operations, API, and development notes live in
-the [GitHub wiki](https://github.com/xiao-villamor/PrintStash/wiki).
-
-| Page | Purpose |
-| --- | --- |
-| [Wiki home](https://github.com/xiao-villamor/PrintStash/wiki) | Main documentation index |
-| [Installation](https://github.com/xiao-villamor/PrintStash/wiki/Installation) | Docker install, images, first launch, upgrades |
-| [User guide](https://github.com/xiao-villamor/PrintStash/wiki/User-guide) | Demo path, current UI workflows, OrcaSlicer hook |
-| [API](https://github.com/xiao-villamor/PrintStash/wiki/API) | Common REST endpoints and upload example |
-| [Configuration](https://github.com/xiao-villamor/PrintStash/wiki/Configuration) | Environment variables and deployment notes |
-| [Development](https://github.com/xiao-villamor/PrintStash/wiki/Development) | Backend/frontend setup, checks, tests |
-| [Architecture](https://github.com/xiao-villamor/PrintStash/wiki/Architecture) | Stack, repository layout, request flow, ADRs |
-| [Provider support](./docs/provider-support.md) | Moonraker and Bambu LAN capability notes |
-| [Known limitations](./docs/known-limitations.md) | Current rough edges and non-goals |
-| [Roadmap](./docs/roadmap.md) | Planned work and release direction |
-| [Release validation](./docs/release-validation.md) | Smoke checks before publishing a release |
-| [Disaster recovery](./docs/disaster-recovery.md) | Backup and restore recovery notes |
-| [Upgrade guide](./UPGRADE.md) | Upgrade guidance for existing installs |
 
 ## Contributing
 
