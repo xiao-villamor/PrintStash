@@ -83,7 +83,7 @@ const printer = {
   id: 3,
   name: "ender",
   provider: "moonraker",
-  moonraker_url: "https://moonraker.perrecha.cloud",
+  moonraker_url: "http://moonraker.local:7125",
   has_api_key: true,
   bambu_host: null,
   bambu_serial: null,
