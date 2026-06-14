@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -93,6 +93,14 @@ class PrinterRead(BaseModel):
     last_error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+
+class MoonrakerConfigRead(BaseModel):
+    printer_id: int
+    server_info: dict[str, Any] = Field(default_factory=dict)
+    printer_info: dict[str, Any] = Field(default_factory=dict)
+    moonraker_config: dict[str, Any] = Field(default_factory=dict)
+    klipper_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class SendToPrinter(BaseModel):

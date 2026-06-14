@@ -190,18 +190,14 @@ def sync_printer_files(
         seen.add(remote_filename)
         synced.append(row)
 
-    now = utcnow()
     existing = session.exec(
         select(PrinterFile).where(
             PrinterFile.printer_id == printer_id,
-            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
         )
     ).all()
     for row in existing:
         if row.remote_filename not in seen:
-            row.missing_since = now
-            row.updated_at = now
-            session.add(row)
+            session.delete(row)
     session.commit()
     return list_printer_files(session, printer_id=printer_id)
 
@@ -210,7 +206,10 @@ def list_printer_files(session: Session, *, printer_id: int) -> list[PrinterFile
     return list(
         session.exec(
             select(PrinterFile)
-            .where(PrinterFile.printer_id == printer_id)
+            .where(
+                PrinterFile.printer_id == printer_id,
+                PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+            )
             .order_by(PrinterFile.remote_filename.asc())  # type: ignore[attr-defined]
         ).all()
     )

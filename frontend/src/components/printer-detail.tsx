@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@/lib/navigation";
 import {
+  MoonrakerConfigRead,
   PrintJobRead,
   PrinterDiagnostics,
   PrinterFileRead,
@@ -12,6 +13,8 @@ import {
 } from "@/types";
 import {
   cancelPrinter,
+  deletePrinterFile,
+  getMoonrakerConfig,
   getPrinterDiagnostics,
   getPrinter,
   listPrinterFiles,
@@ -36,7 +39,9 @@ import {
   Play,
   Square,
   RefreshCcw,
+  Settings,
   Thermometer,
+  Trash2,
   Wifi,
   WifiOff,
   XCircle,
@@ -44,14 +49,19 @@ import {
 
 const STATUS_COLORS: Record<PrinterStatus, string> = {
   ready: "bg-emerald-500",
-  printing: "bg-[var(--primary)]",
+  printing: "bg-blue-600 dark:bg-orange-600",
   paused: "bg-amber-500",
-  offline: "bg-[var(--outline)]",
-  unknown: "bg-[var(--outline)]",
-  error: "bg-[var(--error)]",
+  offline: "bg-slate-400",
+  unknown: "bg-slate-400",
+  error: "bg-red-600",
 };
 
-
+const BTN_SECONDARY =
+  "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
+const BTN_DANGER =
+  "inline-flex items-center gap-1.5 rounded-md border border-red-300/50 bg-background px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40";
+const SECTION_CLASS = "overflow-hidden rounded-lg border border-border bg-background";
+const SECTION_HEADER_CLASS = "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
 
 function providerLabel(provider: PrinterRead["provider"]): string {
   return provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
@@ -98,16 +108,19 @@ export function PrinterDetailPage({
     initialPrinter ?? null,
   );
   const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
+  const [moonrakerConfig, setMoonrakerConfig] = useState<MoonrakerConfigRead | null>(null);
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
   const [jobs, setJobs] = useState<PrintJobRead[]>([]);
   const [printerFiles, setPrinterFiles] = useState<PrinterFileRead[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
-  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "diagnostics">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "config" | "diagnostics">("status");
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
+  const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState(false);
+  const [loadingConfig, setLoadingConfig] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -146,6 +159,18 @@ export function PrinterDetailPage({
     }
   }
 
+  async function loadMoonrakerConfig() {
+    if (printer?.provider !== "moonraker" && initialPrinter?.provider !== "moonraker") return;
+    setLoadingConfig(true);
+    try {
+      setMoonrakerConfig(await getMoonrakerConfig(printerId));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setLoadingConfig(false);
+    }
+  }
+
   function connect() {
     try {
       const ws = openPrinterWS(printerId);
@@ -180,6 +205,7 @@ export function PrinterDetailPage({
     // Server-rendered pages pass the printer down; WS keeps it live after that.
     if (!initialPrinter || initialPrinter.id !== printerId) loadPrinter();
     loadDiagnostics();
+    if (initialPrinter?.provider === "moonraker") loadMoonrakerConfig();
     loadJobs();
     loadPrinterFiles();
     connect();
@@ -240,6 +266,23 @@ export function PrinterDetailPage({
     }
   }
 
+  async function deleteRemoteFile(file: PrinterFileRead) {
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!window.confirm(`Delete ${file.remote_filename} from ${printer?.name ?? "printer"}?`)) return;
+    setDeletingFileId(file.id);
+    setError(null);
+    try {
+      setPrinterFiles(await deletePrinterFile(printerId, file.id));
+      await loadPrinter();
+      toast.success("Printer file deleted");
+    } catch (e) {
+      toast.error(e);
+      await loadPrinter();
+    } finally {
+      setDeletingFileId(null);
+    }
+  }
+
   const ps = snapshot.print_stats || {};
   const vs = snapshot.virtual_sdcard || {};
   const ext = snapshot.extruder || {};
@@ -250,28 +293,28 @@ export function PrinterDetailPage({
 
   if (!printer) {
     return (
-      <div className="max-w-6xl mx-auto w-full space-y-4">
-        <div className="h-8 w-48 rounded bg-[var(--surface-container)] animate-pulse" />
-        <div className="h-64 w-full rounded bg-[var(--surface-container)] animate-pulse" />
+      <div className="w-full space-y-4">
+        <div className="h-8 w-48 animate-pulse rounded bg-muted" />
+        <div className="h-64 w-full animate-pulse rounded bg-muted" />
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto w-full space-y-6">
+    <div className="w-full space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <Link
           href="/printers"
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[13px]"
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
         >
           <ArrowLeft className="h-4 w-4" /> Printers
         </Link>
-        <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded">
+        <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5">
           {wsConnected ? (
             <>
               <Wifi className="h-3 w-3 text-emerald-500" />
-              <span className="font-mono text-[10px] uppercase tracking-wider text-emerald-500 font-bold">
+              <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-emerald-600">
                 Live
               </span>
             </>
@@ -289,10 +332,10 @@ export function PrinterDetailPage({
       {/* Title */}
       <div className="space-y-2">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-semibold text-[var(--on-surface)]">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             {printer.name}
           </h1>
-          <span className="rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+          <span className="rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
             {providerLabel(printer.provider)}
           </span>
           {printer.capabilities.support_level === "beta" && (
@@ -300,16 +343,16 @@ export function PrinterDetailPage({
               Beta
             </span>
           )}
-          <span className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded">
+          <span className="flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1">
             <span
-              className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-[var(--outline)]"}`}
+              className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
             />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               {printer.status}
             </span>
           </span>
         </div>
-        <p className="font-mono text-xs text-[var(--on-surface-variant)] break-all">
+        <p className="font-mono text-xs text-muted-foreground break-all">
           {printer.provider === "moonraker"
             ? printer.moonraker_url
             : printer.bambu_host || "Bambu LAN"}
@@ -317,13 +360,13 @@ export function PrinterDetailPage({
       </div>
 
       {printer.capabilities.support_notes.length > 0 && (
-        <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3 text-xs leading-5 text-[var(--on-surface-variant)]">
+        <div className="rounded border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
           {printer.capabilities.support_notes.join(" ")}
         </div>
       )}
 
       {error && (
-        <div className="rounded border border-[var(--error)]/40 bg-[var(--error-container)]/30 p-3 text-sm text-[var(--error)] font-mono">
+        <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
           {error}
         </div>
       )}
@@ -335,7 +378,8 @@ export function PrinterDetailPage({
         <StatusMetric label="Homed" value={toolhead.homed_axes || "—"} />
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[var(--outline-variant)]">
+      <div className="border-b border-border">
+        <div className="flex gap-1 overflow-x-auto -mb-px">
         <TabButton active={activeTab === "status"} onClick={() => setActiveTab("status")}>
           Status
         </TabButton>
@@ -345,17 +389,26 @@ export function PrinterDetailPage({
         <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>
           Jobs
         </TabButton>
+        {printer.provider === "moonraker" && (
+          <TabButton active={activeTab === "config"} onClick={() => {
+            setActiveTab("config");
+            if (!moonrakerConfig) loadMoonrakerConfig();
+          }}>
+            Config
+          </TabButton>
+        )}
         <TabButton active={activeTab === "diagnostics"} onClick={() => setActiveTab("diagnostics")}>
           Diagnostics
         </TabButton>
+        </div>
       </div>
 
       {activeTab === "status" && (
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Current print */}
-        <section className="lg:col-span-2 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-          <div className="px-6 py-4 border-b border-[var(--outline-variant)]">
-            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+        <section className={`${SECTION_CLASS} lg:col-span-2`}>
+          <div className={SECTION_HEADER_CLASS}>
+            <h2 className="text-sm font-semibold text-foreground">
               Current print
             </h2>
           </div>
@@ -365,16 +418,16 @@ export function PrinterDetailPage({
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   Progress
                 </span>
-                <span className="font-mono text-xs text-[var(--on-surface)] font-semibold">
+                <span className="font-mono text-xs text-foreground font-semibold">
                   {progress != null ? `${progress.toFixed(1)}%` : "—"}
                 </span>
               </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-[var(--surface-container-high)]">
+              <div className="h-2 w-full overflow-hidden rounded bg-muted">
                 <div
-                  className="h-full bg-[var(--primary)] transition-all duration-500"
+                  className="h-full bg-blue-600 transition-all duration-500 dark:bg-orange-600"
                   style={{ width: `${Math.min(100, progress ?? 0)}%` }}
                 />
               </div>
@@ -385,7 +438,7 @@ export function PrinterDetailPage({
               <Row label="TOTAL" value={formatDuration(ps.total_duration)} stack />
             </div>
 
-            <div className="border-t border-[var(--surface-container-high)] pt-4 space-y-3">
+            <div className="border-t border-border pt-4 space-y-3">
               <div className="flex flex-wrap gap-2">
                 <ControlButton
                   onClick={() => control("pause", () => pausePrinter(printerId))}
@@ -415,7 +468,7 @@ export function PrinterDetailPage({
                   destructive
                 />
               </div>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 {auth.isAuthenticated
                   ? "Controls use your signed-in user session."
                   : "Sign in to control printers."}
@@ -425,12 +478,14 @@ export function PrinterDetailPage({
         </section>
 
         {/* Temperatures */}
-        <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-          <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center gap-2">
-            <Thermometer className="h-4 w-4 text-[var(--on-surface-variant)]" />
-            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+        <section className={SECTION_CLASS}>
+          <div className={SECTION_HEADER_CLASS}>
+            <div className="flex items-center gap-2">
+            <Thermometer className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
               Temperatures
             </h2>
+            </div>
           </div>
           <div className="p-6 space-y-5">
             <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
@@ -441,19 +496,22 @@ export function PrinterDetailPage({
       )}
 
       {activeTab === "files" && (
-      <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-        <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between gap-3">
+      <section className={SECTION_CLASS}>
+        <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-[var(--on-surface-variant)]" />
-            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+            <FileText className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
               Printer files
             </h2>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+              {printerFiles.length}
+            </span>
           </div>
           <button
             onClick={syncFiles}
             disabled={syncingFiles || !auth.isAuthenticated || !printer.capabilities.can_list_files}
             title={auth.blockReason ?? "Sync printer files"}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+            className={BTN_SECONDARY}
           >
             {syncingFiles ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -464,12 +522,12 @@ export function PrinterDetailPage({
           </button>
         </div>
         {printer.last_error && printer.status === "offline" && (
-          <div className="border-b border-[var(--outline-variant)] bg-[var(--error-container)]/20 px-6 py-3 text-[11px] text-[var(--error)] font-mono break-words">
+          <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-[11px] text-red-600 break-words dark:bg-red-950/20">
             {printer.last_error}
           </div>
         )}
         {printerFiles.length === 0 ? (
-          <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
             {printer.capabilities.can_list_files
               ? "No printer files synced yet."
               : "Printer file inventory is not supported by this provider."}
@@ -478,7 +536,7 @@ export function PrinterDetailPage({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] border-b border-[var(--surface-variant)]">
+                <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   <th className="py-3 px-4 font-medium">Remote file</th>
                   <th className="py-3 px-4 font-medium">Vault match</th>
                   <th className="py-3 px-4 font-medium text-right">Size</th>
@@ -491,51 +549,48 @@ export function PrinterDetailPage({
                 {printerFiles.map((f) => (
                   <tr
                     key={f.id}
-                    className="border-b border-[var(--surface-variant)] last:border-0 hover:bg-[var(--surface-container-low)] transition-colors"
+                    className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
                   >
-                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface)] max-w-[320px] truncate" title={f.remote_filename}>
+                    <td className="py-3 px-4 font-mono text-xs text-foreground max-w-[320px] truncate" title={f.remote_filename}>
                       {f.remote_filename}
                     </td>
                     <td className="py-3 px-4">
                       {f.model_id ? (
                         <Link
                           href={`/models/${f.model_id}`}
-                          className="text-[var(--on-surface)] hover:text-[var(--primary)] hover:underline font-mono text-xs"
+                          className="font-mono text-xs text-foreground hover:text-blue-600 hover:underline dark:hover:text-orange-500"
                         >
                           {f.model_name ?? f.original_filename}
                         </Link>
                       ) : (
-                        <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+                        <span className="font-mono text-xs text-muted-foreground">
                           External
                         </span>
                       )}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs text-[var(--on-surface)] whitespace-nowrap">
+                    <td className="py-3 px-4 text-right font-mono text-xs text-foreground whitespace-nowrap">
                       {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
                     </td>
                     <td className="py-3 px-4">
-                      <span className={`font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded ${
-                        f.missing_since
-                          ? "bg-amber-500/10 text-amber-600"
-                          : "bg-emerald-500/10 text-emerald-600"
-                      }`}>
-                        {f.missing_since ? "missing" : f.matched_by}
+                      <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
+                        {f.matched_by}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
+                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(f.last_seen_at).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 text-right">
+                      <div className="flex justify-end gap-2">
                       <button
                         onClick={() => startRemoteFile(f)}
                         disabled={
                           !auth.isAuthenticated ||
-                          !!f.missing_since ||
                           !printer.capabilities.can_start ||
-                          startingFileId !== null
+                          startingFileId !== null ||
+                          deletingFileId !== null
                         }
                         title={auth.blockReason ?? "Start this printer file"}
-                        className="inline-flex items-center gap-1.5 rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container-low)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className={BTN_SECONDARY}
                       >
                         {startingFileId === f.id ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
@@ -544,6 +599,30 @@ export function PrinterDetailPage({
                         )}
                         Start
                       </button>
+                      <button
+                        onClick={() => deleteRemoteFile(f)}
+                        disabled={
+                          !auth.isAuthenticated ||
+                          printer.provider !== "moonraker" ||
+                          deletingFileId !== null ||
+                          startingFileId !== null ||
+                          ps.filename === f.remote_filename
+                        }
+                        title={
+                          ps.filename === f.remote_filename
+                            ? "Cannot delete active print file"
+                            : auth.blockReason ?? "Delete this printer file"
+                        }
+                        className={BTN_DANGER}
+                      >
+                        {deletingFileId === f.id ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3" />
+                        )}
+                        Delete
+                      </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -556,26 +635,26 @@ export function PrinterDetailPage({
 
       {/* History */}
       {activeTab === "jobs" && (
-      <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-        <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+      <section className={SECTION_CLASS}>
+        <div className={SECTION_HEADER_CLASS}>
+          <h2 className="text-sm font-semibold text-foreground">
             Print history
           </h2>
           {jobs.length > 0 && (
-            <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
               {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
             </span>
           )}
         </div>
         {jobs.length === 0 ? (
-          <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
             No print jobs yet.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] border-b border-[var(--surface-variant)]">
+                <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   <th className="py-3 px-4 font-medium">When</th>
                   <th className="py-3 px-4 font-medium">File</th>
                   <th className="py-3 px-4 font-medium">State</th>
@@ -588,34 +667,34 @@ export function PrinterDetailPage({
                 {jobs.map((j) => (
                   <tr
                     key={j.id}
-                    className="border-b border-[var(--surface-variant)] last:border-0 hover:bg-[var(--surface-container-low)] transition-colors"
+                    className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
                   >
-                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
+                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       {new Date(j.created_at).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 max-w-[260px] truncate">
                       <Link
                         href={`/models/${j.model_id}`}
-                        className="text-[var(--on-surface)] hover:text-[var(--primary)] hover:underline font-mono text-xs"
+                        className="font-mono text-xs text-foreground hover:text-blue-600 hover:underline dark:hover:text-orange-500"
                         title={j.remote_filename}
                       >
                         {j.remote_filename}
                       </Link>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--surface-container)] text-[var(--on-surface)]">
+                      <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-foreground">
                         {j.state}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs text-[var(--on-surface)]">
+                    <td className="py-3 px-4 text-right font-mono text-xs text-foreground">
                       {(j.progress * 100).toFixed(0)}%
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
+                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       {j.started_at
                         ? new Date(j.started_at).toLocaleTimeString()
                         : "—"}
                     </td>
-                    <td className="py-3 px-4 font-mono text-xs text-[var(--on-surface-variant)] whitespace-nowrap">
+                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
                       {j.finished_at
                         ? new Date(j.finished_at).toLocaleTimeString()
                         : "—"}
@@ -629,19 +708,58 @@ export function PrinterDetailPage({
       </section>
       )}
 
-      {activeTab === "diagnostics" && (
-      <section className="bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded overflow-hidden">
-        <div className="px-6 py-4 border-b border-[var(--outline-variant)] flex items-center justify-between gap-3">
+      {activeTab === "config" && printer.provider === "moonraker" && (
+      <section className={SECTION_CLASS}>
+        <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-[var(--on-surface-variant)]" />
-            <h2 className="text-sm font-semibold text-[var(--on-surface)]">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
+              Moonraker and Klipper config
+            </h2>
+          </div>
+          <button
+            onClick={loadMoonrakerConfig}
+            disabled={loadingConfig}
+            className={BTN_SECONDARY}
+          >
+            {loadingConfig ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3.5 w-3.5" />
+            )}
+            {loadingConfig ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {!moonrakerConfig ? (
+          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
+            {loadingConfig ? "Loading config…" : "Config not loaded."}
+          </div>
+        ) : (
+          <div className="p-4 sm:p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ConfigSummary title="Moonraker" data={moonrakerConfig.server_info} />
+              <ConfigSummary title="Klipper" data={moonrakerConfig.printer_info} />
+            </div>
+            <ConfigBlock title="Moonraker config" data={moonrakerConfig.moonraker_config} />
+            <ConfigBlock title="Klipper config" data={moonrakerConfig.klipper_config} />
+          </div>
+        )}
+      </section>
+      )}
+
+      {activeTab === "diagnostics" && (
+      <section className={SECTION_CLASS}>
+        <div className={SECTION_HEADER_CLASS}>
+          <div className="flex items-center gap-2">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-sm font-semibold text-foreground">
               Provider diagnostics
             </h2>
           </div>
           <button
             onClick={loadDiagnostics}
             disabled={checkingDiagnostics}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-[10px] uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+            className={BTN_SECONDARY}
           >
             {checkingDiagnostics ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -653,7 +771,7 @@ export function PrinterDetailPage({
         </div>
 
         {!diagnostics ? (
-          <div className="p-10 text-center font-mono text-xs text-[var(--on-surface-variant)]">
+          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
             Diagnostics have not loaded yet.
           </div>
         ) : (
@@ -675,15 +793,15 @@ export function PrinterDetailPage({
                   {diagnostics.ok ? "Provider reachable" : "Needs attention"}
                 </span>
               </div>
-              <p className="mt-2 text-sm text-[var(--on-surface-variant)]">
+              <p className="mt-2 text-sm text-muted-foreground">
                 {providerLabel(diagnostics.provider)} is marked {diagnostics.support_level}.
               </p>
             </div>
 
             {diagnostics.notes.length > 0 && (
-              <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)] p-4 space-y-2">
+              <div className="rounded border border-border bg-muted/40 p-4 space-y-2">
                 {diagnostics.notes.map((note) => (
-                  <p key={note} className="text-sm text-[var(--on-surface-variant)] leading-relaxed">
+                  <p key={note} className="text-sm text-muted-foreground leading-relaxed">
                     {note}
                   </p>
                 ))}
@@ -691,26 +809,26 @@ export function PrinterDetailPage({
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded border border-[var(--outline-variant)] overflow-hidden">
-                <div className="border-b border-[var(--outline-variant)] px-4 py-3">
-                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+              <div className="rounded border border-border overflow-hidden">
+                <div className="border-b border-border px-4 py-3">
+                  <h3 className="text-sm font-semibold text-foreground">
                     Checks
                   </h3>
                 </div>
-                <div className="divide-y divide-[var(--surface-variant)]">
+                <div className="divide-y divide-border">
                   {diagnostics.checks.map((check) => (
                     <div key={check.name} className="px-4 py-3 flex items-start gap-3">
                       {check.ok ? (
                         <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
                       ) : (
-                        <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--error)]" />
+                        <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" />
                       )}
                       <div className="min-w-0 flex-1">
-                        <div className="font-mono text-xs uppercase tracking-wider text-[var(--on-surface)]">
+                        <div className="font-mono text-xs uppercase tracking-wider text-foreground">
                           {checkLabel(check.name)}
                         </div>
                         {!check.ok && (
-                          <div className="mt-1 font-mono text-[11px] text-[var(--error)] break-words">
+                          <div className="mt-1 font-mono text-[11px] text-red-600 break-words">
                             {check.code ?? "provider_error"}
                             {check.detail ? `: ${check.detail}` : ""}
                           </div>
@@ -721,20 +839,20 @@ export function PrinterDetailPage({
                 </div>
               </div>
 
-              <div className="rounded border border-[var(--outline-variant)] overflow-hidden">
-                <div className="border-b border-[var(--outline-variant)] px-4 py-3">
-                  <h3 className="text-sm font-semibold text-[var(--on-surface)]">
+              <div className="rounded border border-border overflow-hidden">
+                <div className="border-b border-border px-4 py-3">
+                  <h3 className="text-sm font-semibold text-foreground">
                     Capabilities
                   </h3>
                 </div>
-                <div className="grid grid-cols-2 gap-px bg-[var(--surface-variant)]">
+                <div className="grid grid-cols-2 gap-px bg-border">
                   {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
-                    <div key={name} className="bg-[var(--surface-container-lowest)] px-4 py-3">
-                      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <div key={name} className="bg-background px-4 py-3">
+                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         {checkLabel(name.replace(/^can_/, ""))}
                       </div>
                       <div className={`mt-1 font-mono text-xs font-semibold ${
-                        enabled ? "text-emerald-600" : "text-[var(--on-surface-variant)]"
+                        enabled ? "text-emerald-600" : "text-muted-foreground"
                       }`}>
                         {enabled ? "Supported" : "Unavailable"}
                       </div>
@@ -769,6 +887,63 @@ export function PrinterDetailPage({
   );
 }
 
+function ConfigSummary({
+  title,
+  data,
+}: {
+  title: string;
+  data: Record<string, any>;
+}) {
+  const rows = Object.entries(data)
+    .filter(([, value]) => value == null || ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 8);
+
+  return (
+    <div className="rounded border border-border overflow-hidden">
+      <div className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      </div>
+      <div className="divide-y divide-border">
+        {rows.length === 0 ? (
+          <div className="px-4 py-3 font-mono text-xs text-muted-foreground">
+            —
+          </div>
+        ) : (
+          rows.map(([key, value]) => (
+            <div key={key} className="grid grid-cols-[minmax(120px,0.45fr)_1fr] gap-3 px-4 py-3">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground truncate">
+                {checkLabel(key)}
+              </div>
+              <div className="font-mono text-xs text-foreground break-words">
+                {String(value ?? "—")}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConfigBlock({
+  title,
+  data,
+}: {
+  title: string;
+  data: Record<string, any>;
+}) {
+  return (
+    <div className="rounded border border-border overflow-hidden">
+      <div className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      </div>
+      <pre className="max-h-[420px] overflow-auto bg-muted/40 p-4 font-mono text-[11px] leading-5 text-foreground">
+        {JSON.stringify(data, null, 2)}
+      </pre>
+    </div>
+  );
+}
+
 function TabButton({
   active,
   onClick,
@@ -784,8 +959,8 @@ function TabButton({
       onClick={onClick}
       className={`border-b-2 px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
         active
-          ? "border-[var(--primary)] text-[var(--primary)]"
-          : "border-transparent text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
+          ? "border-blue-600 text-blue-600 dark:border-orange-500 dark:text-orange-500"
+          : "border-transparent text-muted-foreground hover:text-foreground"
       }`}
     >
       {children}
@@ -803,12 +978,12 @@ function StatusMetric({
   truncate?: boolean;
 }) {
   return (
-    <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+    <div className="rounded border border-border bg-background p-3">
+      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <div
-        className={`mt-1 font-mono text-sm font-semibold text-[var(--on-surface)] ${truncate ? "truncate" : ""}`}
+        className={`mt-1 font-mono text-sm font-semibold text-foreground ${truncate ? "truncate" : ""}`}
         title={value}
       >
         {value}
@@ -833,10 +1008,10 @@ function Row({
   if (stack) {
     return (
       <div className="space-y-1">
-        <div className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
-        <div className="font-mono text-sm text-[var(--on-surface)] font-semibold">
+        <div className="font-mono text-sm text-foreground font-semibold">
           {value}
         </div>
       </div>
@@ -844,11 +1019,11 @@ function Row({
   }
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] flex-shrink-0">
+      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground flex-shrink-0">
         {label}
       </span>
       <span
-        className={`font-mono text-xs text-[var(--on-surface)] font-medium ${truncate ? "truncate" : ""} ${capitalize ? "capitalize" : ""}`}
+        className={`font-mono text-xs text-foreground font-medium ${truncate ? "truncate" : ""} ${capitalize ? "capitalize" : ""}`}
       >
         {value}
       </span>
@@ -877,8 +1052,8 @@ function ControlButton({
       disabled={disabled}
       className={`flex items-center gap-1.5 px-3 py-2 rounded font-mono text-xs uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
         destructive
-          ? "bg-[var(--error)] text-[var(--primary-foreground)] hover:opacity-90"
-          : "border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+          ? "bg-red-600 text-white hover:opacity-90"
+          : "border border-border text-foreground hover:bg-muted"
       }`}
     >
       {busy ? (
@@ -906,20 +1081,20 @@ function TempRow({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
-        <span className="font-mono text-xs text-[var(--on-surface)] font-semibold">
+        <span className="font-mono text-xs text-foreground font-semibold">
           {cur != null ? cur.toFixed(1) : "—"}°C
           {tgt != null && tgt > 0 && (
-            <span className="ml-1.5 text-[var(--on-surface-variant)] font-normal">
+            <span className="ml-1.5 text-muted-foreground font-normal">
               / {tgt.toFixed(0)}°C
             </span>
           )}
         </span>
       </div>
       {pct != null && (
-        <div className="h-1 w-full overflow-hidden rounded bg-[var(--surface-container-high)]">
+        <div className="h-1 w-full overflow-hidden rounded bg-muted">
           <div
             className="h-full bg-blue-500 dark:bg-orange-500 transition-all duration-500"
             style={{ width: `${pct}%` }}

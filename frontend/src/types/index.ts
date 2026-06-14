@@ -46,6 +46,7 @@ export type {
   PrinterCapabilities,
   PrinterDiagnosticCheck,
   PrinterDiagnostics,
+  MoonrakerConfigRead,
   PrintJobState,
   PrinterRead,
   PrinterFileRead,

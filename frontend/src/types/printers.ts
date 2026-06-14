@@ -76,6 +76,14 @@ export interface PrinterDiagnostics {
   ok: boolean;
 }
 
+export interface MoonrakerConfigRead {
+  printer_id: number;
+  server_info: Record<string, any>;
+  printer_info: Record<string, any>;
+  moonraker_config: Record<string, any>;
+  klipper_config: Record<string, any>;
+}
+
 export interface PrinterFileRead {
   id: number;
   printer_id: number;

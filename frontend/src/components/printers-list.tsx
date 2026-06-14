@@ -8,7 +8,7 @@ import { usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, RefreshCw, ArrowRight, Wifi, WifiOff } from "lucide-react";
+import { Plus, Trash2, RefreshCw, ArrowRight, Printer as PrinterIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
@@ -118,7 +118,7 @@ export function PrintersPage() {
             <Link
               key={p.id}
               href={`/printers/${p.id}`}
-              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-blue-600 dark:border-orange-500 transition-all duration-200 p-5 flex flex-col gap-3 group"
+              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-blue-600 dark:hover:border-orange-500 transition-all duration-200 p-5 flex flex-col gap-3 group"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -174,7 +174,7 @@ export function PrintersPage() {
                   <Trash2 className="h-3 w-3" />
                   {auth.isAuthenticated ? "Remove" : "Sign in"}
                 </button>
-                <span className="px-2 py-1 rounded border border-border text-foreground text-[10px] uppercase tracking-wider flex items-center gap-1 group-hover:border-blue-600 dark:border-orange-500 group-hover:text-blue-600 dark:text-orange-500 transition-colors">
+                <span className="px-2 py-1 rounded border border-border text-foreground text-[10px] uppercase tracking-wider flex items-center gap-1 group-hover:border-blue-600 group-hover:text-blue-600 dark:group-hover:border-orange-500 dark:group-hover:text-orange-500 transition-colors">
                   Open
                   <ArrowRight className="h-3 w-3" />
                 </span>
@@ -194,26 +194,6 @@ export function PrintersPage() {
         />
       )}
     </div>
-  );
-}
-
-function PrinterIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="6 9 6 2 18 2 18 9" />
-      <path d="M6 12H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-2" />
-      <rect x="6" y="14" width="12" height="8" />
-    </svg>
   );
 }
 

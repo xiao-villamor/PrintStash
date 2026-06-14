@@ -37,6 +37,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.schemas.printers import (
+    MoonrakerConfigRead,
     PrinterCapabilities,
     PrinterCreate,
     PrinterFileRead,
@@ -363,6 +364,45 @@ async def printer_diagnostics(
     }
 
 
+@router.get(
+    "/{printer_id}/config",
+    response_model=MoonrakerConfigRead,
+    summary="Get Moonraker and Klipper configuration",
+)
+async def printer_config(
+    printer_id: int,
+    _: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> MoonrakerConfigRead:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    if p.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="printer_not_found")
+    if p.provider != PrinterProvider.MOONRAKER:
+        raise HTTPException(
+            status_code=409,
+            detail="operation_not_supported_for_provider",
+        )
+
+    try:
+        provider = get_provider_client(p)
+        server_info, printer_info, server_config, klipper_config = await asyncio.gather(
+            provider.server_info(),
+            provider.info(),
+            provider.server_config(),
+            provider.printer_config(),
+        )
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=exc.code)
+
+    return MoonrakerConfigRead(
+        printer_id=printer_id,
+        server_info=server_info.get("result", server_info),
+        printer_info=printer_info.get("result", printer_info),
+        moonraker_config=server_config.get("result", server_config),
+        klipper_config=klipper_config.get("result", {}).get("status", klipper_config),
+    )
+
+
 @router.get("/{printer_id}", response_model=PrinterRead, summary="Get a printer")
 def get_printer(
     printer_id: int,
@@ -572,10 +612,11 @@ async def send_to_printer(
         except OSError:
             logger.warning("failed to remove temp print upload %s", temp_target)
 
-    # Moonraker accepts print=true on upload but returns immediately; the
-    # print_stats subscription will move the job into PRINTING. We mark
-    # STARTED here optimistically when caller asked to print.
-    job.state = PrintJobState.STARTED if payload.start_print else PrintJobState.QUEUED
+    # Upload-only is not a queued print. It only records transfer history; user
+    # can start the remote file later from printer inventory.
+    job.state = PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    if not payload.start_print:
+        job.finished_at = utcnow()
     job.updated_at = utcnow()
     session.add(job)
     session.commit()
@@ -806,6 +847,57 @@ async def sync_files_on_printer(
         raise HTTPException(status_code=502, detail=exc.code)
 
     rows = sync_printer_files(session, printer_id=printer_id, remote_files=remote_files)
+    return _printer_file_reads(session, list(rows), printer_name=p.name)
+
+
+@router.delete(
+    "/{printer_id}/files/{printer_file_id}",
+    response_model=List[PrinterFileRead],
+    dependencies=[Depends(require_superuser)],
+    summary="Delete a remote G-code file from the printer",
+)
+async def delete_file_on_printer(
+    printer_id: int,
+    printer_file_id: int,
+    session: Session = Depends(get_session),
+) -> List[PrinterFileRead]:
+    p = get_or_404(session, Printer, printer_id, "printer_not_found")
+    provider = get_provider_client(p)
+    if not provider.capabilities.can_list_files:
+        raise HTTPException(
+            status_code=409,
+            detail="operation_not_supported_for_provider",
+        )
+    row = session.exec(
+        select(PrinterFile).where(
+            PrinterFile.id == printer_file_id,
+            PrinterFile.printer_id == printer_id,
+            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="printer_file_not_found")
+
+    try:
+        await provider.delete_file(row.remote_filename)
+    except ProviderError as exc:
+        p.last_error = exc.detail
+        p.updated_at = utcnow()
+        session.add(p)
+        session.commit()
+        raise HTTPException(status_code=502, detail=exc.code)
+
+    session.delete(row)
+    session.commit()
+
+    try:
+        remote_files = await provider.list_files()
+    except ProviderError:
+        rows = list_printer_files(session, printer_id=printer_id)
+    else:
+        rows = sync_printer_files(
+            session, printer_id=printer_id, remote_files=remote_files
+        )
     return _printer_file_reads(session, list(rows), printer_name=p.name)
 
 

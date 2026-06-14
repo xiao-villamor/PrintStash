@@ -2,12 +2,17 @@ import {
   getJson,
   GetJsonOptions,
   getWsUrl,
+  authHeaders,
+  getUrl,
+  handleResponse,
+  invalidateApiCache,
   sendAction,
   sendJson,
 } from "@/lib/api/request";
 import { getStoredToken } from "@/lib/auth";
 import {
   Dashboard,
+  MoonrakerConfigRead,
   PrinterDiagnostics,
   PrintJobRead,
   PrinterFileRead,
@@ -38,6 +43,12 @@ export function getPrinter(id: number): Promise<PrinterRead> {
 export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
   // Live connectivity check — caching it would defeat the "re-run checks" button.
   return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, {
+    fresh: true,
+  });
+}
+
+export function getMoonrakerConfig(id: number): Promise<MoonrakerConfigRead> {
+  return getJson<MoonrakerConfigRead>(`/api/v1/printers/${id}/config`, {
     fresh: true,
   });
 }
@@ -119,6 +130,21 @@ export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
     "POST",
     {},
   );
+}
+
+export async function deletePrinterFile(
+  id: number,
+  printerFileId: number,
+): Promise<PrinterFileRead[]> {
+  const res = await fetch(
+    getUrl(`/api/v1/printers/${id}/files/${printerFileId}`),
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+    },
+  );
+  invalidateApiCache(`/api/v1/printers/${id}/files/${printerFileId}`);
+  return handleResponse<PrinterFileRead[]>(res);
 }
 
 export function listPrinterJobs(

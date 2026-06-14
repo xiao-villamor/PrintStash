@@ -15,6 +15,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
+from urllib.parse import quote
 
 import httpx
 import websockets
@@ -84,6 +85,12 @@ class MoonrakerClient:
     async def info(self) -> Dict[str, Any]:
         return await self._request("GET", "/printer/info")
 
+    async def server_info(self) -> Dict[str, Any]:
+        return await self._request("GET", "/server/info")
+
+    async def server_config(self) -> Dict[str, Any]:
+        return await self._request("GET", "/server/config")
+
     async def query_status(self) -> Dict[str, Any]:
         params = "&".join(
             (f"{name}={','.join(fields)}" if fields else name)
@@ -91,8 +98,18 @@ class MoonrakerClient:
         )
         return await self._request("GET", f"/printer/objects/query?{params}")
 
+    async def query_configfile(self) -> Dict[str, Any]:
+        return await self._request("GET", "/printer/objects/query?configfile")
+
     async def list_gcode_files(self) -> Dict[str, Any]:
         return await self._request("GET", "/server/files/list?root=gcodes")
+
+    async def delete_gcode_file(self, remote_filename: str) -> Dict[str, Any]:
+        encoded = "/".join(quote(part, safe="") for part in remote_filename.split("/"))
+        return await self._request(
+            "DELETE",
+            "/server/files/gcodes/" + encoded.lstrip("/"),
+        )
 
     async def upload_gcode(
         self, local_path: Path, remote_filename: str, *, start_print: bool = False

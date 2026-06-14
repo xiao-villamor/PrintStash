@@ -29,6 +29,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Auto-mark a revision known-good after its first successful print (toggle in Design settings)",
       "Delete G-code revisions from a model's Revisions tab",
       "Log print history against an ad-hoc printer name — no registered printer required",
+      "Moonraker printer inventory now stays in sync, removes files deleted elsewhere, and supports deleting printer files",
+      "Printer detail UI refreshed with Moonraker / Klipper config, diagnostics, and profile/settings-aligned styling",
     ],
   },
   {

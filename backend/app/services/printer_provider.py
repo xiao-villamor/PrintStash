@@ -45,9 +45,17 @@ class PrinterProviderClient(Protocol):
 
     async def info(self) -> dict[str, Any]: ...
 
+    async def server_info(self) -> dict[str, Any]: ...
+
+    async def server_config(self) -> dict[str, Any]: ...
+
+    async def printer_config(self) -> dict[str, Any]: ...
+
     async def query_status(self) -> dict[str, Any]: ...
 
     async def list_files(self) -> list[dict[str, Any]]: ...
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]: ...
 
     async def start(self, remote_filename: str) -> dict[str, Any]: ...
 
@@ -86,6 +94,24 @@ class MoonrakerProvider:
         except MoonrakerError as exc:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
 
+    async def server_info(self) -> dict[str, Any]:
+        try:
+            return await self.client.server_info()
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    async def server_config(self) -> dict[str, Any]:
+        try:
+            return await self.client.server_config()
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    async def printer_config(self) -> dict[str, Any]:
+        try:
+            return await self.client.query_configfile()
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
     async def query_status(self) -> dict[str, Any]:
         try:
             return await self.client.query_status()
@@ -103,6 +129,12 @@ class MoonrakerProvider:
     async def start(self, remote_filename: str) -> dict[str, Any]:
         try:
             return await self.client.start_print(remote_filename)
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        try:
+            return await self.client.delete_gcode_file(remote_filename)
         except MoonrakerError as exc:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
 
@@ -165,6 +197,30 @@ class BambuLanProvider:
         client.username_pw_set("bblp", self.access_code)
         client.tls_set()
         return client
+
+    async def server_info(self) -> dict[str, Any]:
+        raise ProviderError(
+            "Provider does not expose Moonraker server info.",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def server_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "Provider does not expose Moonraker server config.",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def printer_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "Provider does not expose Klipper config.",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        raise ProviderError(
+            "Provider does not support remote file deletion.",
+            code="operation_not_supported_for_provider",
+        )
 
     async def _send_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         def _publish() -> None:

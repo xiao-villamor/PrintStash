@@ -417,6 +417,69 @@ class TestBambuPrinter:
         assert live_status["code"] == "provider_timeout"
 
 
+class TestPrinterConfig:
+    def test_moonraker_config_returns_server_and_klipper_config(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with (
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.server_info",
+                new_callable=AsyncMock,
+            ) as mock_server_info,
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.info",
+                new_callable=AsyncMock,
+            ) as mock_printer_info,
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.server_config",
+                new_callable=AsyncMock,
+            ) as mock_server_config,
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.printer_config",
+                new_callable=AsyncMock,
+            ) as mock_printer_config,
+        ):
+            mock_server_info.return_value = {"result": {"klippy_state": "ready"}}
+            mock_printer_info.return_value = {"result": {"software_version": "v1"}}
+            mock_server_config.return_value = {"result": {"server": {"host": "0.0.0.0"}}}
+            mock_printer_config.return_value = {
+                "result": {"status": {"configfile": {"config": {"printer": {}}}}}
+            }
+            resp = client.get(f"/api/v1/printers/{p.id}/config", headers=auth_headers)
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["server_info"]["klippy_state"] == "ready"
+        assert body["printer_info"]["software_version"] == "v1"
+        assert body["moonraker_config"]["server"]["host"] == "0.0.0.0"
+        assert "configfile" in body["klipper_config"]
+
+    def test_config_unsupported_for_bambu(
+        self, client: TestClient, db_session: Session, auth_headers
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.get(f"/api/v1/printers/{p.id}/config", headers=auth_headers)
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+
+
 class TestPrinterStatus:
     def test_status_returns_printer_and_snapshot(
         self, client: TestClient, auth_headers, db_session: Session
@@ -674,6 +737,92 @@ class TestPrinterFiles:
         data = resp.json()
         assert data[0]["file_id"] == f.id
         assert data[0]["matched_by"] == "filename"
+
+    def test_sync_printer_files_deletes_remote_files_missing_from_provider(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        db_session.add(
+            PrinterFile(
+                printer_id=p.id,
+                remote_filename="deleted-in-mainsail.gcode",
+                matched_by="external",
+            )
+        )
+        db_session.add(
+            PrinterFile(
+                printer_id=p.id,
+                remote_filename="still-there.gcode",
+                matched_by="external",
+            )
+        )
+        db_session.commit()
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.list_files",
+            new_callable=AsyncMock,
+        ) as mock_list:
+            mock_list.return_value = [{"path": "still-there.gcode", "size": 123}]
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/files/sync",
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200
+        assert [row["remote_filename"] for row in resp.json()] == ["still-there.gcode"]
+        remaining = db_session.exec(
+            select(PrinterFile).where(PrinterFile.printer_id == p.id)
+        ).all()
+        assert [row.remote_filename for row in remaining] == ["still-there.gcode"]
+
+    def test_delete_printer_file_removes_remote_and_resyncs_inventory(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        deleted = PrinterFile(
+            printer_id=p.id,
+            remote_filename="deleted.gcode",
+            matched_by="external",
+        )
+        kept = PrinterFile(
+            printer_id=p.id,
+            remote_filename="kept.gcode",
+            matched_by="external",
+        )
+        db_session.add_all([deleted, kept])
+        db_session.commit()
+        db_session.refresh(deleted)
+
+        with (
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.delete_file",
+                new_callable=AsyncMock,
+            ) as mock_delete,
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.list_files",
+                new_callable=AsyncMock,
+            ) as mock_list,
+        ):
+            mock_delete.return_value = {"result": "ok"}
+            mock_list.return_value = [{"path": "kept.gcode", "size": 123}]
+            resp = client.delete(
+                f"/api/v1/printers/{p.id}/files/{deleted.id}",
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200
+        assert [row["remote_filename"] for row in resp.json()] == ["kept.gcode"]
+        mock_delete.assert_awaited_once_with("deleted.gcode")
+        remaining = db_session.exec(
+            select(PrinterFile).where(PrinterFile.printer_id == p.id)
+        ).all()
+        assert [row.remote_filename for row in remaining] == ["kept.gcode"]
 
     def test_sync_unsupported_provider(
         self, client: TestClient, db_session: Session, auth_headers
@@ -1105,6 +1254,7 @@ class TestSendToPrinter:
             )
 
         assert resp.status_code == 200
+        assert resp.json()["state"] == PrintJobState.COMPLETED.value
         row = db_session.exec(
             select(PrinterFile).where(PrinterFile.printer_id == p.id)
         ).one()
