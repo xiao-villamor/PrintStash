@@ -169,6 +169,7 @@ function SettingsCard({
 
 export function SettingsPanel() {
   const { user } = useAuth();
+  const latestRelease = CHANGELOG[0];
   const [activeSection, setActiveSection] = useState<SettingsSection>("overview");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   // Vault totals refresh automatically when models change (model writes
@@ -1435,20 +1436,20 @@ export function SettingsPanel() {
           {/* Changelog */}
           <SettingsCard
             icon={Info}
-            title="Version history"
-            description="What changed in each release"
+            title="Latest changes"
+            description="What changed in the current release"
           >
             <div className="divide-y divide-border">
-              {CHANGELOG.map((release) => (
-                <div key={release.version} className="px-4 sm:px-6 py-5 grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-3">
+              {latestRelease && (
+                <div className="px-4 sm:px-6 py-5 grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-3">
                   <div className="flex items-start gap-2">
                     <span className="rounded bg-[var(--primary)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--primary)]">
-                      v{release.version}
+                      v{latestRelease.version}
                     </span>
-                    <span className="text-[11px] text-muted-foreground pt-0.5">{release.date}</span>
+                    <span className="text-[11px] text-muted-foreground pt-0.5">{latestRelease.date}</span>
                   </div>
                   <ul className="space-y-1.5">
-                    {release.changes.map((change, i) => (
+                    {latestRelease.changes.map((change, i) => (
                       <li key={i} className="flex gap-2 text-xs text-muted-foreground">
                         <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-[var(--primary)]" />
                         <span>{change}</span>
@@ -1456,7 +1457,7 @@ export function SettingsPanel() {
                     ))}
                   </ul>
                 </div>
-              ))}
+              )}
             </div>
           </SettingsCard>
         </div>
