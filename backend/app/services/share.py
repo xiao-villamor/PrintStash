@@ -10,18 +10,31 @@ always re-scoped to ``share.model_id`` by the caller.
 from __future__ import annotations
 
 import secrets
+import json
 from datetime import timedelta
 
 from fastapi import HTTPException
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
-from app.db.models import File, Metadata, Model, ShareLink
+from app.db.models import File, FileType, Metadata, Model, ShareLink
 from app.db.scopes import live
 from app.services.auth import _as_utc, _token_hash
 from app.schemas.share import PublicFileRead, PublicModelRead, ShareLinkRead
 
 _TOKEN_BYTES = 32
+
+
+def _selected_file_ids(link: ShareLink) -> list[int] | None:
+    if not link.selected_file_ids_json:
+        return None
+    try:
+        parsed = json.loads(link.selected_file_ids_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [int(item) for item in parsed if isinstance(item, int)]
 
 
 def is_active(link: ShareLink) -> bool:
@@ -36,6 +49,7 @@ def to_read(link: ShareLink) -> ShareLinkRead:
         expires_at=link.expires_at,
         revoked_at=link.revoked_at,
         allow_download=link.allow_download,
+        revision_file_ids=_selected_file_ids(link),
         access_count=link.access_count,
         created_at=link.created_at,
         is_active=is_active(link),
@@ -48,16 +62,33 @@ def create_share(
     model_id: int,
     expires_in_days: int,
     allow_download: bool,
+    revision_file_ids: list[int] | None = None,
     created_by: int | None,
 ) -> tuple[ShareLink, str]:
     """Create a share link, returning (row, raw_token). Only the hash is stored."""
     raw_token = secrets.token_urlsafe(_TOKEN_BYTES)
     days = max(1, min(expires_in_days, 365))
+    selected_ids: list[int] | None = None
+    if revision_file_ids is not None:
+        deduped_ids = list(dict.fromkeys(revision_file_ids))
+        if not deduped_ids:
+            raise HTTPException(status_code=400, detail="no_revisions_selected")
+        selected = session.exec(
+            select(File.id)
+            .where(File.model_id == model_id)
+            .where(File.file_type == FileType.GCODE)
+            .where(live(File))
+            .where(File.id.in_(deduped_ids))  # type: ignore[attr-defined]
+        ).all()
+        selected_ids = [int(file_id) for file_id in selected]
+        if len(selected_ids) != len(deduped_ids):
+            raise HTTPException(status_code=400, detail="invalid_revision_file_id")
     link = ShareLink(
         model_id=model_id,
         token_hash=_token_hash(raw_token),
         expires_at=utcnow() + timedelta(days=days),
         allow_download=allow_download,
+        selected_file_ids_json=json.dumps(selected_ids) if selected_ids else None,
         created_by=created_by,
     )
     session.add(link)
@@ -114,6 +145,8 @@ def public_detail(session: Session, link: ShareLink) -> PublicModelRead:
     """Build the read-only projection for the model behind *link*."""
     model = session.get(Model, link.model_id)
     assert model is not None  # resolve_share already validated liveness
+    selected_ids = _selected_file_ids(link)
+    gcode_revision_numbers = _gcode_revision_numbers(session, link.model_id)
     rows = session.exec(
         select(File, Metadata)
         .where(File.model_id == link.model_id)
@@ -128,12 +161,35 @@ def public_detail(session: Session, link: ShareLink) -> PublicModelRead:
             file_type=f.file_type.value,
             size_bytes=f.size_bytes,
             version=f.version,
+            gcode_revision_number=gcode_revision_numbers.get(f.id),
+            revision_label=f.revision_label,
+            revision_status=f.revision_status,
+            revision_notes=f.revision_notes,
+            is_recommended=f.is_recommended,
             bbox_x_mm=md.bbox_x_mm if md else None,
             bbox_y_mm=md.bbox_y_mm if md else None,
             bbox_z_mm=md.bbox_z_mm if md else None,
             triangle_count=md.triangle_count if md else None,
+            slicer_name=md.slicer_name if md else None,
+            slicer_version=md.slicer_version if md else None,
+            printer_model=md.printer_model if md else None,
+            nozzle_diameter_mm=md.nozzle_diameter_mm if md else None,
+            layer_height_mm=md.layer_height_mm if md else None,
+            first_layer_height_mm=md.first_layer_height_mm if md else None,
+            infill_percent=md.infill_percent if md else None,
+            wall_loops=md.wall_loops if md else None,
+            support_material=md.support_material if md else None,
+            nozzle_temperature_c=md.nozzle_temperature_c if md else None,
+            bed_temperature_c=md.bed_temperature_c if md else None,
+            estimated_time_s=md.estimated_time_s if md else None,
+            filament_weight_g=md.filament_weight_g if md else None,
+            filament_length_mm=md.filament_length_mm if md else None,
+            filament_cost=md.filament_cost if md else None,
+            material_type=md.material_type if md else None,
+            material_brand=md.material_brand if md else None,
         )
         for f, md in rows
+        if _file_allowed(link, f, selected_ids)
     ]
     return PublicModelRead(
         name=model.name,
@@ -155,6 +211,27 @@ def share_file_or_404(session: Session, link: ShareLink, file_id: int) -> File:
         f is None
         or f.deleted_at is not None
         or f.model_id != link.model_id
+        or not _file_allowed(link, f)
     ):
         raise HTTPException(status_code=404, detail="not_found")
     return f
+
+
+def _file_allowed(
+    link: ShareLink, file_row: File, selected_ids: list[int] | None = None
+) -> bool:
+    selected_ids = selected_ids if selected_ids is not None else _selected_file_ids(link)
+    if selected_ids is None:
+        return True
+    return file_row.file_type != FileType.GCODE or file_row.id in selected_ids
+
+
+def _gcode_revision_numbers(session: Session, model_id: int) -> dict[int, int]:
+    rows = session.exec(
+        select(File)
+        .where(File.model_id == model_id)
+        .where(File.file_type == FileType.GCODE)
+        .where(live(File))
+        .order_by(File.version.asc())  # type: ignore[attr-defined]
+    ).all()
+    return {f.id: i for i, f in enumerate(rows, start=1) if f.id is not None}

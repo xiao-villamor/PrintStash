@@ -14,6 +14,8 @@ export VAULT_DATA_DIR=./_data/files
 export VAULT_THUMB_DIR=./_data/thumbs
 export VAULT_API_KEY=devkey
 
+.venv/bin/alembic upgrade head
+
 # Kill any existing
 pkill -f "uvicorn app.main" 2>/dev/null || true
 sleep 0.5

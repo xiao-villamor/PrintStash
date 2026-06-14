@@ -247,10 +247,32 @@ export interface PublicFileRead {
   file_type: string;
   size_bytes: number;
   version: number;
+  gcode_revision_number: number | null;
+  revision_label: string | null;
+  revision_status: FileRevisionStatus | null;
+  revision_notes: string | null;
+  is_recommended: boolean;
   bbox_x_mm: number | null;
   bbox_y_mm: number | null;
   bbox_z_mm: number | null;
   triangle_count: number | null;
+  slicer_name: string | null;
+  slicer_version: string | null;
+  printer_model: string | null;
+  nozzle_diameter_mm: number | null;
+  layer_height_mm: number | null;
+  first_layer_height_mm: number | null;
+  infill_percent: number | null;
+  wall_loops: number | null;
+  support_material: boolean | null;
+  nozzle_temperature_c: number | null;
+  bed_temperature_c: number | null;
+  estimated_time_s: number | null;
+  filament_weight_g: number | null;
+  filament_length_mm: number | null;
+  filament_cost: number | null;
+  material_type: string | null;
+  material_brand: string | null;
 }
 
 export interface PublicModelRead {
@@ -267,6 +289,7 @@ export interface ShareLinkRead {
   expires_at: string;
   revoked_at: string | null;
   allow_download: boolean;
+  revision_file_ids: number[] | null;
   access_count: number;
   created_at: string;
   is_active: boolean;
@@ -280,6 +303,7 @@ export interface ShareLinkCreated extends ShareLinkRead {
 export interface ShareLinkCreate {
   expires_in_days: number;
   allow_download: boolean;
+  revision_file_ids?: number[] | null;
 }
 
 export interface ListModelsParams {

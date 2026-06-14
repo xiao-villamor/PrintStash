@@ -362,6 +362,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       )}
       <ShareDialog
         modelId={model.id}
+        files={model.files}
         open={shareOpen}
         onClose={() => setShareOpen(false)}
       />

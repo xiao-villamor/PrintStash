@@ -9,6 +9,8 @@ services:
       - "3000:3000"
     # The SPA is served by nginx, which proxies /api/v1 (incl. WebSockets) to
     # the api service same-origin — so no browser-side API/WS URL is needed.
+    environment:
+      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_UPLOAD_MB:-512}m
     networks:
       - printstash_net
     depends_on:

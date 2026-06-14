@@ -24,6 +24,7 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     assert "print_jobs" in tables
     assert "refresh_tokens" in tables
     assert "printer_profiles" in tables
+    assert "share_links" in tables
 
     files_columns = {col["name"]: col for col in inspector.get_columns("files")}
     assert "revision_label" in files_columns
@@ -32,3 +33,10 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     assert "is_recommended" in files_columns
     assert files_columns["is_recommended"]["nullable"] is False
     assert files_columns["is_recommended"]["default"] is not None
+
+    share_columns = {col["name"]: col for col in inspector.get_columns("share_links")}
+    assert "model_id" in share_columns
+    assert "token_hash" in share_columns
+    assert "expires_at" in share_columns
+    assert "allow_download" in share_columns
+    assert "selected_file_ids_json" in share_columns

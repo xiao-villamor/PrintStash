@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Link2, Loader2, X } from "lucide-react";
 
 import {
@@ -9,7 +9,7 @@ import {
   revokeShare,
 } from "@/lib/api/share";
 import { toast } from "@/lib/toast";
-import { ShareLinkRead } from "@/types";
+import { FileRead, ShareLinkRead } from "@/types";
 
 function shareUrl(path: string): string {
   if (typeof window === "undefined") return path;
@@ -18,10 +18,12 @@ function shareUrl(path: string): string {
 
 export function ShareDialog({
   modelId,
+  files,
   open,
   onClose,
 }: {
   modelId: number;
+  files: FileRead[];
   open: boolean;
   onClose: () => void;
 }) {
@@ -30,17 +32,26 @@ export function ShareDialog({
   const [creating, setCreating] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [allowDownload, setAllowDownload] = useState(false);
+  const [revisionScope, setRevisionScope] = useState<"all" | "selected">("all");
+  const [selectedRevisionIds, setSelectedRevisionIds] = useState<number[]>([]);
   const [lastToken, setLastToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const gcodeFiles = useMemo(
+    () => files.filter((f) => f.file_type === "gcode"),
+    [files],
+  );
 
   useEffect(() => {
     if (!open) return;
+    const recommended = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
+    setRevisionScope("all");
+    setSelectedRevisionIds(recommended ? [recommended.id] : []);
     setLoading(true);
     listModelShares(modelId)
       .then(setLinks)
       .catch((e) => toast.error(e))
       .finally(() => setLoading(false));
-  }, [open, modelId]);
+  }, [open, modelId, gcodeFiles]);
 
   if (!open) return null;
 
@@ -50,6 +61,7 @@ export function ShareDialog({
       const created = await createModelShare(modelId, {
         expires_in_days: expiresInDays,
         allow_download: allowDownload,
+        revision_file_ids: revisionScope === "selected" ? selectedRevisionIds : null,
       });
       const full = shareUrl(created.url);
       setLastToken(full);
@@ -78,6 +90,17 @@ export function ShareDialog({
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
+
+  function toggleRevision(id: number) {
+    setSelectedRevisionIds((current) =>
+      current.includes(id)
+        ? current.filter((candidate) => candidate !== id)
+        : [...current, id],
+    );
+  }
+
+  const createDisabled =
+    creating || (revisionScope === "selected" && selectedRevisionIds.length === 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -128,10 +151,65 @@ export function ShareDialog({
                 <span className="text-xs text-[var(--on-surface)]">Allow file download</span>
               </label>
             </div>
+            {gcodeFiles.length > 0 && (
+              <div className="space-y-2">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                  Revisions
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRevisionScope("all")}
+                    className={`rounded border px-3 py-2 text-left font-mono text-[11px] ${
+                      revisionScope === "all"
+                        ? "border-[var(--primary)] bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
+                        : "border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                    }`}
+                  >
+                    Every revision
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRevisionScope("selected")}
+                    className={`rounded border px-3 py-2 text-left font-mono text-[11px] ${
+                      revisionScope === "selected"
+                        ? "border-[var(--primary)] bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
+                        : "border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                    }`}
+                  >
+                    Selected revisions
+                  </button>
+                </div>
+                {revisionScope === "selected" && (
+                  <div className="max-h-44 overflow-y-auto rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)]">
+                    {gcodeFiles.map((f) => (
+                      <label key={f.id} className="flex items-start gap-2 px-3 py-2 hover:bg-[var(--surface-container-low)]">
+                        <input
+                          type="checkbox"
+                          checked={selectedRevisionIds.includes(f.id)}
+                          onChange={() => toggleRevision(f.id)}
+                          className="mt-0.5 accent-[var(--primary)]"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-xs text-[var(--on-surface)] truncate">
+                            Rev {f.gcode_revision_number ?? f.version}
+                            {f.revision_label ? ` · ${f.revision_label}` : ""}
+                            {f.is_recommended ? " · Recommended" : ""}
+                          </span>
+                          <span className="block font-mono text-[10px] text-[var(--on-surface-variant)] truncate">
+                            {f.original_filename}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={doCreate}
-              disabled={creating}
+              disabled={createDisabled}
               className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
             >
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
@@ -174,6 +252,7 @@ export function ShareDialog({
                       <p className="font-mono text-[11px] text-[var(--on-surface)]">
                         {l.is_active ? "Active" : l.revoked_at ? "Revoked" : "Expired"}
                         {l.allow_download ? " · downloadable" : " · view-only"}
+                        {l.revision_file_ids?.length ? ` · ${l.revision_file_ids.length} revs` : " · all revs"}
                       </p>
                       <p className="font-mono text-[10px] text-[var(--on-surface-variant)]">
                         expires {new Date(l.expires_at).toLocaleDateString()} · {l.access_count} views

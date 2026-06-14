@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.core.time import utcnow
@@ -509,6 +509,9 @@ class ShareLink(SQLModel, table=True):
     # When false, the public viewer can render the model but not download the
     # original source files (a tessellated mesh is still served for viewing).
     allow_download: bool = Field(default=False)
+    selected_file_ids_json: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     access_count: int = Field(default=0)
 
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")

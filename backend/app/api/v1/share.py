@@ -122,6 +122,24 @@ def download_shared_file(
     return _serve_file(f.path, f.original_filename)
 
 
+@router.get(
+    "/{token}/files/{file_id}/gcode",
+    summary="Serve a shared G-code file for the public toolpath preview",
+)
+def get_shared_gcode(
+    token: str,
+    file_id: int,
+    session: Session = Depends(get_session),
+):
+    link = share.resolve_share(session, token)
+    f = share.share_file_or_404(session, link, file_id)
+    if f.file_type != FileType.GCODE:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not get_backend().exists(f.path):
+        raise HTTPException(status_code=410, detail="file_blob_missing")
+    return _serve_file(f.path, f.original_filename, media_type="text/plain")
+
+
 # ---------------------------------------------------------------------------
 # Admin router — authenticated share management.
 # ---------------------------------------------------------------------------
@@ -156,6 +174,7 @@ def create_model_share(
         model_id=model_id,
         expires_in_days=body.expires_in_days,
         allow_download=body.allow_download,
+        revision_file_ids=body.revision_file_ids,
         created_by=current_user.id,
     )
     read = share.to_read(link)

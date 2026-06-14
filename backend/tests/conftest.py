@@ -43,6 +43,7 @@ _TRUNCATE_TABLES_ORDER = [
     "printers",
     "printer_profiles",
     "filament_profiles",
+    "share_links",
     "files",
     "model_tags",
     "tags",

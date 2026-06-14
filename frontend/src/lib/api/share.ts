@@ -23,6 +23,10 @@ export function sharedDownloadUrl(token: string, fileId: number): string {
   return `/api/v1/share/${token}/files/${fileId}/download`;
 }
 
+export function sharedGcodeUrl(token: string, fileId: number): string {
+  return `/api/v1/share/${token}/files/${fileId}/gcode`;
+}
+
 // Authenticated management.
 export function createModelShare(
   modelId: number,

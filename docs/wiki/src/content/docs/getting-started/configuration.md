@@ -27,7 +27,7 @@ token. Generate something long and random and treat it as a credential.
 | `VAULT_ACCESS_TOKEN_EXPIRE_MINUTES` | `60`                                 | Access-token lifetime, in minutes.             |
 | `VAULT_API_KEY`                     | `changeme`                           | Shared key for headless scripts / the Orca hook. |
 | `VAULT_CORS_ORIGINS`                | _(empty)_                            | Comma-separated browser origins allowed to call the API. Only needed if the UI is served from a different origin than the API. |
-| `VAULT_MAX_UPLOAD_MB`               | `512`                                | Maximum size per uploaded file, in MB.         |
+| `VAULT_MAX_UPLOAD_MB`               | `512`                                | Maximum size per uploaded file, in MB. Docker Compose also maps this to the frontend nginx proxy body limit. |
 | `VAULT_LOG_LEVEL`                   | `INFO`                               | Backend log verbosity.                         |
 
 ## Storage

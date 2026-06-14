@@ -35,13 +35,15 @@ def _make_model(db_session, *, name="M", slug="m", hash_="h" * 64) -> Model:
     return m
 
 
-def _make_file(db_session, model, *, filename="part.stl", ftype="stl") -> File:
+def _make_file(
+    db_session, model, *, filename="part.stl", ftype="stl", version=1
+) -> File:
     f = File(
         model_id=model.id,
         path=f"/data/{filename}",
         original_filename=filename,
         file_type=ftype,
-        version=1,
+        version=version,
         size_bytes=10,
         sha256="a" * 64,
     )
@@ -317,3 +319,36 @@ class TestShareIsolation:
         )
         res = client.get(f"/api/v1/share/{created['token']}/files/{f.id}/download")
         assert res.status_code == 403
+
+    def test_share_can_scope_to_selected_gcode_revisions(
+        self, client, db_session, auth_headers
+    ):
+        m = _make_model(db_session, slug="scope", hash_="q" * 64)
+        mesh = _make_file(db_session, m, filename="part.stl", version=1)
+        rev1 = _make_file(
+            db_session, m, filename="rev1.gcode", ftype="gcode", version=2
+        )
+        rev2 = _make_file(
+            db_session, m, filename="rev2.gcode", ftype="gcode", version=3
+        )
+        rev2.revision_label = "PLA fast"
+        rev2.revision_status = FileRevisionStatus.KNOWN_GOOD
+        db_session.add(rev2)
+        db_session.commit()
+
+        created = self._create_share(
+            client, auth_headers, m.id, revision_file_ids=[rev2.id]
+        )
+        res = client.get(f"/api/v1/share/{created['token']}")
+        assert res.status_code == 200
+        files = res.json()["files"]
+        assert {f["id"] for f in files} == {mesh.id, rev2.id}
+        shared_rev = next(f for f in files if f["id"] == rev2.id)
+        assert shared_rev["gcode_revision_number"] == 2
+        assert shared_rev["revision_label"] == "PLA fast"
+        assert shared_rev["revision_status"] == "known_good"
+
+        blocked = client.get(
+            f"/api/v1/share/{created['token']}/files/{rev1.id}/gcode"
+        )
+        assert blocked.status_code == 404
