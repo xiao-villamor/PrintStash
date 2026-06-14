@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="frontend/public/logo.svg" alt="PrintStash logo" width="420" />
+
 # PrintStash
 
 ### Self-hosted asset management for people who 3D print more things than they can remember.

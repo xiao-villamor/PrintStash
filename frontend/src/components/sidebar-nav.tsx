@@ -4,6 +4,7 @@ import { Link } from "@/lib/navigation";
 import { usePathname } from "@/lib/navigation";
 import { Box, SlidersHorizontal, FolderTree, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { BrandMark } from "@/components/brand-mark";
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
@@ -25,7 +26,7 @@ export function SidebarNav() {
     <nav className="bg-card border-r border-border h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
       <div className="flex items-center gap-4 mb-10 px-1">
         <div className="w-10 h-10 rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white flex-shrink-0">
-          <Box className="h-5 w-5" />
+          <BrandMark className="h-7 w-7" />
         </div>
         <div>
           <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">

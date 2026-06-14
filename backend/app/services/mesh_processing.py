@@ -149,11 +149,16 @@ def analyze_mesh(
     geometry = _geometry_from_mesh(mesh)
 
     _report("rendering_thumbnail")
-    thumb = extract_embedded_3mf_thumbnail(path)
+    # Render in-house first so every model card shares one look — same
+    # blue-grey shading, same centred framing, same transparent background.
+    # Slicer-embedded previews (orange G-code plate renders, off-centre 3MF
+    # plate shots) are visually inconsistent, so they're only a fallback for
+    # when the software rasteriser can't render the geometry.
+    thumb = mesh_render.render_mesh_thumbnail(
+        mesh, path.name, width=width, height=height
+    )
     if thumb is None:
-        thumb = mesh_render.render_mesh_thumbnail(
-            mesh, path.name, width=width, height=height
-        )
+        thumb = extract_embedded_3mf_thumbnail(path)
     return geometry, thumb
 
 
@@ -170,10 +175,12 @@ def render_thumbnail(
     path: Path, width: int = 640, height: int = 480
 ) -> Optional[bytes]:
     """Render a PNG thumbnail of *path*. Returns PNG bytes or None on failure."""
-    thumb = extract_embedded_3mf_thumbnail(path)
+    # Prefer the in-house render for a consistent look across all cards; fall
+    # back to the slicer-embedded preview only when rendering fails.
+    thumb = mesh_render.render_thumbnail(_load_mesh, path, width=width, height=height)
     if thumb is not None:
         return thumb
-    return mesh_render.render_thumbnail(_load_mesh, path, width=width, height=height)
+    return extract_embedded_3mf_thumbnail(path)
 
 
 def to_stl_bytes(path: Path) -> Optional[bytes]:

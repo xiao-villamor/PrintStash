@@ -103,7 +103,7 @@ def render_mesh_thumbnail(
         y_min, y_max = float(ys.min()), float(ys.max())
         extent_x = max(x_max - x_min, 1e-6)
         extent_y = max(y_max - y_min, 1e-6)
-        margin = 0.10
+        margin = 0.18
         scale = min(
             (ss_width * (1 - 2 * margin)) / extent_x,
             (ss_height * (1 - 2 * margin)) / extent_y,

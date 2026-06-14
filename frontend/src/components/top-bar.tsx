@@ -17,6 +17,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   clearCompletedTasks,
@@ -129,9 +130,7 @@ export function TopBar() {
       {/* Logo */}
       <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
         <div className="w-8 h-8 bg-blue-600 dark:bg-orange-600 rounded flex items-center justify-center flex-shrink-0">
-          <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-          </svg>
+          <BrandMark className="h-6 w-6 text-white" />
         </div>
         <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">PrintStash</span>
       </Link>
