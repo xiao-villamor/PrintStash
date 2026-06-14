@@ -166,6 +166,24 @@ def _load_filament_profiles(session: Session) -> list[FilamentProfile]:
     return list(session.exec(select(FilamentProfile)).all())
 
 
+def filament_cost_for_grams(
+    profiles: list[FilamentProfile],
+    metadata: Metadata | None,
+    grams: float | None,
+) -> float | None:
+    """Cost of *grams* of filament using the profile matching *metadata*.
+
+    Used for measured per-print cost (PrintJob.filament_used_g). Returns None
+    when grams, a matching profile, or its cost_per_kg is missing.
+    """
+    if grams is None or metadata is None:
+        return None
+    profile = _matching_filament_profile(profiles, metadata)
+    if profile is None or profile.cost_per_kg is None:
+        return None
+    return round(grams * profile.cost_per_kg / 1000, 4)
+
+
 def _matching_filament_profile(
     profiles: list[FilamentProfile],
     metadata: Metadata,

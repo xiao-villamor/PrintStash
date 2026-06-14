@@ -1,6 +1,6 @@
 [project]
 name = "printstash"
-version = "0.4.0"
+version = "0.5.0"
 description = "PrintStash — self-hosted 3D printing asset manager"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,6 +9,7 @@ dependencies = [
     "asyncpg>=0.29",
     "bcrypt>=5.0.0",
     "boto3>=1.35",
+    "cascadio>=0.0.14",
     "fastapi>=0.115",
     "httpx>=0.27",
     "lxml>=5.3",

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { updateFileRevision } from "@/lib/api";
+import { deleteFileRevision, updateFileRevision } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { FileRead, FileRevisionUpdate, ModelRead } from "@/types";
@@ -39,5 +39,23 @@ export function useRevisionUpdater(
     }
   }
 
-  return { auth, saving, update };
+  async function remove(file: FileRead): Promise<boolean> {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return false;
+    }
+    setSaving(file.id);
+    try {
+      onModel(await deleteFileRevision(modelId, file.id));
+      toast.success("Revision deleted");
+      return true;
+    } catch (e) {
+      toast.error(e);
+      return false;
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return { auth, saving, update, remove };
 }

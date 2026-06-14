@@ -36,10 +36,13 @@ class VaultConfigRead(BaseModel):
     has_backup_s3_access_key: bool = False
     has_backup_s3_secret_key: bool = False
     has_backup_s3: bool = False
+    auto_mark_known_good: bool = True
 
 
 class VaultConfigUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    auto_mark_known_good: Optional[bool] = None
 
     storage_backend: Optional[str] = None
     data_dir: Optional[str] = None
@@ -100,6 +103,9 @@ def update_config(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="storage_backend must be 'local' or 's3'",
         )
+
+    if body.auto_mark_known_good is not None:
+        runtime_config.set_auto_mark_known_good(session, body.auto_mark_known_good)
 
     runtime_config.update_config(
         session,

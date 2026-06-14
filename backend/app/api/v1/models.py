@@ -31,6 +31,7 @@ from app.db.models import (
     File,
     FileRevisionStatus,
     FileType,
+    FilamentProfile,
     Metadata,
     Model,
     ModelTagLink,
@@ -57,9 +58,11 @@ from app.schemas.models import (
     TrashedModelRead,
     VaultStatsRead,
 )
-from app.services import model_views, rbac, storage, taxonomy
+from app.services import filament as filament_svc
+from app.services import model_views, print_results, rbac, storage, taxonomy
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services.moonraker import MoonrakerClient, MoonrakerError
+from app.services.runtime_config import auto_mark_known_good_enabled
 from app.services.trash import (
     hard_delete_expired_models,
     hard_delete_model,
@@ -148,7 +151,9 @@ def list_models(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[ModelListItem]:
-    if (printer_id is not None or printer_presence is not None) and not current_user.is_superuser:
+    if (
+        printer_id is not None or printer_presence is not None
+    ) and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="admin_required")
     return model_views.list_items(
         session,
@@ -383,10 +388,11 @@ def get_model_print_jobs(
 ) -> List[ModelPrintJobRead]:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     revision_numbers = _gcode_revision_numbers(session, model_id)
+    profiles = list(session.exec(select(FilamentProfile)).all())
 
     rows = session.exec(
         select(PrintJob, Printer, File, Metadata)
-        .join(Printer, Printer.id == PrintJob.printer_id)
+        .outerjoin(Printer, Printer.id == PrintJob.printer_id)
         .join(File, File.id == PrintJob.file_id)
         .outerjoin(Metadata, Metadata.file_id == File.id)
         .where(
@@ -400,13 +406,22 @@ def get_model_print_jobs(
         ModelPrintJobRead(
             id=job.id,  # type: ignore[arg-type]
             printer_id=job.printer_id,
-            printer_name=printer.name,
+            printer_name=(
+                printer.name
+                if printer is not None
+                else (job.printer_name or "Unknown printer")
+            ),
             file_id=job.file_id,
             gcode_revision_number=revision_numbers.get(job.file_id),
             revision_label=file.revision_label,
             state=job.state,
             material_type=md.material_type if md else None,
             error=job.error,
+            filament_used_g=job.filament_used_g,
+            actual_duration_s=job.actual_duration_s,
+            filament_cost=model_views.filament_cost_for_grams(
+                profiles, md, job.filament_used_g
+            ),
             started_at=job.started_at,
             finished_at=job.finished_at,
             created_at=job.created_at,
@@ -433,9 +448,16 @@ def create_manual_print_job(
     if file_row is None or file_row.model_id != model_id:
         raise HTTPException(status_code=404, detail={"code": "file_not_found"})
 
-    printer = session.get(Printer, payload.printer_id)
-    if printer is None or printer.deleted_at is not None:
-        raise HTTPException(status_code=404, detail={"code": "printer_not_found"})
+    # Either a registered printer (by id) or an ad-hoc free-text printer name.
+    printer: Optional[Printer] = None
+    printer_name = payload.printer_name
+    if payload.printer_id is not None:
+        printer = session.get(Printer, payload.printer_id)
+        if printer is None or printer.deleted_at is not None:
+            raise HTTPException(status_code=404, detail={"code": "printer_not_found"})
+        printer_name = None  # name is derived from the registered printer
+    elif not printer_name:
+        raise HTTPException(status_code=422, detail={"code": "printer_required"})
 
     try:
         state = PrintJobState(payload.state)
@@ -444,6 +466,7 @@ def create_manual_print_job(
 
     job = PrintJob(
         printer_id=payload.printer_id,
+        printer_name=printer_name,
         file_id=payload.file_id,
         model_id=model_id,
         remote_filename=file_row.original_filename,
@@ -462,7 +485,9 @@ def create_manual_print_job(
     return ModelPrintJobRead(
         id=job.id,
         printer_id=job.printer_id,
-        printer_name=printer.name,
+        printer_name=(
+            printer.name if printer is not None else (printer_name or "Unknown printer")
+        ),
         file_id=job.file_id,
         gcode_revision_number=revision_numbers.get(job.file_id),
         revision_label=file_row.revision_label,
@@ -545,6 +570,9 @@ async def import_print_jobs_from_printer(
             def _ts(t: float | None):
                 return _dt.fromtimestamp(t, tz=timezone.utc) if t else None
 
+            duration = entry.get("print_duration")
+            used_mm = entry.get("filament_used")
+            material = print_results.material_type_for_file(session, matched.id)
             job = PrintJob(
                 printer_id=printer_id,
                 file_id=matched.id,
@@ -554,9 +582,19 @@ async def import_print_jobs_from_printer(
                 source="printer_history",
                 started_at=_ts(start_ts),
                 finished_at=_ts(end_ts),
+                actual_duration_s=int(duration) if duration else None,
+                filament_used_mm=float(used_mm) if used_mm else None,
+                filament_used_g=filament_svc.mm_to_grams(used_mm, material)
+                if used_mm
+                else None,
             )
             session.add(job)
             session.commit()
+
+            if state == PrintJobState.COMPLETED and auto_mark_known_good_enabled(
+                session
+            ):
+                print_results.mark_known_good_if_eligible(session, matched.id)
 
             results.append(
                 ImportedPrintJobRead(
@@ -697,6 +735,49 @@ def update_file_revision(
             for other in other_gcode:
                 other.is_recommended = False
                 session.add(other)
+
+    m.updated_at = utcnow()
+    session.add(file_row)
+    session.add(m)
+    session.commit()
+    return _detail_or_404(session, model_id, current_user)
+
+
+@router.delete(
+    "/{model_id}/files/{file_id}/revision",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Delete a G-code revision",
+    description=(
+        "Soft-deletes a G-code revision file. The blob is reclaimed by the "
+        "trash GC. Only G-code files are supported."
+    ),
+)
+def delete_file_revision(
+    model_id: int,
+    file_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    file_row = session.get(File, file_id)
+    if (
+        file_row is None
+        or file_row.model_id != model_id
+        or file_row.deleted_at is not None
+    ):
+        raise HTTPException(status_code=404, detail="file_not_found")
+    if file_row.file_type != FileType.GCODE:
+        raise HTTPException(status_code=400, detail="revision_not_supported")
+
+    file_row.deleted_at = utcnow()
+    file_row.deleted_by = current_user.id
+    file_row.is_recommended = False
+
+    # Drop a stale thumbnail pointer if it referenced this revision.
+    if m.thumbnail_file_id == file_id:
+        m.thumbnail_file_id = None
+        m.thumbnail_path = None
 
     m.updated_at = utcnow()
     session.add(file_row)

@@ -10,9 +10,13 @@ import ProfilesPage from "@/pages/profiles";
 import SettingsPage from "@/pages/settings";
 import PrintersRoute from "@/pages/printers";
 import PrinterDetailRoute from "@/pages/printer-detail";
+import SharePage from "@/pages/share";
 import NotFound from "@/pages/not-found";
 
 export const router = createBrowserRouter([
+  // Public, unauthenticated share viewer — deliberately mounted OUTSIDE
+  // RootLayout so it bypasses auth/setup gating and the app chrome.
+  { path: "share/:token", element: <SharePage /> },
   {
     element: <RootLayout />,
     children: [

@@ -21,7 +21,10 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import PrintJob, PrintJobState, Printer, PrinterStatus
 from app.db.session import get_session_factory
+from app.services import filament as filament_svc
+from app.services import print_results
 from app.services.printer_provider import ProviderError, get_provider_client
+from app.services.runtime_config import auto_mark_known_good_enabled
 from app.db.scopes import live
 
 logger = get_logger(__name__)
@@ -397,6 +400,7 @@ class PrinterHub:
             if new_state == PrintJobState.PRINTING and job.started_at is None:
                 job.started_at = utcnow()
                 changed = True
+            just_finished = False
             if (
                 new_state
                 in (
@@ -408,12 +412,37 @@ class PrinterHub:
             ):
                 job.finished_at = utcnow()
                 changed = True
+                just_finished = True
+                # Capture the measured outcome once, on the finishing tick.
+                duration = print_stats.get("total_duration") or print_stats.get(
+                    "print_duration"
+                )
+                if duration:
+                    job.actual_duration_s = int(duration)
+                used_mm = print_stats.get("filament_used")
+                if used_mm:
+                    job.filament_used_mm = float(used_mm)
+                    material = print_results.material_type_for_file(
+                        session, job.file_id
+                    )
+                    job.filament_used_g = filament_svc.mm_to_grams(
+                        float(used_mm), material
+                    )
             if changed:
                 job.updated_at = utcnow()
                 if new_state == PrintJobState.FAILED:
                     job.error = print_stats.get("message")
                 session.add(job)
                 session.commit()
+
+            # Auto-mark the printed revision known_good after a successful print.
+            if (
+                just_finished
+                and new_state == PrintJobState.COMPLETED
+                and job.source == "vault"
+                and auto_mark_known_good_enabled(session)
+            ):
+                print_results.mark_known_good_if_eligible(session, job.file_id)
 
 
 def get_hub(request: Request) -> PrinterHub:

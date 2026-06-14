@@ -441,6 +441,97 @@ def test_update_revision_requires_auth(client: TestClient, db_session: Session) 
     assert resp.status_code == 401
 
 
+def test_delete_revision_soft_deletes_and_hides_it(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    keep = _file(db_session, model, version=1, sha="a")
+    drop = _file(db_session, model, version=2, sha="b")
+    drop.is_recommended = True
+    db_session.add(drop)
+    db_session.commit()
+
+    resp = client.delete(
+        f"/api/v1/models/{model.id}/files/{drop.id}/revision",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    file_ids = [f["id"] for f in resp.json()["files"]]
+    assert file_ids == [keep.id]
+
+    db_session.refresh(drop)
+    assert drop.deleted_at is not None
+    assert drop.is_recommended is False
+
+
+def test_delete_revision_rejects_non_gcode(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    mesh = _file(db_session, model, file_type=FileType.STL)
+
+    resp = client.delete(
+        f"/api/v1/models/{model.id}/files/{mesh.id}/revision",
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "revision_not_supported"
+
+
+def test_delete_revision_requires_auth(client: TestClient, db_session: Session) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+
+    resp = client.delete(f"/api/v1/models/{model.id}/files/{file_row.id}/revision")
+
+    assert resp.status_code == 401
+
+
+def test_manual_print_job_accepts_adhoc_printer_name(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+
+    resp = client.post(
+        f"/api/v1/models/{model.id}/print-jobs",
+        json={
+            "printer_name": "Garage Prusa",
+            "file_id": file_row.id,
+            "state": "completed",
+        },
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["printer_id"] is None
+    assert body["printer_name"] == "Garage Prusa"
+
+    listed = client.get(
+        f"/api/v1/models/{model.id}/print-jobs", headers=auth_headers
+    ).json()
+    assert listed[0]["printer_name"] == "Garage Prusa"
+
+
+def test_manual_print_job_requires_a_printer(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+
+    resp = client.post(
+        f"/api/v1/models/{model.id}/print-jobs",
+        json={"file_id": file_row.id, "printer_name": "   "},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["code"] == "printer_required"
+
+
 def test_update_revision_rejects_invalid_status(
     client: TestClient, auth_headers: dict[str, str], db_session: Session
 ) -> None:

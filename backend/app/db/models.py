@@ -25,6 +25,7 @@ class FileType(str, Enum):
     THREE_MF = "3mf"
     GCODE = "gcode"
     OBJ = "obj"
+    STEP = "step"
 
 
 class FileRevisionStatus(str, Enum):
@@ -39,6 +40,8 @@ SUFFIX_TO_FILE_TYPE: dict[str, FileType] = {
     ".stl": FileType.STL,
     ".3mf": FileType.THREE_MF,
     ".obj": FileType.OBJ,
+    ".step": FileType.STEP,
+    ".stp": FileType.STEP,
     ".gcode": FileType.GCODE,
     ".g": FileType.GCODE,
     ".gco": FileType.GCODE,
@@ -419,6 +422,11 @@ class SystemConfig(SQLModel, table=True):
     backup_s3_access_key: Optional[str] = Field(default=None, max_length=256)
     backup_s3_secret_key: Optional[str] = Field(default=None, max_length=512)
 
+    # Behaviour toggles
+    # When true, a file's revision is auto-marked known_good after its first
+    # successful print (never overriding a human's failed/archived verdict).
+    auto_mark_known_good: bool = Field(default=True)
+
     configured_at: Optional[datetime] = Field(default=None, index=True)
 
     created_at: datetime = Field(default_factory=utcnow)
@@ -429,7 +437,12 @@ class PrintJob(SQLModel, table=True):
     __tablename__ = "print_jobs"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    printer_id: int = Field(foreign_key="printers.id", index=True)
+    # Null when the job was logged against an ad-hoc printer that isn't
+    # registered in the vault; `printer_name` then carries the free-text label.
+    printer_id: Optional[int] = Field(
+        default=None, foreign_key="printers.id", index=True
+    )
+    printer_name: Optional[str] = Field(default=None, max_length=128)
     file_id: int = Field(foreign_key="files.id", index=True)
     model_id: int = Field(foreign_key="models.id", index=True)
 
@@ -440,6 +453,14 @@ class PrintJob(SQLModel, table=True):
 
     # Distinguishes vault-initiated jobs from those detected on the printer.
     source: str = Field(default="vault", max_length=16)  # "vault" or "external"
+
+    # Measured outcome, captured from Moonraker when the print finishes.
+    # filament in mm (raw from print_stats) and grams (derived when a matching
+    # filament profile is known); duration in seconds. Null when unknown
+    # (e.g. Bambu, which does not report live filament consumption).
+    filament_used_mm: Optional[float] = None
+    filament_used_g: Optional[float] = None
+    actual_duration_s: Optional[int] = None
 
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
@@ -467,6 +488,31 @@ class PrinterFile(SQLModel, table=True):
     missing_since: Optional[datetime] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ShareLink(SQLModel, table=True):
+    """A public, expiring, read-only capability to view a single Model.
+
+    Possession of the (unguessable) token grants access to exactly one model —
+    never the rest of the vault, never any mutation. Only the SHA-256 of the
+    token is stored; the raw token is shown once at creation.
+    """
+
+    __tablename__ = "share_links"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    model_id: int = Field(foreign_key="models.id", index=True)
+    token_hash: str = Field(max_length=64, unique=True, index=True)
+
+    expires_at: datetime = Field(index=True)
+    revoked_at: Optional[datetime] = Field(default=None, index=True)
+    # When false, the public viewer can render the model but not download the
+    # original source files (a tessellated mesh is still served for viewing).
+    allow_download: bool = Field(default=False)
+    access_count: int = Field(default=0)
+
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class AuditLog(SQLModel, table=True):

@@ -17,7 +17,7 @@ import {
   importPrintJobsFromPrinter,
 } from "@/lib/api";
 import { usePrinters } from "@/lib/queries";
-import { timeAgo } from "@/lib/format";
+import { formatCost, formatDuration, formatGrams, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
 
@@ -42,6 +42,9 @@ export function PrintHistorySection({
   // Manual form state
   const printers = usePrinters().data ?? [];
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | "">("");
+  // When the printer isn't a registered one, log against this free-text name.
+  const [adhocPrinter, setAdhocPrinter] = useState(false);
+  const [adhocPrinterName, setAdhocPrinterName] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<number | "">(gcodeFiles[0]?.id ?? "");
   const [jobState, setJobState] = useState("completed");
   const [startedAt, setStartedAt] = useState("");
@@ -58,6 +61,8 @@ export function PrintHistorySection({
     setShowAdd(true);
     setMode("manual");
     setSelectedPrinterId("");
+    setAdhocPrinter(false);
+    setAdhocPrinterName("");
     setSelectedFileId(gcodeFiles[0]?.id ?? "");
     setJobState("completed");
     setStartedAt("");
@@ -68,12 +73,17 @@ export function PrintHistorySection({
     // Printers come from the shared usePrinters() cache — no fetch needed here.
   }
 
+  const manualPrinterReady = adhocPrinter
+    ? adhocPrinterName.trim().length > 0
+    : !!selectedPrinterId;
+
   async function submitManual() {
-    if (!selectedPrinterId || !selectedFileId) return;
+    if (!manualPrinterReady || !selectedFileId) return;
     setSubmitting(true);
     try {
       const job = await createManualPrintJob(modelId, {
-        printer_id: selectedPrinterId as number,
+        printer_id: adhocPrinter ? null : (selectedPrinterId as number),
+        printer_name: adhocPrinter ? adhocPrinterName.trim() : null,
         file_id: selectedFileId as number,
         state: jobState,
         started_at: startedAt || null,
@@ -154,12 +164,22 @@ export function PrintHistorySection({
                 <div>
                   <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Printer</label>
                   <select
-                    value={selectedPrinterId}
-                    onChange={(e) => setSelectedPrinterId(e.target.value ? Number(e.target.value) : "")}
+                    value={adhocPrinter ? "__adhoc__" : selectedPrinterId}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "__adhoc__") {
+                        setAdhocPrinter(true);
+                        setSelectedPrinterId("");
+                      } else {
+                        setAdhocPrinter(false);
+                        setSelectedPrinterId(v ? Number(v) : "");
+                      }
+                    }}
                     className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
                   >
                     <option value="">Select printer…</option>
                     {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    <option value="__adhoc__">Other (not listed)…</option>
                   </select>
                 </div>
                 <div>
@@ -176,6 +196,18 @@ export function PrintHistorySection({
                   </select>
                 </div>
               </div>
+              {adhocPrinter && (
+                <div>
+                  <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Printer name</label>
+                  <input
+                    value={adhocPrinterName}
+                    onChange={(e) => setAdhocPrinterName(e.target.value)}
+                    maxLength={128}
+                    placeholder="e.g. Garage Prusa MK4"
+                    className="w-full h-8 bg-[var(--surface)] text-[var(--on-surface)] font-mono text-xs border border-[var(--outline-variant)] rounded px-2 focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  />
+                </div>
+              )}
               <div>
                 <label className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">Result</label>
                 <select
@@ -222,7 +254,7 @@ export function PrintHistorySection({
               <div className="flex gap-2 pt-1">
                 <button
                   onClick={submitManual}
-                  disabled={submitting || !selectedPrinterId || !selectedFileId}
+                  disabled={submitting || !manualPrinterReady || !selectedFileId}
                   className="flex-1 h-8 bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
                 >
                   {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
@@ -322,6 +354,21 @@ export function PrintHistorySection({
                   {job.material_type ? `${job.material_type} · ` : ""}
                   {timeAgo(job.created_at)}
                 </p>
+                {(job.actual_duration_s != null ||
+                  job.filament_used_g != null) && (
+                  <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                    <span className="text-emerald-600">measured</span>
+                    {job.actual_duration_s != null
+                      ? ` · ${formatDuration(job.actual_duration_s)}`
+                      : ""}
+                    {job.filament_used_g != null
+                      ? ` · ${formatGrams(job.filament_used_g)}`
+                      : ""}
+                    {job.filament_cost != null
+                      ? ` · ${formatCost(job.filament_cost)}`
+                      : ""}
+                  </p>
+                )}
                 {job.error && (
                   <p className="font-mono text-[11px] text-[var(--error)] break-words">
                     {job.error}

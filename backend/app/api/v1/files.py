@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-_MESH_TYPES = {FileType.STL, FileType.THREE_MF, FileType.OBJ}
+_MESH_TYPES = {FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP}
 
 
 def _accessible_file(session: Session, file_id: int, user: User) -> File:
@@ -144,6 +144,11 @@ def file_thumbnail(
     session: Session = Depends(get_session),
 ):
     _accessible_file(session, file_id, current_user)
+    return thumbnail_response(file_id)
+
+
+def thumbnail_response(file_id: int):
+    """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
     thumb_key = backend.thumbnail_key(file_id)
     filename, media_type = f"{file_id}.webp", "image/webp"
@@ -178,6 +183,12 @@ def file_as_stl(
     session: Session = Depends(get_session),
 ):
     f = _accessible_file(session, file_id, current_user)
+    return stl_response(f, request)
+
+
+def stl_response(f: File, request: Request):
+    """Serve a mesh File as binary STL (cached). No access checks — callers
+    are responsible for authorising access to *f* first."""
     backend = get_backend()
     if not backend.exists(f.path):
         raise HTTPException(status_code=410, detail="file_blob_missing")
@@ -222,7 +233,7 @@ def file_as_stl(
     try:
         backend.write_bytes(data, cache_key)
     except Exception:
-        logger.warning("stl cache write failed for file %s", file_id, exc_info=True)
+        logger.warning("stl cache write failed for file %s", f.id, exc_info=True)
 
     return StreamingResponse(
         io.BytesIO(data), media_type="application/sla", headers=cache_headers

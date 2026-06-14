@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Check,
   FileText,
+  Link2,
   Loader2,
   Minus,
   Pencil,
@@ -61,6 +62,7 @@ import {
 import { PrintHistorySection } from "./print-history-section";
 import { RevisionsTab } from "./revisions-tab";
 import { SendToButtons } from "./send-to-buttons";
+import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
@@ -105,6 +107,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [model, setModel] = useState(initialModel);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editName, setEditName] = useState(model.name);
   const [editDescription, setEditDescription] = useState(model.description || "");
@@ -300,7 +303,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const meta = latestFile?.metadata;
   const printSettingRows = buildPrintSettingRows(meta, metadataPreferences);
   const meshFile = model.files.find(
-    (f) => f.file_type === "stl" || f.file_type === "3mf" || f.file_type === "obj",
+    (f) =>
+      f.file_type === "stl" ||
+      f.file_type === "3mf" ||
+      f.file_type === "obj" ||
+      f.file_type === "step",
   );
   const hasGcode = gcodeFiles.length > 0;
   const thumbUrl = useAuthenticatedAssetUrl(model.thumbnail_url);
@@ -353,6 +360,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           }}
         />
       )}
+      <ShareDialog
+        modelId={model.id}
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+      />
       {/* Detail Header */}
       <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] shrink-0">
         <div className="flex items-center gap-4">
@@ -428,6 +440,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             </>
           ) : (
             <>
+              <button
+                onClick={auth.isAuthenticated && canEditModel ? () => setShareOpen(true) : auth.showAuthRequiredToast}
+                disabled={!auth.isAuthenticated || !canEditModel}
+                title={auth.blockReason ?? (canEditModel ? "Share model" : "Edit access required")}
+                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Link2 className="h-4 w-4" /> Share
+              </button>
               <button
                 onClick={auth.isAuthenticated && canEditModel ? enterEdit : auth.showAuthRequiredToast}
                 disabled={!auth.isAuthenticated || !canEditModel}

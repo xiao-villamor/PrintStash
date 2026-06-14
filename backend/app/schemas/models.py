@@ -101,7 +101,7 @@ class ModelPrintJobRead(BaseModel):
     """A print job belonging to a model, enriched for the history view."""
 
     id: int
-    printer_id: int
+    printer_id: Optional[int] = None
     printer_name: str
     file_id: int
     gcode_revision_number: Optional[int] = None
@@ -109,6 +109,10 @@ class ModelPrintJobRead(BaseModel):
     state: PrintJobState
     material_type: Optional[str] = None
     error: Optional[str] = None
+    # Measured outcome captured from the printer (null when unknown).
+    filament_used_g: Optional[float] = None
+    actual_duration_s: Optional[int] = None
+    filament_cost: Optional[float] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime
@@ -210,12 +214,23 @@ class ModelUpdate(BaseModel):
 class ManualPrintJobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    printer_id: int
+    # Either reference a registered printer (`printer_id`) or pass a free-text
+    # `printer_name` for an ad-hoc printer that isn't in the vault.
+    printer_id: Optional[int] = None
+    printer_name: Optional[str] = Field(default=None, max_length=128)
     file_id: int
     state: str = Field(default="completed", max_length=32)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     error: Optional[str] = Field(default=None, max_length=1024)
+
+    @field_validator("printer_name")
+    @classmethod
+    def _strip_printer_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
 
 
 class ImportedPrintJobRead(BaseModel):

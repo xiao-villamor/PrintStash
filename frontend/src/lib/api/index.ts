@@ -13,4 +13,5 @@ export * from "@/lib/api/filaments";
 export * from "@/lib/api/models";
 export * from "@/lib/api/printer-profiles";
 export * from "@/lib/api/printers";
+export * from "@/lib/api/share";
 export * from "@/lib/api/taxonomy";

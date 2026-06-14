@@ -17,6 +17,38 @@ class IngestResponse(BaseModel):
     message: str = "ingestion queued"
 
 
+class UrlIngestRequest(BaseModel):
+    """Body for POST /ingest/url."""
+
+    url: str
+    collection: Optional[str] = None
+    model_name: Optional[str] = None
+    tags: Optional[str] = None
+
+
+class ArchiveEntryRead(BaseModel):
+    name: str
+    size_bytes: int
+    file_type: Optional[str] = None  # FileType value if importable, else None
+    is_image: bool = False
+
+
+class ArchiveManifest(BaseModel):
+    """Returned after staging an archive; entries are selectable for import."""
+
+    archive_id: str
+    archive_name: str
+    entries: list[ArchiveEntryRead]
+
+
+class ArchiveSelectRequest(BaseModel):
+    """Body for POST /ingest/archive/{archive_id}/select."""
+
+    names: list[str]
+    collection: Optional[str] = None
+    tags: Optional[str] = None
+
+
 class IngestJobStatus(BaseModel):
     job_id: str
     owner_user_id: Optional[int] = Field(default=None, exclude=True)

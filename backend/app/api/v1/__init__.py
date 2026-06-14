@@ -15,6 +15,7 @@ from app.api.v1 import (
     printer_profiles,
     printers,
     setup,
+    share,
     taxonomy,
 )
 
@@ -32,3 +33,5 @@ api_router.include_router(taxonomy.router)
 api_router.include_router(printers.router)
 api_router.include_router(backup.router)
 api_router.include_router(config.router)
+api_router.include_router(share.router)
+api_router.include_router(share.admin_router)

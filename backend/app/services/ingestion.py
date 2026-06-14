@@ -194,6 +194,7 @@ def run_ingestion_pipeline(
     strategy: IngestionStrategy,
     actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
+    source_url: Optional[str] = None,
 ) -> None:
     """Full ingestion pipeline.
 
@@ -259,7 +260,9 @@ def run_ingestion_pipeline(
                 slug = storage.ensure_unique_slug(
                     base_slug, lambda s: _model_exists_with_slug(session, s)
                 )
-                model = Model(name=model_name, slug=slug, hash=dedup_hash)
+                model = Model(
+                    name=model_name, slug=slug, hash=dedup_hash, source_url=source_url
+                )
                 session.add(model)
                 session.commit()
                 session.refresh(model)
@@ -367,6 +370,7 @@ def ingest_orca_gcode(
     source_hash: Optional[str],
     actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
+    source_url: Optional[str] = None,
 ) -> None:
     """Public entry point for G-code ingestion (called from the OrcaSlicer router)."""
     run_ingestion_pipeline(
@@ -380,6 +384,7 @@ def ingest_orca_gcode(
         strategy=_gcode_strategy(),
         actor_user_id=actor_user_id,
         session_factory=session_factory,
+        source_url=source_url,
     )
 
 
@@ -395,6 +400,7 @@ def ingest_mesh(
     source_hash: Optional[str],
     actor_user_id: int | None = None,
     session_factory: SessionFactory | None = None,
+    source_url: Optional[str] = None,
 ) -> None:
     """Public entry point for mesh ingestion (called from the model upload router)."""
     run_ingestion_pipeline(
@@ -408,6 +414,7 @@ def ingest_mesh(
         strategy=_mesh_strategy(file_type),
         actor_user_id=actor_user_id,
         session_factory=session_factory,
+        source_url=source_url,
     )
 
 

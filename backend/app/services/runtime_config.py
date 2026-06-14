@@ -207,6 +207,22 @@ def update_config(
     return config
 
 
+def auto_mark_known_good_enabled(session: Session) -> bool:
+    """Whether successful prints should auto-mark their revision known_good."""
+    config = session.get(SystemConfig, 1)
+    return True if config is None else bool(config.auto_mark_known_good)
+
+
+def set_auto_mark_known_good(session: Session, enabled: bool) -> SystemConfig:
+    config = get_or_create(session)
+    config.auto_mark_known_good = enabled
+    config.updated_at = utcnow()
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return config
+
+
 def mark_configured(session: Session) -> SystemConfig:
     config = get_or_create(session)
     if config.configured_at is None:
@@ -245,6 +261,7 @@ def get_effective_config(session: Session) -> dict:
         "has_backup_s3_access_key": bool(settings.backup_s3_access_key),
         "has_backup_s3_secret_key": bool(settings.backup_s3_secret_key),
         "has_backup_s3": bool(settings.backup_s3_bucket),
+        "auto_mark_known_good": auto_mark_known_good_enabled(session),
     }
 
 

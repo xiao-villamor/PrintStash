@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     max_upload_mb: int = 512
     log_level: str = "INFO"
 
+    # URL + ZIP import (see services/importer.py).
+    url_import_max_redirects: int = 5
+    max_archive_entries: int = 500
+    max_archive_entry_mb: int = 512
+    max_archive_uncompressed_mb: int = 2048
+
     backup_dir: Path = Path("/data/backups")
     backup_retention_days: int = 30
     trash_retention_days: int = 30
@@ -73,7 +79,7 @@ class Settings(BaseSettings):
     backup_s3_secret_key: str = ""
 
     app_name: str = "PrintStash"
-    app_version: str = "0.4.0"
+    app_version: str = "0.5.0"
 
     @property
     def incoming_dir(self) -> Path:

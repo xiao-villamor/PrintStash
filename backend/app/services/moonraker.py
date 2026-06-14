@@ -19,31 +19,14 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 import httpx
 import websockets
 
+from app.core.http_client import close_http_client, get_http_client
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Shared connection pool for all Moonraker HTTP calls. MoonrakerClient
-# instances are created per request/worker loop, so a per-instance client
-# would still open a fresh TCP connection every call; pooling at module
-# level keeps connections alive across printers and requests.
-_http_client: httpx.AsyncClient | None = None
-
-
-def get_http_client() -> httpx.AsyncClient:
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
-        )
-    return _http_client
-
-
-async def close_http_client() -> None:
-    global _http_client
-    if _http_client is not None and not _http_client.is_closed:
-        await _http_client.aclose()
-    _http_client = None
+# Re-exported from app.core.http_client for backward compatibility; the pooled
+# client is shared across all outbound HTTP (Moonraker calls + URL imports).
+__all__ = ["get_http_client", "close_http_client", "MoonrakerError", "MoonrakerClient"]
 
 
 class MoonrakerError(RuntimeError):
@@ -52,7 +35,14 @@ class MoonrakerError(RuntimeError):
 
 # Objects and fields required for live printer state.
 SUBSCRIPTIONS: Dict[str, Optional[list[str]]] = {
-    "print_stats": ["state", "filename", "print_duration", "total_duration", "message"],
+    "print_stats": [
+        "state",
+        "filename",
+        "print_duration",
+        "total_duration",
+        "filament_used",
+        "message",
+    ],
     "virtual_sdcard": ["progress", "file_position", "file_size"],
     "heater_bed": ["temperature", "target"],
     "extruder": ["temperature", "target"],

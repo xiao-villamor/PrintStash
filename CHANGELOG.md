@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.0 - Import, CAD, Sharing & Measured Prints
+
+A big release closing the ingest/discovery gap and deepening the
+print-tracking loop that sets PrintStash apart.
+
+### Highlights
+
+- **Import from URL or ZIP.** Paste a direct file/`.zip` URL or upload a `.zip`
+  and pick which files to import. Each 3D file becomes its own model, grouped
+  under an auto-created collection named after the archive. Server-side fetches
+  are SSRF-guarded (no private/loopback/metadata hosts) and archives are
+  zip-slip / zip-bomb protected.
+- **STEP / STP CAD files.** Ingested, tessellated (via `cascadio`/OpenCASCADE),
+  previewed in the browser, and thumbnailed like any mesh.
+- **Public share links.** Create expiring, read-only links to a single model.
+  View-only by default (the viewer renders a tessellated mesh; original-file
+  download is opt-in per link). Strictly isolated: an unauthenticated, GET-only
+  router; tokens stored hashed; uniform 404 on bad/expired/revoked tokens; file
+  access re-scoped to the shared model; per-IP rate limiting.
+- **Measured filament + duration.** When a print finishes, real filament used
+  and actual duration are captured from Moonraker and shown in print history,
+  with real per-print cost (Bambu leaves filament null — no live data).
+- **Auto known-good revisions.** A revision is promoted to *known-good* after its
+  first successful print (never overriding a manual failed/archived verdict).
+  Toggle in Settings → Design.
+- **Delete G-code revisions.** The Revisions tab gains a delete action per
+  revision. Deletes are soft — the file follows the trash lifecycle and its blob
+  is reclaimed by the GC — consistent with model deletion.
+- **Print history without a registered printer.** Manual print records can now be
+  logged against a free-text printer name ("Other (not listed)…") instead of
+  requiring a preconfigured Moonraker/Bambu printer. `print_jobs.printer_id` is
+  now nullable, backed by a new `printer_name` column.
+
 ## 0.4.0 - Vite + React Router Frontend
 
 The frontend is rebuilt as a Vite single-page app on React Router, migrated off

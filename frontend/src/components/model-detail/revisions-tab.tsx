@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   Star,
+  Trash2,
   Wifi,
 } from "lucide-react";
 
@@ -40,7 +41,7 @@ export function RevisionsTab({
   onModel: (model: ModelRead) => void;
   onAddRevision: () => void;
 }) {
-  const { auth, saving, update } = useRevisionUpdater(modelId, onModel);
+  const { auth, saving, update, remove } = useRevisionUpdater(modelId, onModel);
 
   // Revision edit form — local to this tab.
   const [editingRevisionId, setEditingRevisionId] = useState<number | null>(null);
@@ -77,6 +78,21 @@ export function RevisionsTab({
       is_recommended: revisionRecommended,
     });
     if (ok) setEditingRevisionId(null);
+  }
+
+  async function deleteRevision(file: FileRead) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete Rev ${file.gcode_revision_number ?? file.version} (${file.original_filename})? This can't be undone.`,
+      )
+    )
+      return;
+    const ok = await remove(file);
+    if (ok && editingRevisionId === file.id) setEditingRevisionId(null);
   }
 
   return (
@@ -170,6 +186,19 @@ export function RevisionsTab({
                       className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
                     >
                       <Download className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteRevision(f)}
+                      disabled={!auth.isAuthenticated || saving === f.id}
+                      title={auth.blockReason ?? "Delete revision"}
+                      className="text-[var(--on-surface-variant)] hover:text-[var(--error)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {saving === f.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </button>
                   </div>
                 </div>

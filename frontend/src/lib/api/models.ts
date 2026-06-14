@@ -11,6 +11,7 @@ import {
   sendJson,
 } from "@/lib/api/request";
 import {
+  ArchiveManifest,
   FileRevisionUpdate,
   ImportedPrintJobRead,
   IngestJobStatus,
@@ -151,6 +152,19 @@ export function updateFileRevision(
   );
 }
 
+export async function deleteFileRevision(
+  modelId: number,
+  fileId: number,
+): Promise<ModelRead> {
+  const path = `/api/v1/models/${modelId}/files/${fileId}/revision`;
+  const res = await fetch(getUrl(path), {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  invalidateApiCache(path);
+  return handleResponse<ModelRead>(res);
+}
+
 export function addGcodeRevision(
   modelId: number,
   formData: FormData,
@@ -171,4 +185,28 @@ export function ingestModel(formData: FormData): Promise<IngestResponse> {
 
 export function getJobStatus(jobId: string): Promise<IngestJobStatus> {
   return getJson<IngestJobStatus>(`/api/v1/ingest/jobs/${jobId}`, { fresh: true });
+}
+
+export function ingestUrl(payload: {
+  url: string;
+  collection?: string;
+  model_name?: string;
+  tags?: string;
+}): Promise<IngestResponse> {
+  return sendJson<IngestResponse>("/api/v1/ingest/url", "POST", payload);
+}
+
+export function ingestArchive(formData: FormData): Promise<ArchiveManifest> {
+  return sendForm<ArchiveManifest>("/api/v1/ingest/archive", formData);
+}
+
+export function selectArchiveEntries(
+  archiveId: string,
+  payload: { names: string[]; collection?: string; tags?: string },
+): Promise<IngestResponse> {
+  return sendJson<IngestResponse>(
+    `/api/v1/ingest/archive/${archiveId}/select`,
+    "POST",
+    payload,
+  );
 }

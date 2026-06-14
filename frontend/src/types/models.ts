@@ -39,7 +39,7 @@ export interface FileRead {
   id: number;
   model_id: number;
   original_filename: string;
-  file_type: "stl" | "3mf" | "gcode" | "obj";
+  file_type: "stl" | "3mf" | "gcode" | "obj" | "step";
   version: number;
   gcode_revision_number?: number | null;
   size_bytes: number;
@@ -94,7 +94,7 @@ export interface ModelPrinterPresenceRead {
 
 export interface ModelPrintJobRead {
   id: number;
-  printer_id: number;
+  printer_id: number | null;
   printer_name: string;
   file_id: number;
   gcode_revision_number: number | null;
@@ -102,6 +102,9 @@ export interface ModelPrintJobRead {
   state: PrintJobState;
   material_type: string | null;
   error: string | null;
+  filament_used_g: number | null;
+  actual_duration_s: number | null;
+  filament_cost: number | null;
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
@@ -184,7 +187,8 @@ export interface ModelUpdate {
 }
 
 export interface ManualPrintJobCreate {
-  printer_id: number;
+  printer_id?: number | null;
+  printer_name?: string | null;
   file_id: number;
   state?: string;
   started_at?: string | null;
@@ -222,6 +226,60 @@ export interface IngestJobStatus {
   label?: string | null;
   progress?: number | null;
   result?: Record<string, unknown> | null;
+}
+
+export interface ArchiveEntry {
+  name: string;
+  size_bytes: number;
+  file_type: string | null; // FileType value if importable, else null
+  is_image: boolean;
+}
+
+export interface ArchiveManifest {
+  archive_id: string;
+  archive_name: string;
+  entries: ArchiveEntry[];
+}
+
+export interface PublicFileRead {
+  id: number;
+  original_filename: string;
+  file_type: string;
+  size_bytes: number;
+  version: number;
+  bbox_x_mm: number | null;
+  bbox_y_mm: number | null;
+  bbox_z_mm: number | null;
+  triangle_count: number | null;
+}
+
+export interface PublicModelRead {
+  name: string;
+  description: string | null;
+  has_thumbnail: boolean;
+  allow_download: boolean;
+  files: PublicFileRead[];
+}
+
+export interface ShareLinkRead {
+  id: number;
+  model_id: number;
+  expires_at: string;
+  revoked_at: string | null;
+  allow_download: boolean;
+  access_count: number;
+  created_at: string;
+  is_active: boolean;
+}
+
+export interface ShareLinkCreated extends ShareLinkRead {
+  token: string;
+  url: string;
+}
+
+export interface ShareLinkCreate {
+  expires_in_days: number;
+  allow_download: boolean;
 }
 
 export interface ListModelsParams {

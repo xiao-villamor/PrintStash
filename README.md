@@ -48,16 +48,20 @@ No cloud account, no subscription, no telemetry.
 ## Features
 
 **Ingest and organize**
-- Upload STL, 3MF, OBJ, and G-code files
+- Upload STL, 3MF, OBJ, STEP/STP, and G-code files
+- Import from a URL or a `.zip` archive with selective per-file extraction
 - Push exported G-code from OrcaSlicer with a post-processing hook
 - Deduplicate by content hash and keep model version history
 - Organize with collections, tags, search, filters, and thumbnails
 
 **Inspect every model**
 - View source files, recommended G-code, slicer settings, and mesh metadata
-- Preview meshes and G-code toolpaths in the browser
+- Preview meshes (incl. STEP/STP CAD) and G-code toolpaths in the browser
 - Track revision status, notes, labels, and recommended versions
-- Log print history manually or import matching Moonraker history
+- Auto-mark a revision known-good after its first successful print
+- Log print history manually or import matching Moonraker history — with measured
+  filament use, real duration, and per-print cost
+- Share a model via an expiring, read-only public link (view-only by default)
 
 **Talk to printers**
 - Manage Moonraker/Klipper printers with live status and send-to-print

@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   File as FileIcon,
+  Link2,
   Loader2,
+  Package,
   Plus,
   Upload,
   X,
@@ -13,8 +15,11 @@ import {
   createTag,
   getJobStatus,
   getModel,
+  ingestArchive,
   ingestModel,
   ingestOrca,
+  ingestUrl,
+  selectArchiveEntries,
 } from "@/lib/api";
 import { useCollections, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
@@ -22,11 +27,13 @@ import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
-import { CollectionRead, IngestJobStatus } from "@/types";
+import { ArchiveManifest, CollectionRead, IngestJobStatus } from "@/types";
 
-const MESH_EXT = new Set([".stl", ".3mf", ".obj"]);
+type UploadMode = "files" | "url" | "zip";
+
+const MESH_EXT = new Set([".stl", ".3mf", ".obj", ".step", ".stp"]);
 const GCODE_EXT = new Set([".gcode", ".g", ".gco"]);
-const MESH_ACCEPT = ".stl,.3mf,.obj";
+const MESH_ACCEPT = ".stl,.3mf,.obj,.step,.stp";
 const GCODE_ACCEPT = ".gcode,.g,.gco";
 
 function ext(filename: string): string {
@@ -70,6 +77,12 @@ export function UploadModal({
   const gcodeRef = useRef<HTMLInputElement>(null);
   const [meshFile, setMeshFile] = useState<File | null>(null);
   const [gcodeFile, setGcodeFile] = useState<File | null>(null);
+  const [mode, setMode] = useState<UploadMode>("files");
+  const [urlValue, setUrlValue] = useState("");
+  const [zipFile, setZipFile] = useState<File | null>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
+  const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
+  const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
   const [modelName, setModelName] = useState("");
   const [collectionPath, setCollectionPath] = useState(defaultCollection ?? "");
   const [tagInput, setTagInput] = useState("");
@@ -148,6 +161,11 @@ export function UploadModal({
   function reset() {
     setMeshFile(null);
     setGcodeFile(null);
+    setMode("files");
+    setUrlValue("");
+    setZipFile(null);
+    setManifest(null);
+    setSelectedEntries(new Set());
     setModelName("");
     setCollectionPath(defaultCollection ?? "");
     setSelectedTags([]);
@@ -344,17 +362,151 @@ export function UploadModal({
     }
   }
 
-  function doSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if ((!meshFile && !gcodeFile) || submitting) return;
+  // Inline poll (modal stays open) — used for URL import where the result may
+  // be an archive manifest the user must act on before anything is imported.
+  async function pollJobInline(jid: string): Promise<IngestJobStatus> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+      await sleep(POLL_INTERVAL_MS);
+      const status = await getJobStatus(jid);
+      if (status.state === "completed" || status.state === "failed") return status;
+    }
+    throw new Error("Timed out waiting for the import to complete");
+  }
+
+  function collectionGate(): boolean {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
-      return;
+      return false;
     }
     if (!user?.is_superuser && !collectionPath) {
       toast.warning("Collection required", "Choose a collection you can edit.");
+      return false;
+    }
+    return true;
+  }
+
+  function startImportTask(jobId: string, title: string) {
+    const taskId = createTask({
+      title,
+      detail: "Importing",
+      status: "running",
+      progress: 10,
+    });
+    void (async () => {
+      try {
+        await pollJob(jobId, taskId, {
+          progressStart: 10,
+          progressEnd: 100,
+          pendingDetail: "Waiting for the vault to start importing",
+          runningDetail: "Importing files",
+          completedDetail: "Import processed",
+          completeTask: true,
+        });
+        onUploaded();
+      } catch (err) {
+        toast.error(err);
+      }
+    })();
+  }
+
+  async function runUrlImport() {
+    if (!collectionGate() || submitting) return;
+    setSubmitting(true);
+    try {
+      const res = await ingestUrl({
+        url: urlValue.trim(),
+        collection: collectionPath || undefined,
+        model_name: modelName || undefined,
+        tags: selectedTags.length ? selectedTags.join(",") : undefined,
+      });
+      const status = await pollJobInline(res.job_id);
+      if (status.state === "failed") {
+        throw new Error(status.error || "Import failed");
+      }
+      const result = (status.result ?? {}) as Record<string, unknown>;
+      if (result.kind === "archive_manifest") {
+        const m: ArchiveManifest = {
+          archive_id: String(result.archive_id),
+          archive_name: String(result.archive_name),
+          entries: (result.entries as ArchiveManifest["entries"]) ?? [],
+        };
+        showManifest(m);
+        setSubmitting(false);
+        return;
+      }
+      toast.success("Model imported from URL");
+      onUploaded();
+      close();
+    } catch (err) {
+      toast.error(err);
+      setSubmitting(false);
+    }
+  }
+
+  async function doInspectZip() {
+    if (!collectionGate() || submitting || !zipFile) return;
+    setSubmitting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", zipFile);
+      const m = await ingestArchive(fd);
+      showManifest(m);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function showManifest(m: ArchiveManifest) {
+    setManifest(m);
+    setSelectedEntries(
+      new Set(m.entries.filter((e) => e.file_type).map((e) => e.name)),
+    );
+  }
+
+  async function doImportSelected() {
+    if (!manifest || submitting) return;
+    const names = [...selectedEntries];
+    if (names.length === 0) {
+      toast.warning("Nothing selected", "Pick at least one file to import.");
       return;
     }
+    setSubmitting(true);
+    try {
+      const res = await selectArchiveEntries(manifest.archive_id, {
+        names,
+        collection: collectionPath || undefined,
+        tags: selectedTags.length ? selectedTags.join(",") : undefined,
+      });
+      startImportTask(res.job_id, `Import ${manifest.archive_name}`);
+      close();
+    } catch (err) {
+      toast.error(err);
+      setSubmitting(false);
+    }
+  }
+
+  function doSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (submitting) return;
+    if (manifest) {
+      void doImportSelected();
+      return;
+    }
+    if (mode === "url") {
+      if (!urlValue.trim()) return;
+      void runUrlImport();
+      return;
+    }
+    if (mode === "zip") {
+      if (!zipFile) return;
+      void doInspectZip();
+      return;
+    }
+    if (!meshFile && !gcodeFile) return;
+    if (!collectionGate()) return;
     const taskId = createTask({
       title: `Upload ${modelName || meshFile?.name || gcodeFile?.name || "model"}`,
       detail: "Preparing upload",
@@ -400,6 +552,15 @@ export function UploadModal({
     setSelectedTags((p) =>
       p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug],
     );
+  }
+
+  function toggleEntry(name: string) {
+    setSelectedEntries((p) => {
+      const next = new Set(p);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   }
 
   return (
@@ -449,44 +610,108 @@ export function UploadModal({
             )}
 
             <form onSubmit={doSubmit} className="p-6 space-y-5">
-              {/* File slots */}
-              <div className="space-y-3">
-                <FileSlot
-                  label="3D Model"
-                  accept={MESH_ACCEPT}
-                  file={meshFile}
-                  setFile={(f) => {
-                    setMeshFile(f);
-                    if (f) autoName(f);
-                  }}
-                  placeholder={".stl .3mf .obj"}
-                  inputRef={meshRef}
-                />
-                <FileSlot
-                  label="G-code"
-                  accept={GCODE_ACCEPT}
-                  file={gcodeFile}
-                  setFile={(f) => {
-                    setGcodeFile(f);
-                    if (f) autoName(f);
-                  }}
-                  placeholder={".gcode .g .gco"}
-                  inputRef={gcodeRef}
-                />
-              </div>
+              {/* Mode tabs */}
+              {!manifest && (
+                <div className="flex gap-1 rounded border border-[var(--outline-variant)] p-1">
+                  {(
+                    [
+                      ["files", "Files", Upload],
+                      ["url", "From URL", Link2],
+                      ["zip", "From ZIP", Package],
+                    ] as const
+                  ).map(([m, label, Icon]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMode(m)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                        mode === m
+                          ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
+                          : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" /> {label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-              {/* Model name */}
-              <div>
-                <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
-                  Model name
-                </label>
-                <input
-                  value={modelName}
-                  onChange={(e) => setModelName(e.target.value)}
-                  className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-                  placeholder="e.g. Bracket v2"
+              {/* Input area */}
+              {manifest ? (
+                <ManifestList
+                  manifest={manifest}
+                  selected={selectedEntries}
+                  onToggle={toggleEntry}
+                  onBack={() => {
+                    setManifest(null);
+                    setSelectedEntries(new Set());
+                  }}
                 />
-              </div>
+              ) : mode === "files" ? (
+                <div className="space-y-3">
+                  <FileSlot
+                    label="3D Model"
+                    accept={MESH_ACCEPT}
+                    file={meshFile}
+                    setFile={(f) => {
+                      setMeshFile(f);
+                      if (f) autoName(f);
+                    }}
+                    placeholder={".stl .3mf .obj .step"}
+                    inputRef={meshRef}
+                  />
+                  <FileSlot
+                    label="G-code"
+                    accept={GCODE_ACCEPT}
+                    file={gcodeFile}
+                    setFile={(f) => {
+                      setGcodeFile(f);
+                      if (f) autoName(f);
+                    }}
+                    placeholder={".gcode .g .gco"}
+                    inputRef={gcodeRef}
+                  />
+                </div>
+              ) : mode === "url" ? (
+                <div>
+                  <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                    Source URL
+                  </label>
+                  <input
+                    value={urlValue}
+                    onChange={(e) => setUrlValue(e.target.value)}
+                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    placeholder="https://…/model.stl or …/pack.zip"
+                  />
+                  <p className="mt-1.5 font-mono text-[10px] text-[var(--on-surface-variant)]/70">
+                    Direct file or .zip link — downloaded on the server.
+                  </p>
+                </div>
+              ) : (
+                <FileSlot
+                  label="ZIP archive"
+                  accept=".zip"
+                  file={zipFile}
+                  setFile={setZipFile}
+                  placeholder={".zip"}
+                  inputRef={zipRef}
+                />
+              )}
+
+              {/* Model name (single-file modes only) */}
+              {!manifest && mode !== "zip" && (
+                <div>
+                  <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                    Model name
+                  </label>
+                  <input
+                    value={modelName}
+                    onChange={(e) => setModelName(e.target.value)}
+                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    placeholder="e.g. Bracket v2"
+                  />
+                </div>
+              )}
 
               {/* Collection */}
               <div>
@@ -656,14 +881,34 @@ export function UploadModal({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting || (!meshFile && !gcodeFile) || (!user?.is_superuser && !collectionPath)}
+                  disabled={
+                    submitting ||
+                    (!user?.is_superuser && !collectionPath) ||
+                    (manifest
+                      ? selectedEntries.size === 0
+                      : mode === "files"
+                        ? !meshFile && !gcodeFile
+                        : mode === "url"
+                          ? !urlValue.trim()
+                          : !zipFile)
+                  }
                   className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Uploading…
+                      {manifest
+                        ? "Importing…"
+                        : mode === "zip"
+                          ? "Inspecting…"
+                          : "Working…"}
                     </>
+                  ) : manifest ? (
+                    `Import ${selectedEntries.size} selected`
+                  ) : mode === "url" ? (
+                    "Import from URL"
+                  ) : mode === "zip" ? (
+                    "Inspect archive"
                   ) : (
                     "Upload to vault"
                   )}
@@ -739,6 +984,66 @@ function FileSlot({
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
           className="hidden"
         />
+      </div>
+    </div>
+  );
+}
+
+function ManifestList({
+  manifest,
+  selected,
+  onToggle,
+  onBack,
+}: {
+  manifest: ArchiveManifest;
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+  onBack: () => void;
+}) {
+  const importable = manifest.entries.filter((e) => e.file_type);
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase truncate">
+          {manifest.archive_name} · {importable.length} importable
+        </span>
+        <button
+          type="button"
+          onClick={onBack}
+          className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider hover:text-[var(--on-surface)]"
+        >
+          Back
+        </button>
+      </div>
+      <div className="rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)] max-h-56 overflow-y-auto">
+        {importable.length === 0 ? (
+          <div className="px-3 py-3 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
+            No importable 3D files in this archive.
+          </div>
+        ) : (
+          importable.map((e) => (
+            <label
+              key={e.name}
+              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--surface-container-low)]"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(e.name)}
+                onChange={() => onToggle(e.name)}
+                className="accent-[var(--primary)]"
+              />
+              <span className="text-xs text-[var(--on-surface)] truncate flex-1">
+                {e.name}
+              </span>
+              <span className="font-mono text-[10px] uppercase text-[var(--on-surface-variant)] flex-shrink-0">
+                {e.file_type}
+              </span>
+              <span className="font-mono text-[10px] text-[var(--on-surface-variant)] flex-shrink-0">
+                {formatBytes(e.size_bytes)}
+              </span>
+            </label>
+          ))
+        )}
       </div>
     </div>
   );

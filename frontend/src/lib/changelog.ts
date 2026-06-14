@@ -19,6 +19,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.5.0",
+    date: "Jun 2026",
+    changes: [
+      "Import models from a URL or a .zip archive, with selective per-file extraction",
+      "STEP / STP CAD files: ingest, 3D preview, and thumbnails",
+      "Public share links — expiring, read-only, view-only by default (optional download)",
+      "Measured filament + print duration captured from the printer, with real per-print cost",
+      "Auto-mark a revision known-good after its first successful print (toggle in Design settings)",
+      "Delete G-code revisions from a model's Revisions tab",
+      "Log print history against an ad-hoc printer name — no registered printer required",
+    ],
+  },
+  {
     version: "0.4.0",
     date: "Jun 2026",
     changes: [

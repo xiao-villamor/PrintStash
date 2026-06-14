@@ -68,6 +68,7 @@ export interface VaultConfigRead {
   has_backup_s3_access_key: boolean;
   has_backup_s3_secret_key: boolean;
   has_backup_s3: boolean;
+  auto_mark_known_good: boolean;
 }
 
 export interface VaultConfigUpdate {
@@ -86,4 +87,5 @@ export interface VaultConfigUpdate {
   backup_s3_region?: string;
   backup_s3_access_key?: string;
   backup_s3_secret_key?: string;
+  auto_mark_known_good?: boolean;
 }
