@@ -1,8 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { listCollections, listTags } from "@/lib/api";
+import {
+  getVaultStats,
+  listCollections,
+  listFilamentProfiles,
+  listPrinterProfiles,
+  listPrinters,
+  listTags,
+} from "@/lib/api";
 import { queryKeys } from "@/lib/query-client";
-import type { CollectionRead, TagRead } from "@/types";
+import type {
+  CollectionRead,
+  FilamentProfileRead,
+  PrinterProfileRead,
+  PrinterRead,
+  TagRead,
+  VaultStatsRead,
+} from "@/types";
 
 /**
  * Query hooks for the shared, read-only taxonomy lists.
@@ -28,5 +42,43 @@ export function useTags() {
   return useQuery<TagRead[]>({
     queryKey: queryKeys.tags,
     queryFn: () => listTags({ fresh: true }),
+  });
+}
+
+/**
+ * Same shared-cache treatment for the other read-mostly resources that were
+ * each fetched into local `useState` per component. Mutations through the api
+ * layer invalidate these by key (see `invalidateQueriesForPath`), so a printer
+ * added on one screen shows up on every other without a manual reload.
+ *
+ * `fresh: true` bypasses the legacy in-memory cache in `request.ts` so TanStack
+ * Query stays the single source of truth, matching `useCollections`/`useTags`.
+ */
+export function usePrinters(options?: { enabled?: boolean }) {
+  return useQuery<PrinterRead[]>({
+    queryKey: queryKeys.printers,
+    queryFn: () => listPrinters(undefined, { fresh: true }),
+    enabled: options?.enabled ?? true,
+  });
+}
+
+export function usePrinterProfiles() {
+  return useQuery<PrinterProfileRead[]>({
+    queryKey: queryKeys.printerProfiles,
+    queryFn: () => listPrinterProfiles({ fresh: true }),
+  });
+}
+
+export function useFilamentProfiles() {
+  return useQuery<FilamentProfileRead[]>({
+    queryKey: queryKeys.filamentProfiles,
+    queryFn: () => listFilamentProfiles({ fresh: true }),
+  });
+}
+
+export function useVaultStats() {
+  return useQuery<VaultStatsRead>({
+    queryKey: queryKeys.vaultStats,
+    queryFn: () => getVaultStats({ fresh: true }),
   });
 }

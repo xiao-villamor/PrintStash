@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "@/lib/navigation";
 import { PrinterRead } from "@/types";
-import { createPrinter, deletePrinter, invalidateApiCache, listPrinters } from "@/lib/api";
+import { createPrinter, deletePrinter } from "@/lib/api";
+import { usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,36 +29,16 @@ function providerAddress(p: PrinterRead): string {
     : p.moonraker_url;
 }
 
-export function PrintersPage({
-  initialPrinters,
-}: {
-  initialPrinters?: PrinterRead[];
-}) {
+export function PrintersPage() {
   const auth = useRequireAuth();
-  const [printers, setPrinters] = useState<PrinterRead[]>(
-    initialPrinters ?? [],
-  );
-  const [loading, setLoading] = useState(!initialPrinters);
-  const [error, setError] = useState<string | null>(null);
+  // Shared printers cache: mutations through the api layer invalidate
+  // queryKeys.printers, so this list refetches itself after add/delete.
+  const printersQuery = usePrinters();
+  const printers = printersQuery.data ?? [];
+  const loading = printersQuery.isLoading;
+  const error =
+    printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
-
-  async function refresh() {
-    setLoading(true);
-    try {
-      invalidateApiCache("/api/v1/printers");
-      setPrinters(await listPrinters());
-      setError(null);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    if (!initialPrinters) refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function handleDelete(p: PrinterRead, e: React.MouseEvent) {
     e.preventDefault();
@@ -66,7 +47,6 @@ export function PrintersPage({
     try {
       await deletePrinter(p.id);
       toast.success(`Printer "${p.name}" removed`);
-      await refresh();
     } catch (e) {
       toast.error(e);
     }
@@ -81,7 +61,7 @@ export function PrintersPage({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={refresh}
+            onClick={() => printersQuery.refetch()}
             className="px-3 py-2 rounded border border-border bg-background text-xs font-medium text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -208,8 +188,8 @@ export function PrintersPage({
         <AddPrinterModal
           onClose={() => setAddOpen(false)}
           onCreated={() => {
+            // createPrinter already invalidated queryKeys.printers; just close.
             setAddOpen(false);
-            refresh();
           }}
         />
       )}

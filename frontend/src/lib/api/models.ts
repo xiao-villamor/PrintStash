@@ -2,6 +2,7 @@ import {
   authHeaders,
   expectOk,
   getJson,
+  GetJsonOptions,
   getUrl,
   handleResponse,
   invalidateApiCache,
@@ -49,8 +50,10 @@ export function getModel(id: number): Promise<ModelRead> {
   return getJson<ModelRead>(`/api/v1/models/${id}`);
 }
 
-export function getVaultStats(): Promise<VaultStatsRead> {
-  return getJson<VaultStatsRead>("/api/v1/models/stats");
+export function getVaultStats(
+  options?: GetJsonOptions,
+): Promise<VaultStatsRead> {
+  return getJson<VaultStatsRead>("/api/v1/models/stats", options);
 }
 
 export async function downloadModelExport(format: "json" | "csv"): Promise<void> {

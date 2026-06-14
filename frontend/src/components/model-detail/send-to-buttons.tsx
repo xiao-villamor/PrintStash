@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "@/lib/navigation";
 import { Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
-import { listPrinters, sendToPrinter } from "@/lib/api";
+import { sendToPrinter } from "@/lib/api";
+import { usePrinters } from "@/lib/queries";
 import { createTask, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { FileRead, ModelPrinterFileRead, PrinterRead } from "@/types";
+import { FileRead, ModelPrinterFileRead } from "@/types";
 
 export function SendToButtons({
   modelId,
@@ -36,39 +37,31 @@ export function SendToButtons({
     if (showSend && preselectFileId) setSelectedFile(preselectFileId);
   }, [showSend, preselectFileId]);
   const [startPrint, setStartPrint] = useState(false);
-  const [printers, setPrinters] = useState<PrinterRead[]>([]);
+  const printersQuery = usePrinters();
+  // Stable ref so the default-select effect / memos below don't rerun each render.
+  const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
+  const printersLoading = printersQuery.isLoading;
   const [selectedPrinterIds, setSelectedPrinterIds] = useState<number[]>([]);
-  const [printersLoading, setPrintersLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Send failures live in local `error`; surface a printers load failure too.
+  const displayError =
+    error ??
+    (printersQuery.error instanceof Error ? printersQuery.error.message : null);
 
+  // Default-select a capable printer when the panel opens / once printers load.
   useEffect(() => {
-    let alive = true;
-    setPrintersLoading(true);
-    listPrinters()
-      .then((p) => {
-        if (!alive) return;
-        setPrinters(p);
-        setSelectedPrinterIds((current) => {
-          const capableIds = p
-            .filter((printer) => printer.capabilities.can_upload)
-            .map((printer) => printer.id);
-          if (capableIds.length === 0) return [];
-          const kept = current.filter((id) => capableIds.includes(id));
-          return kept.length > 0 ? kept : [capableIds[0]];
-        });
-      })
-      .catch((e) => {
-        if (!alive) return;
-        const message =
-          e instanceof Error ? e.message : "Failed to load printers";
-        setError(message);
-      })
-      .finally(() => alive && setPrintersLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [showSend]);
+    if (!showSend) return;
+    setSelectedPrinterIds((current) => {
+      const capableIds = printers
+        .filter((printer) => printer.capabilities.can_upload)
+        .map((printer) => printer.id);
+      if (capableIds.length === 0) return [];
+      const kept = current.filter((id) => capableIds.includes(id));
+      return kept.length > 0 ? kept : [capableIds[0]];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSend, printers]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
@@ -195,9 +188,9 @@ export function SendToButtons({
           )}
         </div>
       </div>
-      {error && !showSend && (
+      {displayError && !showSend && (
         <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
-          {error}
+          {displayError}
         </div>
       )}
 
@@ -264,9 +257,9 @@ export function SendToButtons({
                 .join(", ")}
             </div>
           )}
-          {error && (
+          {displayError && (
             <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
-              {error}
+              {displayError}
             </div>
           )}
           <div className="flex gap-2">

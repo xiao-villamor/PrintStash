@@ -41,7 +41,7 @@ export const queryKeys = {
   tags: ["tags"] as const,
   printers: ["printers"] as const,
   printer: (id: number) => ["printers", id] as const,
-  filaments: ["filaments"] as const,
+  filamentProfiles: ["filament-profiles"] as const,
   printerProfiles: ["printer-profiles"] as const,
   adminUsers: ["admin", "users"] as const,
   vaultStats: ["vault-stats"] as const,
@@ -68,12 +68,15 @@ export function invalidateQueriesForPath(path: string): void {
   }
   if (/\/(models|files|ingest|gcode)(\/|$|\?|-)/.test(path)) {
     bust(queryKeys.models);
+    // Vault totals (count, size, material breakdown) are derived from models,
+    // so any model/file write can change them.
+    bust(queryKeys.vaultStats);
   }
   if (/\/printers(\/|$|\?)/.test(path)) {
     bust(queryKeys.printers);
   }
-  if (/\/filaments(\/|$|\?)/.test(path)) {
-    bust(queryKeys.filaments);
+  if (/\/filament-profiles(\/|$|\?)/.test(path)) {
+    bust(queryKeys.filamentProfiles);
   }
   if (/\/printer-profiles(\/|$|\?)/.test(path)) {
     bust(queryKeys.printerProfiles);

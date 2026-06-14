@@ -15,11 +15,11 @@ import {
   createManualPrintJob,
   getModelPrintJobs,
   importPrintJobsFromPrinter,
-  listPrinters,
 } from "@/lib/api";
+import { usePrinters } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
-import { FileRead, ModelPrintJobRead, PrinterRead } from "@/types";
+import { FileRead, ModelPrintJobRead } from "@/types";
 
 import { PRINT_JOB_PRESENTATION, printJobToneClass } from "./presentation";
 
@@ -40,7 +40,7 @@ export function PrintHistorySection({
   const [mode, setMode] = useState<PrintHistoryMode>("manual");
 
   // Manual form state
-  const [printers, setPrinters] = useState<PrinterRead[]>([]);
+  const printers = usePrinters().data ?? [];
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | "">("");
   const [selectedFileId, setSelectedFileId] = useState<number | "">(gcodeFiles[0]?.id ?? "");
   const [jobState, setJobState] = useState("completed");
@@ -65,9 +65,7 @@ export function PrintHistorySection({
     setJobError("");
     setImportResults([]);
     setImportDone(false);
-    if (printers.length === 0) {
-      listPrinters().then(setPrinters).catch(() => {});
-    }
+    // Printers come from the shared usePrinters() cache — no fetch needed here.
   }
 
   async function submitManual() {

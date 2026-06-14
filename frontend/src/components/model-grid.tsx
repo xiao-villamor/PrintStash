@@ -22,8 +22,8 @@ import {
   ChevronRight,
   Plus,
 } from "lucide-react";
-import { listModels, listPrinters, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
-import { useCollections, useTags } from "@/lib/queries";
+import { listModels, createCollection, updateModel, moveCollection, deleteCollection } from "@/lib/api";
+import { useCollections, usePrinters, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
@@ -121,7 +121,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const tagsQuery = useTags();
   const collections = collectionsQuery.data ?? [];
   const tags = tagsQuery.data ?? [];
-  const [printers, setPrinters] = useState<PrinterRead[]>(initial?.printers ?? []);
+  // Printers (superuser-only filter) share the same cache as the printers page
+  // and send-to dialog; gated so non-admins don't fetch a list they can't use.
+  const printers =
+    usePrinters({ enabled: !!user?.is_superuser }).data ?? initial?.printers ?? [];
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
@@ -210,22 +213,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       : null;
   const canViewPrinters = !!user?.is_superuser;
   // Collections + tags are fetched by useCollections()/useTags() above.
-
-  useEffect(() => {
-    let alive = true;
-    if (!canViewPrinters) {
-      setPrinters([]);
-      return;
-    }
-    listPrinters()
-      .then((p) => {
-        if (alive) setPrinters(p);
-      })
-      .catch(() => {
-        if (alive) setPrinters([]);
-      });
-    return () => { alive = false; };
-  }, [canViewPrinters]);
 
   useEffect(() => {
     let alive = true;
