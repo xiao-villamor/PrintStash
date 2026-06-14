@@ -1,63 +1,103 @@
 ---
 title: API
-description: Common REST endpoints, authentication, and an upload example.
+description: Authentication, the endpoints you'll actually use, and an upload example.
 ---
 
-PrintStash exposes a REST API under `/api/v1`. Interactive OpenAPI docs are
-served at `/docs` (Swagger UI) and `/redoc` on the backend.
+The same REST API under `/api/v1` powers the web UI, the OrcaSlicer hook, and any
+script you write — there's no separate "internal" surface. Interactive OpenAPI
+docs are served live by the backend, and they're the authoritative reference for
+request and response shapes:
 
 ```
-http://localhost:8000/docs
+http://localhost:8000/docs     # Swagger UI
+http://localhost:8000/redoc    # ReDoc
 ```
+
+The tables below are a map to help you find your way around; `/docs` is the
+contract.
 
 ## Authentication
 
-Most endpoints require authentication. Two schemes are supported:
+Almost everything requires auth. However you authenticate, you end up holding a
+JWT **Bearer token** that you send on every request:
 
-- **Bearer token** — obtained by logging in; sent as `Authorization: Bearer <token>`.
-- **API key** — created under **Settings**; suited to automation such as the
-  OrcaSlicer upload hook.
+```
+Authorization: Bearer <token>
+```
+
+There are two ways to get one:
+
+**1. Username + password** — what the UI does. Short-lived access tokens with
+refresh-token rotation behind the scenes.
 
 ```bash
-# Log in and capture a token
 curl -s -X POST http://localhost:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"admin","password":"<your-password>"}'
 ```
 
-## Common endpoints
+**2. Username + API key** — for scripts and automation, so you never bake an
+account password into a long-lived hook. Create a named key under **Settings →
+Access** (it's shown once — copy it then), then exchange it at the *same* login
+endpoint for a Bearer token:
 
-| Method   | Path                                      | Purpose                               |
-| -------- | ----------------------------------------- | ------------------------------------- |
-| `GET`    | `/api/v1/health`                          | Liveness / version check (no auth).   |
-| `POST`   | `/api/v1/auth/login`                      | Obtain an access token.               |
-| `GET`    | `/api/v1/models`                          | List models (filters, search, paging).|
-| `GET`    | `/api/v1/models/{id}`                     | Model detail with files and metadata. |
-| `GET`    | `/api/v1/models/stats`                    | Vault totals and breakdowns.          |
-| `POST`   | `/api/v1/ingest`                          | Upload files into the vault.          |
-| `GET`    | `/api/v1/collections`                     | List collections.                     |
-| `GET`    | `/api/v1/tags`                            | List tags.                            |
-| `GET`    | `/api/v1/printers`                        | List printers with live status.       |
-| `GET`    | `/api/v1/printers/{id}/diagnostics`       | Provider capabilities & connectivity. |
-| `POST`   | `/api/v1/printers/{id}/send`              | Send a vault G-code file to a printer.|
-| `GET`    | `/api/v1/filament-profiles`               | List filament presets.                |
-| `GET`    | `/api/v1/printer-profiles`                | List printer presets.                 |
-| `GET`    | `/api/v1/backup`                          | Backup/restore operations.            |
-| `GET`    | `/api/v1/admin/users`                     | User administration (superuser).      |
+```bash
+curl -s -X POST http://localhost:8000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"<api-key>"}'
+```
 
-Endpoint shapes and request/response models are authoritative in `/docs`; the
-table above is a map, not a contract.
+API keys can be revoked from the same Settings page without touching your
+password, which is exactly why the Orca hook uses one.
+
+## Endpoints you'll actually use
+
+| Method | Path                                | Purpose                                 |
+| ------ | ----------------------------------- | --------------------------------------- |
+| `GET`  | `/api/v1/health`                    | Liveness + component readiness (no auth).|
+| `POST` | `/api/v1/auth/login`                | Get an access token.                     |
+| `GET`  | `/api/v1/models`                    | List models — filters, search, paging.   |
+| `GET`  | `/api/v1/models/{id}`               | Model detail with files and metadata.    |
+| `GET`  | `/api/v1/models/stats`              | Vault totals and breakdowns.             |
+| `GET`  | `/api/v1/models/export`             | Metadata export (`?format=json` or `csv`).|
+| `POST` | `/api/v1/ingest`                    | Upload files into the vault.             |
+| `GET`  | `/api/v1/collections`               | List collections (with model counts).    |
+| `GET`  | `/api/v1/tags`                      | List tags.                               |
+| `GET`  | `/api/v1/printers`                  | List printers with live status.          |
+| `GET`  | `/api/v1/printers/{id}/diagnostics` | Provider capabilities & connectivity.    |
+| `POST` | `/api/v1/printers/{id}/send`        | Send a vault G-code file to a printer.    |
+| `GET`  | `/api/v1/filament-profiles`         | List filament presets.                   |
+| `GET`  | `/api/v1/printer-profiles`          | List printer presets.                    |
+| `POST` | `/api/v1/backups`                   | Create a full backup (admin).            |
+| `GET`  | `/api/v1/admin/users`               | User administration (superuser).         |
+
+## Health check
+
+The one endpoint with no auth, and the first thing to curl when something's off.
+It breaks readiness out per component, so the response tells you *which* part is
+unhappy:
+
+```bash
+curl http://localhost:8000/api/v1/health
+```
+
+It reports service identity and the readiness of the database, storage, backup,
+and printer-provider subsystems.
 
 ## Upload example
 
-Upload a file with an API key. The ingest pipeline deduplicates by content hash
-and attaches the file to a model (creating one if needed).
+Upload a file with a Bearer token. The ingest pipeline hashes the content,
+deduplicates against what's already stored, and attaches the file to a model —
+creating one if this mesh is new:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/ingest \
-  -H "Authorization: Bearer <api-key>" \
+  -H "Authorization: Bearer <token>" \
   -F "file=@./Benchy.gcode"
 ```
 
-For automated G-code pushes after slicing, see the OrcaSlicer hook described in
-the [user guide](/PrintStash/guides/user-guide/#pushing-g-code-from-orcaslicer).
+Because dedup is by content hash, re-uploading the identical file is a no-op
+rather than a duplicate — handy when a hook fires twice.
+
+For automated pushes after every slice, use the OrcaSlicer hook described in the
+[user guide](/PrintStash/guides/user-guide/#skip-the-manual-upload-the-orcaslicer-hook).

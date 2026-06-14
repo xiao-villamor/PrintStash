@@ -33,10 +33,18 @@ export default defineConfig({
           ],
         },
         {
+          label: "Concepts",
+          items: [
+            { label: "Core concepts", slug: "concepts/core-concepts" },
+          ],
+        },
+        {
           label: "Guides",
           items: [
             { label: "User guide", slug: "guides/user-guide" },
             { label: "Printers & providers", slug: "guides/printers" },
+            { label: "Backup & restore", slug: "guides/backup-and-restore" },
+            { label: "Upgrading", slug: "guides/upgrading" },
           ],
         },
         {

@@ -1,10 +1,12 @@
 ---
 title: Architecture
-description: Stack, repository layout, request flow, and key design decisions.
+description: How the pieces fit — request flow, the ingestion pipeline, and the decisions behind them.
 ---
 
 PrintStash is a FastAPI backend and a Vite/React single-page app, packaged for
-Docker Compose.
+Docker Compose. The design is deliberately small and one-directional: it's easy
+to follow a request from the browser to the database and back, and the
+boundaries are enforced rather than merely suggested.
 
 ## Stack
 
@@ -13,14 +15,20 @@ Docker Compose.
 - **Storage:** SQLite (default) or Postgres; local disk (default) or S3/R2
 - **Printers:** Moonraker/Klipper (stable), Bambu LAN (beta)
 
+The frontend was migrated off Next.js to a Vite SPA in 0.4. The app was already
+~95% client-rendered behind auth, and under multi-user RBAC server rendering
+broke outright — the server had no access to the browser-held token. The
+production image now serves the static build via nginx, which proxies `/api/v1`
+and WebSockets to the API on the same origin.
+
 ## Repository layout
 
 ```
 backend/
   app/
-    api/        # FastAPI routers (HTTP layer)
+    api/        # FastAPI routers — the HTTP layer, and nothing more
     services/   # business logic — never imports from api/ or fastapi
-    db/         # models, session factory, migrations
+    db/         # models, session factory, migrations, query scopes
     core/       # config, cross-cutting concerns
     schemas/    # Pydantic/SQLModel read/write schemas
     main.py     # app entrypoint
@@ -30,46 +38,97 @@ frontend/
     components/ # UI components
     lib/        # api clients, query hooks, helpers
 docs/
-  wiki/         # this documentation site (Starlight)
+  wiki/         # this site (Astro Starlight)
+  adr/          # architecture decision records
 ```
 
 ## Request flow
 
-The backend keeps a strict one-directional dependency:
+The backend keeps a strict, one-way dependency chain:
 
 ```
 HTTP request → Router (api/) → Service (services/) → DB (db/) → response schema
 ```
 
-Routers handle HTTP concerns and call services. **Services never import from
-`api/` or `fastapi`** — they hold business logic and talk to the database
-through an injected session. This keeps services unit-testable and the HTTP
-layer thin.
+Routers handle HTTP concerns — parsing, status codes, auth — and then call a
+service. **Services never import from `api/` or `fastapi`.** They hold the
+business logic and reach the database through an *injected* session, which keeps
+them unit-testable without spinning up the web layer and keeps the HTTP layer
+thin. If you find yourself importing FastAPI inside a service, that's the smell
+that logic is leaking into the wrong layer.
+
+One module worth knowing by name: **model views** (`services/model_views`) is the
+single owner of every Model → response-schema composition — browse list, detail,
+export, trash list, vault stats. Routers never hand-map Model rows into
+responses; they ask model views. That's why the same model looks consistent
+across every view that shows it.
 
 On the frontend, data flows through a typed API layer (`lib/api/<domain>.ts`)
 wrapped by TanStack Query hooks (`lib/queries.ts`). Query keys mirror backend
-resource roots so a mutation can invalidate exactly the lists and details it
-affects, and shared reads (collections, tags, printers, stats) revalidate on
-window focus.
+resource roots, so a mutation can invalidate exactly the lists and details it
+touched. Shared reads — collections, tags, printers, stats — revalidate on window
+focus, which is how another user's edits surface in your tab without a manual
+refresh.
+
+## The ingestion pipeline
+
+Getting a file into the vault is the most invariant-heavy operation in the app,
+so it lives in exactly one place: `services/ingestion.persist_artifact`. The
+sequence is fixed:
+
+```
+assign version → move into canonical storage → write the File row →
+render thumbnail → extract metadata
+```
+
+Both background ingestion (web/API uploads) and revision attachment call this
+same function — nothing re-implements it. That's why uploading through the UI,
+the REST API, and the OrcaSlicer hook all behave identically, down to the
+recommended-revision rule: the first G-code on a model claims the recommended
+marker right here in the pipeline, so the
+[invariant](/PrintStash/concepts/core-concepts/#the-recommended-revision-invariant)
+can't be violated by a code path that forgot about it.
+
+## Live printer status: the PrinterHub
+
+Printer state doesn't go through the request/response path. A long-lived
+component, the **PrinterHub**, keeps each provider's status in memory, writes a
+coarse snapshot to the database, and fans live updates out to browsers over
+WebSocket. The hub is what makes the live status badge and reconnect indicator
+work, and it's a background task — which is exactly the kind of context the
+session-injection decision below was made for.
+
+## Soft-delete scopes
+
+Trash isn't a flag you check by hand. Live vs. trashed rows are expressed only
+through `app.db.scopes.live()` and `app.db.scopes.trashed()` predicates — no
+hand-written `deleted_at IS NULL` anywhere. If a trashed model ever shows up in a
+browse list, the bug is a query that forgot to apply the `live` scope, and the
+fix is a one-liner. See
+[Core concepts → Trash](/PrintStash/concepts/core-concepts/#trash-and-the-soft-delete-lifecycle).
 
 ## Design decisions (ADRs)
 
-Architectural decisions are recorded under `docs/adr/`.
+Architectural decisions are recorded under `docs/adr/`. Two are worth reading
+here because they shape day-to-day code.
 
 ### ADR-0001 — SessionFactory via ContextVar
 
-Database sessions are injected into background tasks (the ingestion pipeline,
-PrinterHub) through a `SessionFactory` protocol stored in a
-`contextvars.ContextVar`, rather than via module-level imports of the engine.
-This lets background work get a correct session per context and keeps tests from
-fighting a global singleton.
+Background tasks (the ingestion pipeline, the PrinterHub) need a database session,
+but they don't live inside a request, so they can't rely on FastAPI's dependency
+injection. Rather than importing a module-level engine — a global singleton that
+tests end up fighting — sessions are provided through a `SessionFactory` protocol
+stored in a `contextvars.ContextVar`. Each context gets the correct session, and
+tests can swap the factory cleanly.
 
 ### ADR-0002 — Frozen settings + runtime overlay
 
-The global `settings` singleton is split into a **frozen**, env-only `Settings`
-(never mutated after import) and a separate DB-backed `RuntimeOverlay`. A
-`ConfigResolver` provides the single read-path: `effective = overlay[key] ??
-frozen[key]`. Code keeps reading `settings.<key>`; mutations go through the
-overlay instead of rewriting frozen config. See
-[Configuration](/PrintStash/getting-started/configuration/) for the
-environment-variable surface.
+The global `settings` singleton is split in two: a **frozen**, env-only
+`Settings` that is never mutated after import, and a separate DB-backed
+`RuntimeOverlay`. A `ConfigResolver` provides the single read path —
+`effective = overlay[key] ?? frozen[key]`. Code keeps reading `settings.<key>` as
+before; runtime changes go through the overlay instead of rewriting frozen
+config. The payoff is that environment values are a stable, auditable source of
+truth on boot, while a small set of values can still be adjusted live from the
+admin UI. The environment surface is documented in
+[Configuration](/PrintStash/getting-started/configuration/).
