@@ -57,6 +57,19 @@ Then restart the backend and frontend development servers.
 - Always back up the SQLite file before running migrations.
 - Do not edit the SQLite file directly while the API container is running.
 
+## Troubleshooting Migrations
+
+- **`No module named alembic.__main__`** — run migrations with the `alembic`
+  console script (`docker compose run --rm api uv run alembic upgrade head`), not
+  `python -m alembic`. Don't hand-edit the Compose `command:` to call
+  `python -m alembic …`; the shipped command is already correct.
+- **`table … already exists` on upgrade** — the app was started once without
+  running migrations (e.g. the Compose `command:` was removed), so it built the
+  schema itself without recording a migration version. Your data is fine. Back up,
+  then run `docker compose run --rm api uv run alembic stamp head` once to record
+  the current version (it touches no data), after which `alembic upgrade head`
+  works normally.
+
 ## Rollback Expectations
 
 - Stop the upgraded containers before attempting rollback.
