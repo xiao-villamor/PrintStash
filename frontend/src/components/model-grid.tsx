@@ -28,6 +28,7 @@ import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/navigation";
 import { timeAgo } from "@/lib/format";
+import { rememberLastCollection } from "@/lib/last-collection";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 
 type SortKey = "date-desc" | "date-asc" | "name-asc" | "name-desc";
@@ -164,6 +165,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       hasLoadedModels.current = false;
       setSelectedCollection(next);
     }
+    // Remember the folder we're in so the logo / post-delete nav can return
+    // here instead of resetting to the root once the `?c=` param is dropped.
+    rememberLastCollection(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionParam]);
 

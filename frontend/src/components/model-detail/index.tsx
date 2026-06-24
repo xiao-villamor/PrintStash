@@ -168,7 +168,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     try {
       await deleteModel(model.id);
       toast.success("Model deleted");
-      router.push("/");
+      // Return to the folder the model lived in, not the root — deleting one
+      // model shouldn't kick the user out of the collection they were browsing.
+      router.push(
+        model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/",
+      );
       router.refresh();
     } catch (e) {
       toast.error(e);

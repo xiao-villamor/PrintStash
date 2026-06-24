@@ -19,6 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { lastVaultHref } from "@/lib/last-collection";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -107,6 +108,14 @@ export function TopBar() {
   const [profileOpen, setProfileOpen] = useState(false);
   const tasksRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+  // The logo returns to the model browser, restoring the last folder the user
+  // was in rather than always resetting to "All Models". Recomputed whenever the
+  // route changes (e.g. arriving on Settings) so it reflects the remembered
+  // collection at click time.
+  const [homeHref, setHomeHref] = useState("/");
+  useEffect(() => {
+    setHomeHref(lastVaultHref());
+  }, [pathname]);
 
   useEffect(() => {
     setTasks(listTasks());
@@ -132,7 +141,7 @@ export function TopBar() {
   return (
     <header className="h-16 bg-background border-b border-border flex items-center justify-between px-4 z-40 relative">
       {/* Logo */}
-      <Link href="/" className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
+      <Link href={homeHref} className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
         <div className="w-8 h-8 bg-blue-600 dark:bg-orange-600 rounded flex items-center justify-center flex-shrink-0">
           <BrandMark className="h-6 w-6 text-white" />
         </div>
