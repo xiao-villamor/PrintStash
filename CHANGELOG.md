@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.2
+
+### Added 
+
+  - **Folder are selectable** like files in select mode
+  - **Drag** `file on folder` or `folder on folder` to move 
+
+### Fixed
+
+  - Drag file in viewport will show "drag to upload" overlay
+
 ## 0.8.1
 
 ### Added
