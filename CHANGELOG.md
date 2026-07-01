@@ -4,14 +4,14 @@
 
 ### Added 
 
-  - **Folder are selectable** like files in select mode
-  - **Drag** `file on folder` or `folder on folder` to move
-  - **Quick create collection** with selected items
-  - **Drag to level up** Drag item in viewport show in right bottom corner a bubble to level abov for moveing file 
+  - **Folder are selectable** like files in select mode (@JrVolt)
+  - **Drag** `file on folder` or `folder on folder` to move (@JrVolt)
+  - **Quick create collection** with selected items (@JrVolt)
+  - **Drag to level up** Drag item in viewport show in right bottom corner a bubble to level abov for moveing file (@JrVolt)
 
 ### Fixed
 
-  - **Drag file in viewport** will show "drag to upload" overlay, not it won't
+  - **Drag file in viewport** will show "drag to upload" overlay, not it won't (@JrVolt)
 
 ## 0.8.1
 
