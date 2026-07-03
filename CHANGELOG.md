@@ -12,6 +12,7 @@
 ### Fixed
 
   - **Drag file in viewport** will show "drag to upload" overlay, not it won't (@JrVolt)
+  - **Scan 502 Error** Scan is divided in two half, scan file to populate library then mesh genreation
 
 ## 0.8.1
 
