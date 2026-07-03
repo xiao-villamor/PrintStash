@@ -238,14 +238,16 @@ def _detect_memory_limit_bytes() -> int | None:
     return min(limits) if limits else None
 
 
-def _ram_triangle_cap(suffix: str) -> Optional[int]:
-    """RAM-derived triangle ceiling for *suffix*, or None when RAM capping is off.
+def _render_job_memory_budget_bytes() -> Optional[int]:
+    """Bytes one concurrent render job may peak to, or None when RAM capping is
+    off / undetectable.
 
-    Turns the ``mesh_memory_budget_fraction`` of detected memory into a triangle
-    count using the format's measured per-triangle peak cost, so the same config
-    auto-skips a mesh on a 4 GB box that a 32 GB box renders fine. The budget is
-    divided by ``max_render_jobs`` so concurrent renders share the RAM ceiling
-    rather than each claiming the whole of it (#29)."""
+    Shared by the RAM-aware triangle estimate (``_ram_triangle_cap``, a
+    best-effort pre-load guess) and the isolated-subprocess RLIMIT_AS ceiling
+    (``mesh_worker``, a hard enforced ceiling) — both should agree on the same
+    number so the estimate and the actual enforced limit don't disagree about
+    what "too big" means.
+    """
     fraction = settings.mesh_memory_budget_fraction
     if fraction <= 0:
         return None
@@ -254,7 +256,20 @@ def _ram_triangle_cap(suffix: str) -> Optional[int]:
         _MEMORY_LIMIT_BYTES = _detect_memory_limit_bytes() or False
     if not _MEMORY_LIMIT_BYTES:
         return None
-    budget = _MEMORY_LIMIT_BYTES * fraction / _render_jobs_limit()
+    return int(_MEMORY_LIMIT_BYTES * fraction / _render_jobs_limit())
+
+
+def _ram_triangle_cap(suffix: str) -> Optional[int]:
+    """RAM-derived triangle ceiling for *suffix*, or None when RAM capping is off.
+
+    Turns the ``mesh_memory_budget_fraction`` of detected memory into a triangle
+    count using the format's measured per-triangle peak cost, so the same config
+    auto-skips a mesh on a 4 GB box that a 32 GB box renders fine. The budget is
+    divided by ``max_render_jobs`` so concurrent renders share the RAM ceiling
+    rather than each claiming the whole of it (#29)."""
+    budget = _render_job_memory_budget_bytes()
+    if budget is None:
+        return None
     per_tri = _PEAK_BYTES_PER_TRIANGLE.get(suffix, _DEFAULT_PEAK_BYTES_PER_TRIANGLE)
     return max(int(budget / per_tri), 1)
 
@@ -433,6 +448,14 @@ def analyze_mesh(
 
     Returns ``(geometry_dict, png_bytes_or_None)``. *report* receives progress
     labels as the stages run (see ingestion progress hints).
+
+    When ``settings.mesh_isolate_render`` is on (the default), the actual
+    load+render happens in a throwaway subprocess with a hard memory ceiling
+    (see ``mesh_worker``) so a file that slips past the pre-load triangle
+    estimate and blows its budget only takes down that subprocess — never the
+    API itself. On any isolated-render failure (OOM, crash, timeout) this
+    falls back exactly like an over-cap file: keep the cheap metadata, use the
+    embedded slicer preview if there is one.
     """
 
     def _report(label: str) -> None:
@@ -440,14 +463,72 @@ def analyze_mesh(
             report(label)
 
     _report("loading_mesh")
-    cap = settings.mesh_max_render_triangles
     # Too dense to load safely — skip it rather than risk an OOM kill (#24).
     # The file is still indexed; a large 3MF still gets its embedded preview below.
     over_cap = _exceeds_cap(path)
+    if over_cap:
+        geometry = _geometry_from_mesh(None)
+        thumb = None
+        if settings.use_embedded_3mf_preview_for_large_files:
+            thumb = extract_embedded_3mf_thumbnail(path)
+        return geometry, thumb
+
+    if settings.mesh_isolate_render:
+        _report("extracting_geometry")
+        _report("rendering_thumbnail")
+        from app.services import mesh_worker
+
+        with _render_semaphore():
+            geometry, thumb, status = mesh_worker.run_isolated_analyze(
+                path,
+                width=width,
+                height=height,
+                mem_limit_bytes=_render_job_memory_budget_bytes(),
+                timeout_s=settings.mesh_render_timeout_s,
+            )
+        if status != mesh_worker.STATUS_OK:
+            logger.warning(
+                "mesh_processing: isolated render for %s ended in %s; "
+                "indexing without a rendered thumbnail",
+                path.name,
+                status,
+            )
+            geometry = _geometry_from_mesh(None)
+            thumb = (
+                extract_embedded_3mf_thumbnail(path)
+                if settings.use_embedded_3mf_preview_for_large_files
+                else None
+            )
+        return geometry, thumb
+
+    return analyze_mesh_in_process(path, width=width, height=height, report=report)
+
+
+def analyze_mesh_in_process(
+    path: Path,
+    *,
+    width: int = 640,
+    height: int = 480,
+    report: Callable[[str], None] | None = None,
+) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
+    """The actual load-mesh-then-render body, run either directly (legacy /
+    ``mesh_isolate_render=False`` path) or inside the isolated subprocess
+    started by ``mesh_worker.run_isolated_analyze``. Callers wanting the
+    OOM-safe behaviour should call ``analyze_mesh`` instead — this is the
+    unguarded implementation it delegates to.
+    """
+
+    def _report(label: str) -> None:
+        if report is not None:
+            report(label)
+
+    cap = settings.mesh_max_render_triangles
+    over_cap = _exceeds_cap(path)
 
     # One concurrency gate around the whole load+render so a bulk upload's
-    # background tasks don't collectively OOM the box (#29). The body is cheap
-    # when the mesh is skipped (over cap), so holding the gate then is harmless.
+    # background tasks don't collectively OOM the box (#29). Only meaningful
+    # for the legacy in-process path — the isolated path already gates in
+    # `analyze_mesh` before spawning the subprocess.
     with _render_semaphore():
         mesh = None if over_cap else _load_mesh(path)
 
