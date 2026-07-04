@@ -28,14 +28,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import File, Metadata
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
-from app.services import mesh_processing, mesh_worker, thumbnail
+from app.services import mesh_worker, thumbnail
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
 

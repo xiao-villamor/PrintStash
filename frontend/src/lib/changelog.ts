@@ -21,6 +21,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.8.2",
+    date: "Jul 2026",
+    changes: [
+      "Folders are now selectable in select mode, just like files",
+      "Drag a file onto a folder, or a folder onto another folder, to move it",
+      "Quick-create a collection from a set of selected items",
+      "Dragging an item in the viewport shows a bubble in the bottom-right corner — drop it there to move the file up one folder level",
+      "Shared-volume scans now pick up documents too: if a document sits in a scanned folder, switching to the Documents tab while browsing that folder shows it",
+      "Fixed the drag-to-upload overlay appearing over the viewport when it shouldn't",
+      "Fixed a scan crash (502 error): scanning is now split into two phases — catalog files first to populate the library, then generate mesh thumbnails afterward — so a problematic file no longer takes down the whole scan",
+    ],
+  },
+  {
     version: "0.8.1",
     date: "Jun 2026",
     changes: [

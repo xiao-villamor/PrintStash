@@ -339,9 +339,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? 
-      next.delete(id) : 
-      next.add(id); 
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }, []);
@@ -349,14 +351,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const toggleCollectionSelect = useCallback((id: number) => {
     setSelectedCollectionIds((prev) => {
       const next = new Set(prev);
-      next.has(id) ? 
-      next.delete(id) : 
-      next.add(id);
-      return next; 
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
     });
   }, []);
   const toggleDocumentSelect = useCallback((id: number) => {
-    setSelectedDocumentIds((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setSelectedDocumentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const clearSelection = useCallback(() => {
