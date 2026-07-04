@@ -367,13 +367,16 @@ def _load_mesh(path: Path):
     return None
 
 
-def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
-    out: Dict[str, Optional[float]] = {
+def _geometry_from_mesh(
+    mesh, status: str = "ok"
+) -> Dict[str, Optional[float] | Optional[str]]:
+    out: Dict[str, Optional[float] | Optional[str]] = {
         "bbox_x_mm": None,
         "bbox_y_mm": None,
         "bbox_z_mm": None,
         "volume_mm3": None,
         "triangle_count": None,
+        "render_status": status,
     }
 
     if mesh is None:
@@ -467,7 +470,7 @@ def analyze_mesh(
     # The file is still indexed; a large 3MF still gets its embedded preview below.
     over_cap = _exceeds_cap(path)
     if over_cap:
-        geometry = _geometry_from_mesh(None)
+        geometry = _geometry_from_mesh(None, status="skipped_oversize")
         thumb = None
         if settings.use_embedded_3mf_preview_for_large_files:
             thumb = extract_embedded_3mf_thumbnail(path)
@@ -493,7 +496,7 @@ def analyze_mesh(
                 path.name,
                 status,
             )
-            geometry = _geometry_from_mesh(None)
+            geometry = _geometry_from_mesh(None, status=f"failed_{status}")
             thumb = (
                 extract_embedded_3mf_thumbnail(path)
                 if settings.use_embedded_3mf_preview_for_large_files
@@ -569,6 +572,18 @@ def analyze_mesh_in_process(
             del mesh
             _reclaim_memory()
     return geometry, thumb
+
+
+def pending_geometry() -> Dict[str, Optional[float] | Optional[str]]:
+    """Placeholder geometry dict for a file that's catalogued but not yet
+    rendered — external-library scans use this to create the File/Model row
+    immediately (browsable right away, no thumbnail) and defer the actual
+    load+render to a second pass (see mesh_retry.retry_failed_renders), so a
+    slow or risky mesh never blocks the rest of the folder from being indexed.
+    Shaped identically to `extract_geometry`'s return value so it's a drop-in
+    **kwargs for the `Metadata` constructor.
+    """
+    return _geometry_from_mesh(None, status="pending")
 
 
 def extract_geometry(path: Path) -> Dict[str, Optional[float]]:

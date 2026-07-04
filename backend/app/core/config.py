@@ -145,6 +145,13 @@ class Settings(BaseSettings):
     # trimesh's loader instead of crashing outright.
     mesh_render_timeout_s: float = 120.0
 
+    # After a library scan finishes, automatically retry every file whose
+    # render was skipped/failed during the scan (see mesh_retry), one at a
+    # time with a wider memory budget than the scan itself used. Off leaves
+    # those files indexed without a rendered thumbnail until a manual retry
+    # or the next scan.
+    mesh_retry_after_scan: bool = True
+
     # Optional static bearer token guarding the Prometheus /metrics endpoint.
     # Empty = open on the trusted internal network (see docs/known-limitations).
     metrics_token: str = ""
