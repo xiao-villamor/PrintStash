@@ -568,7 +568,9 @@ class TestPrinterConfig:
         ):
             mock_server_info.return_value = {"result": {"klippy_state": "ready"}}
             mock_printer_info.return_value = {"result": {"software_version": "v1"}}
-            mock_server_config.return_value = {"result": {"server": {"host": "0.0.0.0"}}}
+            mock_server_config.return_value = {
+                "result": {"server": {"host": "0.0.0.0"}}
+            }
             mock_printer_config.return_value = {
                 "result": {"status": {"configfile": {"config": {"printer": {}}}}}
             }
@@ -683,7 +685,9 @@ class TestPrinterJobs:
         self, client: TestClient, db_session: Session
     ):
         headers = _user_headers(db_session, "job-viewer")
-        viewer = db_session.exec(select(User).where(User.username == "job-viewer")).one()
+        viewer = db_session.exec(
+            select(User).where(User.username == "job-viewer")
+        ).one()
         allowed = Collection(name="Allowed", slug="allowed", path="allowed")
         denied = Collection(name="Denied", slug="denied", path="denied")
         db_session.add_all([allowed, denied])

@@ -37,8 +37,13 @@ def _as_utc(value: datetime) -> datetime:
 
 
 def create_access_token(
-    user_id: int, username: str, scope: str, expires_delta: timedelta | None = None,) -> str:
-    expire = datetime.now(timezone.utc) + (expires_delta
+    user_id: int,
+    username: str,
+    scope: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    expire = datetime.now(timezone.utc) + (
+        expires_delta
         if expires_delta is not None
         else timedelta(minutes=settings.access_token_expire_minutes)
     )

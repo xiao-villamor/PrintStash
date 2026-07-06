@@ -590,8 +590,8 @@ def _rasterise_triangles(
             nearer = z_u < flat_z[pix_u]
             target = pix_u[nearer]
             flat_z[target] = z_u[nearer]
-            flat_img[target] = np.clip(
-                base_color * col_u[nearer], 0, 255
-            ).astype(np.uint8)
+            flat_img[target] = np.clip(base_color * col_u[nearer], 0, 255).astype(
+                np.uint8
+            )
 
         start = end

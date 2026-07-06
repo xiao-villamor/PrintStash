@@ -63,8 +63,12 @@ def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenR
             detail="invalid_credentials",
         )
     scope = "admin" if user.is_superuser else "write"
-    expires_delta = timedelta(days=settings.remember_me_days) if body.remember_me else None
-    access_token = create_access_token(user.id, user.username, scope=scope, expires_delta=expires_delta)
+    expires_delta = (
+        timedelta(days=settings.remember_me_days) if body.remember_me else None
+    )
+    access_token = create_access_token(
+        user.id, user.username, scope=scope, expires_delta=expires_delta
+    )
     refresh_token = create_refresh_token(session, user_id=user.id)
     return TokenResponse(
         access_token=access_token,

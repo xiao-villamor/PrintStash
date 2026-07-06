@@ -33,7 +33,9 @@ def _user(session: Session, name: str, *, superuser: bool = False) -> User:
 
 def _headers(user: User) -> dict[str, str]:
     scope = "admin" if user.is_superuser else "write"
-    return {"Authorization": f"Bearer {create_access_token(user.id, user.username, scope=scope)}"}
+    return {
+        "Authorization": f"Bearer {create_access_token(user.id, user.username, scope=scope)}"
+    }
 
 
 def _grant(session: Session, user: User, cid: int, role: CollectionRole) -> None:
@@ -85,7 +87,9 @@ def test_markdown_doc_crud_and_image(
 
     # Soft-delete removes it from the list.
     assert client.delete(f"/api/v1/documents/{doc_id}", headers=h).status_code == 204
-    assert client.get(f"/api/v1/documents?collection={col.path}", headers=h).json() == []
+    assert (
+        client.get(f"/api/v1/documents?collection={col.path}", headers=h).json() == []
+    )
 
 
 def test_pdf_upload_serves_blob(
@@ -127,14 +131,22 @@ def test_document_rbac(db_session: Session, client: TestClient, tmp_path: Path) 
     ).json()["id"]
 
     # VIEW can read, can't edit or delete.
-    assert client.get(f"/api/v1/documents/{doc_id}", headers=_headers(viewer)).status_code == 200
+    assert (
+        client.get(f"/api/v1/documents/{doc_id}", headers=_headers(viewer)).status_code
+        == 200
+    )
     assert (
         client.put(
             f"/api/v1/documents/{doc_id}", json={"body": "y"}, headers=_headers(viewer)
         ).status_code
         == 403
     )
-    assert client.delete(f"/api/v1/documents/{doc_id}", headers=_headers(viewer)).status_code == 403
+    assert (
+        client.delete(
+            f"/api/v1/documents/{doc_id}", headers=_headers(viewer)
+        ).status_code
+        == 403
+    )
     # Creating in a collection without EDIT is denied.
     assert (
         client.post(

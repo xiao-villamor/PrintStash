@@ -59,6 +59,7 @@ _IMAGE_TYPES = {
 }
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 
+
 def _safe_filename(filename: str) -> str:
     base = filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     stem, dot, ext = base.rpartition(".")

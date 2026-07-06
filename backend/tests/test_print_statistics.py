@@ -90,9 +90,7 @@ def _job(
     db_session.commit()
 
 
-def test_print_stats_empty(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_print_stats_empty(client: TestClient, auth_headers: dict[str, str]) -> None:
     resp = client.get("/api/v1/models/stats/prints?period=30d", headers=auth_headers)
     assert resp.status_code == 200
     body = resp.json()
@@ -106,9 +104,7 @@ def test_print_stats_empty(
 def test_print_stats_aggregates_completed(
     client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
-    db_session.add(
-        FilamentProfile(name="PETG", material_type="PETG", cost_per_kg=20.0)
-    )
+    db_session.add(FilamentProfile(name="PETG", material_type="PETG", cost_per_kg=20.0))
     db_session.commit()
 
     collection = Collection(name="Functional", slug="functional", path="functional")
@@ -117,9 +113,7 @@ def test_print_stats_aggregates_completed(
     db_session.refresh(collection)
 
     model = _model(db_session, slug="bracket", collection_id=collection.id)
-    file_row = _file_with_material(
-        db_session, model, sha="a", material_type="PETG"
-    )
+    file_row = _file_with_material(db_session, model, sha="a", material_type="PETG")
     # Two completed PETG prints: 100g @ 20/kg => 2.0 each.
     _job(db_session, model, file_row, grams=100.0, duration_s=3600)
     _job(db_session, model, file_row, grams=100.0, duration_s=1800)

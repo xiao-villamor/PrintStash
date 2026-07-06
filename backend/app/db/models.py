@@ -647,9 +647,7 @@ class ExternalLibrary(SQLModel, table=True):
     # Cron expression driving scheduled scans. Empty string = manual only.
     scan_schedule: str = Field(default="0 * * * *", max_length=128)
     # Whether to watch the folder for real-time changes (see enum docstring).
-    watch_mode: ExternalLibraryWatchMode = Field(
-        default=ExternalLibraryWatchMode.AUTO
-    )
+    watch_mode: ExternalLibraryWatchMode = Field(default=ExternalLibraryWatchMode.AUTO)
     # Last-detected filesystem class ("local" / "network" / "unknown"). Display
     # only — explains why watching is or isn't active. Refreshed on each scan /
     # watcher (re)start.

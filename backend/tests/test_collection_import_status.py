@@ -28,8 +28,12 @@ def _run(groups: list[ResolvedGroup]) -> object:
 def test_all_members_failing_marks_job_failed() -> None:
     job = _run(
         [
-            ResolvedGroup(source_url="u1", title="A", error="makerworld_login_required"),
-            ResolvedGroup(source_url="u2", title="B", error="makerworld_login_required"),
+            ResolvedGroup(
+                source_url="u1", title="A", error="makerworld_login_required"
+            ),
+            ResolvedGroup(
+                source_url="u2", title="B", error="makerworld_login_required"
+            ),
         ]
     )
     assert job is not None
@@ -42,7 +46,9 @@ def test_all_members_failing_marks_job_failed() -> None:
 def test_mixed_member_errors_use_generic_code() -> None:
     job = _run(
         [
-            ResolvedGroup(source_url="u1", title="A", error="makerworld_login_required"),
+            ResolvedGroup(
+                source_url="u1", title="A", error="makerworld_login_required"
+            ),
             ResolvedGroup(source_url="u2", title="B", error="no_importable_files"),
         ]
     )

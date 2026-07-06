@@ -215,7 +215,9 @@ async def test_connection(
     # a connection before committing it with Save. Fall back to the stored
     # config (and preserve the saved key when the UI re-sends the mask/blank).
     config = runtime_config.spoolman_config(session)
-    base_url = (body.base_url if body and body.base_url else None) or config.get("base_url")
+    base_url = (body.base_url if body and body.base_url else None) or config.get(
+        "base_url"
+    )
     if not base_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

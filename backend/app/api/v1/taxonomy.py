@@ -362,9 +362,11 @@ async def upload_collection_image(
     col = get_or_404(session, Collection, collection_id, "collection_not_found")
     rbac.require_collection_role(session, current_user, col.id, CollectionRole.EDIT)
 
-    ext = ("." + (file.filename or "").rsplit(".", 1)[-1].lower()) if "." in (
-        file.filename or ""
-    ) else ""
+    ext = (
+        ("." + (file.filename or "").rsplit(".", 1)[-1].lower())
+        if "." in (file.filename or "")
+        else ""
+    )
     media_type = _IMAGE_TYPES.get(ext)
     if media_type is None:
         raise HTTPException(status_code=400, detail="unsupported_image_type")
@@ -389,9 +391,7 @@ async def upload_collection_image(
     # ponytail: orphaned image blobs aren't reclaimed when a readme drops the ref
     # or the collection is deleted. Add a sweep keyed on collection_image_key
     # prefixes if storage growth becomes a problem.
-    return CollectionImageUpload(
-        url=f"/api/v1/collections/{col.id}/images/{name}"
-    )
+    return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
 
 
 @router.get(

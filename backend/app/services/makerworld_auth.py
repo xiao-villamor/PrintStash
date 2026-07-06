@@ -159,7 +159,9 @@ async def begin_login(account: str, password: str) -> LoginResult:
 
     # Unrecognised shape with no token: treat as a (possibly emailed) code step
     # rather than a hard failure, so a new Bambu variant still completes.
-    logger.warning("bambu login returned no token and no known loginType: %r", login_type)
+    logger.warning(
+        "bambu login returned no token and no known loginType: %r", login_type
+    )
     login_token = _stash(_PendingLogin(account=account, tfa_key=None))
     return LoginResult(status="need_email_code", login_token=login_token)
 

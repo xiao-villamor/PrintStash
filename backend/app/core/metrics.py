@@ -52,7 +52,9 @@ app_info = Info(
 )
 
 
-def observe_request(method: str, path: str, status: int, duration_seconds: float) -> None:
+def observe_request(
+    method: str, path: str, status: int, duration_seconds: float
+) -> None:
     """Record one completed HTTP request. Best-effort: never raises to callers."""
     try:
         http_request_duration.labels(

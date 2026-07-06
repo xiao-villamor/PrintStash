@@ -35,7 +35,7 @@ from app.core.logging import get_logger
 from app.db.models import File, Metadata
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
-from app.services import mesh_worker, thumbnail
+from app.services import mesh_processing, mesh_worker, thumbnail
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
 
@@ -87,9 +87,7 @@ def _boosted_memory_budget_bytes() -> Optional[int]:
     detected RAM, undivided by ``max_render_jobs`` — safe because retries run
     one at a time with nothing else competing, unlike a scan or a bulk upload.
     """
-    from app.services.mesh_processing import _detect_memory_limit_bytes
-
-    limit = _detect_memory_limit_bytes()
+    limit = mesh_processing._detect_memory_limit_bytes()
     if not limit:
         return None
     fraction = max(settings.mesh_memory_budget_fraction, 0.0) or 0.5
@@ -166,13 +164,35 @@ def retry_failed_renders(
                 summary.still_failing.append(file_row.original_filename)
                 continue
 
-            geometry, thumb, status = mesh_worker.run_isolated_analyze(
-                path,
-                width=640,
-                height=480,
-                mem_limit_bytes=mem_limit,
-                timeout_s=timeout_s,
-            )
+            if settings.mesh_isolate_render:
+                geometry, thumb, status = mesh_worker.run_isolated_analyze(
+                    path,
+                    width=640,
+                    height=480,
+                    mem_limit_bytes=mem_limit,
+                    timeout_s=timeout_s,
+                )
+            else:
+                # Isolation disabled (mesh_isolate_render=False) — render
+                # directly in this process instead of spawning a subprocess.
+                # Slower to recover from a genuinely bad file (an OOM here
+                # takes this process down with it), but needed for callers
+                # that rely on in-process state — e.g. tests overriding
+                # config via the in-memory `_overlay`, which a spawned
+                # subprocess would never see (it re-imports a clean config).
+                try:
+                    geometry, thumb = mesh_processing.analyze_mesh_in_process(
+                        path, width=640, height=480
+                    )
+                    status = mesh_worker.STATUS_OK
+                except Exception as exc:  # noqa: BLE001 — still one file among many
+                    logger.warning(
+                        "mesh_retry: in-process render for %s raised %s: %s",
+                        file_row.original_filename,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    geometry, thumb, status = None, None, mesh_worker.STATUS_ERROR
 
             if status != mesh_worker.STATUS_OK:
                 logger.warning(

@@ -195,6 +195,7 @@ def _estimate_triangle_count(path: Path) -> Optional[int]:
         return None
     return None
 
+
 # Measured peak RSS per triangle for a full load + thumbnail render, rounded up
 # for safety margin. 3MF's XML loader plus the crease-aware rasteriser cost far
 # more than a raw STL of the same geometry (~4.5x), so it gets its own factor.
@@ -223,7 +224,9 @@ def _detect_memory_limit_bytes() -> int | None:
     except (OSError, ValueError):
         pass
     try:  # cgroup v1
-        v1 = int(Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip())
+        v1 = int(
+            Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip()
+        )
         if 0 < v1 < (1 << 62):  # v1 uses a huge sentinel for "unlimited"
             limits.append(v1)
     except (OSError, ValueError):

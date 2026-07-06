@@ -214,7 +214,9 @@ def create_backup() -> BackupMeta:
                     # A blob that vanished between stat and stream stays listed
                     # in the manifest but is simply absent from the archive;
                     # restore iterates real members, so it degrades cleanly.
-                    logger.warning("backup: skipped key %s", entry["key"], exc_info=True)
+                    logger.warning(
+                        "backup: skipped key %s", entry["key"], exc_info=True
+                    )
                     continue
 
     final_size = archive_path.stat().st_size
@@ -371,9 +373,7 @@ def _read_manifest(archive_path: Path) -> BackupMeta | None:
                         # ``.stem`` only strips ``.gz`` from ``*.tar.gz`` and
                         # would leave a ``.tar`` suffix on the id, so the id here
                         # would not match the one ``create_backup`` returns.
-                        id=archive_path.name.removesuffix(".tar.gz").rsplit("-", 1)[
-                            -1
-                        ],
+                        id=archive_path.name.removesuffix(".tar.gz").rsplit("-", 1)[-1],
                         created_at=manifest["created_at"],
                         size_bytes=archive_path.stat().st_size,
                         storage_backend=manifest.get("storage_backend", "local"),
@@ -516,7 +516,9 @@ def restore_backup(backup_id: str) -> dict:
     with tarfile.open(archive_path, mode="r:gz") as tar:
         arc_to_key = _restore_key_map(tar)
 
-        db_member = tar.extractfile("db.sqlite3") if _has_member(tar, "db.sqlite3") else None
+        db_member = (
+            tar.extractfile("db.sqlite3") if _has_member(tar, "db.sqlite3") else None
+        )
         if db_member is not None:
             _restore_database(db_member.read())
 

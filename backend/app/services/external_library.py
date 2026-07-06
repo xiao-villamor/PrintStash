@@ -200,7 +200,9 @@ def _strategy_for(file_type: FileType):
     return _mesh_strategy(file_type)
 
 
-def _walk(root: Path) -> tuple[dict[str, tuple[int, float]], dict[str, tuple[int, float]]]:
+def _walk(
+    root: Path,
+) -> tuple[dict[str, tuple[int, float]], dict[str, tuple[int, float]]]:
     """Map every supported file under *root* to (size_bytes, mtime).
 
     Returns ``(models, documents)`` — model files (STL/3MF/G-code/etc, see
@@ -354,7 +356,9 @@ def _reindex_changed(
     backend = get_backend()
     assert file_row.id is not None
     if thumb_bytes:
-        backend.write_bytes(thumbnail.to_webp(thumb_bytes), backend.thumbnail_key(file_row.id))
+        backend.write_bytes(
+            thumbnail.to_webp(thumb_bytes), backend.thumbnail_key(file_row.id)
+        )
         backend.delete(backend.legacy_thumbnail_key(file_row.id))
     elif file_type != FileType.GCODE:
         # Deferred mesh re-render: the old thumbnail no longer matches the
@@ -638,7 +642,9 @@ def scan_library(
                 existing_doc = docs_by_path.get(path)
                 try:
                     if existing_doc is None:
-                        _index_external_document(session, library, Path(path), size, mtime)
+                        _index_external_document(
+                            session, library, Path(path), size, mtime
+                        )
                         summary.added += 1
                     elif (
                         existing_doc.size_bytes == size
@@ -814,7 +820,9 @@ def libraries_due_for_scan(session: Session) -> list[int]:
     """
     now = utcnow()
     due: list[int] = []
-    for lib in session.exec(select(ExternalLibrary).where(ExternalLibrary.enabled == True)).all():  # noqa: E712
+    for lib in session.exec(
+        select(ExternalLibrary).where(ExternalLibrary.enabled == True)  # noqa: E712
+    ).all():
         if lib.id is None:
             continue
         if lib.last_scan_status == ExternalLibraryScanStatus.RUNNING:

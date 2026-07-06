@@ -119,7 +119,9 @@ def classify_collection(url: str) -> Optional[str]:
     host = _host(url)
     if host in _PRINTABLES_HOSTS and _collection_id(url):
         return "printables"
-    if (host == "makerworld.com" or host.endswith(".makerworld.com")) and _collection_id(url):
+    if (
+        host == "makerworld.com" or host.endswith(".makerworld.com")
+    ) and _collection_id(url):
         return "makerworld"
     return None
 
@@ -134,7 +136,9 @@ def classify_page(url: str) -> Optional[str]:
     host = _host(url)
     if host in _PRINTABLES_HOSTS and _printables_id(url):
         return "printables"
-    if (host == "makerworld.com" or host.endswith(".makerworld.com")) and _makerworld_id(url):
+    if (
+        host == "makerworld.com" or host.endswith(".makerworld.com")
+    ) and _makerworld_id(url):
         return "makerworld"
     if host in _THINGIVERSE_HOSTS and _thingiverse_id(url):
         return "thingiverse"
@@ -259,7 +263,11 @@ def _pick_printables_pack(packs: Any) -> Optional[str]:
     if not isinstance(packs, list):
         return None
     for pack in packs:
-        if isinstance(pack, dict) and pack.get("fileType") == "MODEL_FILES" and pack.get("id"):
+        if (
+            isinstance(pack, dict)
+            and pack.get("fileType") == "MODEL_FILES"
+            and pack.get("id")
+        ):
             return str(pack["id"])
     for pack in packs:
         if isinstance(pack, dict) and pack.get("id"):
@@ -291,7 +299,12 @@ async def _resolve_printables(url: str) -> Optional[str]:
     if pack_id:
         payload = await _printables_graphql(
             _PRINTABLES_LINK_MUTATION,
-            {"printId": print_id, "source": "model_detail", "fileType": "pack", "id": pack_id},
+            {
+                "printId": print_id,
+                "source": "model_detail",
+                "fileType": "pack",
+                "id": pack_id,
+            },
             url,
         )
         link = _printables_link_from_output(payload)
@@ -395,7 +408,9 @@ async def _printables_download_links(url: str, files: list[ModelFile]) -> list[s
     grouped: dict[str, list[str]] = {}
     for f in files:
         grouped.setdefault(f.file_type, []).append(f.file_id)
-    files_arg = [{"fileType": file_type, "ids": ids} for file_type, ids in grouped.items()]
+    files_arg = [
+        {"fileType": file_type, "ids": ids} for file_type, ids in grouped.items()
+    ]
     payload = await _printables_graphql(
         _PRINTABLES_LINK_MUTATION,
         {"printId": print_id, "source": "model_detail", "files": files_arg},
@@ -421,11 +436,15 @@ query ($collectionId: ID!, $limit: Int, $cursor: String, $ordering: CollectionPr
 """
 
 
-async def _resolve_printables_collection(url: str) -> Optional[tuple[str, list[CollectionMember]]]:
+async def _resolve_printables_collection(
+    url: str,
+) -> Optional[tuple[str, list[CollectionMember]]]:
     collection_id = _collection_id(url)
     if not collection_id:
         return None
-    meta = await _printables_graphql(_PRINTABLES_COLLECTION_QUERY, {"id": collection_id}, url)
+    meta = await _printables_graphql(
+        _PRINTABLES_COLLECTION_QUERY, {"id": collection_id}, url
+    )
     collection = (meta or {}).get("data", {}).get("collection") or {}
     title = str(collection.get("name") or f"Collection {collection_id}")
 
@@ -497,7 +516,9 @@ async def _makerworld_fetch_page(url: str, cookie: Optional[str]) -> Optional[st
     }
     if cookie:
         headers["Cookie"] = cookie
-    resp = await client.get(url, headers=headers, follow_redirects=True, timeout=_TIMEOUT)
+    resp = await client.get(
+        url, headers=headers, follow_redirects=True, timeout=_TIMEOUT
+    )
     html = resp.text if resp.status_code == 200 else None
 
     if html is not None and not _looks_like_challenge(html):
@@ -612,13 +633,22 @@ def _makerworld_collection_members(next_data: Any) -> list[CollectionMember]:
 
     # MakerWorld embeds members under e.g. ``favoriteDesigns.hits`` / ``designs``.
     _MEMBER_LIST_HINTS = (
-        "design", "model", "content", "hit", "item", "list", "record", "favorite",
+        "design",
+        "model",
+        "content",
+        "hit",
+        "item",
+        "list",
+        "record",
+        "favorite",
     )
 
     def walk(node: Any) -> None:
         if isinstance(node, dict):
             for key, value in node.items():
-                if isinstance(value, list) and any(h in key.lower() for h in _MEMBER_LIST_HINTS):
+                if isinstance(value, list) and any(
+                    h in key.lower() for h in _MEMBER_LIST_HINTS
+                ):
                     for entry in value:
                         consider(entry)
                 walk(value)

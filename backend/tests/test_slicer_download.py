@@ -16,7 +16,11 @@ from sqlmodel import Session
 from app.db.models import FileType
 from app.services import auth
 
-from tests.test_ingest_api import _assert_file_created, _completed_job, _configure_storage
+from tests.test_ingest_api import (
+    _assert_file_created,
+    _completed_job,
+    _configure_storage,
+)
 
 
 def _ingest_gcode(client: TestClient, auth_headers: dict[str, str]) -> int:

@@ -178,7 +178,11 @@ def render_discord(context: Dict[str, Any], config: Dict[str, Any]) -> OutboundR
     url = _require(config, "url", "discord")
     et = _event_type(context)
     fields = [
-        {"name": part.split(": ", 1)[0], "value": part.split(": ", 1)[1], "inline": True}
+        {
+            "name": part.split(": ", 1)[0],
+            "value": part.split(": ", 1)[1],
+            "inline": True,
+        }
         for part in summary_lines(context)
         if ": " in part
     ]
@@ -274,10 +278,14 @@ def render_ntfy(context: Dict[str, Any], config: Dict[str, Any]) -> OutboundRequ
         except UnicodeEncodeError:
             pass
     body = "\n".join(summary_lines(context)) or event_label(context)
-    return OutboundRequest(method="POST", url=f"{server}/{topic}", headers=headers, data=body)
+    return OutboundRequest(
+        method="POST", url=f"{server}/{topic}", headers=headers, data=body
+    )
 
 
-RENDERERS: Dict[NotificationTarget, Callable[[Dict[str, Any], Dict[str, Any]], OutboundRequest]] = {
+RENDERERS: Dict[
+    NotificationTarget, Callable[[Dict[str, Any], Dict[str, Any]], OutboundRequest]
+] = {
     NotificationTarget.WEBHOOK: render_webhook,
     NotificationTarget.DISCORD: render_discord,
     NotificationTarget.TELEGRAM: render_telegram,
