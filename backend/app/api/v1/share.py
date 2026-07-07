@@ -66,9 +66,7 @@ def _rate_limit(request: Request) -> None:
 # Public router — unauthenticated, GET only.
 # ---------------------------------------------------------------------------
 
-router = APIRouter(
-    prefix="/share", tags=["share"], dependencies=[Depends(_rate_limit)]
-)
+router = APIRouter(prefix="/share", tags=["share"], dependencies=[Depends(_rate_limit)])
 
 
 @router.get("/{token}", summary="Public read-only view of a shared model")

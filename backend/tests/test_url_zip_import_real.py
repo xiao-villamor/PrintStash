@@ -229,7 +229,10 @@ async def test_download_to_staging_follows_redirect(
     _configure_storage(tmp_path)
     base, routes = http_server
     routes["/start"] = {"status": 302, "headers": {"Location": "/final.stl"}}
-    routes["/final.stl"] = {"headers": {"Content-Type": "model/stl"}, "body": b"solid x\nendsolid x\n"}
+    routes["/final.stl"] = {
+        "headers": {"Content-Type": "model/stl"},
+        "body": b"solid x\nendsolid x\n",
+    }
 
     with patch.object(importer, "_is_public_ip", return_value=True):
         staged, filename = await importer.download_to_staging(f"{base}/start")
@@ -349,9 +352,7 @@ def test_import_real_benchy_from_printables_url_records_source(
     # The paste-able model-page URL is preserved verbatim as the source.
     assert model.source_url == PRINTABLES_URL
 
-    file_row = db_session.exec(
-        select(File).where(File.model_id == model.id)
-    ).first()
+    file_row = db_session.exec(select(File).where(File.model_id == model.id)).first()
     assert file_row is not None and file_row.file_type == FileType.STL
     assert file_row.size_bytes == BENCHY_STL.stat().st_size
     # The staged copy was moved into the vault; the testdata original is intact.
@@ -451,7 +452,9 @@ def test_import_real_benchy_zip_from_makerworld_url(
     assert payload["result"]["imported"] == 2
 
     # Both files landed as their own models, each carrying the MakerWorld URL.
-    models = db_session.exec(select(Model).where(Model.source_url == MAKERWORLD_URL)).all()
+    models = db_session.exec(
+        select(Model).where(Model.source_url == MAKERWORLD_URL)
+    ).all()
     assert len(models) == 2
     assert {FileType.STL, FileType.GCODE} == {
         db_session.exec(select(File).where(File.model_id == m.id)).first().file_type
@@ -567,9 +570,7 @@ def test_import_zip_mirrors_folder_structure_into_collections(
         ).first()
         assert coll is not None, f"missing collection {path!r}"
         return list(
-            db_session.exec(
-                select(Model).where(Model.collection_id == coll.id)
-            ).all()
+            db_session.exec(select(Model).where(Model.collection_id == coll.id)).all()
         )
 
     # The root-level file lands directly in the archive's auto collection...
@@ -632,7 +633,9 @@ def test_import_url_unresolvable_page_reports_host_error(
         patch("app.api.v1.ingest.importer.validate_public_url", return_value=None),
         patch(
             "app.api.v1.ingest.import_resolvers.resolve_page_url",
-            new=AsyncMock(side_effect=importer.ImportError_("printables_resolve_failed")),
+            new=AsyncMock(
+                side_effect=importer.ImportError_("printables_resolve_failed")
+            ),
         ),
         patch(
             "app.api.v1.ingest.import_resolvers.list_model_files",
@@ -758,10 +761,13 @@ def test_collection_review_then_select_imports_chosen_member(
             page_url="https://www.printables.com/model/2-b", title="B", source_id="2"
         ),
     ]
-    with patch(
-        "app.api.v1.ingest.import_resolvers.resolve_collection_url",
-        new=AsyncMock(return_value=("Cool Stuff", members)),
-    ), patch("app.api.v1.ingest.importer.validate_public_url", return_value=None):
+    with (
+        patch(
+            "app.api.v1.ingest.import_resolvers.resolve_collection_url",
+            new=AsyncMock(return_value=("Cool Stuff", members)),
+        ),
+        patch("app.api.v1.ingest.importer.validate_public_url", return_value=None),
+    ):
         manifest = _job(
             client,
             client.post(
@@ -817,10 +823,13 @@ def test_model_page_files_manifest_then_select(
         import_resolvers.ModelFile(file_id="11", name="b.stl", file_type="stl"),
         import_resolvers.ModelFile(file_id="12", name="c.stl", file_type="stl"),
     ]
-    with patch(
-        "app.api.v1.ingest.import_resolvers.list_model_files",
-        new=AsyncMock(return_value=("Springy Cat", files)),
-    ), patch("app.api.v1.ingest.importer.validate_public_url", return_value=None):
+    with (
+        patch(
+            "app.api.v1.ingest.import_resolvers.list_model_files",
+            new=AsyncMock(return_value=("Springy Cat", files)),
+        ),
+        patch("app.api.v1.ingest.importer.validate_public_url", return_value=None),
+    ):
         manifest = _job(
             client,
             client.post(

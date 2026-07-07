@@ -128,6 +128,30 @@ class Settings(BaseSettings):
     # a 3MF still gets its embedded slicer preview. 0 disables the size guard.
     mesh_max_load_mb: int = 200
 
+    # Run each mesh load+render in a throwaway subprocess with a hard RLIMIT_AS
+    # ceiling (derived the same way as the RAM-aware triangle cap) instead of
+    # in-process. The triangle-count estimate above is a *guess* — an unknown
+    # format, a corrupted header, or a dense lattice/gyroid can slip past it and
+    # still blow the budget once actually loaded. In-process, that OOM-kills
+    # uvicorn itself and takes the whole API down mid-scan; isolated, it raises
+    # MemoryError inside the subprocess, which is caught and treated exactly
+    # like an over-cap file (skip the mesh, fall back to the embedded preview).
+    # Off restores the old in-process behaviour (faster, but one bad file can
+    # still crash the API).
+    mesh_isolate_render: bool = True
+
+    # Wall-clock ceiling on one isolated load+render job. Guards against a
+    # pathological file that hangs (rather than growing memory) inside
+    # trimesh's loader instead of crashing outright.
+    mesh_render_timeout_s: float = 120.0
+
+    # After a library scan finishes, automatically retry every file whose
+    # render was skipped/failed during the scan (see mesh_retry), one at a
+    # time with a wider memory budget than the scan itself used. Off leaves
+    # those files indexed without a rendered thumbnail until a manual retry
+    # or the next scan.
+    mesh_retry_after_scan: bool = True
+
     # Optional static bearer token guarding the Prometheus /metrics endpoint.
     # Empty = open on the trusted internal network (see docs/known-limitations).
     metrics_token: str = ""
@@ -164,7 +188,7 @@ class Settings(BaseSettings):
     backup_s3_secret_key: str = ""
 
     app_name: str = "PrintStash"
-    app_version: str = "0.8.1"
+    app_version: str = "0.8.2"
 
     @property
     def incoming_dir(self) -> Path:

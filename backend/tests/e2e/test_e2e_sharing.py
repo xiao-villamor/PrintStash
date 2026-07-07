@@ -22,7 +22,9 @@ def _seed_model(session) -> int:
 
 
 @pytest.mark.asyncio
-async def test_share_link_grants_then_revokes_anonymous_access(api, superuser_headers, e2e_db):
+async def test_share_link_grants_then_revokes_anonymous_access(
+    api, superuser_headers, e2e_db
+):
     model_id = _seed_model(e2e_db)
 
     created = await api.post(
@@ -51,6 +53,8 @@ async def test_share_link_grants_then_revokes_anonymous_access(api, superuser_he
 
     # Revoked links drop out of the owner's management list (the row is kept so
     # the token above stays permanently dead).
-    listed = await api.get(f"/api/v1/models/{model_id}/shares", headers=superuser_headers)
+    listed = await api.get(
+        f"/api/v1/models/{model_id}/shares", headers=superuser_headers
+    )
     assert listed.status_code == 200, listed.text
     assert all(link["id"] != share_id for link in listed.json())

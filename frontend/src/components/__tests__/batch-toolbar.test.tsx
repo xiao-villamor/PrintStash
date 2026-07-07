@@ -25,13 +25,16 @@ function tag(over: Partial<TagRead> = {}): TagRead {
 
 function setup(overrides: Partial<React.ComponentProps<typeof BatchToolbar>> = {}) {
   const props = {
-    count: 2,
+    modelCount: 2,
+    collectionCount: 0,
+    documentCount: 0,
     collections: [collection()],
     tags: [tag()],
     busy: false,
     onMove: vi.fn(),
     onApplyTags: vi.fn(),
     onDelete: vi.fn(),
+    onGroup: vi.fn(),
     onClear: vi.fn(),
     ...overrides,
   };
@@ -41,12 +44,12 @@ function setup(overrides: Partial<React.ComponentProps<typeof BatchToolbar>> = {
 
 describe("BatchToolbar", () => {
   it("renders nothing when nothing is selected", () => {
-    setup({ count: 0 });
+    setup({ modelCount: 0, collectionCount: 0, documentCount: 0 });
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });
 
   it("shows the selected count", () => {
-    setup({ count: 3 });
+    setup({ modelCount: 3 });
     expect(screen.getByText("3 selected")).toBeInTheDocument();
   });
 
@@ -86,7 +89,7 @@ describe("BatchToolbar", () => {
 
   it("confirms before deleting", async () => {
     const user = userEvent.setup();
-    const props = setup({ count: 2 });
+    const props = setup({ modelCount: 2 });
 
     await user.click(screen.getByRole("button", { name: /delete/i }));
     // Confirm inside the dialog (the toolbar also has a "Delete" button).

@@ -128,9 +128,10 @@ def test_list_items_excludes_external_sentinel(
     # an absence.
     from sqlmodel import select
 
-    assert db_session.exec(
-        select(Model).where(Model.hash == SENTINEL_MODEL_HASH)
-    ).first() is not None
+    assert (
+        db_session.exec(select(Model).where(Model.hash == SENTINEL_MODEL_HASH)).first()
+        is not None
+    )
 
 
 def test_list_trashed_pagination_is_complete_and_unique(

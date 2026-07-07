@@ -67,10 +67,15 @@ def test_classify_page_handles_garbage_input() -> None:
 
 
 def test_id_extractors() -> None:
-    assert r._printables_id("https://www.printables.com/model/3161-3d-benchy/files") == "3161"
+    assert (
+        r._printables_id("https://www.printables.com/model/3161-3d-benchy/files")
+        == "3161"
+    )
     assert r._makerworld_id("https://makerworld.com/en/models/1123776-x") == "1123776"
     assert r._thingiverse_id("https://www.thingiverse.com/thing:763622") == "763622"
-    assert r._thingiverse_id("https://www.thingiverse.com/things/763622/files") == "763622"
+    assert (
+        r._thingiverse_id("https://www.thingiverse.com/things/763622/files") == "763622"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -87,7 +92,10 @@ def test_first_download_url_falls_back_to_model_like_string() -> None:
 
 
 def test_first_download_url_none_when_nothing_matches() -> None:
-    assert r._first_download_url({"meta": "hello", "n": 3, "page": "https://x.test/about"}) is None
+    assert (
+        r._first_download_url({"meta": "hello", "n": 3, "page": "https://x.test/about"})
+        is None
+    )
 
 
 def test_pick_printables_pack_prefers_model_files() -> None:
@@ -100,7 +108,10 @@ def test_pick_printables_pack_prefers_model_files() -> None:
 
 def test_first_download_url_keyed_link_beats_deep_fallback() -> None:
     # A keyed url anywhere wins over a model-looking bare string.
-    data = {"files": ["https://cdn.test/a.stl"], "meta": {"url": "https://cdn.test/real.zip"}}
+    data = {
+        "files": ["https://cdn.test/a.stl"],
+        "meta": {"url": "https://cdn.test/real.zip"},
+    }
     assert r._first_download_url(data) == "https://cdn.test/real.zip"
 
 
@@ -143,17 +154,36 @@ async def test_resolve_unknown_host_returns_none() -> None:
 @pytest.mark.asyncio
 async def test_resolve_thingiverse_builds_zip_url() -> None:
     url = "https://www.thingiverse.com/thing:763622/files"
-    assert await r.resolve_page_url(url) == "https://www.thingiverse.com/thing:763622/zip"
+    assert (
+        await r.resolve_page_url(url) == "https://www.thingiverse.com/thing:763622/zip"
+    )
 
 
 @pytest.mark.asyncio
 async def test_resolve_printables_uses_pack_link() -> None:
-    meta = {"data": {"print": {"id": "3161", "downloadPacks": [{"id": "42", "fileType": "MODEL_FILES"}], "stls": []}}}
-    link_payload = {"data": {"getDownloadLink": {"ok": True, "output": {"link": "https://files.printables.test/pack.zip"}}}}
+    meta = {
+        "data": {
+            "print": {
+                "id": "3161",
+                "downloadPacks": [{"id": "42", "fileType": "MODEL_FILES"}],
+                "stls": [],
+            }
+        }
+    }
+    link_payload = {
+        "data": {
+            "getDownloadLink": {
+                "ok": True,
+                "output": {"link": "https://files.printables.test/pack.zip"},
+            }
+        }
+    }
 
     graphql = AsyncMock(side_effect=[meta, link_payload])
     with patch.object(r, "_printables_graphql", graphql):
-        out = await r.resolve_page_url("https://www.printables.com/model/3161-3d-benchy")
+        out = await r.resolve_page_url(
+            "https://www.printables.com/model/3161-3d-benchy"
+        )
 
     assert out == "https://files.printables.test/pack.zip"
     assert graphql.await_count == 2  # meta query, then link mutation
@@ -170,7 +200,9 @@ async def test_resolve_printables_unresolved_raises_host_error() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_printables_network_error_becomes_host_error() -> None:
-    with patch.object(r, "_printables_graphql", AsyncMock(side_effect=RuntimeError("boom"))):
+    with patch.object(
+        r, "_printables_graphql", AsyncMock(side_effect=RuntimeError("boom"))
+    ):
         with pytest.raises(ImportError_) as exc:
             await r.resolve_page_url("https://www.printables.com/model/3161-3d-benchy")
     assert str(exc.value) == "printables_resolve_failed"
@@ -228,7 +260,10 @@ def test_looks_like_challenge_detects_interstitial() -> None:
 
 def test_looks_like_challenge_false_when_next_data_present() -> None:
     # A page that ships __NEXT_DATA__ is real content, even if it name-drops a marker.
-    assert r._looks_like_challenge('<script id="__NEXT_DATA__">{}</script> just a moment') is False
+    assert (
+        r._looks_like_challenge('<script id="__NEXT_DATA__">{}</script> just a moment')
+        is False
+    )
 
 
 def test_looks_like_challenge_false_for_plain_page() -> None:
@@ -249,7 +284,9 @@ async def test_makerworld_fetch_uses_httpx_when_not_challenged() -> None:
         patch.object(r, "get_http_client", return_value=_fake_http_client(200, good)),
         patch.object(r.browser_fetch, "fetch_rendered_html", browser),
     ):
-        out = await r._makerworld_fetch_page("https://makerworld.com/en/models/1-x", None)
+        out = await r._makerworld_fetch_page(
+            "https://makerworld.com/en/models/1-x", None
+        )
     assert out == good
     browser.assert_not_awaited()
 
@@ -260,10 +297,14 @@ async def test_makerworld_fetch_falls_back_to_browser_on_challenge() -> None:
     rendered = '<script id="__NEXT_DATA__">{"ok":1}</script>'
     browser = AsyncMock(return_value=rendered)
     with (
-        patch.object(r, "get_http_client", return_value=_fake_http_client(200, challenge)),
+        patch.object(
+            r, "get_http_client", return_value=_fake_http_client(200, challenge)
+        ),
         patch.object(r.browser_fetch, "fetch_rendered_html", browser),
     ):
-        out = await r._makerworld_fetch_page("https://makerworld.com/en/models/1-x", None)
+        out = await r._makerworld_fetch_page(
+            "https://makerworld.com/en/models/1-x", None
+        )
     assert out == rendered
     browser.assert_awaited_once()
 
@@ -276,7 +317,9 @@ async def test_makerworld_fetch_falls_back_to_browser_on_non_200() -> None:
         patch.object(r, "get_http_client", return_value=_fake_http_client(403, "")),
         patch.object(r.browser_fetch, "fetch_rendered_html", browser),
     ):
-        out = await r._makerworld_fetch_page("https://makerworld.com/en/models/1-x", None)
+        out = await r._makerworld_fetch_page(
+            "https://makerworld.com/en/models/1-x", None
+        )
     assert out == rendered
     browser.assert_awaited_once()
 
@@ -287,9 +330,15 @@ async def test_makerworld_fetch_falls_back_to_browser_on_non_200() -> None:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("https://www.printables.com/@JonasHansen_1131321/collections/3525050", "printables"),
+        (
+            "https://www.printables.com/@JonasHansen_1131321/collections/3525050",
+            "printables",
+        ),
         ("https://printables.com/collections/3525050", "printables"),
-        ("https://makerworld.com/es/collections/5600774-h2d-sample-projects", "makerworld"),
+        (
+            "https://makerworld.com/es/collections/5600774-h2d-sample-projects",
+            "makerworld",
+        ),
         ("https://makerworld.com/en/collections/5600774", "makerworld"),
         # A model page is not a collection.
         ("https://www.printables.com/model/1660232-springy-cat", None),
@@ -303,8 +352,13 @@ def test_classify_collection(url: str, expected) -> None:
 
 
 def test_collection_id_extractor() -> None:
-    assert r._collection_id("https://printables.com/@u/collections/3525050") == "3525050"
-    assert r._collection_id("https://makerworld.com/es/collections/5600774-slug") == "5600774"
+    assert (
+        r._collection_id("https://printables.com/@u/collections/3525050") == "3525050"
+    )
+    assert (
+        r._collection_id("https://makerworld.com/es/collections/5600774-slug")
+        == "5600774"
+    )
     assert r._collection_id("https://printables.com/model/1660232") is None
 
 
@@ -319,7 +373,11 @@ _SPRINGY_CAT_META = {
             "name": "Springy Cat",
             "stls": [
                 {"id": "7098445", "name": "SpringyCat.stl", "fileSize": 1233984},
-                {"id": "6978173", "name": "SpringyCat_Spring-joiner.stl", "fileSize": 1684},
+                {
+                    "id": "6978173",
+                    "name": "SpringyCat_Spring-joiner.stl",
+                    "fileSize": 1684,
+                },
             ],
             "gcodes": [],
             "slas": [],
@@ -331,8 +389,12 @@ _SPRINGY_CAT_META = {
 
 @pytest.mark.asyncio
 async def test_list_model_files_lists_printables_files() -> None:
-    with patch.object(r, "_printables_graphql", AsyncMock(return_value=_SPRINGY_CAT_META)):
-        result = await r.list_model_files("https://www.printables.com/model/1660232-springy-cat")
+    with patch.object(
+        r, "_printables_graphql", AsyncMock(return_value=_SPRINGY_CAT_META)
+    ):
+        result = await r.list_model_files(
+            "https://www.printables.com/model/1660232-springy-cat"
+        )
     assert result is not None
     title, files = result
     assert title == "Springy Cat"
@@ -403,8 +465,14 @@ async def test_resolve_printables_collection_lists_members() -> None:
             "moreCollectionModels": {
                 "cursor": "",
                 "items": [
-                    {"id": "1660232", "print": {"id": "1660232", "name": "Springy Cat"}},
-                    {"id": "1725199", "print": {"id": "1725199", "name": "Pallet Coaster"}},
+                    {
+                        "id": "1660232",
+                        "print": {"id": "1660232", "name": "Springy Cat"},
+                    },
+                    {
+                        "id": "1725199",
+                        "print": {"id": "1725199", "name": "Pallet Coaster"},
+                    },
                 ],
             }
         }
@@ -444,7 +512,9 @@ async def test_resolve_printables_collection_paginates() -> None:
     }
     graphql = AsyncMock(side_effect=[name_payload, page1, page2])
     with patch.object(r, "_printables_graphql", graphql):
-        _, members = await r.resolve_collection_url("https://printables.com/collections/9")
+        _, members = await r.resolve_collection_url(
+            "https://printables.com/collections/9"
+        )
     assert [m.source_id for m in members] == ["1", "2"]
 
 
@@ -452,7 +522,9 @@ async def test_resolve_printables_collection_paginates() -> None:
 async def test_resolve_collection_empty_raises_host_error() -> None:
     name_payload = {"data": {"collection": {"name": "empty"}}}
     members_payload = {"data": {"moreCollectionModels": {"cursor": "", "items": []}}}
-    with patch.object(r, "_printables_graphql", AsyncMock(side_effect=[name_payload, members_payload])):
+    with patch.object(
+        r, "_printables_graphql", AsyncMock(side_effect=[name_payload, members_payload])
+    ):
         with pytest.raises(ImportError_) as exc:
             await r.resolve_collection_url("https://printables.com/collections/9")
     assert str(exc.value) == "printables_collection_resolve_failed"

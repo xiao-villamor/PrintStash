@@ -1109,9 +1109,7 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         total_prints=len(rows),
         total_cost=round(total_cost, 4) if has_cost else None,
         total_filament_g=round(total_filament_g, 2) if has_filament else None,
-        avg_filament_g=(
-            round(grams_sum / grams_samples, 2) if grams_samples else None
-        ),
+        avg_filament_g=(round(grams_sum / grams_samples, 2) if grams_samples else None),
         total_print_time_s=total_duration_s,
         top_collections=top_collections,
         top_filaments=top_filaments,

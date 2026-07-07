@@ -148,6 +148,16 @@ class Metadata(SQLModel, table=True):
     volume_mm3: Optional[float] = None
     triangle_count: Optional[int] = None
 
+    # Outcome of the mesh load+render for this file: "ok" (rendered normally),
+    # "skipped_oversize" (the pre-load triangle/size estimate flagged it before
+    # ever touching trimesh), "failed_oom" / "failed_error" / "failed_timeout"
+    # (the isolated render subprocess — see mesh_worker — didn't come back
+    # clean), or None for non-mesh files (G-code). Anything other than "ok" is
+    # a candidate for mesh_retry.retry_failed_renders, which re-attempts these
+    # one at a time with a wider memory budget once scan-wide contention is
+    # gone.
+    render_status: Optional[str] = Field(default=None, max_length=32, index=True)
+
     created_at: datetime = Field(default_factory=utcnow)
 
     file: Optional["File"] = Relationship(back_populates="file_metadata")
@@ -383,6 +393,22 @@ class Document(SQLModel, table=True):
     filename: Optional[str] = Field(default=None, max_length=255)  # binary
     size_bytes: Optional[int] = None
     sha256: Optional[str] = Field(default=None, max_length=64)
+
+    # External libraries (NAS folder mirroring) — a PDF/markdown/txt file found
+    # alongside models in a scanned folder. Same index-in-place contract as
+    # File.is_external: PrintStash never copies or owns these bytes. Markdown
+    # content is still cached in ``body`` for fast reads (refreshed on scan
+    # when source_mtime changes); binary docs are served straight from
+    # ``source_path`` (see api/v1/documents.get_document_file). Not linked to
+    # any specific Model — deliberately folder-scoped only, exactly like a
+    # scanned model's Collection: browsing to a folder and switching to the
+    # Documents tab shows whatever documents share that folder's Collection.
+    is_external: bool = Field(default=False, index=True)
+    external_library_id: Optional[int] = Field(
+        default=None, foreign_key="external_libraries.id", index=True
+    )
+    source_path: Optional[str] = Field(default=None, max_length=1024)
+    source_mtime: Optional[float] = None
 
     deleted_at: Optional[datetime] = Field(default=None, index=True)
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
@@ -621,9 +647,7 @@ class ExternalLibrary(SQLModel, table=True):
     # Cron expression driving scheduled scans. Empty string = manual only.
     scan_schedule: str = Field(default="0 * * * *", max_length=128)
     # Whether to watch the folder for real-time changes (see enum docstring).
-    watch_mode: ExternalLibraryWatchMode = Field(
-        default=ExternalLibraryWatchMode.AUTO
-    )
+    watch_mode: ExternalLibraryWatchMode = Field(default=ExternalLibraryWatchMode.AUTO)
     # Last-detected filesystem class ("local" / "network" / "unknown"). Display
     # only — explains why watching is or isn't active. Refreshed on each scan /
     # watcher (re)start.

@@ -624,7 +624,9 @@ async def send_to_printer(
 
     # Upload-only is not a queued print. It only records transfer history; user
     # can start the remote file later from printer inventory.
-    job.state = PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    job.state = (
+        PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    )
     if not payload.start_print:
         job.finished_at = utcnow()
     job.updated_at = utcnow()
@@ -688,7 +690,9 @@ async def start_printer_file(
         if printer_file and printer_file.file_id is not None:
             candidate = session.get(File, printer_file.file_id)
             if candidate and candidate.deleted_at is None:
-                _require_file_role(session, current_user, candidate, CollectionRole.EDIT)
+                _require_file_role(
+                    session, current_user, candidate, CollectionRole.EDIT
+                )
                 file_row = candidate
                 source = "vault"
 

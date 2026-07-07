@@ -102,9 +102,9 @@ class TestBambuLanProvider:
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         # Out-of-range mc_percent must not escape the 0..1 progress band.
         assert (
-            provider._normalize_status({"print": {"mc_percent": 150}})["virtual_sdcard"][
-                "progress"
-            ]
+            provider._normalize_status({"print": {"mc_percent": 150}})[
+                "virtual_sdcard"
+            ]["progress"]
             == 1.0
         )
         assert (

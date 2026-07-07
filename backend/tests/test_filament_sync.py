@@ -15,8 +15,16 @@ from app.services.filament_sync import cost_per_kg_from_filament
 from app.services.spoolman import SpoolmanError
 
 
-def _filament(fid, name, material="PLA", vendor="Bambu", price=25.0, weight=1000.0,
-              density=1.24, diameter=1.75):
+def _filament(
+    fid,
+    name,
+    material="PLA",
+    vendor="Bambu",
+    price=25.0,
+    weight=1000.0,
+    density=1.24,
+    diameter=1.75,
+):
     return {
         "id": fid,
         "name": name,
@@ -35,9 +43,7 @@ def _enable(session: Session):
 
 
 def _sync(session: Session, filaments):
-    with patch(
-        "app.services.filament_sync.get_spoolman_client"
-    ) as mock_get:
+    with patch("app.services.filament_sync.get_spoolman_client") as mock_get:
         mock_get.return_value.list_filaments = AsyncMock(return_value=filaments)
         return asyncio.run(filament_sync.sync_from_spoolman(session))
 
@@ -58,9 +64,7 @@ class TestSync:
         result = _sync(db_session, [_filament(1, "PLA Basic Black")])
         assert result.created == 1
         prof = db_session.exec(
-            select(FilamentProfile).where(
-                FilamentProfile.spoolman_filament_id == 1
-            )
+            select(FilamentProfile).where(FilamentProfile.spoolman_filament_id == 1)
         ).one()
         assert prof.material_type == "PLA"
         assert prof.material_brand == "Bambu"
@@ -70,9 +74,7 @@ class TestSync:
 
     def test_adopts_existing_local_preset(self, db_session: Session):
         _enable(db_session)
-        db_session.add(
-            FilamentProfile(name="PLA Basic Black", material_type="PLA")
-        )
+        db_session.add(FilamentProfile(name="PLA Basic Black", material_type="PLA"))
         db_session.commit()
         result = _sync(db_session, [_filament(7, "PLA Basic Black")])
         assert result.adopted == 1 and result.created == 0
@@ -89,9 +91,7 @@ class TestSync:
         result = _sync(db_session, [_filament(1, "PLA Black", price=30.0)])
         assert result.updated == 1 and result.created == 0
         prof = db_session.exec(
-            select(FilamentProfile).where(
-                FilamentProfile.spoolman_filament_id == 1
-            )
+            select(FilamentProfile).where(FilamentProfile.spoolman_filament_id == 1)
         ).one()
         assert prof.cost_per_kg == 30.0
 

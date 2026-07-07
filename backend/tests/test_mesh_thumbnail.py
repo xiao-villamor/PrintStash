@@ -18,7 +18,9 @@ _PNG_SMALL = _PNG_MAGIC + b"small"
 _PNG_BIG = _PNG_MAGIC + b"x" * 500
 
 
-def _make_3mf(tmp_path: Path, entries: dict[str, bytes], *, suffix: str = ".3mf") -> Path:
+def _make_3mf(
+    tmp_path: Path, entries: dict[str, bytes], *, suffix: str = ".3mf"
+) -> Path:
     path = tmp_path / f"model{suffix}"
     with zipfile.ZipFile(path, "w") as zf:
         for name, data in entries.items():

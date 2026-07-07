@@ -32,8 +32,16 @@ from app.services.runtime_config import set_notifications_enabled
 # --------------------------------------------------------------------------- #
 
 
-def _channel(session, *, events, target=NotificationTarget.WEBHOOK, config=None,
-             printer_ids=None, enabled=True, name="ch"):
+def _channel(
+    session,
+    *,
+    events,
+    target=NotificationTarget.WEBHOOK,
+    config=None,
+    printer_ids=None,
+    enabled=True,
+    name="ch",
+):
     ch = NotificationChannel(
         name=name,
         target=target,
@@ -79,7 +87,12 @@ def _allow_public_urls():
 
 
 def test_backoff_schedule_then_exhaustion():
-    assert [notifications.next_retry_delay(a) for a in (1, 2, 3, 4)] == [30, 120, 600, 1800]
+    assert [notifications.next_retry_delay(a) for a in (1, 2, 3, 4)] == [
+        30,
+        120,
+        600,
+        1800,
+    ]
     assert notifications.next_retry_delay(5) is None
 
 
@@ -172,7 +185,9 @@ async def test_dispatch_success_marks_sent_and_channel_status(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "get_http_client", return_value=_http_returning(204)):
+    with patch.object(
+        notifications, "get_http_client", return_value=_http_returning(204)
+    ):
         attempted = await notifications.dispatch_due()
     assert attempted == 1
 
@@ -194,7 +209,9 @@ async def test_dispatch_http_error_retries_with_backoff(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "get_http_client", return_value=_http_returning(500, "boom")):
+    with patch.object(
+        notifications, "get_http_client", return_value=_http_returning(500, "boom")
+    ):
         await notifications.dispatch_due()
 
     db_session.expire_all()
@@ -221,7 +238,9 @@ async def test_dispatch_marks_failed_after_exhausting_retries(db_session):
     db_session.add(delivery)
     db_session.commit()
 
-    with patch.object(notifications, "get_http_client", return_value=_http_returning(500)):
+    with patch.object(
+        notifications, "get_http_client", return_value=_http_returning(500)
+    ):
         await notifications.dispatch_due()
 
     db_session.expire_all()
@@ -265,8 +284,9 @@ async def test_dispatch_blocks_non_public_url(db_session):
 
     client = _http_returning(204)
     # Override the autouse allow-fixture: this URL is "not public".
-    with patch.object(notifications, "get_http_client", return_value=client), patch.object(
-        notifications, "is_public_url", return_value=False
+    with (
+        patch.object(notifications, "get_http_client", return_value=client),
+        patch.object(notifications, "is_public_url", return_value=False),
     ):
         await notifications.dispatch_due()
     client.request.assert_not_called()  # never left the process
@@ -356,7 +376,9 @@ async def test_success_resets_consecutive_failures(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "get_http_client", return_value=_http_returning(204)):
+    with patch.object(
+        notifications, "get_http_client", return_value=_http_returning(204)
+    ):
         await notifications.dispatch_due()
 
     db_session.refresh(ch)
@@ -384,7 +406,9 @@ async def test_stuck_sending_is_reclaimed(db_session):
     db_session.add(d)
     db_session.commit()
 
-    with patch.object(notifications, "get_http_client", return_value=_http_returning(204)):
+    with patch.object(
+        notifications, "get_http_client", return_value=_http_returning(204)
+    ):
         attempted = await notifications.dispatch_due()
 
     assert attempted == 1  # reclaimed and delivered
@@ -442,15 +466,21 @@ async def test_run_dispatcher_loop_delivers_then_cancels(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "_POLL_INTERVAL_S", 0.01), patch.object(
-        notifications, "get_http_client", return_value=_http_returning(204)
+    with (
+        patch.object(notifications, "_POLL_INTERVAL_S", 0.01),
+        patch.object(
+            notifications, "get_http_client", return_value=_http_returning(204)
+        ),
     ):
         task = asyncio.create_task(notifications.run_dispatcher_loop())
         # Poll until the delivery is sent, then cancel the loop.
         for _ in range(200):
             await asyncio.sleep(0.01)
             db_session.expire_all()
-            if _deliveries(db_session, ch.id)[0].status == NotificationDeliveryStatus.SENT:
+            if (
+                _deliveries(db_session, ch.id)[0].status
+                == NotificationDeliveryStatus.SENT
+            ):
                 break
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -469,8 +499,9 @@ async def test_run_dispatcher_loop_survives_tick_error(db_session):
         calls["n"] += 1
         raise RuntimeError("tick boom")
 
-    with patch.object(notifications, "_POLL_INTERVAL_S", 0.01), patch.object(
-        notifications, "dispatch_due", side_effect=_boom
+    with (
+        patch.object(notifications, "_POLL_INTERVAL_S", 0.01),
+        patch.object(notifications, "dispatch_due", side_effect=_boom),
     ):
         task = asyncio.create_task(notifications.run_dispatcher_loop())
         await asyncio.sleep(0.1)
@@ -516,7 +547,9 @@ def test_print_completed_fires_once_and_is_idempotent(db_session):
 
     stats = {"total_duration": 3600, "filament_used": 1000, "filename": "x.gcode"}
     PrinterHub._sync_active_job_db(p.id, "complete", "x.gcode", 1.0, stats)
-    PrinterHub._sync_active_job_db(p.id, "complete", "x.gcode", 1.0, stats)  # idempotent
+    PrinterHub._sync_active_job_db(
+        p.id, "complete", "x.gcode", 1.0, stats
+    )  # idempotent
     db_session.expire_all()
     deliveries = _deliveries(db_session)
     assert len(deliveries) == 1

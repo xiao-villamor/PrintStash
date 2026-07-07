@@ -305,9 +305,7 @@ def _refresh_printer_gauge() -> None:
         return
     printer_status.clear()
     for provider, prn_status in rows:
-        printer_status.labels(
-            provider=provider.value, status=prn_status.value
-        ).inc()
+        printer_status.labels(provider=provider.value, status=prn_status.value).inc()
 
 
 @app.get("/metrics", include_in_schema=False)
@@ -323,6 +321,10 @@ def metrics_endpoint(request: Request) -> Response:
         auth = request.headers.get("authorization", "")
         provided = auth.split(" ", 1)[1] if auth.lower().startswith("bearer ") else ""
         if not hmac.compare_digest(provided, token):
-            return Response(status_code=status.HTTP_401_UNAUTHORIZED, content="unauthorized")
+            return Response(
+                status_code=status.HTTP_401_UNAUTHORIZED, content="unauthorized"
+            )
     _refresh_printer_gauge()
-    return Response(content=generate_latest(_metrics_registry), media_type=CONTENT_TYPE_LATEST)
+    return Response(
+        content=generate_latest(_metrics_registry), media_type=CONTENT_TYPE_LATEST
+    )

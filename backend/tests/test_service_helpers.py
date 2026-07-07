@@ -119,7 +119,10 @@ class TestValidatePublicUrl:
 
 class TestCollectionForArchive:
     def test_nests_under_parent(self) -> None:
-        assert imp._collection_for_archive("Functional", "Brackets.zip") == "Functional/Brackets"
+        assert (
+            imp._collection_for_archive("Functional", "Brackets.zip")
+            == "Functional/Brackets"
+        )
 
     def test_no_parent_uses_archive_stem(self) -> None:
         assert imp._collection_for_archive(None, "MyPack.zip") == "MyPack"
@@ -154,12 +157,20 @@ class TestMoonrakerWsUrl:
 def _profiles() -> list[FilamentProfile]:
     return [
         FilamentProfile(
-            name="Hatchbox PLA", material_type="PLA", material_brand="Hatchbox", cost_per_kg=20.0
+            name="Hatchbox PLA",
+            material_type="PLA",
+            material_brand="Hatchbox",
+            cost_per_kg=20.0,
         ),
         FilamentProfile(
-            name="Generic PETG", material_type="PETG", material_brand=None, cost_per_kg=25.0
+            name="Generic PETG",
+            material_type="PETG",
+            material_brand=None,
+            cost_per_kg=25.0,
         ),
-        FilamentProfile(name="No Cost PLA", material_type="PLA", material_brand="NoCost"),
+        FilamentProfile(
+            name="No Cost PLA", material_type="PLA", material_brand="NoCost"
+        ),
     ]
 
 
@@ -201,16 +212,22 @@ class TestEffectivePrintMetrics:
     def test_measured_values_win(self) -> None:
         md = Metadata(file_id=1, material_type="PLA", material_brand="Hatchbox")
         job = PrintJob(
-            file_id=1, model_id=1, remote_filename="x",
-            filament_used_g=50.0, actual_duration_s=600,
+            file_id=1,
+            model_id=1,
+            remote_filename="x",
+            filament_used_g=50.0,
+            actual_duration_s=600,
         )
         grams, cost, duration = mv._effective_print_metrics(_profiles(), md, job)
         assert (grams, cost, duration) == (50.0, 1.0, 600)
 
     def test_falls_back_to_slicer_estimate(self) -> None:
         md = Metadata(
-            file_id=1, material_type="PLA", material_brand="Hatchbox",
-            filament_weight_g=30.0, estimated_time_s=900,
+            file_id=1,
+            material_type="PLA",
+            material_brand="Hatchbox",
+            filament_weight_g=30.0,
+            estimated_time_s=900,
         )
         job = PrintJob(file_id=1, model_id=1, remote_filename="x")
         grams, cost, duration = mv._effective_print_metrics(_profiles(), md, job)
@@ -218,7 +235,9 @@ class TestEffectivePrintMetrics:
 
     def test_slicer_cost_used_when_no_profile_match(self) -> None:
         # No matching profile, but the slicer recorded a total cost.
-        md = Metadata(file_id=1, material_type="ABS", filament_weight_g=10.0, filament_cost=3.5)
+        md = Metadata(
+            file_id=1, material_type="ABS", filament_weight_g=10.0, filament_cost=3.5
+        )
         job = PrintJob(file_id=1, model_id=1, remote_filename="x")
         _, cost, _ = mv._effective_print_metrics(_profiles(), md, job)
         assert cost == 3.5
@@ -246,13 +265,21 @@ class TestCsvCell:
             "counts": {"models": 1, "files": 1},
             "models": [
                 {
-                    "id": 1, "name": "Vase", "slug": "vase", "source_url": None,
-                    "collection": None, "tags": [],
+                    "id": 1,
+                    "name": "Vase",
+                    "slug": "vase",
+                    "source_url": None,
+                    "collection": None,
+                    "tags": [],
                     "files": [
                         {
-                            "id": 10, "file_type": "gcode", "version": 1,
-                            "original_filename": "v.gcode", "size_bytes": 0,
-                            "sha256": "abc", "is_recommended": True,
+                            "id": 10,
+                            "file_type": "gcode",
+                            "version": 1,
+                            "original_filename": "v.gcode",
+                            "size_bytes": 0,
+                            "sha256": "abc",
+                            "is_recommended": True,
                             "uploaded_at": "2024-01-01",
                             "metadata": {
                                 "infill_percent": 0,
@@ -305,15 +332,18 @@ class TestWalk:
     ) -> None:
         (tmp_path / "a.stl").write_text("x")
         (tmp_path / "b.STL").write_text("x")  # uppercase ext still counts
-        (tmp_path / "c.txt").write_text("x")  # unsupported, ignored
+        (tmp_path / "c.txt").write_text("x")  # not a model — lands in documents instead
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "d.3mf").write_text("x")  # recurses
 
-        names = {Path(k).name for k in _walk(tmp_path)}
-        assert names == {"a.stl", "b.STL", "d.3mf"}
+        models, documents = _walk(tmp_path)
+        model_names = {Path(k).name for k in models}
+        doc_names = {Path(k).name for k in documents}
+        assert model_names == {"a.stl", "b.STL", "d.3mf"}
+        assert doc_names == {"c.txt"}
 
     def test_empty_dir_yields_nothing(self, tmp_path: Path) -> None:
-        assert _walk(tmp_path) == {}
+        assert _walk(tmp_path) == ({}, {})
 
 
 class TestCollectionPathForMirror:
@@ -326,7 +356,9 @@ class TestCollectionPathForMirror:
 
     def test_nested_dirs_become_collection_path(self) -> None:
         lib = self._lib("/nas/lib")
-        out = _collection_path_for(None, lib, Path("/nas/lib/Functional/Brackets/x.stl"))
+        out = _collection_path_for(
+            None, lib, Path("/nas/lib/Functional/Brackets/x.stl")
+        )
         assert out == "Functional/Brackets"
 
     def test_root_level_file_has_no_collection(self) -> None:

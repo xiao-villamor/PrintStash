@@ -381,7 +381,9 @@ async def ingest_model(
     return IngestResponse(job_id=job_id, state="pending")
 
 
-def _manifest_from_pending(archive_id: str, pending: "importer._PendingArchive") -> ArchiveManifest:
+def _manifest_from_pending(
+    archive_id: str, pending: "importer._PendingArchive"
+) -> ArchiveManifest:
     return ArchiveManifest(
         archive_id=archive_id,
         archive_name=pending.archive_name,
@@ -417,7 +419,9 @@ def _stage_model_files_manifest(
         files_token=token,
         page_title=page_title,
         files=[
-            ModelFileRead(file_id=f.file_id, name=f.name, file_type=f.file_type, size=f.size)
+            ModelFileRead(
+                file_id=f.file_id, name=f.name, file_type=f.file_type, size=f.size
+            )
             for f in files
         ],
     )
@@ -465,7 +469,9 @@ async def _handle_collection_url(
             collection_name=title,
             target_collection=target,
             members=[
-                CollectionMemberRead(source_id=m.source_id, title=m.title, page_url=m.page_url)
+                CollectionMemberRead(
+                    source_id=m.source_id, title=m.title, page_url=m.page_url
+                )
                 for m in members
             ],
         )

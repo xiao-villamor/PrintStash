@@ -33,7 +33,9 @@ def _headers(user: User) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _grant(session: Session, user: User, collection_id: int, role: CollectionRole) -> None:
+def _grant(
+    session: Session, user: User, collection_id: int, role: CollectionRole
+) -> None:
     from app.db.models import CollectionPermission
 
     session.add(
@@ -218,9 +220,7 @@ def test_batch_tags_add_is_additive_and_idempotent(
     assert _tag_slugs(db_session, m.id) == {"keep", "new"}
 
 
-def test_batch_tags_remove_only_named(
-    client: TestClient, db_session: Session
-) -> None:
+def test_batch_tags_remove_only_named(client: TestClient, db_session: Session) -> None:
     user = _user(db_session, "untagger", superuser=True)
     m = _model(db_session, "HasTags", None)
     tags = taxonomy.resolve_or_create_tags(db_session, ["alpha", "beta"])
@@ -357,9 +357,7 @@ def test_batch_tags_all_failed_does_not_create_tag(
     assert body["failed"][0]["reason"] == "collection_permission_denied"
 
     db_session.expire_all()
-    tag = db_session.exec(
-        select(Tag).where(Tag.slug == "should-not-exist")
-    ).first()
+    tag = db_session.exec(select(Tag).where(Tag.slug == "should-not-exist")).first()
     assert tag is None, "tag created despite zero editable models"
 
 
