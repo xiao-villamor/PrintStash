@@ -7,7 +7,6 @@ import { deleteDocument, listDocuments, uploadDocument } from "@/lib/api";
 import { Link, useRouter } from "@/lib/navigation";
 import { timeAgoShort } from "@/lib/format";
 import { toast } from "@/lib/toast";
-import { Checkbox } from "@/components/ui/checkbox";
 import type { DocumentKind, DocumentListItem } from "@/types";
 
 function KindIcon({ kind }: { kind: DocumentKind }) {
@@ -24,16 +23,10 @@ export function DocumentBrowser({
   collectionId,
   collectionPath,
   canCreate,
-  selectMode = false,
-  selectedDocumentIds = new Set(),
-  onToggleDocumentSelect,
 }: {
   collectionId: number | null;
   collectionPath: string | null;
   canCreate: boolean;
-  selectMode?: boolean;
-  selectedDocumentIds?: Set<number>;
-  onToggleDocumentSelect?: (id: number) => void;
 }) {
   const router = useRouter();
   const [docs, setDocs] = useState<DocumentListItem[]>([]);
@@ -124,45 +117,11 @@ export function DocumentBrowser({
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-          {docs.map((doc) => {
-            const isSelected = selectedDocumentIds.has(doc.id);
-            return (
+          {docs.map((doc) => (
             <div
               key={doc.id}
-                onClick={() => {
-                  if (selectMode) onToggleDocumentSelect?.(doc.id);
-                }}
-                className={`group relative flex items-start gap-3 rounded-lg border bg-background p-3 transition-colors ${
-                  selectMode ? "cursor-pointer" : ""
-                } ${
-                  isSelected
-                    ? "border-blue-500 dark:border-orange-500 bg-blue-50/30 dark:bg-orange-950/20"
-                    : "border-border hover:border-blue-400 dark:hover:border-orange-500"
-                }`}
-              >
-                {selectMode && (
-                  <span
-                    className="absolute top-2 left-2 z-10"
-                    onClick={(e) => { e.stopPropagation(); onToggleDocumentSelect?.(doc.id); }}
-                  >
-                    <Checkbox
-                      checked={isSelected}
-                      onChange={() => onToggleDocumentSelect?.(doc.id)}
-                      ariaLabel={`Select ${doc.name}`}
-                    />
-                  </span>
-                )}
-                {selectMode ? (
-                  <div className={`flex items-start gap-3 min-w-0 flex-1 ${selectMode ? "pl-6" : ""}`}>
-                    <KindIcon kind={doc.kind} />
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-foreground truncate">{doc.name}</div>
-                      <div className="text-xs text-muted-foreground mt-0.5 uppercase font-mono">
-                        {doc.kind} · {timeAgoShort(doc.updated_at)}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
+              className="group relative flex items-start gap-3 rounded-lg border border-border bg-background p-3 hover:border-blue-400 dark:hover:border-orange-500 transition-colors"
+            >
               <Link href={`/documents/${doc.id}`} className="flex items-start gap-3 min-w-0 flex-1">
                 <KindIcon kind={doc.kind} />
                 <div className="min-w-0">
@@ -172,10 +131,9 @@ export function DocumentBrowser({
                   </div>
                 </div>
               </Link>
-                )}
-                {!selectMode && canEditItem(doc) && (
+              {canEditItem(doc) && (
                 <button
-                    onClick={(e) => { e.stopPropagation(); remove(doc); }}
+                  onClick={() => remove(doc)}
                   title="Delete document"
                   className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-red-600 transition-opacity"
                 >
@@ -183,8 +141,7 @@ export function DocumentBrowser({
                 </button>
               )}
             </div>
-            );
-          })}
+          ))}
         </div>
       )}
     </div>

@@ -172,9 +172,7 @@ async def makerworld_verify(
     except MakerWorldAuthError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.code)
     if not result.token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_code"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_code")
     runtime_config.set_makerworld_token(session, result.token)
     return MakerWorldLoginResponse(status="ok", connected=True)
 
@@ -199,9 +197,7 @@ def makerworld_set_token(
     if token.lower().startswith("token="):
         token = token.split("=", 1)[1].split(";", 1)[0].strip()
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="missing_token"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="missing_token")
     runtime_config.set_makerworld_token(session, token)
     return MakerWorldStatus(**runtime_config.makerworld_status(session))
 

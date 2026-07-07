@@ -49,10 +49,10 @@ def test_webhook_hmac_signature_when_secret_set():
     import hmac
 
     secret = "s3cr3t"
-    req = r.render_webhook(
-        _ctx(), {"url": "https://example.com/hook", "secret": secret}
-    )
-    expected = hmac.new(secret.encode(), req.data.encode(), hashlib.sha256).hexdigest()
+    req = r.render_webhook(_ctx(), {"url": "https://example.com/hook", "secret": secret})
+    expected = hmac.new(
+        secret.encode(), req.data.encode(), hashlib.sha256
+    ).hexdigest()
     assert req.headers["X-PrintStash-Signature"] == f"sha256={expected}"
 
 
@@ -170,9 +170,7 @@ def test_duration_formatting_hours_minutes():
 
 
 def test_summary_skips_absent_optional_fields():
-    lines = r.summary_lines(
-        _ctx(model_name=None, filament_used_g=None, duration_s=None)
-    )
+    lines = r.summary_lines(_ctx(model_name=None, filament_used_g=None, duration_s=None))
     joined = "\n".join(lines)
     assert "Model:" not in joined
     assert "Filament:" not in joined

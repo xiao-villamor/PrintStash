@@ -114,10 +114,9 @@ class TestRecordSpoolUsage:
     def test_decrements_when_configured(self, db_session: Session):
         self._enable(db_session)
         job = _completed_job(spool_id=3, grams=10.0)
-        with (
-            patch("app.services.spoolman.active_spool_sync", return_value=None),
-            patch("app.services.spoolman.use_spool_weight_sync") as mock_use,
-        ):
+        with patch(
+            "app.services.spoolman.active_spool_sync", return_value=None
+        ), patch("app.services.spoolman.use_spool_weight_sync") as mock_use:
             assert print_results.record_spool_usage(db_session, job) is True
             mock_use.assert_called_once()
             args = mock_use.call_args.args
@@ -128,10 +127,9 @@ class TestRecordSpoolUsage:
         # must not write its own decrement (would double-count).
         self._enable(db_session)
         job = _completed_job(spool_id=3, grams=10.0)
-        with (
-            patch("app.services.spoolman.active_spool_sync", return_value=7),
-            patch("app.services.spoolman.use_spool_weight_sync") as mock_use,
-        ):
+        with patch(
+            "app.services.spoolman.active_spool_sync", return_value=7
+        ), patch("app.services.spoolman.use_spool_weight_sync") as mock_use:
             assert print_results.record_spool_usage(db_session, job) is False
             mock_use.assert_not_called()
 
@@ -141,12 +139,11 @@ class TestRecordSpoolUsage:
         self._enable(db_session)
         runtime_config.set_spoolman_write_force(db_session, True)
         job = _completed_job(spool_id=3, grams=10.0)
-        with (
-            patch(
-                "app.services.spoolman.active_spool_sync", return_value=7
-            ) as mock_active,
-            patch("app.services.spoolman.use_spool_weight_sync") as mock_use,
-        ):
+        with patch(
+            "app.services.spoolman.active_spool_sync", return_value=7
+        ) as mock_active, patch(
+            "app.services.spoolman.use_spool_weight_sync"
+        ) as mock_use:
             assert print_results.record_spool_usage(db_session, job) is True
             mock_use.assert_called_once()
             # Forced path short-circuits the probe entirely.
@@ -184,12 +181,11 @@ class TestRecordSpoolUsage:
     def test_swallows_spoolman_error(self, db_session: Session):
         self._enable(db_session)
         job = _completed_job(spool_id=3, grams=10.0)
-        with (
-            patch("app.services.spoolman.active_spool_sync", return_value=None),
-            patch(
-                "app.services.spoolman.use_spool_weight_sync",
-                side_effect=SpoolmanError("down", code="transport"),
-            ),
+        with patch(
+            "app.services.spoolman.active_spool_sync", return_value=None
+        ), patch(
+            "app.services.spoolman.use_spool_weight_sync",
+            side_effect=SpoolmanError("down", code="transport"),
         ):
             # Never raises — a Spoolman outage must not block the print path.
             assert print_results.record_spool_usage(db_session, job) is False

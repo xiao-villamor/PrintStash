@@ -330,19 +330,9 @@ def test_is_due_cron_logic() -> None:
     # Never scanned + valid schedule → due.
     assert external_library.is_due(hourly, None, now) is True
     # Last scan was last hour, a boundary (12:00) has passed → due.
-    assert (
-        external_library.is_due(
-            hourly, datetime(2026, 6, 15, 11, 0, tzinfo=timezone.utc), now
-        )
-        is True
-    )
+    assert external_library.is_due(hourly, datetime(2026, 6, 15, 11, 0, tzinfo=timezone.utc), now) is True
     # Last scan was 10 min ago, no new boundary since → not due.
-    assert (
-        external_library.is_due(
-            hourly, datetime(2026, 6, 15, 12, 20, tzinfo=timezone.utc), now
-        )
-        is False
-    )
+    assert external_library.is_due(hourly, datetime(2026, 6, 15, 12, 20, tzinfo=timezone.utc), now) is False
     # Empty schedule = manual only → never due.
     assert external_library.is_due("", None, now) is False
     # Invalid cron → never due (defensive).

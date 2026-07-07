@@ -53,10 +53,8 @@ def mm_to_grams(
     """
     if length_mm is None or length_mm <= 0 or diameter_mm <= 0:
         return None
-    density = (
-        density_g_cm3
-        if density_g_cm3 and density_g_cm3 > 0
-        else density_for(material_type)
+    density = density_g_cm3 if density_g_cm3 and density_g_cm3 > 0 else density_for(
+        material_type
     )
     radius_mm = diameter_mm / 2.0
     volume_mm3 = math.pi * radius_mm * radius_mm * length_mm

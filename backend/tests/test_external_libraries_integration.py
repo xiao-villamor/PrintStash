@@ -285,7 +285,9 @@ def test_write_back_never_overwrites_existing_nas_file(
 # --------------------------------------------------------------------------- #
 # Real folder shapes
 # --------------------------------------------------------------------------- #
-def test_scan_indexes_mixed_mesh_and_gcode(tmp_path: Path, db_session: Session) -> None:
+def test_scan_indexes_mixed_mesh_and_gcode(
+    tmp_path: Path, db_session: Session
+) -> None:
     """A realistic folder mixes meshes and slicer output; both index in place."""
     _configure_storage(tmp_path)
     _enable_feature(db_session)
@@ -322,11 +324,6 @@ def test_scan_indexes_but_skips_over_cap_mesh(
     nas.mkdir(parents=True, exist_ok=True)
     mesh = trimesh.creation.icosphere(subdivisions=4, radius=10.0)  # 5120 triangles
     (nas / "dense.stl").write_bytes(mesh.export(file_type="stl"))
-    # Isolation off — phase 2 (mesh_retry) normally renders in a spawned
-    # subprocess that re-imports a clean app.core.config with an EMPTY
-    # _overlay, so the triangle-cap override below would silently not apply
-    # there and the over-cap guard this test exists to prove would never fire.
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     # Force the file over the triangle cap so the real guard fires on a real file.
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", len(mesh.faces) // 2)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)

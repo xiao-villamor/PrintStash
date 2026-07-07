@@ -54,15 +54,9 @@ async def _create_channel(api, headers, *, name, target, config, events=(COMPLET
     return r.json()
 
 
-def _seed_completed_job(
-    session, *, filename: str, printer_name: str
-) -> tuple[int, PrintJob]:
+def _seed_completed_job(session, *, filename: str, printer_name: str) -> tuple[int, PrintJob]:
     """Insert a printer + model + file + a COMPLETED PrintJob; return (printer_id, job)."""
-    printer = Printer(
-        name=printer_name,
-        provider=PrinterProvider.MOONRAKER,
-        status=PrinterStatus.READY,
-    )
+    printer = Printer(name=printer_name, provider=PrinterProvider.MOONRAKER, status=PrinterStatus.READY)
     session.add(printer)
     session.commit()
     session.refresh(printer)
@@ -107,39 +101,19 @@ async def test_all_targets_deliver_a_valid_payload_for_a_real_print(
 ):
     """A completed print fans out to all four targets and each accepts the payload."""
     await _enable(api, superuser_headers)
+    await _create_channel(api, superuser_headers, name="hook", target="webhook", config={"url": fakes.webhook_url})
+    await _create_channel(api, superuser_headers, name="dc", target="discord", config={"url": fakes.discord_url})
     await _create_channel(
-        api,
-        superuser_headers,
-        name="hook",
-        target="webhook",
-        config={"url": fakes.webhook_url},
-    )
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="dc",
-        target="discord",
-        config={"url": fakes.discord_url},
-    )
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="tg",
-        target="telegram",
+        api, superuser_headers, name="tg", target="telegram",
         config={"bot_token": "123:ABC", "chat_id": "42"},
     )
     await _create_channel(
-        api,
-        superuser_headers,
-        name="nt",
-        target="ntfy",
+        api, superuser_headers, name="nt", target="ntfy",
         config={"topic": "prints", "server_url": fakes.ntfy_server},
     )
 
     # Fire the event exactly as printer_hub does, with a realistic filename.
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="benchy_v2.gcode", printer_name="Voron 2.4"
-    )
+    printer_id, job = _seed_completed_job(e2e_db, filename="benchy_v2.gcode", printer_name="Voron 2.4")
     enqueued = notifications.enqueue_for_event(
         e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
     )
@@ -183,15 +157,10 @@ async def test_telegram_filename_with_underscore_is_accepted(
     """Regression: a normal filename with '_' must not break Telegram parsing."""
     await _enable(api, superuser_headers)
     await _create_channel(
-        api,
-        superuser_headers,
-        name="tg",
-        target="telegram",
+        api, superuser_headers, name="tg", target="telegram",
         config={"bot_token": "123:ABC", "chat_id": "42"},
     )
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="my_part_v3.gcode", printer_name="Printer_One"
-    )
+    printer_id, job = _seed_completed_job(e2e_db, filename="my_part_v3.gcode", printer_name="Printer_One")
     notifications.enqueue_for_event(
         e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
     )
@@ -211,15 +180,10 @@ async def test_ntfy_title_with_non_ascii_is_accepted(
     """Regression: non-latin-1 chars in the title (incl. the em-dash) must send."""
     await _enable(api, superuser_headers)
     await _create_channel(
-        api,
-        superuser_headers,
-        name="nt",
-        target="ntfy",
+        api, superuser_headers, name="nt", target="ntfy",
         config={"topic": "prints", "server_url": fakes.ntfy_server},
     )
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="café_ñandú.gcode", printer_name="Impresora-Ñ"
-    )
+    printer_id, job = _seed_completed_job(e2e_db, filename="café_ñandú.gcode", printer_name="Impresora-Ñ")
     notifications.enqueue_for_event(
         e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
     )

@@ -37,9 +37,7 @@ class RunningServer:
 
 def start_server(app: Starlette) -> RunningServer:
     port = _free_port()
-    config = uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning", lifespan="off"
-    )
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="off")
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -49,6 +47,4 @@ def start_server(app: Starlette) -> RunningServer:
         if time.time() > deadline:
             raise RuntimeError("fake server failed to start within 10s")
         time.sleep(0.02)
-    return RunningServer(
-        base_url=f"http://127.0.0.1:{port}", port=port, _server=server, _thread=thread
-    )
+    return RunningServer(base_url=f"http://127.0.0.1:{port}", port=port, _server=server, _thread=thread)

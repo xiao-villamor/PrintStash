@@ -506,9 +506,7 @@ def _secret_keys(target: NotificationTarget) -> set:
     return _SECRET_CONFIG_KEYS.get(target, set())
 
 
-def serialize_channel(
-    channel: NotificationChannel, *, mask: bool = True
-) -> Dict[str, Any]:
+def serialize_channel(channel: NotificationChannel, *, mask: bool = True) -> Dict[str, Any]:
     """Project a channel to an API dict, masking secret config values.
 
     Secret values are replaced by a fixed placeholder and exposed as a
@@ -600,7 +598,9 @@ def validate_channel(
     for field in _REQUIRED_CONFIG_FIELDS.get(target, []):
         value = config.get(field)
         if not value or not str(value).strip():
-            raise NotificationConfigError(f"{target.value} channel requires '{field}'")
+            raise NotificationConfigError(
+                f"{target.value} channel requires '{field}'"
+            )
     for field in _URL_CONFIG_FIELDS.get(target, []):
         value = config.get(field)
         if value and not _is_http_url(str(value)):
@@ -720,9 +720,7 @@ def _clean_events(events: List[str]) -> List[str]:
     return out
 
 
-def list_recent_deliveries(
-    session: Session, *, limit: int = 50
-) -> List[Dict[str, Any]]:
+def list_recent_deliveries(session: Session, *, limit: int = 50) -> List[Dict[str, Any]]:
     rows = session.exec(
         select(NotificationDelivery)
         .order_by(NotificationDelivery.created_at.desc())  # type: ignore[attr-defined]
@@ -764,7 +762,6 @@ async def send_test(channel_id: int) -> Dict[str, Any]:
     gets instant feedback, and updates the channel's last-status like a real
     delivery would.
     """
-
     def _load() -> Optional[Dict[str, Any]]:
         with get_session_factory().session() as session:
             channel = session.get(NotificationChannel, channel_id)

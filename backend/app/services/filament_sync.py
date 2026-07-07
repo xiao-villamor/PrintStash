@@ -106,7 +106,9 @@ async def sync_from_spoolman(session: Session) -> SyncResult:
         diameter = filament.get("diameter")
 
         profile = session.exec(
-            select(FilamentProfile).where(FilamentProfile.spoolman_filament_id == fid)
+            select(FilamentProfile).where(
+                FilamentProfile.spoolman_filament_id == fid
+            )
         ).first()
 
         adopted = False

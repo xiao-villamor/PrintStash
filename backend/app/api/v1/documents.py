@@ -43,8 +43,6 @@ from app.schemas.documents import (
     DocumentUpdate,
 )
 from app.services import rbac
-from app.services.documents import BINARY_MEDIA_TYPES as _BINARY_TYPES
-from app.services.documents import kind_for as _kind_for
 from app.services.storage_backend import get_backend
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -58,6 +56,17 @@ _IMAGE_TYPES = {
     ".webp": "image/webp",
 }
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
+
+_MARKDOWN_EXTS = {".md", ".markdown", ".txt"}
+_BINARY_TYPES = {".pdf": "application/pdf"}
+
+
+def _kind_for(ext: str) -> DocumentKind:
+    if ext in _MARKDOWN_EXTS:
+        return DocumentKind.MARKDOWN
+    if ext == ".pdf":
+        return DocumentKind.PDF
+    return DocumentKind.OTHER
 
 
 def _safe_filename(filename: str) -> str:
@@ -272,17 +281,6 @@ def update_document(
         if doc.kind is not DocumentKind.MARKDOWN:
             raise HTTPException(status_code=400, detail="not_a_markdown_document")
         doc.body = payload.body
-        if doc.is_external and doc.source_path:
-            # The folder is the source of truth for external libraries — an
-            # edit here has to land on the NAS file itself, or the next scan
-            # would just overwrite it back to the old on-disk content.
-            try:
-                Path(doc.source_path).write_text(payload.body, encoding="utf-8")
-                doc.source_mtime = Path(doc.source_path).stat().st_mtime
-            except OSError as exc:
-                raise HTTPException(
-                    status_code=502, detail=f"write_back_failed: {exc}"
-                ) from exc
     doc.updated_at = utcnow()
     doc.updated_by = current_user.id
     session.add(doc)
@@ -322,22 +320,6 @@ def get_document_file(
     if not doc.filename:
         raise HTTPException(status_code=404, detail="no_file")
     ext = "." + doc.filename.rsplit(".", 1)[-1].lower()
-    media_type = _BINARY_TYPES.get(ext, "application/octet-stream")
-
-    if doc.is_external:
-        # Index-in-place: source_path is the NAS file itself, not a vault
-        # blob key. _serve_file's LocalStorageBackend.direct_path(key) does a
-        # plain Path(key) internally, so an absolute path works exactly the
-        # same way it already does for external Files.
-        if not doc.source_path or not Path(doc.source_path).exists():
-            raise HTTPException(status_code=410, detail="file_blob_missing")
-        return _serve_file(
-            doc.source_path,
-            doc.filename,
-            media_type,
-            headers={"X-Content-Type-Options": "nosniff"},
-        )
-
     backend = get_backend()
     key = backend.document_file_key(doc.id, doc.filename)
     if not backend.exists(key):
@@ -345,7 +327,7 @@ def get_document_file(
     return _serve_file(
         key,
         doc.filename,
-        media_type,
+        _BINARY_TYPES.get(ext, "application/octet-stream"),
         headers={"X-Content-Type-Options": "nosniff"},
     )
 

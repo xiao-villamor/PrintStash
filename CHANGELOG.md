@@ -1,20 +1,5 @@
 # Changelog
 
-## 0.8.2
-
-### Added 
-
-  - **Folder are selectable** like files in select mode (@JrVolt)
-  - **Drag** `file on folder` or `folder on folder` to move (@JrVolt)
-  - **Quick create collection** with selected items (@JrVolt)
-  - **Drag to level up** Drag item in viewport show in right bottom corner a bubble to level abov for moveing file (@JrVolt)
-  - **Shared volumes documents scan** If a document is present in a folder, when browsing a folder you can switch to `Documents` tab to see it. (@JrVolt)
-
-### Fixed
-
-  - **Drag file in viewport** will show "drag to upload" overlay, not it won't (@JrVolt)
-  - **Scan 502 Error** Scan is divided in two half, scan file to populate library then mesh genreation (@JrVolt)
-
 ## 0.8.1
 
 ### Added

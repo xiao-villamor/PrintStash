@@ -21,15 +21,9 @@ def test_requires_superuser(client: TestClient):
 
 
 def test_master_switch_roundtrip(client: TestClient, auth_headers):
-    assert (
-        client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"]
-        is False
-    )
+    assert client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"] is False
     client.put("/api/v1/notifications", json={"enabled": True}, headers=auth_headers)
-    assert (
-        client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"]
-        is True
-    )
+    assert client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"] is True
 
 
 def test_create_masks_secret_url(client: TestClient, auth_headers):
@@ -60,9 +54,8 @@ def test_update_preserves_secret_when_blank(client: TestClient, auth_headers):
 
     resp = MagicMock(status_code=204, text="")
     fake = MagicMock(request=AsyncMock(return_value=resp))
-    with (
-        patch("app.services.notifications.get_http_client", return_value=fake),
-        patch("app.services.notifications.is_public_url", return_value=True),
+    with patch("app.services.notifications.get_http_client", return_value=fake), patch(
+        "app.services.notifications.is_public_url", return_value=True
     ):
         out = client.post(
             f"/api/v1/notifications/channels/{cid}/test", headers=auth_headers
@@ -98,9 +91,7 @@ def test_delete_channel(client: TestClient, auth_headers):
         ).status_code
         == 204
     )
-    assert (
-        client.get("/api/v1/notifications/channels", headers=auth_headers).json() == []
-    )
+    assert client.get("/api/v1/notifications/channels", headers=auth_headers).json() == []
 
 
 def test_create_rejects_incomplete_config(client: TestClient, auth_headers):
@@ -149,7 +140,4 @@ def test_reenable_resets_failure_count(client: TestClient, auth_headers):
 
 
 def test_deliveries_endpoint_empty(client: TestClient, auth_headers):
-    assert (
-        client.get("/api/v1/notifications/deliveries", headers=auth_headers).json()
-        == []
-    )
+    assert client.get("/api/v1/notifications/deliveries", headers=auth_headers).json() == []

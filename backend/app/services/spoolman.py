@@ -178,9 +178,7 @@ def use_spool_weight_sync(
         headers["X-Api-Key"] = api_key
     url = f"{base_url.rstrip('/')}/api/v1/spool/{spool_id}/use"
     try:
-        resp = httpx.put(
-            url, json={"use_weight": used_g}, headers=headers, timeout=timeout
-        )
+        resp = httpx.put(url, json={"use_weight": used_g}, headers=headers, timeout=timeout)
     except httpx.HTTPError as exc:
         raise SpoolmanError(f"transport error: {exc}", code="transport") from exc
     if resp.status_code < 200 or resp.status_code >= 300:
@@ -239,7 +237,5 @@ def get_spoolman_client(session: Session) -> SpoolmanClient:
     config = runtime_config.spoolman_config(session)
     base_url = config.get("base_url")
     if not base_url:
-        raise SpoolmanError(
-            "Spoolman base URL is not configured", code="not_configured"
-        )
+        raise SpoolmanError("Spoolman base URL is not configured", code="not_configured")
     return SpoolmanClient(base_url, config.get("api_key"))

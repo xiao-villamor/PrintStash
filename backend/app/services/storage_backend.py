@@ -174,13 +174,17 @@ class LocalStorageBackend(StorageBackend):
         return str(settings.thumb_dir / "stl-cache" / f"{sha256}.stl")
 
     def collection_image_key(self, collection_id: int, name: str) -> str:
-        return str(settings.thumb_dir / "collection-images" / str(collection_id) / name)
+        return str(
+            settings.thumb_dir / "collection-images" / str(collection_id) / name
+        )
 
     def document_file_key(self, document_id: int, name: str) -> str:
         return str(settings.data_dir / "documents" / str(document_id) / name)
 
     def document_image_key(self, document_id: int, name: str) -> str:
-        return str(settings.thumb_dir / "document-images" / str(document_id) / name)
+        return str(
+            settings.thumb_dir / "document-images" / str(document_id) / name
+        )
 
     def exists(self, key: str) -> bool:
         return Path(key).exists()

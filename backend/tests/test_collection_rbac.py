@@ -90,10 +90,7 @@ def test_grant_does_not_leak_to_prefix_sibling(db_session: Session) -> None:
 
     _grant(db_session, user, func.id, CollectionRole.ADMIN)
 
-    assert (
-        rbac.effective_collection_role(db_session, user, func.id)
-        == CollectionRole.ADMIN
-    )
+    assert rbac.effective_collection_role(db_session, user, func.id) == CollectionRole.ADMIN
     assert rbac.effective_collection_role(db_session, user, func_tools.id) is None
     assert func_tools.id not in rbac.accessible_collection_ids(db_session, user)
 
@@ -107,10 +104,7 @@ def test_grant_on_child_does_not_leak_up_to_parent(db_session: Session) -> None:
 
     _grant(db_session, user, child.id, CollectionRole.ADMIN)
 
-    assert (
-        rbac.effective_collection_role(db_session, user, child.id)
-        == CollectionRole.ADMIN
-    )
+    assert rbac.effective_collection_role(db_session, user, child.id) == CollectionRole.ADMIN
     assert rbac.effective_collection_role(db_session, user, parent.id) is None
     assert parent.id not in rbac.accessible_collection_ids(db_session, user)
 
@@ -121,9 +115,7 @@ def test_trashed_collection_grants_no_role(db_session: Session) -> None:
     coll = taxonomy.resolve_or_create_collection(db_session, "Temp")
     assert coll is not None
     _grant(db_session, user, coll.id, CollectionRole.EDIT)
-    assert (
-        rbac.effective_collection_role(db_session, user, coll.id) == CollectionRole.EDIT
-    )
+    assert rbac.effective_collection_role(db_session, user, coll.id) == CollectionRole.EDIT
 
     from app.core.time import utcnow
 
@@ -332,9 +324,7 @@ def test_deleting_a_child_does_not_block_deleting_the_parent(
     admin = _user(db_session, "admin-del", superuser=True)
     h = _headers(admin)
 
-    parent = client.post(
-        "/api/v1/collections", json={"name": "Parent"}, headers=h
-    ).json()
+    parent = client.post("/api/v1/collections", json={"name": "Parent"}, headers=h).json()
     child = client.post(
         "/api/v1/collections",
         json={"name": "Child", "parent_id": parent["id"]},
@@ -343,16 +333,9 @@ def test_deleting_a_child_does_not_block_deleting_the_parent(
 
     # A LIVE child still blocks a non-recursive parent delete.
     assert (
-        client.delete(f"/api/v1/collections/{parent['id']}", headers=h).status_code
-        == 409
+        client.delete(f"/api/v1/collections/{parent['id']}", headers=h).status_code == 409
     )
 
     # After the child is trashed, the parent deletes cleanly.
-    assert (
-        client.delete(f"/api/v1/collections/{child['id']}", headers=h).status_code
-        == 204
-    )
-    assert (
-        client.delete(f"/api/v1/collections/{parent['id']}", headers=h).status_code
-        == 204
-    )
+    assert client.delete(f"/api/v1/collections/{child['id']}", headers=h).status_code == 204
+    assert client.delete(f"/api/v1/collections/{parent['id']}", headers=h).status_code == 204

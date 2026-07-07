@@ -170,9 +170,7 @@ def test_hard_delete_tagged_model_succeeds_and_keeps_the_tag(
     from app.db.models import ModelTagLink, Tag
 
     uid = uuid.uuid4().hex
-    model = Model(
-        name=f"Tagged {uid[:6]}", slug=f"tagged-{uid[:8]}", hash=(uid * 2)[:64]
-    )
+    model = Model(name=f"Tagged {uid[:6]}", slug=f"tagged-{uid[:8]}", hash=(uid * 2)[:64])
     tag = Tag(name=f"tag-{uid[:6]}", slug=f"tag-{uid[:6]}")
     db_session.add(model)
     db_session.add(tag)

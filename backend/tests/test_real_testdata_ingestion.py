@@ -65,9 +65,7 @@ def _configure_storage(tmp_path: Path) -> None:
 def _stage_copy(src: Path) -> Path:
     """Copy a real file into staging so ingestion can consume (move) it without
     touching the original under ``testdata/``."""
-    staged = (
-        Path(_overlay["staging_dir"]) / "_incoming" / f"{uuid.uuid4().hex}-{src.name}"
-    )
+    staged = Path(_overlay["staging_dir"]) / "_incoming" / f"{uuid.uuid4().hex}-{src.name}"
     shutil.copy(src, staged)
     return staged
 
@@ -125,9 +123,7 @@ def test_ingest_real_stl_extracts_geometry_and_thumbnail(
     tmp_path: Path, db_session: Session
 ) -> None:
     _configure_storage(tmp_path)
-    model, f = _ingest_mesh(
-        db_session, CUBE_STL, FileType.STL, model_name="Calibration Cube"
-    )
+    model, f = _ingest_mesh(db_session, CUBE_STL, FileType.STL, model_name="Calibration Cube")
 
     assert f.file_type == FileType.STL
     assert f.size_bytes == CUBE_STL.stat().st_size
@@ -147,11 +143,11 @@ def test_ingest_real_stl_extracts_geometry_and_thumbnail(
 
 
 @_requires(SPATULA_3MF)
-def test_ingest_real_3mf_extracts_geometry(tmp_path: Path, db_session: Session) -> None:
+def test_ingest_real_3mf_extracts_geometry(
+    tmp_path: Path, db_session: Session
+) -> None:
     _configure_storage(tmp_path)
-    model, f = _ingest_mesh(
-        db_session, SPATULA_3MF, FileType.THREE_MF, model_name="Spatula"
-    )
+    model, f = _ingest_mesh(db_session, SPATULA_3MF, FileType.THREE_MF, model_name="Spatula")
 
     assert f.file_type == FileType.THREE_MF
     md = _metadata_for(db_session, f.id)
@@ -171,9 +167,7 @@ def test_ingest_real_gcode_parses_slicer_metadata(
     tmp_path: Path, db_session: Session
 ) -> None:
     _configure_storage(tmp_path)
-    model, f = _ingest_gcode(
-        db_session, CUBE_GCODE, model_name="Calibration Cube GCode"
-    )
+    model, f = _ingest_gcode(db_session, CUBE_GCODE, model_name="Calibration Cube GCode")
 
     assert f.file_type == FileType.GCODE
     # The very first g-code on a model always claims the recommended marker.
@@ -210,12 +204,8 @@ def test_reingesting_identical_real_file_dedups_to_one_model(
     tmp_path: Path, db_session: Session
 ) -> None:
     _configure_storage(tmp_path)
-    model_a, file_v1 = _ingest_mesh(
-        db_session, CUBE_STL, FileType.STL, model_name="Cube"
-    )
-    model_b, file_v2 = _ingest_mesh(
-        db_session, CUBE_STL, FileType.STL, model_name="Cube Again"
-    )
+    model_a, file_v1 = _ingest_mesh(db_session, CUBE_STL, FileType.STL, model_name="Cube")
+    model_b, file_v2 = _ingest_mesh(db_session, CUBE_STL, FileType.STL, model_name="Cube Again")
 
     # Same content hash → same model; the re-upload is a new version, not a clone.
     assert model_a.id == model_b.id

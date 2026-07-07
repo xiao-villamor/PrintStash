@@ -43,9 +43,7 @@ async def test_setup_login_refresh_apikey_and_rbac(api, tmp_path, e2e_db):
     assert again.status_code == 409
 
     # The JWT from setup authenticates /me as the superuser.
-    me = await api.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {setup_token}"}
-    )
+    me = await api.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {setup_token}"})
     assert me.status_code == 200, me.text
     assert me.json()["username"] == "owner"
     assert me.json()["is_superuser"] is True
@@ -69,16 +67,12 @@ async def test_setup_login_refresh_apikey_and_rbac(api, tmp_path, e2e_db):
     refreshed = await api.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
     assert refreshed.status_code == 200, refreshed.text
     new_access = refreshed.json()["access_token"]
-    me2 = await api.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {new_access}"}
-    )
+    me2 = await api.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new_access}"})
     assert me2.status_code == 200
 
     # Create an API key and exchange it for a JWT via login.
     admin_headers = {"Authorization": f"Bearer {access}"}
-    key = await api.post(
-        "/api/v1/auth/api-keys", json={"name": "ci"}, headers=admin_headers
-    )
+    key = await api.post("/api/v1/auth/api-keys", json={"name": "ci"}, headers=admin_headers)
     assert key.status_code == 200, key.text
     raw_key = key.json()["api_key"]
     key_login = await api.post(

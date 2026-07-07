@@ -127,34 +127,17 @@ function formatDate(value: string | null | undefined): string {
 }
 
 async function pollScanJob(jobId: string): Promise<void> {
-  // A big library (or one with several problematic meshes each waiting out
-  // the backend's render timeout) can legitimately run for a long time while
-  // still making real progress — a fixed wall-clock deadline for the whole
-  // job would eventually cut off any library that grows past it. Instead,
-  // give up only when the job stops reporting ANY progress at all for
-  // IDLE_TIMEOUT_MS: a genuinely hung job still surfaces an error, but one
-  // that's just large and slow never gets cut off mid-scan.
-  const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // no progress signal for 5 minutes
-  let lastSignature = "";
-  let lastProgressAt = Date.now();
-
-  for (;;) {
+  // Mirrors the upload modal's polling: wait until the scan job terminates.
+  const deadline = Date.now() + 15 * 60 * 1000;
+  while (Date.now() < deadline) {
     const job = await getJobStatus(jobId);
     if (job.state === "completed") return;
     if (job.state === "failed") {
       throw new Error(job.error || "scan_failed");
     }
-
-    const signature = `${job.step ?? ""}/${job.total_steps ?? ""}/${job.label ?? ""}`;
-    if (signature !== lastSignature) {
-      lastSignature = signature;
-      lastProgressAt = Date.now();
-    } else if (Date.now() - lastProgressAt > IDLE_TIMEOUT_MS) {
-      throw new Error("scan_timeout");
-    }
-
     await new Promise((r) => setTimeout(r, 1000));
   }
+  throw new Error("scan_timeout");
 }
 
 export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {

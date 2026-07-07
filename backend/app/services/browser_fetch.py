@@ -84,9 +84,7 @@ def _cookies_for(url: str, cookie_header: str) -> list[dict]:
     for part in cookie_header.split(";"):
         name, sep, value = part.strip().partition("=")
         if name and sep:
-            cookies.append(
-                {"name": name, "value": value, "domain": domain, "path": "/"}
-            )
+            cookies.append({"name": name, "value": value, "domain": domain, "path": "/"})
     return cookies
 
 
@@ -132,9 +130,7 @@ async def fetch_rendered_html(
                 except Exception:
                     # Selector never appeared (challenge stuck or page reshaped);
                     # return whatever rendered and let the caller's parser decide.
-                    logger.warning(
-                        "wait_selector %r not found at %s", wait_selector, url
-                    )
+                    logger.warning("wait_selector %r not found at %s", wait_selector, url)
             return await page.content()
         except Exception as exc:  # noqa: BLE001 — navigation boundary
             logger.warning("browser fetch failed for %s: %s", url, exc)
@@ -186,13 +182,9 @@ async def api_get(
             page = await context.new_page()
             # Warm up: solving the root's challenge grants clearance to the
             # context, which the request below then reuses.
-            await page.goto(
-                origin + "/", wait_until="domcontentloaded", timeout=timeout_ms
-            )
+            await page.goto(origin + "/", wait_until="domcontentloaded", timeout=timeout_ms)
             await page.wait_for_timeout(2500)
-            resp = await context.request.get(
-                url, headers=headers or {}, timeout=timeout_ms
-            )
+            resp = await context.request.get(url, headers=headers or {}, timeout=timeout_ms)
             return resp.status, await resp.text()
         except Exception as exc:  # noqa: BLE001 — navigation/request boundary
             logger.warning("browser api_get failed for %s: %s", url, exc)

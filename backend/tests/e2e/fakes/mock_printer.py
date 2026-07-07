@@ -338,7 +338,9 @@ def create_app(
     @spool_app.get("/api/v1/spool")
     async def spool_list(allow_archived: bool = False) -> list:
         return [
-            s for s in state.spools.values() if allow_archived or not s.get("archived")
+            s
+            for s in state.spools.values()
+            if allow_archived or not s.get("archived")
         ]
 
     @spool_app.get("/api/v1/spool/{spool_id}")

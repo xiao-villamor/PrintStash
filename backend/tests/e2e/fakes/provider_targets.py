@@ -33,22 +33,7 @@ from .recorder import Received, Recorder
 # Number of times the flaky endpoint fails before succeeding.
 FLAKY_FAILURES = 2
 
-_ALLOWED_HTML_TAGS = {
-    "b",
-    "/b",
-    "i",
-    "/i",
-    "u",
-    "/u",
-    "s",
-    "/s",
-    "code",
-    "/code",
-    "pre",
-    "/pre",
-    "a",
-    "/a",
-}
+_ALLOWED_HTML_TAGS = {"b", "/b", "i", "/i", "u", "/u", "s", "/s", "code", "/code", "pre", "/pre", "a", "/a"}
 _HTML_TAG_RE = re.compile(r"<([^>]*)>")
 _HTML_ENTITY_RE = re.compile(r"&(?:[a-zA-Z]+|#\d+);")
 
@@ -91,7 +76,7 @@ def _telegram_parse_error(text: str, parse_mode: Optional[str]) -> Optional[str]
         for tag in _HTML_TAG_RE.findall(text):
             name = tag.split(" ", 1)[0].strip().lower()
             if name not in _ALLOWED_HTML_TAGS:
-                return f'Bad Request: unsupported start tag "{name}"'
+                return f"Bad Request: unsupported start tag \"{name}\""
         # Strip valid tags + entities, then any leftover '<' or '&' is unescaped.
         residue = _HTML_TAG_RE.sub("", text)
         residue = _HTML_ENTITY_RE.sub("", residue)
@@ -105,39 +90,22 @@ def build_provider_app(recorder: Recorder) -> Starlette:
     async def discord(request: Request) -> Response:
         body = await request.json()
         recorder.record(
-            Received(
-                "discord",
-                request.method,
-                request.url.path,
-                dict(request.headers),
-                json=body,
-            )
+            Received("discord", request.method, request.url.path, dict(request.headers), json=body)
         )
         if not (isinstance(body, dict) and (body.get("embeds") or body.get("content"))):
-            return JSONResponse(
-                {"message": "Cannot send an empty message", "code": 50006},
-                status_code=400,
-            )
+            return JSONResponse({"message": "Cannot send an empty message", "code": 50006}, status_code=400)
         return Response(status_code=204)
 
     async def telegram(request: Request) -> Response:
         body = await request.json()
         recorder.record(
-            Received(
-                "telegram",
-                request.method,
-                request.url.path,
-                dict(request.headers),
-                json=body,
-            )
+            Received("telegram", request.method, request.url.path, dict(request.headers), json=body)
         )
         text = (body or {}).get("text", "") if isinstance(body, dict) else ""
         parse_mode = (body or {}).get("parse_mode") if isinstance(body, dict) else None
         err = _telegram_parse_error(text, parse_mode)
         if err:
-            return JSONResponse(
-                {"ok": False, "error_code": 400, "description": err}, status_code=400
-            )
+            return JSONResponse({"ok": False, "error_code": 400, "description": err}, status_code=400)
         return JSONResponse({"ok": True, "result": {"message_id": 1}})
 
     async def ntfy(request: Request) -> Response:
@@ -155,9 +123,7 @@ def build_provider_app(recorder: Recorder) -> Starlette:
                 try:
                     value.encode("latin-1")
                 except UnicodeEncodeError:
-                    return PlainTextResponse(
-                        "invalid non-ASCII header", status_code=400
-                    )
+                    return PlainTextResponse("invalid non-ASCII header", status_code=400)
         return JSONResponse({"id": "fake", "topic": request.path_params.get("topic")})
 
     async def webhook(request: Request) -> Response:
@@ -167,14 +133,7 @@ def build_provider_app(recorder: Recorder) -> Starlette:
         except ValueError:
             parsed = None
         recorder.record(
-            Received(
-                "webhook",
-                request.method,
-                request.url.path,
-                dict(request.headers),
-                json=parsed,
-                body=raw,
-            )
+            Received("webhook", request.method, request.url.path, dict(request.headers), json=parsed, body=raw)
         )
         return Response(status_code=204)
 
@@ -183,14 +142,7 @@ def build_provider_app(recorder: Recorder) -> Starlette:
         n = recorder.bump(f"flaky:{key}")
         raw = await request.body()
         recorder.record(
-            Received(
-                "flaky",
-                request.method,
-                request.url.path,
-                dict(request.headers),
-                body=raw,
-                status_returned=200 if n > FLAKY_FAILURES else 500,
-            )
+            Received("flaky", request.method, request.url.path, dict(request.headers), body=raw, status_returned=200 if n > FLAKY_FAILURES else 500)
         )
         if n <= FLAKY_FAILURES:
             return PlainTextResponse("temporary failure", status_code=500)

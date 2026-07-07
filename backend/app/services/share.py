@@ -226,9 +226,7 @@ def share_file_or_404(session: Session, link: ShareLink, file_id: int) -> File:
 def _file_allowed(
     link: ShareLink, file_row: File, selected_ids: list[int] | None = None
 ) -> bool:
-    selected_ids = (
-        selected_ids if selected_ids is not None else _selected_file_ids(link)
-    )
+    selected_ids = selected_ids if selected_ids is not None else _selected_file_ids(link)
     if selected_ids is None:
         return True
     return file_row.file_type != FileType.GCODE or file_row.id in selected_ids

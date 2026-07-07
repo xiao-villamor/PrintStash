@@ -195,7 +195,6 @@ def _estimate_triangle_count(path: Path) -> Optional[int]:
         return None
     return None
 
-
 # Measured peak RSS per triangle for a full load + thumbnail render, rounded up
 # for safety margin. 3MF's XML loader plus the crease-aware rasteriser cost far
 # more than a raw STL of the same geometry (~4.5x), so it gets its own factor.
@@ -224,9 +223,7 @@ def _detect_memory_limit_bytes() -> int | None:
     except (OSError, ValueError):
         pass
     try:  # cgroup v1
-        v1 = int(
-            Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip()
-        )
+        v1 = int(Path("/sys/fs/cgroup/memory/memory.limit_in_bytes").read_text().strip())
         if 0 < v1 < (1 << 62):  # v1 uses a huge sentinel for "unlimited"
             limits.append(v1)
     except (OSError, ValueError):
@@ -241,27 +238,6 @@ def _detect_memory_limit_bytes() -> int | None:
     return min(limits) if limits else None
 
 
-def _render_job_memory_budget_bytes() -> Optional[int]:
-    """Bytes one concurrent render job may peak to, or None when RAM capping is
-    off / undetectable.
-
-    Shared by the RAM-aware triangle estimate (``_ram_triangle_cap``, a
-    best-effort pre-load guess) and the isolated-subprocess RLIMIT_AS ceiling
-    (``mesh_worker``, a hard enforced ceiling) — both should agree on the same
-    number so the estimate and the actual enforced limit don't disagree about
-    what "too big" means.
-    """
-    fraction = settings.mesh_memory_budget_fraction
-    if fraction <= 0:
-        return None
-    global _MEMORY_LIMIT_BYTES
-    if _MEMORY_LIMIT_BYTES is None:
-        _MEMORY_LIMIT_BYTES = _detect_memory_limit_bytes() or False
-    if not _MEMORY_LIMIT_BYTES:
-        return None
-    return int(_MEMORY_LIMIT_BYTES * fraction / _render_jobs_limit())
-
-
 def _ram_triangle_cap(suffix: str) -> Optional[int]:
     """RAM-derived triangle ceiling for *suffix*, or None when RAM capping is off.
 
@@ -270,9 +246,15 @@ def _ram_triangle_cap(suffix: str) -> Optional[int]:
     auto-skips a mesh on a 4 GB box that a 32 GB box renders fine. The budget is
     divided by ``max_render_jobs`` so concurrent renders share the RAM ceiling
     rather than each claiming the whole of it (#29)."""
-    budget = _render_job_memory_budget_bytes()
-    if budget is None:
+    fraction = settings.mesh_memory_budget_fraction
+    if fraction <= 0:
         return None
+    global _MEMORY_LIMIT_BYTES
+    if _MEMORY_LIMIT_BYTES is None:
+        _MEMORY_LIMIT_BYTES = _detect_memory_limit_bytes() or False
+    if not _MEMORY_LIMIT_BYTES:
+        return None
+    budget = _MEMORY_LIMIT_BYTES * fraction / _render_jobs_limit()
     per_tri = _PEAK_BYTES_PER_TRIANGLE.get(suffix, _DEFAULT_PEAK_BYTES_PER_TRIANGLE)
     return max(int(budget / per_tri), 1)
 
@@ -370,16 +352,13 @@ def _load_mesh(path: Path):
     return None
 
 
-def _geometry_from_mesh(
-    mesh, status: str = "ok"
-) -> Dict[str, Optional[float] | Optional[str]]:
-    out: Dict[str, Optional[float] | Optional[str]] = {
+def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
+    out: Dict[str, Optional[float]] = {
         "bbox_x_mm": None,
         "bbox_y_mm": None,
         "bbox_z_mm": None,
         "volume_mm3": None,
         "triangle_count": None,
-        "render_status": status,
     }
 
     if mesh is None:
@@ -454,14 +433,6 @@ def analyze_mesh(
 
     Returns ``(geometry_dict, png_bytes_or_None)``. *report* receives progress
     labels as the stages run (see ingestion progress hints).
-
-    When ``settings.mesh_isolate_render`` is on (the default), the actual
-    load+render happens in a throwaway subprocess with a hard memory ceiling
-    (see ``mesh_worker``) so a file that slips past the pre-load triangle
-    estimate and blows its budget only takes down that subprocess — never the
-    API itself. On any isolated-render failure (OOM, crash, timeout) this
-    falls back exactly like an over-cap file: keep the cheap metadata, use the
-    embedded slicer preview if there is one.
     """
 
     def _report(label: str) -> None:
@@ -469,72 +440,14 @@ def analyze_mesh(
             report(label)
 
     _report("loading_mesh")
+    cap = settings.mesh_max_render_triangles
     # Too dense to load safely — skip it rather than risk an OOM kill (#24).
     # The file is still indexed; a large 3MF still gets its embedded preview below.
     over_cap = _exceeds_cap(path)
-    if over_cap:
-        geometry = _geometry_from_mesh(None, status="skipped_oversize")
-        thumb = None
-        if settings.use_embedded_3mf_preview_for_large_files:
-            thumb = extract_embedded_3mf_thumbnail(path)
-        return geometry, thumb
-
-    if settings.mesh_isolate_render:
-        _report("extracting_geometry")
-        _report("rendering_thumbnail")
-        from app.services import mesh_worker
-
-        with _render_semaphore():
-            geometry, thumb, status = mesh_worker.run_isolated_analyze(
-                path,
-                width=width,
-                height=height,
-                mem_limit_bytes=_render_job_memory_budget_bytes(),
-                timeout_s=settings.mesh_render_timeout_s,
-            )
-        if status != mesh_worker.STATUS_OK:
-            logger.warning(
-                "mesh_processing: isolated render for %s ended in %s; "
-                "indexing without a rendered thumbnail",
-                path.name,
-                status,
-            )
-            geometry = _geometry_from_mesh(None, status=f"failed_{status}")
-            thumb = (
-                extract_embedded_3mf_thumbnail(path)
-                if settings.use_embedded_3mf_preview_for_large_files
-                else None
-            )
-        return geometry, thumb
-
-    return analyze_mesh_in_process(path, width=width, height=height, report=report)
-
-
-def analyze_mesh_in_process(
-    path: Path,
-    *,
-    width: int = 640,
-    height: int = 480,
-    report: Callable[[str], None] | None = None,
-) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
-    """The actual load-mesh-then-render body, run either directly (legacy /
-    ``mesh_isolate_render=False`` path) or inside the isolated subprocess
-    started by ``mesh_worker.run_isolated_analyze``. Callers wanting the
-    OOM-safe behaviour should call ``analyze_mesh`` instead — this is the
-    unguarded implementation it delegates to.
-    """
-
-    def _report(label: str) -> None:
-        if report is not None:
-            report(label)
-
-    cap = settings.mesh_max_render_triangles
-    over_cap = _exceeds_cap(path)
 
     # One concurrency gate around the whole load+render so a bulk upload's
-    # background tasks don't collectively OOM the box (#29). Only meaningful
-    # for the legacy in-process path — the isolated path already gates in
-    # `analyze_mesh` before spawning the subprocess.
+    # background tasks don't collectively OOM the box (#29). The body is cheap
+    # when the mesh is skipped (over cap), so holding the gate then is harmless.
     with _render_semaphore():
         mesh = None if over_cap else _load_mesh(path)
 
@@ -575,18 +488,6 @@ def analyze_mesh_in_process(
             del mesh
             _reclaim_memory()
     return geometry, thumb
-
-
-def pending_geometry() -> Dict[str, Optional[float] | Optional[str]]:
-    """Placeholder geometry dict for a file that's catalogued but not yet
-    rendered — external-library scans use this to create the File/Model row
-    immediately (browsable right away, no thumbnail) and defer the actual
-    load+render to a second pass (see mesh_retry.retry_failed_renders), so a
-    slow or risky mesh never blocks the rest of the folder from being indexed.
-    Shaped identically to `extract_geometry`'s return value so it's a drop-in
-    **kwargs for the `Metadata` constructor.
-    """
-    return _geometry_from_mesh(None, status="pending")
 
 
 def extract_geometry(path: Path) -> Dict[str, Optional[float]]:

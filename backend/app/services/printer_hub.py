@@ -317,9 +317,9 @@ class PrinterHub:
             # OFFLINE from a previously-live status. Skipping UNKNOWN avoids
             # spurious alerts on startup/first-connect, and equality skips the
             # heartbeat re-write path that re-persists an unchanged status.
-            if status == PrinterStatus.OFFLINE and prev_status not in (
-                PrinterStatus.OFFLINE,
-                PrinterStatus.UNKNOWN,
+            if (
+                status == PrinterStatus.OFFLINE
+                and prev_status not in (PrinterStatus.OFFLINE, PrinterStatus.UNKNOWN)
             ):
                 notifications.enqueue_for_event(
                     session,

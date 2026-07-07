@@ -15,9 +15,7 @@ import pytest
 
 pytestmark = pytest.mark.e2e
 
-FIXTURE = (
-    Path(__file__).resolve().parents[1] / "fixtures" / "real_orca_ender3_benchy.gcode"
-)
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "real_orca_ender3_benchy.gcode"
 
 
 async def _setup_and_login(api, tmp_path) -> dict[str, str]:
@@ -65,9 +63,7 @@ async def _await_job(api, headers, job_id: str) -> dict:
 async def test_gcode_upload_parses_metadata_and_dedups(api, tmp_path, e2e_db):
     headers = await _setup_and_login(api, tmp_path)
 
-    job = await _await_job(
-        api, headers, (await _upload(api, headers, model_name="Benchy"))["job_id"]
-    )
+    job = await _await_job(api, headers, (await _upload(api, headers, model_name="Benchy"))["job_id"])
     assert job["state"] == "completed", job
 
     # The model now exists and is listable.
@@ -86,9 +82,7 @@ async def test_gcode_upload_parses_metadata_and_dedups(api, tmp_path, e2e_db):
     assert (meta.slicer_name or "").lower().startswith("orca") or meta.layer_height_mm
 
     # Re-uploading identical bytes dedups by content hash (no second model).
-    dup = await _await_job(
-        api, headers, (await _upload(api, headers, model_name="Benchy Copy"))["job_id"]
-    )
+    dup = await _await_job(api, headers, (await _upload(api, headers, model_name="Benchy Copy"))["job_id"])
     assert dup["state"] in ("duplicate", "completed"), dup
     listing2 = (await api.get("/api/v1/models", headers=headers)).json()
     benchies = [m for m in listing2 if m["name"] in ("Benchy", "Benchy Copy")]

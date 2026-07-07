@@ -89,9 +89,7 @@ def test_over_cap_3mf_still_gets_embedded_preview(tmp_path: Path, monkeypatch) -
     png = mesh_processing._PNG_MAGIC + b"preview-bytes"
     p = tmp_path / "dense.3mf"
     with zipfile.ZipFile(p, "w") as zf:
-        zf.writestr(
-            "3D/3dmodel.model", b"<triangle/>" * 100_000
-        )  # ~157k tris, over cap
+        zf.writestr("3D/3dmodel.model", b"<triangle/>" * 100_000)  # ~157k tris, over cap
         zf.writestr("Metadata/thumbnail.png", png)
 
     monkeypatch.setattr(
@@ -111,18 +109,12 @@ def test_post_load_backstop_skips_render_when_estimate_missed(
 ) -> None:
     # A format the estimator can't size up (returns None) but whose loaded mesh
     # is over budget: keep the cheap geometry, skip the expensive render.
-    # mesh_isolate_render off: this test monkeypatches mesh_processing internals
-    # directly and needs them to run in THIS process, not a spawned subprocess
-    # that would re-import a clean, unpatched module (see mesh_worker).
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 10)
     p = tmp_path / "model.obj"
     p.write_text("# obj")
 
     monkeypatch.setattr(mesh_processing, "_estimate_triangle_count", lambda _p: None)
-    monkeypatch.setattr(
-        mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=99)
-    )
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=99))
     monkeypatch.setattr(
         mesh_processing.mesh_render,
         "render_mesh_thumbnail",
@@ -136,17 +128,11 @@ def test_post_load_backstop_skips_render_when_estimate_missed(
 
 
 def test_under_cap_mesh_renders_normally(tmp_path: Path, monkeypatch) -> None:
-    # Isolation off — see test_post_load_backstop_skips_render_when_estimate_missed
-    # for why: this monkeypatches render_mesh_thumbnail directly and needs it to
-    # run in this process, not a spawned subprocess.
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
     p = tmp_path / "ok.stl"
     _write_binary_stl(p, 500)
 
-    monkeypatch.setattr(
-        mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=500)
-    )
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=500))
     monkeypatch.setattr(
         mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNGDATA"
     )
@@ -181,17 +167,13 @@ def test_ram_cap_scales_with_memory_and_format(monkeypatch) -> None:
     stl_cap = mesh_processing._ram_triangle_cap(".stl")
     mf_cap = mesh_processing._ram_triangle_cap(".3mf")
     # 2 GB budget / per-triangle cost.
-    assert stl_cap == int(
-        2 * 1024**3 / mesh_processing._DEFAULT_PEAK_BYTES_PER_TRIANGLE
-    )
+    assert stl_cap == int(2 * 1024**3 / mesh_processing._DEFAULT_PEAK_BYTES_PER_TRIANGLE)
     assert mf_cap == int(2 * 1024**3 / mesh_processing._PEAK_BYTES_PER_TRIANGLE[".3mf"])
     # 3MF is the heavier format, so its cap is the lower of the two.
     assert mf_cap < stl_cap
 
 
-def test_ram_cap_skips_mesh_a_big_host_would_render(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_ram_cap_skips_mesh_a_big_host_would_render(tmp_path: Path, monkeypatch) -> None:
     # Static ceiling is generous (5M), but a 2 GB host can't afford this mesh.
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 5_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
@@ -209,9 +191,7 @@ def test_ram_cap_skips_mesh_a_big_host_would_render(
     assert mesh_processing.extract_geometry(p)["triangle_count"] is None
 
 
-def test_static_cap_still_applies_on_a_huge_ram_host(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_static_cap_still_applies_on_a_huge_ram_host(tmp_path: Path, monkeypatch) -> None:
     # A 256 GB host: the RAM cap is enormous, so the static ceiling is what binds.
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
     monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
@@ -221,9 +201,7 @@ def test_static_cap_still_applies_on_a_huge_ram_host(
     monkeypatch.setattr(
         mesh_processing,
         "_load_mesh",
-        lambda _p: (_ for _ in ()).throw(
-            AssertionError("over static cap must not load")
-        ),
+        lambda _p: (_ for _ in ()).throw(AssertionError("over static cap must not load")),
     )
     assert mesh_processing.extract_geometry(p)["triangle_count"] is None
 
@@ -235,9 +213,6 @@ def test_static_cap_still_applies_on_a_huge_ram_host(
 
 
 def test_loaded_mesh_triggers_memory_reclaim(tmp_path: Path, monkeypatch) -> None:
-    # Isolation off — this monkeypatches _reclaim_memory itself and needs the
-    # call to happen in this process to be observable.
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
     p = tmp_path / "ok.stl"
@@ -249,9 +224,7 @@ def test_loaded_mesh_triggers_memory_reclaim(tmp_path: Path, monkeypatch) -> Non
         mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNG"
     )
     monkeypatch.setattr(
-        mesh_processing,
-        "_reclaim_memory",
-        lambda: calls.__setitem__("n", calls["n"] + 1),
+        mesh_processing, "_reclaim_memory", lambda: calls.__setitem__("n", calls["n"] + 1)
     )
 
     mesh_processing.analyze_mesh(p)
@@ -267,9 +240,7 @@ def test_skipped_mesh_does_not_reclaim(tmp_path: Path, monkeypatch) -> None:
 
     calls = {"n": 0}
     monkeypatch.setattr(
-        mesh_processing,
-        "_reclaim_memory",
-        lambda: calls.__setitem__("n", calls["n"] + 1),
+        mesh_processing, "_reclaim_memory", lambda: calls.__setitem__("n", calls["n"] + 1)
     )
     monkeypatch.setattr(
         mesh_processing,
@@ -340,8 +311,6 @@ def test_oversize_3mf_still_gets_embedded_preview(tmp_path: Path, monkeypatch) -
 def test_size_guard_disabled_when_zero(tmp_path: Path, monkeypatch) -> None:
     # mesh_max_load_mb = 0 turns the byte cap off; a big-but-sparse-triangle file
     # then loads normally (only the triangle cap still applies).
-    # Isolation off — monkeypatches render_mesh_thumbnail, needs it in-process.
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
     p = tmp_path / "big.stl"
@@ -473,7 +442,8 @@ def test_over_cap_ply_skips_load(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
     p = tmp_path / "dense.ply"
     p.write_bytes(
-        b"ply\nformat binary_little_endian 1.0\nelement face 999999\nend_header\n"
+        b"ply\nformat binary_little_endian 1.0\n"
+        b"element face 999999\nend_header\n"
     )
     monkeypatch.setattr(
         mesh_processing,
@@ -608,11 +578,6 @@ def test_render_semaphore_caps_concurrent_renders(tmp_path: Path, monkeypatch) -
     import threading
     import time
 
-    # Isolation off — this test exercises the in-process threading.Semaphore
-    # directly (via 8 threads sharing one process's _RENDER_SEMAPHORE); that
-    # concept doesn't apply across separate OS processes, so this needs the
-    # legacy in-process path to mean anything.
-    monkeypatch.setitem(_overlay, "mesh_isolate_render", False)
     monkeypatch.setitem(_overlay, "max_render_jobs", 2)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)

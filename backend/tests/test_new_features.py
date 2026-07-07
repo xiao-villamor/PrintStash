@@ -235,11 +235,7 @@ class TestCompletionCapture:
         pid, file_id, job_id = self._setup(db_session)
         asyncio.run(
             hub._sync_active_job(
-                pid,
-                "complete",
-                "cap.gcode",
-                1.0,
-                {"state": "complete", "filename": "cap.gcode"},
+                pid, "complete", "cap.gcode", 1.0, {"state": "complete", "filename": "cap.gcode"}
             )
         )
         f = db_session.get(File, file_id)
@@ -252,11 +248,7 @@ class TestCompletionCapture:
         )
         asyncio.run(
             hub._sync_active_job(
-                pid,
-                "complete",
-                "cap.gcode",
-                1.0,
-                {"state": "complete", "filename": "cap.gcode"},
+                pid, "complete", "cap.gcode", 1.0, {"state": "complete", "filename": "cap.gcode"}
             )
         )
         f = db_session.get(File, file_id)
@@ -324,7 +316,9 @@ class TestShareIsolation:
     def test_download_blocked_when_view_only(self, client, db_session, auth_headers):
         m = _make_model(db_session, slug="dl", hash_="d" * 64)
         f = _make_file(db_session, m, filename="dl.stl")
-        created = self._create_share(client, auth_headers, m.id, allow_download=False)
+        created = self._create_share(
+            client, auth_headers, m.id, allow_download=False
+        )
         res = client.get(f"/api/v1/share/{created['token']}/files/{f.id}/download")
         assert res.status_code == 403
 
@@ -356,7 +350,9 @@ class TestShareIsolation:
         assert shared_rev["revision_label"] == "PLA fast"
         assert shared_rev["revision_status"] == "known_good"
 
-        blocked = client.get(f"/api/v1/share/{created['token']}/files/{rev1.id}/gcode")
+        blocked = client.get(
+            f"/api/v1/share/{created['token']}/files/{rev1.id}/gcode"
+        )
         assert blocked.status_code == 404
 
 

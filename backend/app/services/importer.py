@@ -478,9 +478,7 @@ def import_resolved_groups(
     done = 0
     for group in groups:
         if not group.staged_files:
-            results.append(
-                {"name": group.title, "error": group.error or "no_importable_files"}
-            )
+            results.append({"name": group.title, "error": group.error or "no_importable_files"})
             continue
         for staged, original_filename in group.staged_files:
             res = _ingest_one_file(
@@ -515,11 +513,7 @@ def import_resolved_groups(
     # the UI shows e.g. the MakerWorld login message rather than a generic one).
     if not imported:
         member_errors = {r["error"] for r in results if r.get("error")}
-        error = (
-            member_errors.pop()
-            if len(member_errors) == 1
-            else "collection_import_failed"
-        )
+        error = member_errors.pop() if len(member_errors) == 1 else "collection_import_failed"
         registry.update(job_id, state="failed", error=error, result=result)
         return
 

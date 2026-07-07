@@ -65,9 +65,7 @@ class LibraryCreate(BaseModel):
     # Empty string = manual only. Otherwise a cron expression.
     scan_schedule: str = Field(default="0 * * * *", max_length=128)
     watch_mode: ExternalLibraryWatchMode = ExternalLibraryWatchMode.AUTO
-    collection_mode: ExternalLibraryCollectionMode = (
-        ExternalLibraryCollectionMode.MIRROR
-    )
+    collection_mode: ExternalLibraryCollectionMode = ExternalLibraryCollectionMode.MIRROR
     target_collection_id: Optional[int] = None
 
 
@@ -97,9 +95,7 @@ def _validate_schedule(schedule: str) -> None:
         raise HTTPException(status_code=400, detail="invalid_cron_schedule")
 
 
-def _schedule_watcher_refresh(
-    request: Request, background_tasks: BackgroundTasks
-) -> None:
+def _schedule_watcher_refresh(request: Request, background_tasks: BackgroundTasks) -> None:
     """Reconcile the folder watcher after a config change (best-effort).
 
     The watcher only exists once the app lifespan has started; guard for setups
@@ -118,8 +114,7 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
         except (ValueError, TypeError):
             summary = None
     watch_active = lib.fs_kind is not None and external_library.should_watch(
-        lib,
-        lib.fs_kind,  # type: ignore[arg-type]
+        lib, lib.fs_kind  # type: ignore[arg-type]
     )
     return LibraryRead(
         id=lib.id,  # type: ignore[arg-type]
@@ -133,9 +128,7 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
         watch_active=watch_active,
         collection_mode=lib.collection_mode,
         target_collection_id=lib.target_collection_id,
-        last_scanned_at=lib.last_scanned_at.isoformat()
-        if lib.last_scanned_at
-        else None,
+        last_scanned_at=lib.last_scanned_at.isoformat() if lib.last_scanned_at else None,
         last_scan_status=lib.last_scan_status.value if lib.last_scan_status else None,
         last_scan_summary=summary,
     )

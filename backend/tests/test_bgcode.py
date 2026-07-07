@@ -18,26 +18,14 @@ from app.services import bgcode, thumbnail
 from app.services.gcode_parser import parse
 
 _REAL_FIXTURE = (
-    Path(__file__).resolve().parents[2]
-    / "testdata"
-    / "benchy"
-    / "BenchyRules_PLA_14m.bgcode"
+    Path(__file__).resolve().parents[2] / "testdata" / "benchy" / "BenchyRules_PLA_14m.bgcode"
 )
 
 # Block types.
-_FILE_META, _GCODE, _SLICER_META, _PRINTER_META, _PRINT_META, _THUMBNAIL = (
-    0,
-    1,
-    2,
-    3,
-    4,
-    5,
-)
+_FILE_META, _GCODE, _SLICER_META, _PRINTER_META, _PRINT_META, _THUMBNAIL = 0, 1, 2, 3, 4, 5
 
 
-def _block(
-    btype: int, params: bytes, data: bytes, *, compression: int, checksum_type: int
-) -> bytes:
+def _block(btype: int, params: bytes, data: bytes, *, compression: int, checksum_type: int) -> bytes:
     """Assemble one bgcode block. compression: 0=none, 1=deflate, 3='heatshrink'."""
     if compression == 1:
         body = zlib.compress(data)
@@ -79,52 +67,37 @@ def _png_bytes(w: int, h: int) -> bytes:
 
 def _sample_container(*, checksum_type: int = 1) -> bytes:
     file_meta = _block(
-        _FILE_META,
-        _meta_params(),
-        b"Producer=PrusaSlicer 2.8.0+win64\n",
-        compression=0,
-        checksum_type=checksum_type,
+        _FILE_META, _meta_params(), b"Producer=PrusaSlicer 2.8.0+win64\n",
+        compression=0, checksum_type=checksum_type,
     )
     printer_meta = _block(
-        _PRINTER_META,
-        _meta_params(),
+        _PRINTER_META, _meta_params(),
         (
             b"printer_model=MK4S\nnozzle_diameter=0.4\nbed_temperature=60\n"
             b"fill_density=15%\nlayer_height=0.2\ntemperature=215\n"
             b"support_material=0\nfilament_type=PETG\n"
         ),
-        compression=0,
-        checksum_type=checksum_type,
+        compression=0, checksum_type=checksum_type,
     )
     # Deflate-compressed, to exercise the zlib path.
     print_meta = _block(
-        _PRINT_META,
-        _meta_params(),
+        _PRINT_META, _meta_params(),
         (
             b"filament used [mm]=1234.5\ntotal filament used [g]=7.5\n"
             b"total filament cost=0.25\nestimated printing time (normal mode)=1h 5m 3s\n"
         ),
-        compression=1,
-        checksum_type=checksum_type,
+        compression=1, checksum_type=checksum_type,
     )
     thumb = _block(
-        _THUMBNAIL,
-        _thumb_params(0, 16, 16),
-        _png_bytes(16, 16),
-        compression=0,
-        checksum_type=checksum_type,
+        _THUMBNAIL, _thumb_params(0, 16, 16), _png_bytes(16, 16),
+        compression=0, checksum_type=checksum_type,
     )
     # A "heatshrink" g-code block the reader must skip without decoding.
     gcode = _block(
-        _GCODE,
-        struct.pack("<H", 2),
-        b"\x00\x01\x02opaque-heatshrink-bytes",
-        compression=3,
-        checksum_type=checksum_type,
+        _GCODE, struct.pack("<H", 2), b"\x00\x01\x02opaque-heatshrink-bytes",
+        compression=3, checksum_type=checksum_type,
     )
-    return _build(
-        [file_meta, printer_meta, thumb, print_meta, gcode], checksum_type=checksum_type
-    )
+    return _build([file_meta, printer_meta, thumb, print_meta, gcode], checksum_type=checksum_type)
 
 
 class TestSyntheticBgcode:
@@ -192,9 +165,7 @@ class TestSyntheticBgcode:
         assert parse(p)["printer_model"] == "Ender 3"
 
 
-@pytest.mark.skipif(
-    not _REAL_FIXTURE.exists(), reason="real .bgcode fixture not present"
-)
+@pytest.mark.skipif(not _REAL_FIXTURE.exists(), reason="real .bgcode fixture not present")
 class TestRealFixture:
     def test_parse_real_prusaslicer_bgcode(self) -> None:
         result = parse(_REAL_FIXTURE)
