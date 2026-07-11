@@ -362,7 +362,8 @@ def test_detect_fs_kind_and_should_watch(tmp_path: Path) -> None:
     from app.db.models import ExternalLibraryWatchMode as WM
 
     # tmp_path is a local filesystem on the test host.
-    assert external_library.detect_fs_kind(tmp_path) in {"local", "unknown"}
+    # CI can place pytest temp files on a mounted Windows/network filesystem.
+    assert external_library.detect_fs_kind(tmp_path) in {"local", "network", "unknown"}
 
     lib = ExternalLibrary(name="x", root_path=str(tmp_path))
 
