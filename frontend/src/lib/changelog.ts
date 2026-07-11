@@ -22,6 +22,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.9.0",
+    date: "Jul 2026",
+    changes: [
+      "Bambu LAN beta: upload plain-text Vault G-code over your local network, then optionally start it with an explicit Send & Print choice",
+      "Printer actions now come from each provider's advertised capabilities, so unsupported controls stay clearly disabled",
+      "Printer reconnects back off after failures, while repeated live-job database failures are circuit-broken to protect the server",
+    ],
+  },
+  {
     version: "0.8.5",
     date: "Jul 2026",
     changes: [

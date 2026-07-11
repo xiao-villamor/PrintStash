@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0
+
+### Added
+
+- **Bambu LAN Vault send support (beta).** Plain-text G-code can be uploaded
+  over the local network, with an explicit opt-in to start after upload.
+- **Provider capability matrix.** API and UI now use provider-declared action
+  support, including measured-consumption capability.
+
+### Fixed
+
+- **Printer reconnect and job-sync resilience.** Failed provider connections
+  back off instead of reconnecting in a tight loop; repeated job-sync database
+  failures are circuit-broken and progress writes are coalesced.
+
 ## 0.8.5
 
 ### Security

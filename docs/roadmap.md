@@ -8,7 +8,7 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current Release: 0.8.x — Self-Hosted Library
+## Current Release: 0.9.0 — Provider Maturity
 
 Production hardening is in place. The app is useful for local-first 3D print
 library workflows, installable through Docker Compose (the default compose pulls
@@ -110,14 +110,16 @@ Shipped in 0.8.0:
   a manual "write back anyway" override), plus a UI warning — so a print is
   never counted twice
 
-## 0.9 — Provider Maturity (Bambu + reliability)
+## 0.9 — Provider Maturity (Bambu + reliability, delivered in 0.9.0)
 
 Goal: make printer integrations predictable across normal home setups.
 
-- Bambu LAN upload/send parity, with provider-safe guardrails
-- More disconnect/reconnect coverage for mixed fleets
-- Clear UI states for unsupported printer actions
-- Broader hardware validation and notes for tested Moonraker and Bambu setups
+- Bambu LAN upload/send parity for plain-text Vault G-code, with idle-state
+  guardrails and explicit opt-in start
+- Exponential reconnect backoff and circuit-breaking for repeated job-sync DB
+  failures
+- Capability-driven UI states for unsupported printer actions
+- Broader hardware validation notes for tested Moonraker and Bambu setups
 
 ## 0.10 — More Providers
 
