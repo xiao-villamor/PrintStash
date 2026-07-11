@@ -25,9 +25,11 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: "0.9.0",
     date: "Jul 2026",
     changes: [
-      "Bambu LAN beta: upload plain-text Vault G-code over your local network, then optionally start it with an explicit Send & Print choice",
-      "Printer actions now come from each provider's advertised capabilities, so unsupported controls stay clearly disabled",
-      "Printer reconnects back off after failures, while repeated live-job database failures are circuit-broken to protect the server",
+      "Bambu LAN beta: upload plain-text Vault G-code over local FTPS, then optionally start it through local MQTT with an explicit Send & Print choice",
+      "Bambu sends verify the printer is idle before creating a transfer job; upload-only remains the safe default",
+      "Printer actions and diagnostics now come from each provider's advertised capabilities, so unsupported controls stay clearly disabled",
+      "Connection failures use bounded backoff, while Bambu polling failures now correctly mark the printer offline and recover on the next successful status",
+      "Live job progress writes are coalesced and repeated database failures are circuit-broken to avoid write storms",
     ],
   },
   {

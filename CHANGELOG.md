@@ -4,16 +4,44 @@
 
 ### Added
 
-- **Bambu LAN Vault send support (beta).** Plain-text G-code can be uploaded
-  over the local network, with an explicit opt-in to start after upload.
-- **Provider capability matrix.** API and UI now use provider-declared action
-  support, including measured-consumption capability.
+- **Bambu LAN Vault send support (beta).** PrintStash can upload plain-text
+  G-code to a Bambu printer's local cache over implicit FTPS, then start the
+  uploaded file through the local MQTT connection. Upload-only remains the
+  default; starting requires the explicit **Start print immediately** option.
+- **Provider-safe Bambu send guard.** Bambu sends now verify that the printer
+  reports an idle/ready state before creating a transfer job, so an active or
+  unreachable printer is rejected without leaving a job stuck uploading.
+- **Provider capability matrix.** Printer integrations declare supported
+  actions from one shared capability set (status, upload, start, controls,
+  file inventory, raw G-code, and measured consumption). API diagnostics and
+  frontend actions are derived from that data instead of provider-specific UI
+  checks.
 
 ### Fixed
 
-- **Printer reconnect and job-sync resilience.** Failed provider connections
-  back off instead of reconnecting in a tight loop; repeated job-sync database
-  failures are circuit-broken and progress writes are coalesced.
+- **Predictable reconnect behavior.** Initial connection and subscription
+  failures now use bounded exponential backoff, while a recovered provider
+  clears its stale offline/error state on the first successful status update.
+- **Bambu status failures reach the printer hub.** Polling errors no longer stay
+  hidden inside the provider loop, preventing stale online state during a LAN
+  outage and allowing the shared reconnect policy to take over.
+- **Mixed-provider send controls are capability-aware.** The send dialog keeps
+  upload-only printers selectable but disables **Send & Print** when any
+  selected printer cannot start the uploaded file.
+
+### Performance
+
+- **Live job database writes are bounded.** Unchanged progress updates are
+  coalesced to a five-second interval. Three consecutive job-sync database
+  failures open a per-printer circuit breaker with increasing retry delays,
+  preventing a database outage from becoming a write storm.
+
+### Ops
+
+- Node.js 24 is pinned for frontend development and release builds, matching
+  CI and the production frontend image.
+- Provider documentation, limitations, diagnostics, manual hardware checks,
+  and the public roadmap now describe the 0.9.0 capability surface.
 
 ## 0.8.5
 
