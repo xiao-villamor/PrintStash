@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -24,10 +25,11 @@ class TestCapabilities:
 
     def test_bambu_capabilities(self):
         caps = capabilities_for_provider(PrinterProvider.BAMBU_LAN)
-        assert caps.can_upload is False
+        assert caps.can_upload is True
+        assert caps.can_start is True
         assert caps.can_pause is True
         assert caps.support_level == "beta"
-        assert "upload" in caps.unsupported_actions
+        assert "list_files" in caps.unsupported_actions
 
 
 class TestProviderFactory:
@@ -135,7 +137,50 @@ class TestBambuLanProvider:
             asyncio.run(provider.cancel())
             assert send.await_count == 3
 
-    def test_start_unsupported(self):
+    def test_start_sends_cached_gcode_command(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
-        with pytest.raises(ProviderError, match="operation_not_supported_for_provider"):
-            asyncio.run(provider.start("file.gcode"))
+        with patch.object(provider, "_send_command", new_callable=AsyncMock) as send:
+            send.return_value = {"ok": True}
+            assert asyncio.run(provider.start("file.gcode")) == {"ok": True}
+        payload = send.await_args.args[0]
+        assert payload["print"]["command"] == "gcode_file"
+        assert payload["print"]["param"] == "/cache/file.gcode"
+        assert payload["print"]["sequence_id"]
+
+    def test_upload_uses_ftps_adapter(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_text("G28\n")
+        with patch.object(provider, "_upload_via_ftps") as upload:
+            assert asyncio.run(provider.upload(source, "cube.gcode")) == {
+                "ok": True,
+                "remote_filename": "cube.gcode",
+            }
+        upload.assert_called_once_with(source, "cube.gcode")
+
+    def test_upload_rejects_nested_remote_name(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_text("G28\n")
+        with pytest.raises(ProviderError, match="invalid_bambu_remote_filename"):
+            provider._upload_via_ftps(source, "nested/cube.gcode")
+
+    def test_ftps_upload_uses_cache_and_atomic_rename(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        ftp = MagicMock()
+        ftp.size.return_value = source.stat().st_size
+        with patch.object(provider, "_ftps_client", return_value=ftp):
+            provider._upload_via_ftps(source, "cube.gcode")
+
+        ftp.connect.assert_called_once_with("192.168.1.50", 990)
+        ftp.login.assert_called_once_with("bblp", "acc")
+        ftp.prot_p.assert_called_once_with()
+        upload_path = ftp.storbinary.call_args.args[0]
+        assert upload_path.startswith("STOR cache/.cube.gcode.")
+        assert upload_path.endswith(".uploading")
+        temp_path = upload_path.removeprefix("STOR ")
+        ftp.size.assert_called_once_with(temp_path)
+        ftp.rename.assert_called_once_with(temp_path, "cache/cube.gcode")
+        ftp.quit.assert_called_once_with()

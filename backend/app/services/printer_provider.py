@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
+import ssl
 from dataclasses import dataclass
+from enum import StrEnum
+from ftplib import FTP_TLS
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
+from uuid import uuid4
 
 import httpx
 import paho.mqtt.client as mqtt
@@ -17,6 +23,24 @@ from app.services.moonraker import MoonrakerClient, MoonrakerError
 logger = get_logger(__name__)
 
 
+class _ImplicitFTP_TLS(FTP_TLS):
+    """``ftplib`` client variant for Bambu's implicit-TLS port 990."""
+
+    def connect(self, host="", port=0, timeout=-999, source_address=None):
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+        self.source_address = source_address
+        self.sock = socket.create_connection(
+            (host, port), timeout, source_address=source_address
+        )
+        self.af = self.sock.family
+        self.sock = self.context.wrap_socket(self.sock, server_hostname=host)
+        self.file = self.sock.makefile("r", encoding=self.encoding)
+        self.welcome = self.getresp()
+        return self.welcome
+
+
 class ProviderError(RuntimeError):
     """Common provider exception surface."""
 
@@ -26,19 +50,87 @@ class ProviderError(RuntimeError):
         self.code = code
 
 
+class Capability(StrEnum):
+    """Provider action vocabulary shared by API, UI, and future edge transport."""
+
+    START = "start"
+    PAUSE = "pause"
+    RESUME = "resume"
+    CANCEL = "cancel"
+    LIVE_STATUS = "live_status"
+    UPLOAD = "upload"
+    LIST_FILES = "list_files"
+    SEND_GCODE = "send_gcode"
+    MEASURED_CONSUMPTION = "measured_consumption"
+
+
 @dataclass(frozen=True)
 class ProviderCapabilities:
-    can_start: bool
-    can_pause: bool
-    can_resume: bool
-    can_cancel: bool
-    can_live_status: bool
-    can_upload: bool
-    can_list_files: bool = False
-    can_send_gcode: bool = False
+    supported: frozenset[Capability]
     support_level: str = "stable"
     support_notes: tuple[str, ...] = ()
     unsupported_actions: tuple[str, ...] = ()
+    requires_ready_before_send: bool = False
+
+    def supports(self, capability: Capability) -> bool:
+        return capability in self.supported
+
+    @property
+    def can_start(self) -> bool:
+        return self.supports(Capability.START)
+
+    @property
+    def can_pause(self) -> bool:
+        return self.supports(Capability.PAUSE)
+
+    @property
+    def can_resume(self) -> bool:
+        return self.supports(Capability.RESUME)
+
+    @property
+    def can_cancel(self) -> bool:
+        return self.supports(Capability.CANCEL)
+
+    @property
+    def can_live_status(self) -> bool:
+        return self.supports(Capability.LIVE_STATUS)
+
+    @property
+    def can_upload(self) -> bool:
+        return self.supports(Capability.UPLOAD)
+
+    @property
+    def can_list_files(self) -> bool:
+        return self.supports(Capability.LIST_FILES)
+
+    @property
+    def can_send_gcode(self) -> bool:
+        return self.supports(Capability.SEND_GCODE)
+
+    @property
+    def can_measure_consumption(self) -> bool:
+        return self.supports(Capability.MEASURED_CONSUMPTION)
+
+    def action_flags(self) -> dict[str, bool]:
+        return {
+            "can_start": self.can_start,
+            "can_pause": self.can_pause,
+            "can_resume": self.can_resume,
+            "can_cancel": self.can_cancel,
+            "can_live_status": self.can_live_status,
+            "can_upload": self.can_upload,
+            "can_list_files": self.can_list_files,
+            "can_send_gcode": self.can_send_gcode,
+            "can_measure_consumption": self.can_measure_consumption,
+        }
+
+    def as_api_dict(self) -> dict[str, object]:
+        return {
+            **self.action_flags(),
+            "support_level": self.support_level,
+            "support_notes": list(self.support_notes),
+            "unsupported_actions": list(self.unsupported_actions),
+        }
 
 
 class PrinterProviderClient(Protocol):
@@ -55,6 +147,8 @@ class PrinterProviderClient(Protocol):
     async def query_status(self) -> dict[str, Any]: ...
 
     async def list_files(self) -> list[dict[str, Any]]: ...
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]: ...
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]: ...
 
@@ -80,14 +174,7 @@ class PrinterProviderClient(Protocol):
 
 class MoonrakerProvider:
     capabilities = ProviderCapabilities(
-        can_start=True,
-        can_pause=True,
-        can_resume=True,
-        can_cancel=True,
-        can_live_status=True,
-        can_upload=True,
-        can_list_files=True,
-        can_send_gcode=True,
+        supported=frozenset(Capability),
         support_level="stable",
     )
 
@@ -131,6 +218,14 @@ class MoonrakerProvider:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
         result = body.get("result", [])
         return result if isinstance(result, list) else []
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        try:
+            return await self.client.upload_gcode(
+                local_path, remote_filename, start_print=False
+            )
+        except MoonrakerError as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         try:
@@ -188,19 +283,23 @@ class MoonrakerProvider:
 
 class BambuLanProvider:
     capabilities = ProviderCapabilities(
-        can_start=False,
-        can_pause=True,
-        can_resume=True,
-        can_cancel=True,
-        can_live_status=True,
-        can_upload=False,
-        can_list_files=False,
+        supported=frozenset(
+            {
+                Capability.START,
+                Capability.PAUSE,
+                Capability.RESUME,
+                Capability.CANCEL,
+                Capability.LIVE_STATUS,
+                Capability.UPLOAD,
+            }
+        ),
         support_level="beta",
         support_notes=(
-            "Bambu LAN support is beta and currently limited to local status plus pause/resume/cancel controls.",
-            "Vault upload, send-to-print, start existing files, and printer file inventory are not implemented for this provider yet.",
+            "Bambu LAN upload and explicit start are beta features.",
+            "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
         ),
-        unsupported_actions=("upload", "send", "start", "list_files"),
+        unsupported_actions=("list_files", "delete_file", "send_gcode"),
+        requires_ready_before_send=True,
     )
 
     def __init__(self, host: str, serial: str, access_code: str) -> None:
@@ -254,6 +353,50 @@ class BambuLanProvider:
         try:
             await asyncio.to_thread(_publish)
             return {"ok": True}
+        except Exception as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    def _upload_via_ftps(self, local_path: Path, remote_filename: str) -> None:
+        """Store a plain-text G-code file in Bambu's cache over implicit FTPS."""
+
+        remote_name = Path(remote_filename).name
+        if not remote_name or remote_name != remote_filename:
+            raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        temp_name = f".{remote_name}.{uuid4().hex}.uploading"
+        ftp = self._ftps_client()
+        try:
+            ftp.connect(self.host, 990)
+            ftp.login("bblp", self.access_code)
+            ftp.prot_p()
+            with local_path.open("rb") as source:
+                ftp.storbinary(f"STOR cache/{temp_name}", source)
+            remote_size = ftp.size(f"cache/{temp_name}")
+            if remote_size is not None and remote_size != local_path.stat().st_size:
+                raise ProviderError("bambu_upload_size_mismatch", code="provider_error")
+            ftp.rename(f"cache/{temp_name}", f"cache/{remote_name}")
+        finally:
+            try:
+                ftp.quit()
+            except Exception:  # noqa: BLE001 - connection can fail before greeting
+                try:
+                    ftp.close()
+                except Exception:  # noqa: BLE001 - best effort socket cleanup
+                    pass
+
+    @staticmethod
+    def _ftps_client() -> FTP_TLS:
+        context = ssl.create_default_context()
+        # Bambu LAN devices expose a device-local self-signed certificate.
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        return _ImplicitFTP_TLS(context=context, timeout=30)
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        try:
+            await asyncio.to_thread(self._upload_via_ftps, local_path, remote_filename)
+            return {"ok": True, "remote_filename": remote_filename}
+        except ProviderError:
+            raise
         except Exception as exc:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
 
@@ -329,9 +472,17 @@ class BambuLanProvider:
         )
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
+        remote_name = Path(remote_filename).name
+        if not remote_name or remote_name != remote_filename:
+            raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
+        return await self._send_command(
+            {
+                "print": {
+                    "sequence_id": uuid4().hex,
+                    "command": "gcode_file",
+                    "param": f"/cache/{remote_name}",
+                }
+            }
         )
 
     async def pause(self) -> dict[str, Any]:
@@ -367,24 +518,17 @@ class BambuLanProvider:
         *,
         stop_event: asyncio.Event | None = None,
     ) -> None:
-        backoff = 1.0
-        while True:
-            if stop_event is not None and stop_event.is_set():
-                return
-            try:
-                status = await self.query_status()
-                await on_status(status.get("result", {}).get("status", {}))
-                backoff = 1.0
-                await asyncio.sleep(2.0)
-            except ProviderError as exc:
-                logger.warning(
-                    "bambu status poll failed for %s (%s), retry in %.1fs",
-                    self.serial,
-                    exc.code,
-                    backoff,
-                )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, 30.0)
+        if stop_event is not None and stop_event.is_set():
+            return
+        status = await self.query_status()
+        await on_status(status.get("result", {}).get("status", {}))
+        if stop_event is None:
+            await asyncio.sleep(2.0)
+            return
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            return
 
 
 def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities:
@@ -398,16 +542,7 @@ def provider_diagnostic_summary(provider: PrinterProvider) -> dict[str, object]:
     return {
         "provider": provider.value,
         "support_level": caps.support_level,
-        "capabilities": {
-            "can_start": caps.can_start,
-            "can_pause": caps.can_pause,
-            "can_resume": caps.can_resume,
-            "can_cancel": caps.can_cancel,
-            "can_live_status": caps.can_live_status,
-            "can_upload": caps.can_upload,
-            "can_list_files": caps.can_list_files,
-            "can_send_gcode": caps.can_send_gcode,
-        },
+        "capabilities": caps.action_flags(),
         "unsupported_actions": list(caps.unsupported_actions),
         "notes": list(caps.support_notes),
     }

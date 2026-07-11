@@ -46,6 +46,7 @@ export interface PrinterCapabilities {
   can_upload: boolean;
   can_list_files: boolean;
   can_send_gcode: boolean;
+  can_measure_consumption: boolean;
   support_level: "stable" | "beta" | string;
   support_notes: string[];
   unsupported_actions: string[];
@@ -71,6 +72,7 @@ export interface PrinterDiagnostics {
     can_live_status: boolean;
     can_list_files: boolean;
     can_send_gcode: boolean;
+    can_measure_consumption: boolean;
   };
   unsupported_actions: string[];
   notes: string[];

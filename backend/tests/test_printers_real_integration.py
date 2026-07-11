@@ -226,7 +226,10 @@ def test_send_to_printer_uploads_real_file_and_records_inventory(
         assert "multipart/form-data" in server.state.last_upload_content_type
         assert b'filename="jobs/bracket-release.gcode"' in server.state.last_upload_body
         assert b'name="print"' in server.state.last_upload_body
-        assert b"true" in server.state.last_upload_body
+        # Provider-neutral send uploads first, then starts explicitly. Bambu
+        # needs this split and Moonraker retains equivalent observable behavior.
+        assert b"false" in server.state.last_upload_body
+        assert server.state.start_requests == ["jobs/bracket-release.gcode"]
         assert b"G28\nG1 X1 Y1\n" in server.state.last_upload_body
 
         job = db_session.exec(

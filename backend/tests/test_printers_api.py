@@ -347,10 +347,11 @@ class TestBambuPrinter:
         assert resp.status_code == 201
         body = resp.json()
         assert body["provider"] == "bambu_lan"
-        assert body["capabilities"]["can_upload"] is False
+        assert body["capabilities"]["can_upload"] is True
+        assert body["capabilities"]["can_start"] is True
         assert body["capabilities"]["can_pause"] is True
         assert body["capabilities"]["support_level"] == "beta"
-        assert "send" in body["capabilities"]["unsupported_actions"]
+        assert "list_files" in body["capabilities"]["unsupported_actions"]
 
     def test_create_bambu_missing_fields_422(self, client: TestClient, auth_headers):
         resp = client.post(
@@ -360,8 +361,8 @@ class TestBambuPrinter:
         )
         assert resp.status_code == 422
 
-    def test_bambu_send_rejected(
-        self, client: TestClient, db_session: Session, auth_headers
+    def test_bambu_send_uploads_when_ready(
+        self, client: TestClient, db_session: Session, auth_headers, tmp_path
     ):
         from app.db.models import File, Model
 
@@ -395,13 +396,68 @@ class TestBambuPrinter:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/send",
-            json={"file_id": f.id, "start_print": False},
-            headers=auth_headers,
+        local = tmp_path / "model.gcode"
+        local.write_text("G28\n")
+
+        class FakeBackend:
+            def exists(self, _path):
+                return True
+
+            def download_to_path(self, _path, _target):
+                return local
+
+        with (
+            patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
+            patch(
+                "app.services.printer_provider.BambuLanProvider.query_status",
+                new_callable=AsyncMock,
+                return_value={
+                    "result": {"status": {"print_stats": {"state": "standby"}}}
+                },
+            ),
+            patch(
+                "app.services.printer_provider.BambuLanProvider.upload",
+                new_callable=AsyncMock,
+                return_value={"ok": True},
+            ) as upload,
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        assert resp.json()["state"] == "completed"
+        upload.assert_awaited_once()
+
+    def test_bambu_send_rejects_busy_printer(
+        self, client: TestClient, db_session: Session, auth_headers
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
         )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+            return_value={
+                "result": {"status": {"print_stats": {"state": "printing"}}}
+            },
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": 999, "start_print": False},
+                headers=auth_headers,
+            )
         assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.json()["detail"] == "printer_not_ready"
 
     def test_send_rejects_binary_bgcode(
         self, client: TestClient, db_session: Session, auth_headers
@@ -464,7 +520,7 @@ class TestBambuPrinter:
             assert resp.status_code == 200
             assert resp.json() == {"ok": True}
 
-    def test_bambu_diagnostics_reports_beta_without_send_parity(
+    def test_bambu_diagnostics_reports_beta_capabilities(
         self, client: TestClient, auth_headers, db_session: Session
     ):
         p = Printer(
@@ -491,7 +547,9 @@ class TestBambuPrinter:
         assert resp.status_code == 200
         body = resp.json()
         assert body["support_level"] == "beta"
-        assert "send" in body["unsupported_actions"]
+        assert body["capabilities"]["can_upload"] is True
+        assert body["capabilities"]["can_start"] is True
+        assert "list_files" in body["unsupported_actions"]
         assert body["ok"] is True
         assert [check["name"] for check in body["checks"]] == [
             "configuration",
@@ -1167,7 +1225,7 @@ class TestPrinterFiles:
         assert sentinel_file.sha256 == SENTINEL_FILE_HASH
         mock_start.assert_awaited_once_with("external.gcode")
 
-    def test_start_unsupported_provider(
+    def test_start_bambu_provider(
         self, client: TestClient, db_session: Session, auth_headers
     ):
         p = Printer(
@@ -1182,14 +1240,18 @@ class TestPrinterFiles:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/start",
-            json={"remote_filename": "part.gcode"},
-            headers=auth_headers,
-        )
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.start",
+            new_callable=AsyncMock,
+            return_value={"ok": True},
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "part.gcode"},
+                headers=auth_headers,
+            )
 
-        assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.status_code == 200
 
 
 class TestSendToPrinter:
@@ -1241,12 +1303,10 @@ class TestSendToPrinter:
         assert resp.status_code == 400
         assert resp.json()["detail"] == "file_not_gcode"
 
-    def test_send_unsupported_provider_creates_no_job(
+    def test_send_busy_bambu_creates_no_job(
         self, client: TestClient, auth_headers, db_session: Session
     ):
-        """Regression test for 0.8.5 addenda #3: the provider check must run
-        before the PrintJob is created, or a 409 here leaves a row stuck in
-        UPLOADING forever."""
+        """The Bambu ready-state guard must run before creating a PrintJob."""
         from app.db.models import File, Model
 
         m = Model(name="Model", slug="model-bambu-send", hash="m" * 64)
@@ -1279,14 +1339,21 @@ class TestSendToPrinter:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/send",
-            json={"file_id": f.id, "start_print": False},
-            headers=auth_headers,
-        )
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+            return_value={
+                "result": {"status": {"print_stats": {"state": "printing"}}}
+            },
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
 
         assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.json()["detail"] == "printer_not_ready"
         jobs = db_session.exec(
             select(PrintJob).where(PrintJob.printer_id == p.id)
         ).all()

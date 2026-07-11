@@ -31,6 +31,7 @@ class PrinterCapabilities(BaseModel):
     can_upload: bool
     can_list_files: bool = False
     can_send_gcode: bool = False
+    can_measure_consumption: bool = False
     support_level: str = "stable"
     support_notes: list[str] = Field(default_factory=list)
     unsupported_actions: list[str] = Field(default_factory=list)

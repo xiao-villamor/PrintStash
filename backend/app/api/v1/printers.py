@@ -65,7 +65,6 @@ from app.services.printer_hub import (
     get_hub_from_ws,
 )
 from app.services.printer_provider import (
-    MoonrakerProvider,
     ProviderError,
     capabilities_for_provider,
     get_provider_client,
@@ -103,7 +102,7 @@ def _to_read(p: Printer) -> PrinterRead:
         bambu_host=p.bambu_host,
         bambu_serial=p.bambu_serial,
         has_bambu_access_code=bool(p.bambu_access_code),
-        capabilities=PrinterCapabilities(**caps.__dict__),
+        capabilities=PrinterCapabilities(**caps.as_api_dict()),
         notes=p.notes,
         group=p.group,
         status=p.status,
@@ -533,15 +532,24 @@ async def send_to_printer(
 ) -> PrintJobRead:
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = get_provider_client(p)
-    # Upload is only implemented against the Moonraker client; capabilities.can_upload
-    # is a coarse flag, so also check the concrete type before any PrintJob row
-    # exists — a 409 raised after the job is created would leave it stuck in
-    # UPLOADING forever, since HTTPException isn't caught by the failure handlers below.
-    if not provider.capabilities.can_upload or not isinstance(provider, MoonrakerProvider):
+    if not provider.capabilities.can_upload:
         raise HTTPException(
             status_code=409,
             detail="operation_not_supported_for_provider",
         )
+    if provider.capabilities.requires_ready_before_send:
+        try:
+            status = await provider.query_status()
+        except ProviderError as exc:
+            raise HTTPException(status_code=502, detail=exc.code) from exc
+        state = str(
+            status.get("result", {})
+            .get("status", {})
+            .get("print_stats", {})
+            .get("state", "")
+        ).lower()
+        if state not in {"standby", "ready", "idle"}:
+            raise HTTPException(status_code=409, detail="printer_not_ready")
     f = get_or_404(session, File, payload.file_id, "file_not_found")
     if f.file_type != FileType.GCODE:
         raise HTTPException(status_code=400, detail="file_not_gcode")
@@ -592,9 +600,9 @@ async def send_to_printer(
     session.refresh(job)
 
     try:
-        await provider.client.upload_gcode(
-            local, remote_name, start_print=payload.start_print
-        )
+        await provider.upload(local, remote_name)
+        if payload.start_print:
+            await provider.start(remote_name)
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
         job.error = exc.code

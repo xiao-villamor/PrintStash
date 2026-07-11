@@ -55,7 +55,9 @@ only after you have seen the result yourself in the browser.
 - [ ] Jobs tab: print-job history populates.
 - [ ] Diagnostics tab: support level, capability/connectivity checks, rerun.
 - [ ] Send a vault G-code to a printer from model detail (Klipper sync panel).
-- [ ] (If available) Add a Bambu LAN printer; status + pause/resume/cancel only.
+- [ ] (If available) Add a Bambu LAN printer; verify status, upload-only send,
+      explicit Send & Print on a supervised disposable job, and
+      pause/resume/cancel only where safe.
 
 ## 4. Statistics (admin)
 

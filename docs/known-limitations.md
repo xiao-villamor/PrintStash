@@ -9,10 +9,10 @@ manufacturing platform.
 - Moonraker/Klipper is the primary supported provider.
 - Moonraker support includes live status, upload/send, optional start, remote
   file inventory sync, remote file start, pause/resume/cancel, and job history.
-- Bambu LAN support is beta. It is limited to local status plus
-  pause/resume/cancel controls.
-- Bambu LAN upload, send-to-print, remote file inventory, and remote-file start
-  are not implemented today.
+- Bambu LAN support is beta. It supports local status, upload of plain-text
+  Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
+- Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
+  filament consumption are not implemented.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups.
 

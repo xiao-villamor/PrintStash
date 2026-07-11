@@ -32,13 +32,23 @@ Support level: beta.
 Current behavior:
 
 - local status polling
+- upload plain-text Vault G-code over LAN FTPS
+- explicitly start a just-uploaded G-code file; upload alone never starts it
 - pause, resume, and cancel controls
 
-Not supported today:
+Safety rules:
 
-- upload/send from the Vault
-- start remote files
+- PrintStash checks that the printer is idle before a Bambu Vault send.
+- Start requires the user to select **Start print immediately** in the send
+  dialog; the default is upload-only.
+- Upload and start remain beta until validated against more firmware versions.
+
+Not supported:
+
 - remote file inventory
+- delete remote files
+- raw G-code controls
+- measured filament consumption
 - cloud printer control
 
 The API exposes this through provider capabilities and diagnostics. The UI labels
