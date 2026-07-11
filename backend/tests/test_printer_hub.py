@@ -227,6 +227,46 @@ class TestStateMapping:
 
 
 class TestPrinterHubSyncActiveJob:
+    def test_sync_circuit_breaker_bounds_repeated_failures(self, hub, monkeypatch):
+        calls = 0
+
+        async def failing_sync(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(
+            "app.services.printer_hub.asyncio.to_thread", failing_sync
+        )
+
+        async def _run():
+            for _ in range(4):
+                await hub._sync_active_job(1, "printing", "cube.gcode", 0.5, {})
+
+        asyncio.run(_run())
+        failures, retry_after = hub._job_sync_breakers[1]
+        assert calls == 3
+        assert failures == 3
+        assert retry_after > 0
+
+    def test_sync_progress_is_coalesced(self, hub, monkeypatch):
+        calls = 0
+
+        async def successful_sync(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+
+        monkeypatch.setattr(
+            "app.services.printer_hub.asyncio.to_thread", successful_sync
+        )
+
+        async def _run():
+            await hub._sync_active_job(1, "printing", "cube.gcode", 0.5, {})
+            await hub._sync_active_job(1, "printing", "cube.gcode", 0.9, {})
+
+        asyncio.run(_run())
+        assert calls == 1
+
     def _setup_job(self, db_session):
         from app.db.models import File, Model
 
