@@ -746,7 +746,7 @@ async function onMainDrop(e: React.DragEvent) {
             />
           ) : viewMode === "grid" ? (
             <div key="grid" className="p-4 sm:p-6 animate-panel-in">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
+              <div className="stagger-children grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
                 {visibleCollections.map((collection) => (
                   <CollectionFolderCard
                     key={collection.id}

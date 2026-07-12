@@ -122,7 +122,7 @@ test("printer detail route preserves the dynamic id and renders live status", as
   await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
   await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Temperatures")).toBeVisible();
-  await page.getByRole("button", { name: "Files" }).click();
+  await page.getByRole("tab", { name: "Files" }).click();
   await expect(page.getByText("skadis_kitchen-roll_screw_PLA_30m12s.gcode")).toBeVisible();
   await expect(page.getByText("Failed to fetch")).toHaveCount(0);
   await expect(page.getByText("This page could not be found")).toHaveCount(0);
@@ -131,6 +131,39 @@ test("printer detail route preserves the dynamic id and renders live status", as
   const html = await page.content();
   expect(html).not.toContain("printerId\":\"$NaN");
   expect(problems).toEqual([]);
+});
+
+/** Computed animation-delay of every direct child of the staggered model grid. */
+async function gridDelays(page: Page) {
+  await page.goto("/");
+  const grid = page.locator(".stagger-children").first();
+  await expect(grid.locator("> *").first()).toBeAttached();
+  return grid.evaluate((el) =>
+    Array.from(el.children).map((c) => getComputedStyle(c).animationDelay),
+  );
+}
+
+test("grid cards enter on a capped stagger", async ({ page }) => {
+  const delays = await gridDelays(page);
+  expect(delays.length).toBeGreaterThan(1);
+
+  expect(delays[0]).toBe("0s");
+  expect(delays[1]).toBe("0.03s");
+  // The cap is the point: a full 60-card page must still land inside the 300ms
+  // UI budget rather than marching in for two seconds.
+  for (const delay of delays) {
+    expect(Number.parseFloat(delay)).toBeLessThanOrEqual(0.27);
+  }
+});
+
+test("reduced motion drops the grid stagger entirely", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  // The stagger rules are :nth-child (specificity 0,2,0); a naive
+  // `.stagger-children > *` override loses to them and the grid keeps marching in.
+  for (const delay of await gridDelays(page)) {
+    expect(delay).toBe("0s");
+  }
 });
 
 test("gallery upload queues a task and tracks it to completion", async ({ page }) => {
