@@ -39,6 +39,12 @@
   file inventory, raw G-code, and measured consumption). API diagnostics and
   frontend actions are derived from that data instead of provider-specific UI
   checks.
+- **Provider conformance suite.** Every printer integration is exercised by one
+  shared test pack: it must register, reject incomplete credentials, refuse the
+  actions it does not declare without touching the network, and keep transport
+  failures behind the common provider error surface. Adding a printer backend is
+  now a single small class, so future providers arrive faster and behave
+  consistently from the first release.
 
 ### Fixed
 
