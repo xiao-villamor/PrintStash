@@ -6,7 +6,17 @@ export type PrinterStatus =
   | "paused"
   | "error";
 
-export type PrinterProvider = "moonraker" | "bambu_lan";
+export type PrinterProvider =
+  | "moonraker"
+  | "bambu_lan"
+  | "prusalink"
+  | "elegoo_centauri";
+export type PrinterVariant =
+  | "generic"
+  | "elegoo_neptune4"
+  | "elegoo_centauri_carbon"
+  | "elegoo_centauri_carbon_2";
+export type PrusaLinkAuthMode = "digest" | "api_key";
 
 export type PrintJobState =
   | "queued"
@@ -24,9 +34,18 @@ export interface PrinterRead {
   provider: PrinterProvider;
   moonraker_url: string;
   has_api_key: boolean;
+  provider_variant?: PrinterVariant | null;
   bambu_host?: string | null;
   bambu_serial?: string | null;
   has_bambu_access_code?: boolean;
+  prusalink_url?: string | null;
+  prusalink_auth_mode?: PrusaLinkAuthMode | null;
+  prusalink_username?: string | null;
+  has_prusalink_password?: boolean;
+  has_prusalink_api_key?: boolean;
+  elegoo_centauri_host?: string | null;
+  elegoo_centauri_mainboard_id?: string | null;
+  has_elegoo_centauri_access_code?: boolean;
   capabilities: PrinterCapabilities;
   notes: string | null;
   group: string | null;
@@ -110,11 +129,20 @@ export interface PrinterFileRead {
 export interface PrinterCreate {
   name: string;
   provider?: PrinterProvider;
-  moonraker_url: string;
+  moonraker_url?: string;
   api_key?: string;
+  provider_variant?: PrinterVariant;
   bambu_host?: string;
   bambu_serial?: string;
   bambu_access_code?: string;
+  prusalink_url?: string;
+  prusalink_auth_mode?: PrusaLinkAuthMode;
+  prusalink_username?: string;
+  prusalink_password?: string;
+  prusalink_api_key?: string;
+  elegoo_centauri_host?: string;
+  elegoo_centauri_access_code?: string;
+  elegoo_centauri_mainboard_id?: string;
   notes?: string;
   group?: string;
 }
@@ -124,9 +152,18 @@ export interface PrinterUpdate {
   name?: string;
   moonraker_url?: string;
   api_key?: string;
+  provider_variant?: PrinterVariant;
   bambu_host?: string;
   bambu_serial?: string;
   bambu_access_code?: string;
+  prusalink_url?: string;
+  prusalink_auth_mode?: PrusaLinkAuthMode;
+  prusalink_username?: string;
+  prusalink_password?: string;
+  prusalink_api_key?: string;
+  elegoo_centauri_host?: string;
+  elegoo_centauri_access_code?: string;
+  elegoo_centauri_mainboard_id?: string;
   notes?: string;
   group?: string;
 }

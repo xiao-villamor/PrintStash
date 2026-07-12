@@ -13,6 +13,13 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
+- PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
+  status, upload/start, file inventory/deletion, and pause/resume/cancel are
+  implemented; Prusa Connect cloud, SLA printers, raw G-code controls, and
+  measured filament consumption are not.
+- Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
+  Carbon 2 have beta local status/control support, but no upload or inventory.
+  Neptune 2/3, OrangeStorm, and SLA models are not covered.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups.
 

@@ -89,6 +89,40 @@ def _validate_provider_config(p: Printer) -> None:
             raise HTTPException(status_code=400, detail="bambu_serial_required")
         if not p.bambu_access_code:
             raise HTTPException(status_code=400, detail="bambu_access_code_required")
+    if p.provider == PrinterProvider.PRUSALINK:
+        if not p.prusalink_url:
+            raise HTTPException(status_code=400, detail="prusalink_url_required")
+        if p.prusalink_auth_mode == "digest":
+            if not p.prusalink_username or not p.prusalink_password:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prusalink_digest_credentials_required",
+                )
+        elif p.prusalink_auth_mode == "api_key":
+            if not p.prusalink_api_key:
+                raise HTTPException(
+                    status_code=400, detail="prusalink_api_key_required"
+                )
+        else:
+            raise HTTPException(status_code=400, detail="prusalink_auth_mode_required")
+    if p.provider == PrinterProvider.ELEGOO_CENTAURI:
+        if p.provider_variant not in {
+            "elegoo_centauri_carbon",
+            "elegoo_centauri_carbon_2",
+        }:
+            raise HTTPException(
+                status_code=400, detail="elegoo_centauri_model_required"
+            )
+        if not p.elegoo_centauri_host:
+            raise HTTPException(status_code=400, detail="elegoo_centauri_host_required")
+        if (
+            p.provider_variant == "elegoo_centauri_carbon_2"
+            and not p.elegoo_centauri_access_code
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="elegoo_centauri_access_code_required",
+            )
 
 
 def _to_read(p: Printer) -> PrinterRead:
@@ -99,9 +133,18 @@ def _to_read(p: Printer) -> PrinterRead:
         provider=p.provider,
         moonraker_url=p.moonraker_url,
         has_api_key=bool(p.api_key),
+        provider_variant=p.provider_variant,
         bambu_host=p.bambu_host,
         bambu_serial=p.bambu_serial,
         has_bambu_access_code=bool(p.bambu_access_code),
+        prusalink_url=p.prusalink_url,
+        prusalink_auth_mode=p.prusalink_auth_mode,
+        prusalink_username=p.prusalink_username,
+        has_prusalink_password=bool(p.prusalink_password),
+        has_prusalink_api_key=bool(p.prusalink_api_key),
+        elegoo_centauri_host=p.elegoo_centauri_host,
+        elegoo_centauri_mainboard_id=p.elegoo_centauri_mainboard_id,
+        has_elegoo_centauri_access_code=bool(p.elegoo_centauri_access_code),
         capabilities=PrinterCapabilities(**caps.as_api_dict()),
         notes=p.notes,
         group=p.group,
@@ -434,9 +477,18 @@ async def create_printer(
         provider=payload.provider,
         moonraker_url=(payload.moonraker_url or "").strip().rstrip("/"),
         api_key=payload.api_key or None,
+        provider_variant=payload.provider_variant,
         bambu_host=payload.bambu_host,
         bambu_serial=payload.bambu_serial,
         bambu_access_code=payload.bambu_access_code,
+        prusalink_url=(payload.prusalink_url or "").strip().rstrip("/") or None,
+        prusalink_auth_mode=payload.prusalink_auth_mode,
+        prusalink_username=payload.prusalink_username or None,
+        prusalink_password=payload.prusalink_password or None,
+        prusalink_api_key=payload.prusalink_api_key or None,
+        elegoo_centauri_host=(payload.elegoo_centauri_host or "").strip() or None,
+        elegoo_centauri_access_code=payload.elegoo_centauri_access_code or None,
+        elegoo_centauri_mainboard_id=payload.elegoo_centauri_mainboard_id or None,
         notes=payload.notes,
         group=payload.group.strip() if payload.group else None,
     )
@@ -470,12 +522,32 @@ async def update_printer(
         p.moonraker_url = payload.moonraker_url.strip().rstrip("/")
     if payload.api_key is not None:
         p.api_key = payload.api_key or None
+    if payload.provider_variant is not None:
+        p.provider_variant = payload.provider_variant
     if payload.bambu_host is not None:
         p.bambu_host = payload.bambu_host or None
     if payload.bambu_serial is not None:
         p.bambu_serial = payload.bambu_serial or None
     if payload.bambu_access_code is not None:
         p.bambu_access_code = payload.bambu_access_code or None
+    if payload.prusalink_url is not None:
+        p.prusalink_url = payload.prusalink_url.strip().rstrip("/") or None
+    if payload.prusalink_auth_mode is not None:
+        p.prusalink_auth_mode = payload.prusalink_auth_mode
+    if payload.prusalink_username is not None:
+        p.prusalink_username = payload.prusalink_username or None
+    if payload.prusalink_password is not None:
+        p.prusalink_password = payload.prusalink_password or None
+    if payload.prusalink_api_key is not None:
+        p.prusalink_api_key = payload.prusalink_api_key or None
+    if payload.elegoo_centauri_host is not None:
+        p.elegoo_centauri_host = payload.elegoo_centauri_host.strip() or None
+    if payload.elegoo_centauri_access_code is not None:
+        p.elegoo_centauri_access_code = payload.elegoo_centauri_access_code or None
+    if payload.elegoo_centauri_mainboard_id is not None:
+        p.elegoo_centauri_mainboard_id = (
+            payload.elegoo_centauri_mainboard_id.strip() or None
+        )
     if payload.notes is not None:
         p.notes = payload.notes
     if payload.group is not None:
@@ -519,9 +591,9 @@ async def delete_printer(
     response_model=PrintJobRead,
     summary="Upload a vault file to the printer (optionally start the print)",
     description=(
-        "Streams the chosen vault File to Moonraker's gcode store. The File must "
-        "be a .gcode artifact. If start_print is true, Moonraker is asked to start "
-        "the print immediately after upload."
+        "Streams the chosen vault File to the configured provider. The File must "
+        "be a .gcode artifact. If start_print is true, the provider is asked to "
+        "start the print immediately after upload."
     ),
 )
 async def send_to_printer(
@@ -554,7 +626,7 @@ async def send_to_printer(
     if f.file_type != FileType.GCODE:
         raise HTTPException(status_code=400, detail="file_not_gcode")
     # Binary G-code (PrusaSlicer .bgcode) is indexed for its metadata, but the
-    # providers we drive (Moonraker/Klipper, Bambu LAN) print plain-text G-code
+    # providers we drive print plain-text G-code
     # only — never hand them a .bgcode blob.
     if Path(f.original_filename).suffix.lower() == ".bgcode":
         raise HTTPException(status_code=400, detail="binary_gcode_not_printable")
@@ -628,7 +700,9 @@ async def send_to_printer(
 
     # Upload-only is not a queued print. It only records transfer history; user
     # can start the remote file later from printer inventory.
-    job.state = PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    job.state = (
+        PrintJobState.STARTED if payload.start_print else PrintJobState.COMPLETED
+    )
     if not payload.start_print:
         job.finished_at = utcnow()
     job.updated_at = utcnow()
@@ -692,7 +766,9 @@ async def start_printer_file(
         if printer_file and printer_file.file_id is not None:
             candidate = session.get(File, printer_file.file_id)
             if candidate and candidate.deleted_at is None:
-                _require_file_role(session, current_user, candidate, CollectionRole.EDIT)
+                _require_file_role(
+                    session, current_user, candidate, CollectionRole.EDIT
+                )
                 file_row = candidate
                 source = "vault"
 

@@ -240,10 +240,14 @@ username or password.
 PrintStash is a **beta** self-hosted release. It is useful today, but it is
 deliberately not a full manufacturing platform. Set expectations accordingly:
 
-- **Bambu LAN is beta** and limited to local status plus pause/resume/cancel.
-  Upload, send-to-print, remote file inventory, and remote-file start are
-  **not** implemented for Bambu yet, issues are wellcome. Moonraker/Klipper is the fully supported
-  provider.
+- **Bambu LAN is beta** with local status, plain-text G-code upload, explicit
+  start, and pause/resume/cancel. Remote inventory/deletion is not implemented.
+- **PrusaLink is beta** for local FDM printers, with Digest or legacy API-key
+  authentication, status, upload/start, files, and print controls. Prusa
+  Connect cloud is not used.
+- **Elegoo support covers Neptune 4, Pro, Plus, and Max** through Moonraker;
+  Centauri Carbon and Carbon 2 additionally have beta local status/control
+  support through native SDCP/MQTT. Centauri upload/inventory is unavailable.
 - **Hardware coverage is still thin.** Provider behavior needs more real-world
   validation across printers, firmware versions, and network/auth setups.
   Reports are very welcome.

@@ -9,8 +9,10 @@ import pytest
 from app.db.models import Printer, PrinterProvider
 from app.services.printer_provider import (
     BambuLanProvider,
+    ElegooCentauriProvider,
     MoonrakerProvider,
     ProviderError,
+    PrusaLinkProvider,
     capabilities_for_provider,
     get_provider_client,
 )
@@ -30,6 +32,25 @@ class TestCapabilities:
         assert caps.can_pause is True
         assert caps.support_level == "beta"
         assert "list_files" in caps.unsupported_actions
+
+    def test_prusalink_capabilities_are_beta_and_honest(self):
+        caps = PrusaLinkProvider.capabilities
+        assert caps.can_upload is True
+        assert caps.can_start is True
+        assert caps.can_list_files is True
+        assert caps.can_send_gcode is False
+        assert caps.can_measure_consumption is False
+        assert caps.support_level == "beta"
+
+    def test_centauri_capabilities_are_safe_and_honest(self):
+        caps = ElegooCentauriProvider.capabilities
+        assert caps.can_live_status is True
+        assert caps.can_start is True
+        assert caps.can_pause is True
+        assert caps.can_upload is False
+        assert caps.can_list_files is False
+        assert caps.can_send_gcode is False
+        assert caps.support_level == "beta"
 
 
 class TestProviderFactory:
@@ -53,6 +74,50 @@ class TestProviderFactory:
         )
         client = get_provider_client(p)
         assert isinstance(client, BambuLanProvider)
+
+    def test_get_prusalink_digest_provider(self):
+        p = Printer(
+            name="mk4",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://mk4.local",
+            prusalink_auth_mode="digest",
+            prusalink_username="maker",
+            prusalink_password="secret",
+        )
+        client = get_provider_client(p)
+        assert isinstance(client, PrusaLinkProvider)
+
+    def test_prusalink_missing_credentials_rejected(self):
+        p = Printer(
+            name="mk4",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://mk4.local",
+            prusalink_auth_mode="digest",
+            prusalink_username="maker",
+        )
+        with pytest.raises(ProviderError) as exc:
+            get_provider_client(p)
+        assert exc.value.code == "provider_credentials_missing"
+
+    def test_get_centauri_carbon_provider(self):
+        p = Printer(
+            name="CC1",
+            provider=PrinterProvider.ELEGOO_CENTAURI,
+            provider_variant="elegoo_centauri_carbon",
+            elegoo_centauri_host="192.168.1.50",
+        )
+        assert isinstance(get_provider_client(p), ElegooCentauriProvider)
+
+    def test_centauri_carbon_2_requires_access_code(self):
+        p = Printer(
+            name="CC2",
+            provider=PrinterProvider.ELEGOO_CENTAURI,
+            provider_variant="elegoo_centauri_carbon_2",
+            elegoo_centauri_host="192.168.1.51",
+        )
+        with pytest.raises(ProviderError) as exc:
+            get_provider_client(p)
+        assert exc.value.code == "provider_credentials_missing"
 
     def test_missing_bambu_creds_raises(self):
         p = Printer(
@@ -104,9 +169,9 @@ class TestBambuLanProvider:
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         # Out-of-range mc_percent must not escape the 0..1 progress band.
         assert (
-            provider._normalize_status({"print": {"mc_percent": 150}})["virtual_sdcard"][
-                "progress"
-            ]
+            provider._normalize_status({"print": {"mc_percent": 150}})[
+                "virtual_sdcard"
+            ]["progress"]
             == 1.0
         )
         assert (

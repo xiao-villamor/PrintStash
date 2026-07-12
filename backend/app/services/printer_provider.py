@@ -18,7 +18,9 @@ import paho.mqtt.client as mqtt
 
 from app.core.logging import get_logger
 from app.db.models import Printer, PrinterProvider
+from app.services.elegoo_centauri import ElegooCentauriClient, ElegooCentauriError
 from app.services.moonraker import MoonrakerClient, MoonrakerError
+from app.services.prusalink import PrusaLinkClient, PrusaLinkError
 
 logger = get_logger(__name__)
 
@@ -148,7 +150,9 @@ class PrinterProviderClient(Protocol):
 
     async def list_files(self) -> list[dict[str, Any]]: ...
 
-    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]: ...
+    async def upload(
+        self, local_path: Path, remote_filename: str
+    ) -> dict[str, Any]: ...
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]: ...
 
@@ -450,7 +454,8 @@ class BambuLanProvider:
             # DNS). nosec: this is the documented way every Bambu LAN
             # integration talks to the printer's local API.
             async with httpx.AsyncClient(
-                timeout=10.0, verify=False  # nosec B501
+                timeout=10.0,
+                verify=False,  # nosec B501
             ) as client:
                 resp = await client.get(url)
             if resp.status_code >= 400:
@@ -531,9 +536,218 @@ class BambuLanProvider:
             return
 
 
+class PrusaLinkProvider:
+    capabilities = ProviderCapabilities(
+        supported=frozenset(
+            {
+                Capability.START,
+                Capability.PAUSE,
+                Capability.RESUME,
+                Capability.CANCEL,
+                Capability.LIVE_STATUS,
+                Capability.UPLOAD,
+                Capability.LIST_FILES,
+            }
+        ),
+        support_level="beta",
+        support_notes=(
+            "PrusaLink local FDM support is beta pending broader hardware validation.",
+            "Raw G-code controls and measured filament consumption are unavailable.",
+        ),
+        unsupported_actions=("send_gcode", "emergency_stop"),
+    )
+
+    def __init__(self, client: PrusaLinkClient) -> None:
+        self.client = client
+
+    async def _call(self, method: str, *args: Any) -> Any:
+        try:
+            return await getattr(self.client, method)(*args)
+        except PrusaLinkError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+    async def info(self) -> dict[str, Any]:
+        return await self._call("info")
+
+    async def server_info(self) -> dict[str, Any]:
+        return await self.info()
+
+    async def server_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def printer_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def query_status(self) -> dict[str, Any]:
+        return await self._call("query_status")
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        return await self._call("list_files")
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        return await self._call("upload", local_path, remote_filename)
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("delete_file", remote_filename)
+
+    async def start(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("start", remote_filename)
+
+    async def pause(self) -> dict[str, Any]:
+        return await self._call("pause")
+
+    async def resume(self) -> dict[str, Any]:
+        return await self._call("resume")
+
+    async def cancel(self) -> dict[str, Any]:
+        return await self._call("cancel")
+
+    async def run_gcode(self, script: str) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def emergency_stop(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def subscribe_status(
+        self,
+        on_status: Callable[[dict[str, Any]], Awaitable[None]],
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        try:
+            await self.client.subscribe_status(on_status, stop_event=stop_event)
+        except PrusaLinkError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+
+class ElegooCentauriProvider:
+    capabilities = ProviderCapabilities(
+        supported=frozenset(
+            {
+                Capability.START,
+                Capability.PAUSE,
+                Capability.RESUME,
+                Capability.CANCEL,
+                Capability.LIVE_STATUS,
+            }
+        ),
+        support_level="beta",
+        support_notes=(
+            "Centauri Carbon uses local SDCP; Carbon 2 uses local authenticated MQTT.",
+            "Upload and file inventory are unavailable because current firmware does not expose a safe confirmed file API.",
+        ),
+        unsupported_actions=(
+            "upload",
+            "list_files",
+            "delete_file",
+            "send_gcode",
+            "measured_consumption",
+        ),
+    )
+
+    def __init__(self, client: ElegooCentauriClient) -> None:
+        self.client = client
+
+    async def _call(self, method: str, *args: Any) -> Any:
+        try:
+            return await getattr(self.client, method)(*args)
+        except ElegooCentauriError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+    async def info(self) -> dict[str, Any]:
+        return await self._call("info")
+
+    async def server_info(self) -> dict[str, Any]:
+        return await self.info()
+
+    async def server_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def printer_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def query_status(self) -> dict[str, Any]:
+        return await self._call("query_status")
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def start(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("start", remote_filename)
+
+    async def pause(self) -> dict[str, Any]:
+        return await self._call("pause")
+
+    async def resume(self) -> dict[str, Any]:
+        return await self._call("resume")
+
+    async def cancel(self) -> dict[str, Any]:
+        return await self._call("cancel")
+
+    async def run_gcode(self, script: str) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def emergency_stop(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def subscribe_status(
+        self,
+        on_status: Callable[[dict[str, Any]], Awaitable[None]],
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        try:
+            await self.client.subscribe_status(on_status, stop_event=stop_event)
+        except ElegooCentauriError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+
 def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities:
     if provider == PrinterProvider.BAMBU_LAN:
         return BambuLanProvider.capabilities
+    if provider == PrinterProvider.PRUSALINK:
+        return PrusaLinkProvider.capabilities
+    if provider == PrinterProvider.ELEGOO_CENTAURI:
+        return ElegooCentauriProvider.capabilities
     return MoonrakerProvider.capabilities
 
 
@@ -563,6 +777,57 @@ def get_provider_client(printer: Printer) -> PrinterProviderClient:
             host=printer.bambu_host,
             serial=printer.bambu_serial,
             access_code=printer.bambu_access_code,
+        )
+
+    if printer.provider == PrinterProvider.PRUSALINK:
+        if not printer.prusalink_url or not printer.prusalink_auth_mode:
+            raise ProviderError(
+                "provider_credentials_missing", code="provider_credentials_missing"
+            )
+        if printer.prusalink_auth_mode == "digest" and (
+            not printer.prusalink_username or not printer.prusalink_password
+        ):
+            raise ProviderError(
+                "provider_credentials_missing", code="provider_credentials_missing"
+            )
+        if printer.prusalink_auth_mode == "api_key" and not printer.prusalink_api_key:
+            raise ProviderError(
+                "provider_credentials_missing", code="provider_credentials_missing"
+            )
+        return PrusaLinkProvider(
+            PrusaLinkClient(
+                printer.prusalink_url,
+                auth_mode=printer.prusalink_auth_mode,
+                username=printer.prusalink_username,
+                password=printer.prusalink_password,
+                api_key=printer.prusalink_api_key,
+            )
+        )
+
+    if printer.provider == PrinterProvider.ELEGOO_CENTAURI:
+        if not printer.elegoo_centauri_host or printer.provider_variant not in {
+            "elegoo_centauri_carbon",
+            "elegoo_centauri_carbon_2",
+        }:
+            raise ProviderError(
+                "provider_credentials_missing",
+                code="provider_credentials_missing",
+            )
+        if (
+            printer.provider_variant == "elegoo_centauri_carbon_2"
+            and not printer.elegoo_centauri_access_code
+        ):
+            raise ProviderError(
+                "provider_credentials_missing",
+                code="provider_credentials_missing",
+            )
+        return ElegooCentauriProvider(
+            ElegooCentauriClient(
+                printer.elegoo_centauri_host,
+                model=printer.provider_variant,
+                access_code=printer.elegoo_centauri_access_code,
+                mainboard_id=printer.elegoo_centauri_mainboard_id,
+            )
         )
 
     if not printer.moonraker_url:

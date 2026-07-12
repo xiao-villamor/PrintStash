@@ -62,6 +62,8 @@ class PrinterStatus(str, Enum):
 class PrinterProvider(str, Enum):
     MOONRAKER = "moonraker"
     BAMBU_LAN = "bambu_lan"
+    PRUSALINK = "prusalink"
+    ELEGOO_CENTAURI = "elegoo_centauri"
 
 
 class PrintJobState(str, Enum):
@@ -409,9 +411,18 @@ class Printer(SQLModel, table=True):
     # Base URL of Moonraker, e.g. "http://mainsailos.local" or "http://10.0.0.42:7125".
     moonraker_url: str = Field(default="", max_length=512)
     api_key: Optional[str] = Field(default=None, max_length=128)
+    provider_variant: Optional[str] = Field(default=None, max_length=64)
     bambu_host: Optional[str] = Field(default=None, max_length=255)
     bambu_serial: Optional[str] = Field(default=None, max_length=128)
     bambu_access_code: Optional[str] = Field(default=None, max_length=128)
+    prusalink_url: Optional[str] = Field(default=None, max_length=512)
+    prusalink_auth_mode: Optional[str] = Field(default=None, max_length=32)
+    prusalink_username: Optional[str] = Field(default=None, max_length=128)
+    prusalink_password: Optional[str] = Field(default=None, max_length=255)
+    prusalink_api_key: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = None
     group: Optional[str] = Field(default=None, max_length=128, index=True)
 
@@ -626,9 +637,7 @@ class ExternalLibrary(SQLModel, table=True):
     # Cron expression driving scheduled scans. Empty string = manual only.
     scan_schedule: str = Field(default="0 * * * *", max_length=128)
     # Whether to watch the folder for real-time changes (see enum docstring).
-    watch_mode: ExternalLibraryWatchMode = Field(
-        default=ExternalLibraryWatchMode.AUTO
-    )
+    watch_mode: ExternalLibraryWatchMode = Field(default=ExternalLibraryWatchMode.AUTO)
     # Last-detected filesystem class ("local" / "network" / "unknown"). Display
     # only — explains why watching is or isn't active. Refreshed on each scan /
     # watcher (re)start.

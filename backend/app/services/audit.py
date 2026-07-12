@@ -37,6 +37,9 @@ _UNSET = object()
 _REDACTED_FIELDS = {
     "api_key",
     "bambu_access_code",
+    "prusalink_password",
+    "prusalink_api_key",
+    "elegoo_centauri_access_code",
     "hashed_password",
     "key_hash",
     "token_hash",

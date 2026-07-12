@@ -13,7 +13,7 @@ boundaries are enforced rather than merely suggested.
 - **Backend:** Python 3.11+, FastAPI, SQLModel, Alembic
 - **Frontend:** React 19, React Router 7, TanStack Query, Vite, Tailwind
 - **Storage:** SQLite (default) or Postgres; local disk (default) or S3/R2
-- **Printers:** Moonraker/Klipper (stable), Bambu LAN (beta)
+- **Printers:** Moonraker/Klipper (stable); Bambu LAN, PrusaLink, and Elegoo Centauri (beta)
 
 The frontend was migrated off Next.js to a Vite SPA in 0.4. The app was already
 ~95% client-rendered behind auth, and under multi-user RBAC server rendering

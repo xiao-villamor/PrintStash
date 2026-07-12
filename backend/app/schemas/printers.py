@@ -44,9 +44,25 @@ class PrinterCreate(BaseModel):
     provider: PrinterProvider = PrinterProvider.MOONRAKER
     moonraker_url: Optional[str] = Field(default=None, max_length=512)
     api_key: Optional[str] = Field(default=None, max_length=512)
+    provider_variant: Optional[
+        Literal[
+            "generic",
+            "elegoo_neptune4",
+            "elegoo_centauri_carbon",
+            "elegoo_centauri_carbon_2",
+        ]
+    ] = None
     bambu_host: Optional[str] = Field(default=None, max_length=255)
     bambu_serial: Optional[str] = Field(default=None, max_length=255)
     bambu_access_code: Optional[str] = Field(default=None, max_length=255)
+    prusalink_url: Optional[str] = Field(default=None, max_length=512)
+    prusalink_auth_mode: Optional[Literal["digest", "api_key"]] = None
+    prusalink_username: Optional[str] = Field(default=None, max_length=128)
+    prusalink_password: Optional[str] = Field(default=None, max_length=255)
+    prusalink_api_key: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
 
@@ -61,6 +77,30 @@ class PrinterCreate(BaseModel):
                 raise ValueError("bambu_serial_required")
             if not self.bambu_access_code:
                 raise ValueError("bambu_access_code_required")
+        if self.provider == PrinterProvider.PRUSALINK:
+            if not self.prusalink_url:
+                raise ValueError("prusalink_url_required")
+            if self.prusalink_auth_mode == "digest":
+                if not self.prusalink_username or not self.prusalink_password:
+                    raise ValueError("prusalink_digest_credentials_required")
+            elif self.prusalink_auth_mode == "api_key":
+                if not self.prusalink_api_key:
+                    raise ValueError("prusalink_api_key_required")
+            else:
+                raise ValueError("prusalink_auth_mode_required")
+        if self.provider == PrinterProvider.ELEGOO_CENTAURI:
+            if self.provider_variant not in {
+                "elegoo_centauri_carbon",
+                "elegoo_centauri_carbon_2",
+            }:
+                raise ValueError("elegoo_centauri_model_required")
+            if not self.elegoo_centauri_host:
+                raise ValueError("elegoo_centauri_host_required")
+            if (
+                self.provider_variant == "elegoo_centauri_carbon_2"
+                and not self.elegoo_centauri_access_code
+            ):
+                raise ValueError("elegoo_centauri_access_code_required")
         return self
 
 
@@ -71,9 +111,25 @@ class PrinterUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     moonraker_url: Optional[str] = Field(default=None, max_length=512)
     api_key: Optional[str] = Field(default=None, max_length=512)
+    provider_variant: Optional[
+        Literal[
+            "generic",
+            "elegoo_neptune4",
+            "elegoo_centauri_carbon",
+            "elegoo_centauri_carbon_2",
+        ]
+    ] = None
     bambu_host: Optional[str] = Field(default=None, max_length=255)
     bambu_serial: Optional[str] = Field(default=None, max_length=255)
     bambu_access_code: Optional[str] = Field(default=None, max_length=255)
+    prusalink_url: Optional[str] = Field(default=None, max_length=512)
+    prusalink_auth_mode: Optional[Literal["digest", "api_key"]] = None
+    prusalink_username: Optional[str] = Field(default=None, max_length=128)
+    prusalink_password: Optional[str] = Field(default=None, max_length=255)
+    prusalink_api_key: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
+    elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
 
@@ -84,9 +140,18 @@ class PrinterRead(BaseModel):
     provider: PrinterProvider
     moonraker_url: str
     has_api_key: bool
+    provider_variant: Optional[str] = None
     bambu_host: Optional[str] = None
     bambu_serial: Optional[str] = None
     has_bambu_access_code: bool = False
+    prusalink_url: Optional[str] = None
+    prusalink_auth_mode: Optional[str] = None
+    prusalink_username: Optional[str] = None
+    has_prusalink_password: bool = False
+    has_prusalink_api_key: bool = False
+    elegoo_centauri_host: Optional[str] = None
+    elegoo_centauri_mainboard_id: Optional[str] = None
+    has_elegoo_centauri_access_code: bool = False
     capabilities: PrinterCapabilities
     notes: Optional[str] = None
     group: Optional[str] = None

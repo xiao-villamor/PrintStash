@@ -39,6 +39,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "watchfiles>=0.24",
     "websockets>=13",
+    "pycentauri==0.6.5",
 ]
 
 [project.optional-dependencies]

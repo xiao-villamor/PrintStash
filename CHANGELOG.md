@@ -4,6 +4,21 @@
 
 ### Added
 
+- **PrusaLink local FDM support (beta).** Connect modern PrusaLink with Digest
+  username/password authentication or legacy installations with an API key.
+  PrintStash supports live status, G-code upload, explicit start, remote file
+  inventory/deletion, and pause/resume/cancel without using Prusa Connect cloud.
+- **Elegoo Neptune 4-family setup.** Neptune 4, Pro, Plus, and Max can be added
+  through a dedicated preset backed by the existing Moonraker/Klipper provider,
+  keeping one tested transport and an identifiable printer variant.
+- **Elegoo Centauri Carbon support (beta).** Original Carbon printers connect
+  locally over SDCP/WebSocket, while Carbon 2 uses its access-code-protected
+  local MQTT API. Both provide status and start/pause/resume/cancel controls.
+  Upload and file inventory stay disabled because current firmware exposes no
+  safe confirmed file API.
+- **Provider-aware printer setup.** The add-printer flow now offers Moonraker,
+  Elegoo Neptune 4, PrusaLink, and Bambu LAN with only the credentials required
+  by each integration.
 - **Bambu LAN Vault send support (beta).** PrintStash can upload plain-text
   G-code to a Bambu printer's local cache over implicit FTPS, then start the
   uploaded file through the local MQTT connection. Upload-only remains the

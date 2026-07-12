@@ -12,9 +12,11 @@ manufacturing platform.
 - Moonraker/Klipper is the primary supported provider, with live status,
   upload/send, optional start, remote file inventory sync, remote file start,
   pause/resume/cancel, and job history.
-- Bambu LAN support is beta: local status plus pause/resume/cancel only.
-- Bambu LAN upload, send-to-print, remote file inventory, and remote-file start
-  are not implemented today.
+- Bambu LAN support is beta with local status, upload/start, and controls;
+  remote inventory/deletion remains unavailable.
+- PrusaLink local FDM support is beta; Prusa Connect cloud is not integrated.
+- Elegoo Centauri Carbon and Carbon 2 status/controls are beta. Upload and file
+  inventory are disabled because firmware exposes no safe confirmed API.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups.
 

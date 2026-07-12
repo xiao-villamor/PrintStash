@@ -58,6 +58,18 @@ only after you have seen the result yourself in the browser.
 - [ ] (If available) Add a Bambu LAN printer; verify status, upload-only send,
       explicit Send & Print on a supervised disposable job, and
       pause/resume/cancel only where safe.
+- [ ] (If available) Add a PrusaLink FDM printer with Digest auth; verify
+      status/temperatures, file sync/delete, upload-only, supervised explicit
+      start, pause/resume/cancel, restart, and reconnect behavior.
+- [ ] (If available) repeat PrusaLink connection with legacy API-key auth.
+- [ ] (If available) add a Neptune 4-family printer with the Elegoo preset;
+      verify it persists as `elegoo_neptune4` and passes the Moonraker checks.
+- [ ] (If available) add an original Centauri Carbon; verify SDCP status,
+      temperatures, supervised start-existing-file, pause/resume/cancel, and
+      reconnect while paused using its saved mainboard ID.
+- [ ] (If available) enable LAN Only on a Centauri Carbon 2, add its IP/access
+      code, then verify MQTT status and supervised controls. Confirm upload and
+      file inventory remain unavailable in UI and API capabilities.
 
 ## 4. Statistics (admin)
 

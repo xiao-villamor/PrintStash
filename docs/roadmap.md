@@ -110,24 +110,30 @@ Shipped in 0.8.0:
   a manual "write back anyway" override), plus a UI warning — so a print is
   never counted twice
 
-## 0.9 — Provider Maturity (Bambu + reliability, delivered in 0.9.0)
+## 0.9 — Provider Maturity (delivered in 0.9.0)
 
 Goal: make printer integrations predictable across normal home setups.
 
 - Bambu LAN upload/send parity for plain-text Vault G-code, with idle-state
   guardrails and explicit opt-in start
+- PrusaLink local FDM beta with Digest/API-key authentication, status, G-code
+  upload/start, file inventory/deletion, and pause/resume/cancel
+- Elegoo Neptune 4-family guided setup over the existing Moonraker transport
+- Elegoo Centauri Carbon and Carbon 2 beta local status/control integration;
+  upload stays disabled until firmware exposes a safe confirmed file API
 - Exponential reconnect backoff and circuit-breaking for repeated job-sync DB
   failures
 - Capability-driven UI states for unsupported printer actions
-- Broader hardware validation notes for tested Moonraker and Bambu setups
+- Broader hardware validation notes for Moonraker, Bambu, PrusaLink, and
+  Neptune 4-family setups
 
 ## 0.10 — More Providers
 
 Goal: cover the other common homelab print stacks.
 
 - OctoPrint provider (status, send, basic controls)
-- PrusaLink / Prusa Connect provider
-- Shared provider capability matrix so the UI shows exactly what each one supports
+- Prusa Connect cloud integration (local PrusaLink support shipped in 0.9.0)
+- Broader Elegoo model support beyond Neptune 4 and Centauri Carbon families
 
 ## 0.11 — Library Workflow Polish
 

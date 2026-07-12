@@ -54,6 +54,51 @@ Not supported:
 The API exposes this through provider capabilities and diagnostics. The UI labels
 Bambu LAN as beta and disables unsupported actions.
 
+## PrusaLink
+
+Support level: beta.
+
+PrintStash connects directly to PrusaLink on the local network; it does not
+send printer credentials or jobs through Prusa Connect cloud. Supported:
+
+- HTTP Digest username/password authentication on modern PrusaLink
+- legacy `X-Api-Key` authentication
+- polled printer/job status and temperatures
+- Vault G-code upload and explicit start
+- remote G-code inventory and deletion
+- pause, resume, and cancel controls
+
+Raw G-code commands and measured filament consumption are not supported.
+Physical-printer coverage is still expanding, so supervise first prints after
+adding or updating a PrusaLink device.
+
+## Elegoo Neptune 4 family
+
+Neptune 4, 4 Pro, 4 Plus, and 4 Max use the Moonraker provider through a
+dedicated setup preset. This intentionally avoids a second implementation of
+the same Klipper/Moonraker protocol. PrintStash does not install or update
+Elegoo firmware and sends no vendor-specific maintenance macros.
+
+Other Elegoo families are not implied by this Neptune preset; native Centauri
+support is documented separately below.
+
+## Elegoo Centauri Carbon
+
+Support level: beta.
+
+- Original Centauri Carbon: local SDCP v3 over WebSocket port 3030; no
+  authentication. Saving the mainboard ID is recommended because some firmware
+  states do not announce it while paused or errored.
+- Centauri Carbon 2: authenticated local MQTT on port 1883. Enable **LAN Only**
+  in printer network settings and enter the access code shown by the printer.
+- Both models: live status, temperatures, progress, start of a file already on
+  printer storage, pause, resume, and cancel.
+
+Upload, file inventory/deletion, raw G-code, and measured consumption are not
+advertised. Original Carbon file-list probes can terminate its printer daemon;
+Carbon 2's documented file-list request does not answer on validated firmware.
+PrintStash therefore never probes those operations.
+
 ## Diagnostics
 
 Use:
