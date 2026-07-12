@@ -124,7 +124,7 @@ export function BottomNavBar() {
 
 function NavTab({ item, active }: { item: NavItem; active: boolean }) {
   const className =
-    "group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 active:scale-95 transition-transform duration-150";
+    "group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 active:scale-95 transition-transform duration-press";
   const content = (
     <>
       <TabIcon icon={item.icon} active={active} />

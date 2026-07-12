@@ -141,7 +141,7 @@ function ModelCardInner({
           : undefined
       }
       onDragEnd={() => setDragging(false)}
-      className={`animate-card-in group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-200 active:scale-[0.99] overflow-hidden ${
+      className={`animate-card-in group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
         draggable ? "cursor-grab active:cursor-grabbing" : ""
       } ${dragging ? "opacity-40" : ""} ${
         selected
@@ -178,7 +178,7 @@ function ModelCardInner({
             <img
               alt={model.name}
               draggable={false}
-              className={`w-full h-full object-cover transition-opacity duration-300 ease-out ${
+              className={`w-full h-full object-cover transition-opacity duration-slow ease-out ${
                 thumbLoaded ? "opacity-90 group-hover:opacity-100" : "opacity-0"
               }`}
               src={thumb}

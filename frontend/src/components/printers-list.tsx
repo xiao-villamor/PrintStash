@@ -119,7 +119,7 @@ export function PrintersPage() {
             <Link
               key={p.id}
               href={`/printers/${p.id}`}
-              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-primary transition-[box-shadow,border-color] duration-200 p-5 flex flex-col gap-3 group"
+              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-primary transition-[box-shadow,border-color] duration-fast p-5 flex flex-col gap-3 group"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
