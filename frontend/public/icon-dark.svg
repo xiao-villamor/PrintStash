@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="268 118 426 426" width="32" height="32" fill="none" role="img" aria-label="PrintStash">
   <defs>
     <linearGradient id="ps-icon-dark" x1="272" y1="118" x2="690" y2="544" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fb923c"/>
-      <stop offset="1" stop-color="#ea580c"/>
+      <stop offset="0" stop-color="#2767FF"/>
+      <stop offset="1" stop-color="#0E48F0"/>
     </linearGradient>
   </defs>
   <rect x="272" y="118" width="418" height="426" rx="69" fill="url(#ps-icon-dark)"/>

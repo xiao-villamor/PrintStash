@@ -13,7 +13,9 @@ function applyTheme(theme: Theme) {
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
   const favicon = document.getElementById("app-favicon") as HTMLLinkElement | null;
-  if (favicon) favicon.href = theme === "dark" ? "/icon-dark.svg" : "/icon-light.svg";
+  if (favicon) {
+    favicon.href = theme === "dark" ? "/icon-dark.svg?v=2" : "/icon-light.svg?v=2";
+  }
   const id = window.setTimeout(() => root.classList.remove("theme-transitioning"), 350);
   return () => window.clearTimeout(id);
 }
