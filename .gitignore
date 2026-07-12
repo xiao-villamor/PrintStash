@@ -48,6 +48,10 @@ frontend/coverage/
 docs/feature-inventory.md
 docs/internal/
 docs/*-internal.md
+**/plans/
+**/plan/
+**/*-plan.md
+**/*-plans.md
 
 # AI assistant tooling (kept local, not published) — except the shared
 # project skill in .claude/skills/printstash/
