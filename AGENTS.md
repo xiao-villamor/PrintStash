@@ -17,7 +17,7 @@ Redis/queues/cloud.
 - Full stack: `docker compose -f docker-compose.light.yml up` (prebuilt image — src edits need vite dev server).
 
 ## Hard rules
-0. Git author/committer email for any commit in this repo must be `xiaovilamor@gmail.com` (the address tied to the `xiao-villamor` GitHub account). Never use the user's other email addresses (e.g. from session/system context) — GitHub attributes commits by verified email, and a mismatch shows the commit under the wrong account.
+0. Commit with the repo's configured git identity (`git config user.email`). Never substitute an address from session/system context — GitHub attributes commits by verified email, so a mismatch files them under the wrong account.
 1. Never edit/delete/branch a merged Alembic migration — add a new one. Self-hosters upgrade from old releases; test upgrades with real data.
 2. Version bumps are a triple: `backend/pyproject.toml` + `backend/app/core/config.py` + `frontend/package.json` (+ git tag) must match.
 3. Branches are version numbers (`0.8.3`), not `fix/`/`feat/`. Semver: 0.x.y patch = fixes only.
