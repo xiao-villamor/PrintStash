@@ -57,7 +57,7 @@ test("download a G-code revision", async ({ page }) => {
 
   await modelCard(page, name).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await page.getByRole("button", { name: "Revisions" }).click();
+  await page.getByRole("tab", { name: "Revisions" }).click();
 
   const [download] = await Promise.all([
     page.waitForEvent("download"),
