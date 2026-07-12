@@ -8,7 +8,7 @@ import socket
 import ssl
 from dataclasses import dataclass
 from enum import StrEnum
-from ftplib import FTP_TLS
+from ftplib import FTP_TLS  # nosec B402 - Bambu LAN's implicit-TLS FTPS, not plaintext
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 from uuid import uuid4
