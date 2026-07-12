@@ -283,7 +283,7 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   if (!loaded) return null;
 
   return (
-    <div className="bg-card border border-border rounded">
+    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-start justify-between gap-3">
         <div className="flex items-start gap-3 min-w-0">
           <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
@@ -322,9 +322,11 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
         <div className="p-4 sm:p-5 space-y-5">
           {/* Existing libraries */}
           {libraries.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">
-              No libraries yet. Add a folder below to start mirroring.
-            </p>
+            <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
+              <FolderSync className="h-7 w-7 text-muted-foreground/50" />
+              <p className="text-sm font-medium text-foreground">No shared volumes yet</p>
+              <p className="text-xs text-muted-foreground">Add a folder below to start mirroring it into your vault.</p>
+            </div>
           ) : (
             <ul className="space-y-3">
               {libraries.map((lib) => {

@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { consumeSessionExpired } from "@/lib/auth";
 
 export default function LoginPage() {
   const { login, user } = useAuth();
@@ -16,6 +17,7 @@ export default function LoginPage() {
   const [remember_me, setremember_me] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sessionExpired] = useState(consumeSessionExpired);
 
   if (user) {
     return <Navigate to="/" replace />;
@@ -61,6 +63,11 @@ export default function LoginPage() {
           onSubmit={handleSubmit}
           className="bg-surface-container-low border border-outline-variant rounded p-6 space-y-4"
         >
+          {sessionExpired && (
+            <div role="status" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-on-surface">
+              Session expired. You were signed out; sign in again to continue.
+            </div>
+          )}
           <div>
             <label
               htmlFor="username"
@@ -73,6 +80,8 @@ export default function LoginPage() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
+              aria-invalid={!!error}
+              aria-describedby={error ? "login-error" : undefined}
               autoComplete="username"
               autoFocus
               required
@@ -92,6 +101,8 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={!!error}
+              aria-describedby={error ? "login-error" : undefined}
               autoComplete="current-password"
               required
               className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -112,7 +123,9 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="text-xs text-error font-mono">{error}</div>
+            <div id="login-error" role="alert" className="text-sm text-error font-mono">
+              {error}
+            </div>
           )}
 
           <button

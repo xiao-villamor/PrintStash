@@ -74,7 +74,7 @@ export function BatchToolbar({
             type="button"
             onClick={() => setDeleteOpen(true)}
             disabled={busy}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
           >
             <Trash2 className="h-4 w-4" />
             Delete
@@ -320,7 +320,7 @@ function ChipEditor({
   const chipClasses =
     accent === "add"
       ? "bg-accent text-accent-foreground"
-      : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400";
+      : "bg-destructive/10 text-destructive";
 
   return (
     <div>

@@ -24,12 +24,8 @@ export const toast = {
   /** Show a red error toast with a description parsed from the thrown value. */
   error(raw: unknown): void {
     const msg = userMessage(raw);
-    const api = parseApiError(raw);
-    const description =
-      api.status > 0 && api.code !== "unknown"
-        ? `HTTP ${api.status}`
-        : undefined;
-    sonner.error(msg, { description, duration: 6000 });
+    console.debug("PrintStash API error", parseApiError(raw));
+    sonner.error(msg, { duration: 6000 });
   },
 
   /** Show a green success toast. */

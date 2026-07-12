@@ -5,7 +5,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -52,7 +51,6 @@ type ChartType = (typeof CHART_TYPES)[number]["id"];
 
 // Shared accent — the app's light-mode blue, legible on both themes.
 const ACCENT = "#3b82f6";
-const BAR_COLORS = ["#3b82f6", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981"];
 
 // Recharts renders axes/cursor as SVG attributes, where `var(--…)` does NOT
 // resolve (it falls back to black — invisible on dark). So chart chrome uses a
@@ -114,7 +112,8 @@ function Segmented<T extends string>({
           key={opt.id}
           type="button"
           onClick={() => onChange(opt.id)}
-          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+          aria-pressed={value === opt.id}
+          className={`rounded px-2.5 py-1 text-xs font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
             value === opt.id
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
@@ -210,14 +209,14 @@ function TimeSeriesCard({
 
   return (
     <Card>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <CardHeader className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="text-base">{metricLabel} over time</CardTitle>
         <div className="flex flex-wrap gap-2">
           <Segmented options={METRICS} value={metric} onChange={setMetric} />
           <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="px-5 pb-5">
         <ResponsiveContainer width="100%" height={260}>
           {chartType === "area" ? (
             <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -277,7 +276,7 @@ function StatsContent({
 }) {
   if (stats.total_prints === 0) {
     return (
-      <Card>
+      <Card className="animate-panel-in">
         <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
           <BarChart3 className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
@@ -298,7 +297,7 @@ function StatsContent({
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-panel-in">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <MetricCard
           icon={Coins}
@@ -356,11 +355,7 @@ function StatsContent({
                   content={<ChartTooltip valueLabel="Prints" />}
                   cursor={CURSOR_FILL}
                 />
-                <Bar dataKey="prints" radius={[0, 4, 4, 0]}>
-                  {collectionData.map((_, i) => (
-                    <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
-                  ))}
-                </Bar>
+                <Bar dataKey="prints" fill={ACCENT} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -396,11 +391,7 @@ function StatsContent({
                   content={<ChartTooltip valueLabel="Prints" />}
                   cursor={CURSOR_FILL}
                 />
-                <Bar dataKey="prints" radius={[0, 4, 4, 0]}>
-                  {filamentData.map((_, i) => (
-                    <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
-                  ))}
-                </Bar>
+                <Bar dataKey="prints" fill={ACCENT} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -427,12 +418,12 @@ export default function StatisticsPage() {
       />
 
       {isLoading && (
-        <div className="py-16 text-center text-sm text-muted-foreground">
+        <div className="animate-panel-in py-16 text-center text-sm text-muted-foreground">
           Loading statistics…
         </div>
       )}
       {isError && (
-        <Card>
+        <Card className="animate-panel-in">
           <CardContent className="py-12 text-center text-sm text-destructive">
             Failed to load statistics.
           </CardContent>

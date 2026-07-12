@@ -334,7 +334,7 @@ export function FilamentProfilesCard() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="animate-panel-in space-y-6">
       {error && (
         <div className="rounded border border-destructive/20 bg-destructive/5 px-4 py-3 text-xs text-destructive">
           {error}
@@ -342,9 +342,9 @@ export function FilamentProfilesCard() {
       )}
 
       {/* ── Filament presets ─────────────────────────────────────── */}
-      <section className="overflow-hidden rounded-lg border border-border bg-background">
+      <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         {/* header */}
-        <div className="flex items-center justify-between border-b border-border bg-muted/40 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-border bg-muted/50 px-5 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent">
               <Layers className="h-4 w-4 text-primary" />
@@ -464,7 +464,7 @@ export function FilamentProfilesCard() {
                       <div>
                         <div className="flex items-center gap-2.5">
                           <span
-                            className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${edit.materialType ? materialColor(edit.materialType) : "bg-slate-300 dark:bg-slate-600"}`}
+                            className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${edit.materialType ? materialColor(edit.materialType) : "bg-muted-foreground/30"}`}
                             title={edit.materialType || "Unknown type"}
                           />
                           <input
@@ -478,7 +478,7 @@ export function FilamentProfilesCard() {
                           {linked && (
                             <span
                               title="Synced from Spoolman — edit it in Spoolman"
-                              className="flex-shrink-0 rounded-full border border-emerald-500/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"
+                              className="flex-shrink-0 rounded-full border border-emerald-500/40 px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400"
                             >
                               Spoolman
                             </span>
@@ -530,7 +530,7 @@ export function FilamentProfilesCard() {
                             onClick={() => handleDeleteFilament(profile.id)}
                             disabled={!auth.isAuthenticated}
                             title="Delete"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -546,12 +546,12 @@ export function FilamentProfilesCard() {
       </section>
 
       {/* ── Printer presets ──────────────────────────────────────── */}
-      <section className="overflow-hidden rounded-lg border border-border bg-background">
+      <section className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         {/* header */}
-        <div className="flex items-center justify-between border-b border-border bg-muted/40 px-5 py-4">
+        <div className="flex items-center justify-between border-b border-border bg-muted/50 px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted dark:bg-slate-800">
-              <Printer className="h-4 w-4 text-muted-foreground dark:text-muted-foreground" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              <Printer className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -694,7 +694,7 @@ export function FilamentProfilesCard() {
                           onClick={() => handleDeletePrinter(profile.id)}
                           disabled={!auth.isAuthenticated}
                           title="Delete"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

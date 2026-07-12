@@ -63,6 +63,12 @@ export default function SharePage() {
     };
   }, [token]);
 
+  useEffect(() => {
+    document.title = model
+      ? `${model.name} · Shared · PrintStash`
+      : "Shared model · PrintStash";
+  }, [model]);
+
   const meshFile = useMemo(
     () => model?.files.find((f) => MESH_TYPES.has(f.file_type)) ?? null,
     [model],

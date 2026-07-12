@@ -19,6 +19,7 @@ export function TabBar<K extends string>({
   tabClassName,
   activeTabClassName,
   indicatorInset = 0,
+  showIndicator = true,
 }: {
   tabs: TabItem<K>[];
   active: K;
@@ -27,6 +28,8 @@ export function TabBar<K extends string>({
   tabClassName?: string;
   activeTabClassName?: string;
   indicatorInset?: number;
+  /** Disable when the active tab already has a filled selected state. */
+  showIndicator?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
@@ -37,6 +40,7 @@ export function TabBar<K extends string>({
     const measure = () => {
       const el = list.querySelector<HTMLElement>('[data-active="true"]');
       if (el) setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
+      else setIndicator(null);
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -82,7 +86,7 @@ export function TabBar<K extends string>({
           </button>
         );
       })}
-      {indicator && (
+      {showIndicator && indicator && (
         <span
           aria-hidden
           className="absolute bottom-0 left-0 h-0.5 w-px origin-left rounded-full bg-primary transition-transform duration-fast ease-in-out motion-reduce:transition-none"

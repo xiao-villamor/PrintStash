@@ -41,6 +41,13 @@ export class ApiError extends Error {
 export function parseApiError(raw: unknown): ApiError {
   if (raw instanceof ApiError) return raw;
 
+  if (
+    raw instanceof TypeError ||
+    (raw instanceof Error && raw.name === "AbortError")
+  ) {
+    return new ApiError(0, "network_unreachable", raw.message);
+  }
+
   const message =
     raw instanceof Error
       ? raw.message
@@ -146,11 +153,19 @@ const ERROR_MESSAGES: Record<string, string> = {
   thumb_dir_not_writable: "Cannot write to the thumbnail directory. Check filesystem permissions.",
   // General
   duplicate_slug: "An item with that name already exists.",
+  network_unreachable:
+    "Couldn't reach the server. Check that PrintStash is running and try again.",
+  unknown:
+    "Something went wrong reaching the server. Check that PrintStash is running and try again.",
 };
 
 /** Return a user-presentable message for a given server detail code. */
 export function getErrorMessage(code: string): string {
-  return ERROR_MESSAGES[code] ?? code.replace(/_/g, " ");
+  const message = ERROR_MESSAGES[code];
+  if (message) return message;
+  const humanized = code.replace(/_/g, " ").trim();
+  if (!humanized) return ERROR_MESSAGES.unknown;
+  return `${humanized.charAt(0).toUpperCase()}${humanized.slice(1)}.`;
 }
 
 /** Return a user-presentable message for any caught error. */

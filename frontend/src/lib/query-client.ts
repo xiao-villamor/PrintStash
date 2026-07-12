@@ -52,6 +52,20 @@ export const queryKeys = {
 } as const;
 
 /**
+ * Refresh every vault read model after an asynchronous ingest job finishes.
+ *
+ * Upload POSTs return while ingestion is still queued, so request-level
+ * invalidation happens too early. Cancelling any stale refetch started by that
+ * POST before invalidating again prevents the pre-ingest result winning the
+ * race with this completion refresh.
+ */
+export async function refreshVaultAfterIngest(): Promise<void> {
+  const keys = [queryKeys.models, queryKeys.collections, queryKeys.vaultStats];
+  await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
+  await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+}
+
+/**
  * Invalidate the query keys a mutated API path can affect.
  *
  * Keyed (not blanket) invalidation: a collection/tag write also touches how

@@ -33,6 +33,7 @@ import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { cn } from "@/lib/utils";
 import { providerAddress, providerLabel } from "@/lib/printer-providers";
 import {
@@ -136,6 +137,8 @@ export function PrinterDetailPage({
   const [syncingFiles, setSyncingFiles] = useState(false);
   const [checkingDiagnostics, setCheckingDiagnostics] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(false);
+  const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -299,17 +302,17 @@ export function PrinterDetailPage({
   }
 
   function emergencyStop() {
-    if (
-      !window.confirm(
-        "Emergency stop halts the printer immediately and requires a firmware restart. Continue?",
-      )
-    )
-      return;
-    void machineAction(
+    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    setConfirmEmergencyStop(true);
+  }
+
+  async function confirmEmergencyStopAction() {
+    await machineAction(
       "estop",
       () => emergencyStopPrinter(printerId),
       "Emergency stop sent",
     );
+    setConfirmEmergencyStop(false);
   }
 
   async function syncFiles() {
@@ -347,9 +350,14 @@ export function PrinterDetailPage({
     }
   }
 
-  async function deleteRemoteFile(file: PrinterFileRead) {
+  function deleteRemoteFile(file: PrinterFileRead) {
     if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
-    if (!window.confirm(`Delete ${file.remote_filename} from ${printer?.name ?? "printer"}?`)) return;
+    setDeleteTarget(file);
+  }
+
+  async function confirmDeleteRemoteFile() {
+    if (!deleteTarget) return;
+    const file = deleteTarget;
     setDeletingFileId(file.id);
     setError(null);
     try {
@@ -361,6 +369,7 @@ export function PrinterDetailPage({
       await loadPrinter();
     } finally {
       setDeletingFileId(null);
+      setDeleteTarget(null);
     }
   }
 
@@ -382,7 +391,25 @@ export function PrinterDetailPage({
   }
 
   return (
-    <div className="w-full space-y-6">
+    <>
+      <ConfirmModal
+        open={confirmEmergencyStop}
+        onClose={() => { if (machineBusy !== "estop") setConfirmEmergencyStop(false); }}
+        onConfirm={confirmEmergencyStopAction}
+        busy={machineBusy === "estop"}
+        title="Emergency stop printer?"
+        description="This halts the printer immediately and requires a firmware restart."
+        confirmLabel="Emergency stop"
+      />
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => { if (deletingFileId === null) setDeleteTarget(null); }}
+        onConfirm={confirmDeleteRemoteFile}
+        busy={deletingFileId !== null}
+        title="Delete printer file?"
+        description={deleteTarget ? `${deleteTarget.remote_filename} will be deleted from ${printer.name}.` : "This file will be deleted from the printer."}
+      />
+      <div className="w-full space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <Link
@@ -1049,7 +1076,8 @@ export function PrinterDetailPage({
         )}
       </section>
       )}
-    </div>
+      </div>
+    </>
   );
 }
 

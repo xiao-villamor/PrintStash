@@ -27,6 +27,7 @@ import { revisionStatusClass, revisionStatusLabel } from "./presentation";
 import { RevisionCompare } from "./revision-compare";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 export function RevisionsTab({
   modelId,
@@ -49,6 +50,8 @@ export function RevisionsTab({
   const [revisionStatus, setRevisionStatus] = useState<FileRevisionStatus | "">("");
   const [revisionNotes, setRevisionNotes] = useState("");
   const [revisionRecommended, setRevisionRecommended] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FileRead | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   // Compare selection — local to this tab.
   const [compareLeftId, setCompareLeftId] = useState<number>(gcodeFiles.at(-1)?.id ?? 0);
@@ -80,23 +83,41 @@ export function RevisionsTab({
     if (ok) setEditingRevisionId(null);
   }
 
-  async function deleteRevision(file: FileRead) {
+  function deleteRevision(file: FileRead) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
-    if (
-      !window.confirm(
-        `Delete Rev ${file.gcode_revision_number ?? file.version} (${file.original_filename})? This can't be undone.`,
-      )
-    )
-      return;
-    const ok = await remove(file);
-    if (ok && editingRevisionId === file.id) setEditingRevisionId(null);
+    setDeleteTarget(file);
+  }
+
+  async function confirmDeleteRevision() {
+    if (!deleteTarget) return;
+    const file = deleteTarget;
+    setDeleteBusy(true);
+    try {
+      const ok = await remove(file);
+      if (ok) {
+        if (editingRevisionId === file.id) setEditingRevisionId(null);
+        setDeleteTarget(null);
+      }
+    } finally {
+      setDeleteBusy(false);
+    }
   }
 
   return (
     <>
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDeleteRevision}
+        busy={deleteBusy}
+        title="Delete revision?"
+        description={deleteTarget
+          ? `Rev ${deleteTarget.gcode_revision_number ?? deleteTarget.version} (${deleteTarget.original_filename}) will be moved to trash.`
+          : "This revision will be moved to trash."}
+      />
       <section>
         <div className="mb-4 flex items-center justify-between gap-3 border-b border-outline-variant pb-1">
           <h2 className="text-lg font-semibold text-on-surface">

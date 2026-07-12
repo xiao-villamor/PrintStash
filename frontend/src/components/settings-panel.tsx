@@ -87,6 +87,10 @@ import {
   writeCardMetrics,
 } from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
+import {
+  readPrinterCardImagePreference,
+  writePrinterCardImagePreference,
+} from "@/lib/printer-card-display";
 import { CHANGELOG, GITHUB_REPO } from "@/lib/changelog";
 import type {
   ApiKeyRead,
@@ -180,11 +184,11 @@ function SettingsCard({
   className?: string;
 }) {
   return (
-    <div className={`bg-card border border-border rounded ${className ?? ""}`}>
-      <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-start justify-between gap-3">
+    <div className={cn("overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)}>
+      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
         <div className="flex items-start gap-3 min-w-0">
           {Icon && (
-            <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <Icon className="h-4 w-4" />
             </div>
           )}
@@ -246,6 +250,8 @@ export function SettingsPanel() {
     DEFAULT_METADATA_PREFERENCES,
   );
   const [cardMetrics, setCardMetrics] = useState<CardMetrics>(DEFAULT_CARD_METRICS);
+  const [showPrinterCardImage, setShowPrinterCardImage] = useState(false);
+  const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
 
   const refreshUsers = useCallback(async () => {
     if (!user?.is_superuser) return;
@@ -276,6 +282,7 @@ export function SettingsPanel() {
       .catch(() => {});
     setMetadataPrefs(readMetadataPreferences());
     setCardMetrics(readCardMetrics());
+    setShowPrinterCardImage(readPrinterCardImagePreference());
   }, []);
 
   useEffect(() => {
@@ -640,6 +647,12 @@ export function SettingsPanel() {
     toast.success("Card metrics reset.");
   }
 
+  function updatePrinterCardImagePreference(next: boolean) {
+    setShowPrinterCardImage(next);
+    writePrinterCardImagePreference(next);
+    toast.success(next ? "Printer card images enabled." : "Printer card images hidden.");
+  }
+
   async function saveTrashRetention() {
     setTrashBusy("settings");
     try {
@@ -752,31 +765,69 @@ export function SettingsPanel() {
         description="This replaces the current database and stored files with the selected backup."
         confirmLabel="Restore"
       />
+      <ConfirmModal
+        open={printerImageWarningOpen}
+        onClose={() => setPrinterImageWarningOpen(false)}
+        onConfirm={() => {
+          updatePrinterCardImagePreference(true);
+          setPrinterImageWarningOpen(false);
+        }}
+        title="Download third-party printer images?"
+        description="Printer artwork will load from OrcaSlicer's GitHub repository. Images may be copyrighted or trademarked by their creators or printer manufacturers and remain subject to their original licenses. PrintStash does not own or redistribute them. Continue only if this use is permitted where you live."
+        confirmLabel="Download & enable"
+      />
 
       <PageHeader title="Settings" description="Vault configuration and display preferences" />
 
-      {/* Section tabs — underline indicator, scrolls horizontally on small screens */}
-      <div className="border-b border-border">
+      <div className="border-b border-border pb-3 lg:hidden">
         <TabBar
-          tabs={SETTINGS_SECTIONS.map((s) => {
-            const Icon = s.icon;
+          tabs={SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
             return {
-              key: s.id,
+              key: section.id,
               label: (
                 <>
                   <Icon className="h-4 w-4" />
-                  {s.label}
+                  {section.label}
                 </>
               ),
             };
           })}
           active={activeSection}
           onChange={setActiveSection}
-          className="flex gap-1 overflow-x-auto -mb-px"
-          tabClassName="relative inline-flex items-center gap-2 whitespace-nowrap px-3.5 py-2.5 text-sm font-medium transition-colors text-muted-foreground hover:text-foreground"
-          activeTabClassName="text-primary"
+          className="gap-1 overflow-x-auto"
+          tabClassName="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] duration-press active:scale-[0.99] hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          activeTabClassName="bg-accent text-accent-foreground"
+          showIndicator={false}
         />
       </div>
+
+      <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6">
+        <nav aria-label="Settings sections" className="sticky top-0 hidden rounded-lg border border-border bg-card p-2 shadow-sm lg:block">
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isActive = section.id === activeSection;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                  isActive
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{section.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <main className="min-w-0">
 
       {activeSection === "overview" && (
         <div className="space-y-6 animate-panel-in">
@@ -877,38 +928,56 @@ export function SettingsPanel() {
             >
               <div className="p-4 sm:p-5 space-y-4">
                 <div className="grid gap-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
-                  <input
-                    value={newUsername}
-                    onChange={(event) => setNewUsername(event.target.value)}
-                    className={INPUT}
-                    maxLength={128}
-                    placeholder="Username"
-                  />
-                  <input
-                    value={newUserEmail}
-                    onChange={(event) => setNewUserEmail(event.target.value)}
-                    className={INPUT}
-                    maxLength={255}
-                    placeholder="Email"
-                  />
-                  <input
-                    value={newUserPassword}
-                    onChange={(event) => setNewUserPassword(event.target.value)}
-                    className={INPUT}
-                    type="password"
-                    maxLength={256}
-                    placeholder="Initial password"
-                  />
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Username</span>
+                    <input
+                      id="new-user-username"
+                      value={newUsername}
+                      onChange={(event) => setNewUsername(event.target.value)}
+                      className={INPUT}
+                      maxLength={128}
+                      autoComplete="username"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Email</span>
+                    <input
+                      id="new-user-email"
+                      value={newUserEmail}
+                      onChange={(event) => setNewUserEmail(event.target.value)}
+                      className={INPUT}
+                      type="email"
+                      maxLength={255}
+                      autoComplete="email"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Initial password</span>
+                    <input
+                      id="new-user-password"
+                      value={newUserPassword}
+                      onChange={(event) => setNewUserPassword(event.target.value)}
+                      className={INPUT}
+                      type="password"
+                      minLength={8}
+                      maxLength={256}
+                      autoComplete="new-password"
+                      aria-describedby="new-user-password-help"
+                    />
+                  </label>
                   <button
                     type="button"
                     onClick={createUser}
                     disabled={usersBusy === "create" || !newUsername.trim() || newUserPassword.trim().length < 8}
-                    className={BTN_PRIMARY}
+                    className={`${BTN_PRIMARY} self-end`}
                   >
                     <UserPlus className="h-3.5 w-3.5" />
                     Create
                   </button>
                 </div>
+                <p id="new-user-password-help" className="text-xs text-muted-foreground">
+                  Initial password: at least 8 characters.
+                </p>
 
                 <div className="space-y-2">
                   {users.length === 0 ? (
@@ -1013,50 +1082,59 @@ export function SettingsPanel() {
             >
               <div className="p-4 sm:p-5 space-y-4">
                 <div className="grid gap-2 lg:grid-cols-[1fr_1.4fr_auto_auto]">
-                  <select
-                    value={accessUserId}
-                    onChange={(event) => {
-                      setAccessUserId(event.target.value ? Number(event.target.value) : "");
-                      setAccessCollectionId("");
-                    }}
-                    className={INPUT}
-                    disabled={accessBusy === "load"}
-                  >
-                    <option value="">Select user</option>
-                    {nonSuperUsers.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.username}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={accessCollectionId}
-                    onChange={(event) => setAccessCollectionId(event.target.value ? Number(event.target.value) : "")}
-                    className={INPUT}
-                    disabled={!accessUserId || accessBusy === "load"}
-                  >
-                    <option value="">Select collection</option>
-                    {grantableCollections.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {row.path}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={accessRole}
-                    onChange={(event) => setAccessRole(event.target.value as CollectionRole)}
-                    className={INPUT}
-                    disabled={!accessUserId || !accessCollectionId || accessBusy === "load"}
-                  >
-                    <option value="view">View</option>
-                    <option value="edit">Edit</option>
-                    <option value="admin">Admin</option>
-                  </select>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">User</span>
+                    <select
+                      value={accessUserId}
+                      onChange={(event) => {
+                        setAccessUserId(event.target.value ? Number(event.target.value) : "");
+                        setAccessCollectionId("");
+                      }}
+                      className={INPUT}
+                      disabled={accessBusy === "load"}
+                    >
+                      <option value="">Select user</option>
+                      {nonSuperUsers.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.username}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Collection</span>
+                    <select
+                      value={accessCollectionId}
+                      onChange={(event) => setAccessCollectionId(event.target.value ? Number(event.target.value) : "")}
+                      className={INPUT}
+                      disabled={!accessUserId || accessBusy === "load"}
+                    >
+                      <option value="">Select collection</option>
+                      {grantableCollections.map((row) => (
+                        <option key={row.id} value={row.id}>
+                          {row.path}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Role</span>
+                    <select
+                      value={accessRole}
+                      onChange={(event) => setAccessRole(event.target.value as CollectionRole)}
+                      className={INPUT}
+                      disabled={!accessUserId || !accessCollectionId || accessBusy === "load"}
+                    >
+                      <option value="view">View</option>
+                      <option value="edit">Edit</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
                   <button
                     type="button"
                     onClick={saveCollectionAccess}
                     disabled={!accessUserId || !accessCollectionId || accessBusy === "save"}
-                    className={BTN_PRIMARY}
+                    className={`${BTN_PRIMARY} self-end`}
                   >
                     {accessBusy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                     Grant
@@ -1128,12 +1206,16 @@ export function SettingsPanel() {
               ) : (
                 <>
                   <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                    <input
-                      value={keyName}
-                      onChange={(event) => setKeyName(event.target.value)}
-                      className={INPUT}
-                      maxLength={128}
-                    />
+                    <label className="block space-y-1">
+                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Key name</span>
+                      <input
+                        id="api-key-name"
+                        value={keyName}
+                        onChange={(event) => setKeyName(event.target.value)}
+                        className={INPUT}
+                        maxLength={128}
+                      />
+                    </label>
                     <button
                       type="button"
                       onClick={generateApiKey}
@@ -1362,6 +1444,49 @@ export function SettingsPanel() {
 
       {activeSection === "design" && (
         <div className="space-y-6 animate-panel-in">
+          <SettingsCard
+            icon={Printer}
+            title="Printer cards"
+            description="Choose whether printer cards include a visual. Plain cards remain more compact and information-dense."
+          >
+            <div className="flex items-center justify-between gap-4 p-4 sm:p-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-muted sm:flex">
+                  <img
+                    src="/images/printers/generic-fdm.png"
+                    alt=""
+                    className="h-12 w-12 object-contain"
+                  />
+                </div>
+                <div>
+                  <p className="text-[13px] font-medium text-foreground">Show printer image</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Adds a brand-neutral printer visual above each card.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="Show printer image on printer cards"
+                aria-checked={showPrinterCardImage}
+                onClick={() => {
+                  if (showPrinterCardImage) updatePrinterCardImagePreference(false);
+                  else setPrinterImageWarningOpen(true);
+                }}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                  showPrinterCardImage ? "bg-primary" : "bg-outline-variant"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${
+                    showPrinterCardImage ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+          </SettingsCard>
+
           {/* Print tracking behaviour */}
           <SettingsCard
             icon={Printer}
@@ -1400,8 +1525,9 @@ export function SettingsPanel() {
             description="Currency used to display cost figures in statistics and filament pricing."
           >
             <div className="p-4 sm:p-5 flex items-center justify-between gap-4">
-              <span className="text-[13px] text-foreground">Display currency</span>
+              <label htmlFor="display-currency" className="text-[13px] text-foreground">Display currency</label>
               <select
+                id="display-currency"
                 value={currency}
                 onChange={(event) => saveCurrency(event.target.value)}
                 disabled={!user || currencyBusy}
@@ -1467,7 +1593,7 @@ export function SettingsPanel() {
                           </span>
                           <span className="flex-1 text-left">{opt.label}</span>
                           {usedInOther ? (
-                            <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+                            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/60">
                               Slot {otherSlot + 1}
                             </span>
                           ) : (
@@ -1740,6 +1866,8 @@ export function SettingsPanel() {
           </SettingsCard>
         </div>
       )}
+        </main>
+      </div>
     </div>
   );
 }

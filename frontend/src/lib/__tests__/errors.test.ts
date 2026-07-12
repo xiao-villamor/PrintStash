@@ -48,6 +48,12 @@ describe("parseApiError", () => {
     expect(err.detail).toBe("a plain string");
   });
 
+  it("maps fetch failures to an actionable network code", () => {
+    const err = parseApiError(new TypeError("Failed to fetch"));
+    expect(err.code).toBe("network_unreachable");
+    expect(userMessage(err)).toMatch(/PrintStash is running/i);
+  });
+
   it("treats a bare snake_case message as a server detail code", () => {
     // Failed background jobs surface a bare code with no HTTP envelope.
     const err = parseApiError(new Error("url_not_a_direct_file"));
@@ -71,8 +77,8 @@ describe("getErrorMessage / userMessage", () => {
     expect(getErrorMessage("collection_not_empty")).toMatch(/still has models/);
   });
 
-  it("humanises unknown codes by replacing underscores", () => {
-    expect(getErrorMessage("some_new_code")).toBe("some new code");
+  it("humanises unknown codes as sentence-case messages", () => {
+    expect(getErrorMessage("some_new_code")).toBe("Some new code.");
   });
 
   it("userMessage parses then maps in one step", () => {

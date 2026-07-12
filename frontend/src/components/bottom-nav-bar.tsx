@@ -71,13 +71,6 @@ export function BottomNavBar() {
     setMoreOpen(false);
   }, [pathname]);
 
-  useEffect(() => {
-    document.body.style.overflow = moreOpen ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [moreOpen]);
-
   const tabs = visibleItems.slice(0, MAX_TABS);
   const overflow = visibleItems.slice(MAX_TABS);
   const moreActive = overflow.some((item) => isItemActive(item, pathname));
@@ -103,6 +96,7 @@ export function BottomNavBar() {
           onClick={() => setMoreOpen(true)}
           aria-label="More"
           aria-expanded={moreOpen}
+          aria-current={moreActive ? "page" : undefined}
           className="group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5"
         >
           <TabIcon icon={MoreHorizontal} active={moreActive || moreOpen} />
@@ -133,13 +127,13 @@ function NavTab({ item, active }: { item: NavItem; active: boolean }) {
   );
   if (item.external) {
     return (
-      <a href={item.href} className={className}>
+      <a href={item.href} className={className} aria-current={active ? "page" : undefined}>
         {content}
       </a>
     );
   }
   return (
-    <Link href={item.href} className={className}>
+    <Link href={item.href} className={className} aria-current={active ? "page" : undefined}>
       {content}
     </Link>
   );
@@ -232,13 +226,13 @@ function MoreSheet({
               );
               if (item.external) {
                 return (
-                  <a key={item.href} href={item.href} onClick={onClose} className={className}>
+                  <a key={item.href} href={item.href} aria-current={active ? "page" : undefined} onClick={onClose} className={className}>
                     {inner}
                   </a>
                 );
               }
               return (
-                <Link key={item.href} href={item.href} onClick={onClose} className={className}>
+                <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} onClick={onClose} className={className}>
                   {inner}
                 </Link>
               );
@@ -257,7 +251,7 @@ function MoreSheet({
             <button
               type="button"
               onClick={onLogout}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
             >
               <LogOut className="h-4 w-4" />
               Log out

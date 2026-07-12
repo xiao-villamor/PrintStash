@@ -1,18 +1,20 @@
 import { Link } from "@/lib/navigation";
+import { Button } from "@/components/ui/button";
+import { PageContainer } from "@/components/ui/page-container";
+import { PageHeader } from "@/components/ui/page-header";
 
 export default function NotFound() {
   return (
-    <div className="flex h-full min-h-[60vh] flex-col items-center justify-center gap-3 text-center px-6">
-      <p className="text-2xl font-bold text-on-surface">404</p>
-      <p className="text-sm text-on-surface-variant">
-        This page doesn’t exist.
-      </p>
-      <Link
-        href="/"
-        className="mt-2 h-9 px-4 inline-flex items-center rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90"
-      >
-        Back to vault
-      </Link>
-    </div>
+    <PageContainer>
+      <PageHeader
+        title="404"
+        description="This page doesn’t exist."
+        actions={
+          <Button asChild size="xs">
+            <Link href="/">Back to vault</Link>
+          </Button>
+        }
+      />
+    </PageContainer>
   );
 }

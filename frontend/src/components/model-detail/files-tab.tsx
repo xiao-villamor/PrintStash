@@ -33,7 +33,7 @@ export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
                   {f.is_external && (
                     <span
                       title="Stored in a linked shared volume; synced both ways"
-                      className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-primary"
+                      className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-primary"
                     >
                       <FolderSync className="h-3 w-3" />
                       Linked

@@ -19,8 +19,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
-import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon } from "lucide-react";
+import { readPrinterCardImagePreference } from "@/lib/printer-card-display";
+import { printerArtwork } from "@/lib/orca-printer-images";
+import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon, Network, Clock3 } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
@@ -41,21 +44,43 @@ export function PrintersPage() {
   const error =
     printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<PrinterRead | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [showCardImages] = useState(readPrinterCardImagePreference);
 
-  async function handleDelete(p: PrinterRead, e: React.MouseEvent) {
+  function handleDelete(p: PrinterRead, e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm(`Remove printer "${p.name}"?`)) return;
+    setDeleteTarget(p);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const printer = deleteTarget;
+    setDeleteBusy(true);
     try {
-      await deletePrinter(p.id);
-      toast.success(`Printer "${p.name}" removed`);
+      await deletePrinter(printer.id);
+      toast.success(`Printer "${printer.name}" removed`);
+      setDeleteTarget(null);
     } catch (e) {
       toast.error(e);
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <>
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={confirmDelete}
+        busy={deleteBusy}
+        title="Remove printer?"
+        description={deleteTarget ? `"${deleteTarget.name}" will be removed from PrintStash.` : "This printer will be removed from PrintStash."}
+        confirmLabel="Remove"
+      />
+      <div className="flex w-full flex-col gap-6">
       <PageHeader
         title="Printers"
         description="Connected printer endpoints"
@@ -81,13 +106,13 @@ export function PrintersPage() {
       />
 
       {error && (
-        <div className="rounded border border-red-300/50 bg-red-50/30 p-3 text-sm text-red-600">
+        <div className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
             <div
               key={i}
@@ -109,31 +134,35 @@ export function PrintersPage() {
               Add your first printer
             </Button>
           }
-          className="bg-card border border-border rounded"
+          className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="stagger-children grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {printers.map((p) => (
-            <Link
+            <article
               key={p.id}
-              href={`/printers/${p.id}`}
-              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-primary transition-[box-shadow,border-color] duration-fast p-5 flex flex-col gap-3 group"
+              className="animate-card-in flex min-h-72 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm"
             >
-              <div className="flex items-start justify-between gap-2">
+              {showCardImages && (
+                <PrinterCardArtwork
+                  key={`${p.id}:${p.model_name || p.detected_model || "unknown"}`}
+                  printer={p}
+                />
+              )}
+              <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
                 <div className="min-w-0">
-                  <h3 className="text-[15px] font-semibold text-foreground truncate">
+                  <Link href={`/printers/${p.id}`} className="text-[15px] font-semibold text-foreground hover:text-primary">
                     {p.name}
-                  </h3>
+                  </Link>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <span className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">
+                    <span className="rounded border border-border px-1.5 py-0.5 text-3xs uppercase tracking-wider text-muted-foreground">
                       {providerLabel(p)}
                     </span>
                     {p.capabilities.support_level === "beta" && (
-                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-amber-600">
+                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-3xs uppercase tracking-wider text-amber-600">
                         Beta
                       </span>
                     )}
-                    <PrinterModelBadge printer={p} canEdit={auth.isAuthenticated} />
                   </div>
                 </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
@@ -146,23 +175,51 @@ export function PrintersPage() {
                 </span>
               </div>
 
-              <p className="text-[13px] text-muted-foreground truncate">
-                {providerAddress(p)}
-              </p>
+              <div className="flex flex-1 flex-col gap-4 px-5 py-4">
+                <dl className="grid gap-3 text-sm">
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <PrinterIcon className="h-3.5 w-3.5" /> Model
+                    </dt>
+                    <dd className="min-w-0">
+                      <PrinterModelBadge printer={p} canEdit={auth.isAuthenticated} />
+                    </dd>
+                  </div>
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Network className="h-3.5 w-3.5" /> Endpoint
+                    </dt>
+                    <dd className="truncate font-mono text-xs text-foreground" title={providerAddress(p)}>
+                      {providerAddress(p)}
+                    </dd>
+                  </div>
+                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Clock3 className="h-3.5 w-3.5" /> Activity
+                    </dt>
+                    <dd className="text-xs text-foreground">
+                      {p.last_seen_at
+                        ? `Seen ${new Date(p.last_seen_at).toLocaleString()}`
+                        : "Never connected"}
+                    </dd>
+                  </div>
+                </dl>
 
-              {p.last_error && (
-                <div className="rounded bg-red-50/30 border border-red-300/20 p-2 text-xs text-red-600 truncate">
-                  {p.last_error}
-                </div>
-              )}
+                {p.notes && (
+                  <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                    {p.notes}
+                  </p>
+                )}
 
-              <div className="text-2xs text-muted-foreground mt-auto">
-                {p.last_seen_at
-                  ? `Last seen ${new Date(p.last_seen_at).toLocaleString()}`
-                  : "Never connected"}
+                {p.last_error && (
+                  <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs leading-relaxed text-destructive">
+                    <span className="font-medium">Connection issue: </span>
+                    <span className="line-clamp-2">{p.last_error}</span>
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-border">
+              <div className="flex items-center justify-between border-t border-border bg-muted/20 px-4 py-3">
                 <button
                   onClick={(e) => {
                     if (!auth.isAuthenticated) { e.preventDefault(); e.stopPropagation(); auth.showAuthRequiredToast(); return; }
@@ -174,12 +231,12 @@ export function PrintersPage() {
                   <Trash2 className="h-3 w-3" />
                   {auth.isAuthenticated ? "Remove" : "Sign in"}
                 </button>
-                <span className="px-2 py-1 rounded border border-border text-foreground text-3xs uppercase tracking-wider flex items-center gap-1 group-hover:border-primary group-hover:text-primary transition-colors">
+                <Link href={`/printers/${p.id}`} className="flex items-center gap-1 rounded border border-border px-2.5 py-1.5 text-3xs uppercase tracking-wider text-foreground transition-colors hover:border-primary hover:text-primary">
                   Open
                   <ArrowRight className="h-3 w-3" />
-                </span>
+                </Link>
               </div>
-            </Link>
+            </article>
           ))}
         </div>
       )}
@@ -192,6 +249,36 @@ export function PrintersPage() {
             setAddOpen(false);
           }}
         />
+      )}
+      </div>
+    </>
+  );
+}
+
+function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
+  const modelName = printer.model_name || printer.detected_model;
+  const artwork = printerArtwork(modelName);
+  const [imageUrl, setImageUrl] = useState(artwork.imageUrl);
+  const usingFallback = imageUrl === "/images/printers/generic-fdm.png";
+
+  return (
+    <div className="relative flex h-44 items-center justify-center border-b border-border bg-muted/40 px-6 py-4">
+      <img
+        src={imageUrl}
+        alt={`${modelName || printer.name} printer`}
+        referrerPolicy="no-referrer"
+        onError={() => setImageUrl("/images/printers/generic-fdm.png")}
+        className="h-full w-full object-contain"
+      />
+      {!usingFallback && (
+        <a
+          href={artwork.sourceUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="absolute bottom-2 right-2 rounded bg-background/90 px-1.5 py-0.5 text-3xs text-muted-foreground hover:text-foreground"
+        >
+          Image: OrcaSlicer
+        </a>
       )}
     </div>
   );
@@ -252,7 +339,7 @@ function PrinterModelBadge({
               setEditing(false);
             }
           }}
-          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <option value="">Select model</option>
           {PRINTER_MODEL_OPTIONS.map((model) => (
@@ -267,13 +354,13 @@ function PrinterModelBadge({
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             placeholder="Custom model name"
-            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
         )}
         <button
           type="submit"
           disabled={saving || (selected === OTHER_MODEL_OPTION && !customValue.trim())}
-          className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
+          className="rounded border border-border px-1.5 py-0.5 text-3xs uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
         >
           Save
         </button>
@@ -282,8 +369,10 @@ function PrinterModelBadge({
   }
 
   return (
-    <span
-      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground"
+    <button
+      type="button"
+      disabled={!canEdit}
+      className="flex max-w-full items-center gap-1 truncate rounded-md text-left text-xs font-medium text-foreground enabled:hover:text-primary disabled:cursor-default"
       onClick={(e) => {
         if (!canEdit) return;
         e.preventDefault();
@@ -293,7 +382,7 @@ function PrinterModelBadge({
     >
       {displayModel || (canEdit ? "Set model" : "Model unknown")}
       {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
-    </span>
+    </button>
   );
 }
 

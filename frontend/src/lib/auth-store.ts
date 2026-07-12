@@ -11,6 +11,7 @@ const LEGACY_TOKEN_KEY = "nexus3d.token";
 const LEGACY_USER_KEY = "nexus3d.user";
 const AUTH_EVENT = "printstash:auth-changed";
 const UNAUTH_EVENT = "printstash:unauthorized";
+const SESSION_EXPIRED_KEY = "printstash.session-expired";
 
 export interface StoredUser {
   id: number;
@@ -93,7 +94,26 @@ export function onAuthChange(cb: () => void): () => void {
 }
 
 export function emitUnauthorized(): void {
-  if (isBrowser()) window.dispatchEvent(new Event(UNAUTH_EVENT));
+  if (!isBrowser()) return;
+  // Login failures also return 401. Only expire an established session, and
+  // clear it before broadcasting so concurrent failed requests become no-ops.
+  if (!getToken()) return;
+  try {
+    sessionStorage.setItem(SESSION_EXPIRED_KEY, "1");
+  } catch { /* ignore */ }
+  clearLogin();
+  window.dispatchEvent(new Event(UNAUTH_EVENT));
+}
+
+export function consumeSessionExpired(): boolean {
+  if (!isBrowser()) return false;
+  try {
+    const expired = sessionStorage.getItem(SESSION_EXPIRED_KEY) === "1";
+    sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+    return expired;
+  } catch {
+    return false;
+  }
 }
 
 export function onUnauthorized(cb: () => void): () => void {

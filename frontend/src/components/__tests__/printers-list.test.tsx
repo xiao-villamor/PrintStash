@@ -73,7 +73,10 @@ function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   };
 }
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  window.localStorage.clear();
+});
 
 async function openForm() {
   render(<PrintersPage />);
@@ -153,6 +156,23 @@ describe("printer setup", () => {
 });
 
 describe("printer card", () => {
+  it("shows optional printer artwork only when enabled in display settings", () => {
+    mockUsePrinters.mockReturnValue({
+      data: [makePrinter()],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const plain = render(<PrintersPage />);
+    expect(screen.queryByAltText("Voron 2.4 printer")).not.toBeInTheDocument();
+    plain.unmount();
+
+    window.localStorage.setItem("printstash.printer-card.show-image", "true");
+    render(<PrintersPage />);
+    expect(screen.getByAltText("Voron 2.4 printer")).toBeInTheDocument();
+  });
+
   it("shows the detected model", () => {
     mockUsePrinters.mockReturnValueOnce({
       data: [makePrinter({ detected_model: "Bambu Lab X1 Carbon" })],
@@ -175,7 +195,9 @@ describe("printer card", () => {
     render(<PrintersPage />);
 
     await userEvent.click(screen.getByText("Set model"));
-    await userEvent.selectOptions(screen.getByRole("combobox"), "Voron 2.4");
+    const selector = screen.getByRole("combobox");
+    expect(selector.closest("a")).toBeNull();
+    await userEvent.selectOptions(selector, "Voron 2.4");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>

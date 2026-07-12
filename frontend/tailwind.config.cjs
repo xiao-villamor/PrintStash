@@ -45,6 +45,7 @@ const config = {
           DEFAULT: "var(--popover)",
           foreground: "var(--popover-foreground)",
         },
+        "popover-hover": "var(--popover-hover)",
         card: {
           DEFAULT: "var(--card)",
           foreground: "var(--card-foreground)",

@@ -24,6 +24,7 @@ import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { ModalShell } from "@/components/ui/modal";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   ChevronRight,
   Folder,
@@ -194,6 +195,8 @@ export function TaxonomyManager() {
   const [permissionUsers, setPermissionUsers] = useState<UserRead[]>([]);
   const [permissionUserId, setPermissionUserId] = useState<number | "">("");
   const [permissionRole, setPermissionRole] = useState<CollectionRole>("view");
+  const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
+  const [deleteTagBusy, setDeleteTagBusy] = useState(false);
 
   async function refresh() {
     try {
@@ -262,6 +265,17 @@ export function TaxonomyManager() {
     }
   }
 
+  async function confirmDeleteTag() {
+    if (!deleteTagTarget) return;
+    setDeleteTagBusy(true);
+    try {
+      await handleDeleteTag(deleteTagTarget.id);
+      setDeleteTagTarget(null);
+    } finally {
+      setDeleteTagBusy(false);
+    }
+  }
+
   async function openPermissions(collection: CollectionRead) {
     setSharingCollection(collection);
     setPermissionUserId("");
@@ -324,6 +338,16 @@ export function TaxonomyManager() {
 
   return (
     <div className="space-y-4 sm:space-y-6 lg:space-y-8">
+      <ConfirmModal
+        open={!!deleteTagTarget}
+        onClose={() => setDeleteTagTarget(null)}
+        onConfirm={confirmDeleteTag}
+        busy={deleteTagBusy}
+        title="Delete tag?"
+        description={deleteTagTarget
+          ? `"${deleteTagTarget.name}" will be removed from ${deleteTagTarget.model_count} model${deleteTagTarget.model_count === 1 ? "" : "s"}.`
+          : "This tag will be removed from its models."}
+      />
       {sharingCollection && (
         <PermissionsModal
           collection={sharingCollection}
@@ -503,15 +527,7 @@ export function TaxonomyManager() {
                   <button
                     onClick={() => {
                       if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
-                      if (
-                        t.model_count > 0 &&
-                        !window.confirm(
-                          `Delete tag "${t.name}"? It will be removed from ${t.model_count} model${t.model_count === 1 ? "" : "s"}.`,
-                        )
-                      ) {
-                        return;
-                      }
-                      handleDeleteTag(t.id);
+                      setDeleteTagTarget(t);
                     }}
                     title={`Delete tag "${t.name}"`}
                     aria-label={`Delete tag ${t.name}`}

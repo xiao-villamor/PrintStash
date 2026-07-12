@@ -19,11 +19,11 @@ export function PageContainer({
   children: ReactNode;
 }) {
   return (
-    <div className="h-full overflow-y-auto [scrollbar-gutter:stable] bg-background p-6 pb-24 md:pb-6">
+    <div className="h-full overflow-y-auto [scrollbar-gutter:stable] bg-background px-4 py-6 pb-24 sm:px-6 lg:px-8 md:pb-6">
       <div
         className={cn(
           "mx-auto w-full space-y-6",
-          width === "prose" ? "max-w-4xl" : "max-w-6xl",
+          width === "prose" ? "max-w-4xl" : "max-w-screen-2xl",
           className,
         )}
       >

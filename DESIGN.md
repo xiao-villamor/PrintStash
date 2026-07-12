@@ -34,6 +34,7 @@ the semantic token and it follows the theme for free.
 | `background` / `foreground` | Page base |
 | `card` / `card-foreground` | Raised content surfaces |
 | `popover` / `popover-foreground` | Floating panels: menus, pickers |
+| `popover-hover` | Perceptible hover/focus fill for items inside floating panels |
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
 | `primary` / `primary-foreground` | Primary action. `primary-hover` for hover, `primary-soft` for selection rings |
 | `accent` / `accent-foreground` | Tinted hover/selected states |
@@ -67,7 +68,7 @@ of taste.
   Profiles, Settings, Organize, printer detail. These compose
   `PageContainer` (`components/ui/page-container.tsx`), which owns the scroll
   container, the padding, the mobile bottom-nav clearance, and **one** content
-  width: `max-w-6xl`, centered. There is no second width to choose from, and no
+  width: `max-w-screen-2xl`, centered. There is no second width to choose from, and no
   page may hand-roll its own scroll container — that is exactly how Printers
   ended up spanning a 2560px monitor while Statistics sat in a 1024px column.
 - **Surfaces** — the vault grid, model detail's split pane, the public share

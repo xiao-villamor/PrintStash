@@ -426,7 +426,7 @@ export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
             <div className="flex items-center gap-1">
               <button
                 onClick={() => setShowTravel((v) => !v)}
-                className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
+                className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                   showTravel
                     ? "border-primary text-primary bg-secondary-container"
                     : "border-outline-variant text-muted-foreground hover:text-foreground"
@@ -437,7 +437,7 @@ export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
               {printerBedMm && (
                 <button
                   onClick={() => setShowBed((v) => !v)}
-                  className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
+                  className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                     showBed
                       ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30"
                       : "border-outline-variant text-muted-foreground hover:text-foreground"

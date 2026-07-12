@@ -134,6 +134,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [sendOpen, setSendOpen] = useState(false);
   const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
+  const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
   const viewerControls = useRef<STLViewerControls | null>(null);
   const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
@@ -256,14 +258,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       auth.showAuthRequiredToast();
       return;
     }
-    if (
-      tag.model_count > 0 &&
-      !window.confirm(
-        `Delete tag "${tag.name}"? It will be removed from ${tag.model_count} model${tag.model_count === 1 ? "" : "s"}.`,
-      )
-    ) {
-      return;
-    }
+    setDeleteTagTarget(tag);
+  }
+
+  async function confirmDeleteTag() {
+    if (!deleteTagTarget) return;
+    const tag = deleteTagTarget;
+    setDeleteTagBusy(true);
     try {
       await deleteTag(tag.id);
       setEditTags((p) =>
@@ -272,6 +273,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
       toast.success(`Tag "${tag.name}" deleted`);
     } catch (e) {
       toast.error(e);
+    } finally {
+      setDeleteTagBusy(false);
+      setDeleteTagTarget(null);
     }
   }
 
@@ -359,6 +363,16 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         title="Delete model?"
         description="This will move the model to trash. Files will be permanently removed after the retention period."
         confirmLabel="Delete"
+      />
+      <ConfirmModal
+        open={!!deleteTagTarget}
+        onClose={() => setDeleteTagTarget(null)}
+        onConfirm={confirmDeleteTag}
+        busy={deleteTagBusy}
+        title="Delete tag?"
+        description={deleteTagTarget
+          ? `"${deleteTagTarget.name}" will be removed from ${deleteTagTarget.model_count} model${deleteTagTarget.model_count === 1 ? "" : "s"}.`
+          : "This tag will be removed from the model."}
       />
       {addRevisionOpen && (
         <AddGcodeRevisionModal

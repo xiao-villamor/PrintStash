@@ -4,7 +4,6 @@ import { usePathname } from "@/lib/navigation";
 import { useEffect } from "react";
 import { useRouter } from "@/lib/navigation";
 
-import { AuthBanner } from "@/components/auth-banner";
 import { BottomNavBar } from "@/components/bottom-nav-bar";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
@@ -19,6 +18,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const chromeless = CHROMELESS_PREFIXES.some((p) => pathname.startsWith(p));
   const isVault = pathname === "/";
+
+  useEffect(() => {
+    const title = pathname === "/"
+      ? "Vault"
+      : pathname.startsWith("/models/")
+        ? "Model"
+        : pathname.startsWith("/documents/")
+          ? "Document"
+          : pathname.startsWith("/printers/")
+            ? "Printer"
+            : pathname.startsWith("/printers")
+              ? "Printers"
+              : pathname.startsWith("/statistics")
+                ? "Statistics"
+                : pathname.startsWith("/settings")
+                  ? "Settings"
+                  : pathname.startsWith("/organize")
+                    ? "Catalog"
+                    : pathname.startsWith("/profiles")
+                      ? "Profiles"
+                      : pathname.startsWith("/login")
+                        ? "Sign in"
+                        : pathname.startsWith("/setup")
+                          ? "Setup"
+                          : "PrintStash";
+    document.title = `${title} · PrintStash`;
+  }, [pathname]);
 
   useEffect(() => {
     if (!chromeless && !loading && !user) {
@@ -49,7 +75,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <MobileFilterProvider>
           <div className="flex flex-col h-dvh overflow-hidden">
             <TopBar />
-            <AuthBanner />
             <div className="flex flex-1 min-h-0 overflow-hidden">
               {isVault ? (
                 children

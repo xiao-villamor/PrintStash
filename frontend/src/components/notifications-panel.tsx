@@ -32,7 +32,7 @@ import { inputClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const CARD =
-  "bg-card border border-border rounded overflow-hidden";
+  "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
 const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
 const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "font-mono uppercase tracking-wider");
 const BTN_SECONDARY = cn(
@@ -292,9 +292,11 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
       {canEdit && (
         <div className="space-y-2">
           {channels.length === 0 && !draft && (
-            <p className="text-xs text-muted-foreground italic px-1">
-              No channels yet. Add one to start receiving alerts.
-            </p>
+            <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
+              <Bell className="h-7 w-7 text-muted-foreground/50" />
+              <p className="text-sm font-medium text-foreground">No notification channels yet</p>
+              <p className="text-xs text-muted-foreground">Add a channel to start receiving print and printer alerts.</p>
+            </div>
           )}
           {channels.map((ch) => {
             const badge = statusBadge(ch.last_status);

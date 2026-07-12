@@ -4,6 +4,7 @@ import {
   invalidateQueriesForPath,
   queryClient,
   queryKeys,
+  refreshVaultAfterIngest,
 } from "@/lib/query-client";
 
 /**
@@ -97,6 +98,24 @@ describe("invalidateQueriesForPath", () => {
   it("does nothing for an unrecognised path", () => {
     invalidateQueriesForPath("/api/v1/health");
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshVaultAfterIngest", () => {
+  it("cancels stale upload-time reads, then refreshes grid, tree, and totals", async () => {
+    const cancel = vi.spyOn(queryClient, "cancelQueries").mockResolvedValue();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
+
+    await refreshVaultAfterIngest();
+
+    expectBusted(cancel, [queryKeys.models, queryKeys.collections, queryKeys.vaultStats]);
+    expectBusted(invalidate, [queryKeys.models, queryKeys.collections, queryKeys.vaultStats]);
+    expect(cancel.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      invalidate.mock.invocationCallOrder[0],
+    );
+
+    cancel.mockRestore();
+    invalidate.mockRestore();
   });
 });
 

@@ -14,6 +14,7 @@ import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { UploadModal, UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
 import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
   SlidersHorizontal,
@@ -21,7 +22,7 @@ import {
   Grid,
   List,
   FileText,
-  MoreVertical,
+  X,
   Printer,
   Folder,
   ChevronRight,
@@ -31,7 +32,7 @@ import {
 import { createCollection, updateModel, moveCollection, deleteCollection, batchMoveModels, batchTagModels, batchDeleteModels, } from "@/lib/api";
 import { isMeshFile, isGcodeFile, extensionOf, walkEntries, entriesFromDataTransfer, BulkItem } from "@/lib/bulk-upload";
 import { useCollections, useModelList, useOutlinerModels, usePrinters, useTags, useVaultStats, type ModelListFilters, } from "@/lib/queries";
-import { queryKeys } from "@/lib/query-client";
+import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
@@ -360,6 +361,7 @@ async function onMainDrop(e: React.DragEvent) {
   // the root with no filter narrowing the view, label it with the real library
   // total instead of that root-only count (#30).
   const hasActiveFilters =
+    !!selectedCollection ||
     selectedTags.length > 0 ||
     selectedPrinterId !== null ||
     selectedPrinterPresence !== null ||
@@ -469,12 +471,65 @@ async function onMainDrop(e: React.DragEvent) {
     }
   }
 
+  function clearSearch() {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("q");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
+
+  function clearAllFilters() {
+    setSelectedTags([]);
+    setSelectedPrinterId(null);
+    setSelectedPrinterPresence(null);
+    setSelectedIds(new Set());
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("q");
+    params.delete("c");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
+
+  const activeFilterItems: { label: string; onRemove: () => void }[] = (() => {
+    const items: { label: string; onRemove: () => void }[] = [];
+    if (selectedCollection) {
+      items.push({
+        label: `Collection: ${selectedName ?? selectedCollection}`,
+        onRemove: () => handleCollectionChange(null),
+      });
+    }
+    if (query.trim()) {
+      items.push({ label: `Search: ${query.trim()}`, onRemove: clearSearch });
+    }
+    for (const slug of selectedTags) {
+      const tag = tags.find((item) => item.slug === slug);
+      items.push({
+        label: `Tag: ${tag?.name ?? slug}`,
+        onRemove: () => setSelectedTags((current) => current.filter((item) => item !== slug)),
+      });
+    }
+    if (selectedPrinterId !== null) {
+      const printer = printers.find((item) => item.id === selectedPrinterId);
+      items.push({
+        label: `Printer: ${printer?.name ?? selectedPrinterId}`,
+        onRemove: () => setSelectedPrinterId(null),
+      });
+    }
+    if (selectedPrinterPresence !== null) {
+      items.push({
+        label: selectedPrinterPresence === "none" ? "Vault only" : "On a printer",
+        onRemove: () => setSelectedPrinterPresence(null),
+      });
+    }
+    return items;
+  })();
+
   return (
     <>
       <UploadModal
         open={uploadOpen}
         onClose={() => { setUploadOpen(false); setDropPreload(null); setDropCollection(null); }}
-        onUploaded={refresh}
+        onUploaded={refreshVaultAfterIngest}
         defaultCollection={dropCollection ?? uploadDefaultCollection}
         preloadFiles={dropPreload?.files ?? null}
         preloadItems={dropPreload?.items ?? null}
@@ -574,37 +629,38 @@ async function onMainDrop(e: React.DragEvent) {
                   <SlidersHorizontal className="w-4 h-4 mr-1.5 text-muted-foreground" />
                   Filters
                 </button>
-                <button
+                <Button
+                  variant="outline"
+                  size="xs"
                   onClick={handleOpenCreateCollection}
                   disabled={!canAdminSelectedCollection}
-                  className="hidden md:flex items-center px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted transition-colors"
+                  title={canAdminSelectedCollection ? "Create a collection" : "Admin access required for this collection"}
+                  className="hidden md:inline-flex"
                 >
-                  <Plus className="w-4 h-4 mr-1.5 text-muted-foreground" />
+                  <Plus className="w-4 h-4 text-muted-foreground" />
                   New collection
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="xs"
                   onClick={() => { setDropPreload(null); setDropCollection(null); setUploadOpen(true); }}
                   disabled={!canUploadToVault}
-                  className="flex items-center px-3 py-2 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={canUploadToVault ? "Upload artifacts" : "Sign in and get edit access to upload"}
                 >
                   Upload
-                </button>
+                </Button>
               </div>
               {auth.isAuthenticated && (
-                <button
+                <Button
+                  variant={selectMode ? "default" : "outline"}
+                  size="xs"
                   onClick={() => {
                     if (selectMode) clearSelection();
                     else setSelectMode(true);
                   }}
-                  className={`hidden md:flex items-center px-3 py-2 text-xs font-medium rounded border transition-colors ${
-                    selectMode
-                      ? "text-primary-foreground bg-primary border-transparent hover:bg-primary-hover"
-                      : "text-foreground bg-background border-border hover:bg-muted"
-                  }`}
                 >
-                  <CheckSquare className="w-4 h-4 mr-1.5" />
+                  <CheckSquare className="w-4 h-4" />
                   {selectMode ? "Done" : "Select"}
-                </button>
+                </Button>
               )}
               <div className="h-6 w-px bg-muted mx-1 hidden md:block" />
               <div className="flex items-center bg-muted p-1 rounded">
@@ -633,6 +689,31 @@ async function onMainDrop(e: React.DragEvent) {
             collectionId={selectedCollectionRow.id}
             canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
           />
+        )}
+
+        {activeFilterItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
+            <span className="text-3xs font-mono uppercase tracking-wider text-muted-foreground">
+              Filters
+            </span>
+            {activeFilterItems.map((item) => (
+              <Button
+                key={item.label}
+                type="button"
+                variant="outline"
+                size="xs"
+                onClick={item.onRemove}
+                className="gap-1.5"
+                title={`Remove ${item.label}`}
+              >
+                {item.label}
+                <X className="h-3 w-3" aria-hidden />
+              </Button>
+            ))}
+            <Button type="button" variant="ghost" size="xs" onClick={clearAllFilters}>
+              Clear all
+            </Button>
+          </div>
         )}
 
         {/* Models / Documents tabs */}
@@ -718,7 +799,7 @@ async function onMainDrop(e: React.DragEvent) {
         ) : (
         <div className="flex-1 flex flex-col bg-background">
           {error && (
-            <div className="mx-6 mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+            <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
           )}
 
           {loading ? (
@@ -732,7 +813,11 @@ async function onMainDrop(e: React.DragEvent) {
                   : "Upload a model when you're ready, or skim the wiki first if this is a new install."
               }
               action={
-                !query && !selectedCollection && selectedTags.length === 0 && !selectedPrinterId && !selectedPrinterPresence ? (
+                hasActiveFilters ? (
+                  <Button type="button" variant="outline" size="xs" onClick={clearAllFilters}>
+                    Clear all filters
+                  </Button>
+                ) : (
                   <a
                     href="https://xiao-villamor.github.io/PrintStash/"
                     className="inline-flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
@@ -740,7 +825,7 @@ async function onMainDrop(e: React.DragEvent) {
                     <BookOpen className="h-4 w-4 text-muted-foreground" />
                     Open wiki
                   </a>
-                ) : undefined
+                )
               }
               className="flex-1 py-20 animate-panel-in"
             />
@@ -777,7 +862,6 @@ async function onMainDrop(e: React.DragEvent) {
                   <span className="w-24 text-right hidden sm:block">Collection</span>
                   <span className="w-20 text-right">Files</span>
                   <span className="w-24 text-right hidden md:block">Updated</span>
-                  <span className="w-8" />
                 </div>
                 {visibleCollections.map((collection) => (
                   <CollectionListRow
@@ -858,7 +942,7 @@ function CollectionFolderCard({ collection, onSelect, onDropModel }: { collectio
       className={`animate-card-in group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
         dragOver
           ? "border-primary ring-2 ring-primary-soft"
-          : "border-border hover:border-orange-500 dark:hover:border-orange-500"
+          : "border-border hover:border-primary"
       }`}
     >
       <div className="flex-1 flex items-center justify-center bg-muted/60 dark:bg-surface-container-high min-h-[100px] sm:min-h-[140px]">
@@ -966,14 +1050,14 @@ function ModelListRow({
         {model.tags.length > 0 && (
           <div className="flex gap-1 mt-0.5">
             {model.tags.slice(0, 2).map((tag) => (
-              <span key={tag} className="bg-accent text-accent-foreground px-1 py-px rounded font-mono text-[9px] uppercase tracking-wider">{tag}</span>
+              <span key={tag} className="bg-accent text-accent-foreground px-1 py-px rounded font-mono text-3xs uppercase tracking-wider">{tag}</span>
             ))}
           </div>
         )}
         {printerPresence.length > 0 && (
           <div className="flex gap-1 mt-1">
             {printerPresence.slice(0, 2).map((p) => (
-              <span key={p.printer_id} className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-emerald-600">
+              <span key={p.printer_id} className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1 py-px font-mono text-3xs uppercase tracking-wider text-emerald-600">
                 <Printer className="h-3 w-3" />{p.printer_name}
               </span>
             ))}
@@ -983,9 +1067,6 @@ function ModelListRow({
       <span className="w-24 text-right text-xs font-mono text-muted-foreground truncate hidden sm:block">{model.collection || "—"}</span>
       <span className="w-20 text-right text-xs font-mono text-muted-foreground">{model.file_count}</span>
       <span className="w-24 text-right text-xs font-mono text-muted-foreground hidden md:block">{timeAgo(model.updated_at)}</span>
-      <span className="w-8 flex justify-center">
-        <MoreVertical className="h-4 w-4 text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </span>
     </Link>
   );
 }

@@ -89,7 +89,7 @@ function MetricCell({ id, model, isLast }: { id: CardMetricId; model: ModelListI
   const cfg = METRIC_CONFIG[id];
   return (
     <div className={`py-2 px-1 text-center bg-muted/50 ${isLast ? "" : "border-r border-border"}`}>
-      <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">{cfg.abbr}</p>
+      <p className="text-3xs font-bold text-muted-foreground uppercase tracking-wider mb-0.5">{cfg.abbr}</p>
       <p className="text-2xs font-bold text-foreground font-mono truncate">{cfg.getValue(model)}</p>
     </div>
   );
@@ -198,7 +198,7 @@ function ModelCardInner({
           )}
           {hasPrinter && (
             <div className="absolute bottom-2 right-2">
-              <span className="text-[9px] font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
+              <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
                 On printer
               </span>
             </div>
@@ -207,9 +207,9 @@ function ModelCardInner({
 
         {/* Title + revision */}
         <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
-          <h4 className="text-sm font-bold text-foreground uppercase tracking-tight truncate leading-tight">
+          <h2 title={model.name} className="text-sm font-bold text-foreground uppercase tracking-tight line-clamp-2 leading-tight">
             {model.name}
-          </h4>
+          </h2>
           <RevisionBadge
             status={model.recommended_revision_status}
             label={model.recommended_revision_label}

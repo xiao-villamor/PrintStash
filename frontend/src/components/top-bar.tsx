@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useTransition } from "react";
+import { Suspense, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
 import { Link } from "@/lib/navigation";
 import {
@@ -38,9 +38,30 @@ function TopBarSearch() {
   const searchParams = useSearchParams();
   const q = searchParams.get("q") ?? "";
   const [value, setValue] = useState(q);
+  const inputRef = useRef<HTMLInputElement>(null);
   const [, startTransition] = useTransition();
 
   useEffect(() => { setValue(q); }, [q]);
+
+  useEffect(() => {
+    if (pathname !== "/") return;
+    function focusSearch(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (
+        event.key !== "/" ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        target?.matches("input, textarea, select, [contenteditable='true']")
+      ) {
+        return;
+      }
+      event.preventDefault();
+      inputRef.current?.focus();
+    }
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, [pathname]);
 
   useEffect(() => {
     if (pathname !== "/") return;
@@ -76,8 +97,10 @@ function TopBarSearch() {
           <Search className="h-5 w-5 text-muted-foreground" />
         </div>
         <input
+          ref={inputRef}
           className="block w-full pl-10 pr-10 sm:pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-ring focus:border-primary dark:border-primary-soft text-sm transition-colors"
           placeholder="Search PrintStash..."
+          aria-label="Search models"
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -132,7 +155,7 @@ export function TopBar() {
       {/* Logo */}
       <Link href={homeHref} className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
         <div className="w-8 h-8 bg-primary rounded flex items-center justify-center flex-shrink-0">
-          <BrandMark className="h-6 w-6 text-white" />
+          <BrandMark className="h-6 w-6 text-primary-foreground" />
         </div>
         <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">PrintStash</span>
       </Link>
@@ -208,11 +231,11 @@ export function TopBar() {
                 type="button"
                 data-menu-trigger
                 onClick={() => setProfileOpen((v) => !v)}
-                className="flex items-center space-x-2 focus:outline-none group"
+                className="group flex items-center space-x-2 rounded-md px-1.5 py-1 transition-[background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted"
                 aria-haspopup="menu"
                 aria-expanded={profileOpen}
               >
-                <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-white font-medium text-sm">
+                <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-medium text-sm">
                   {user?.username.charAt(0).toUpperCase() ?? "…"}
                 </div>
                 <span className="text-sm font-medium text-foreground group-hover:text-foreground hidden sm:block">
@@ -257,15 +280,15 @@ function ProfileMenu({
 
   return (
     <div
-      className="w-48 overflow-hidden rounded border border-border bg-popover py-1 shadow-lg"
+      className="w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl"
     >
       {items.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const className = `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
           active
-            ? "bg-accent text-accent-foreground"
-            : "text-foreground hover:bg-muted hover:text-foreground"
-        } ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
+            ? "bg-accent text-accent-foreground ring-1 ring-inset ring-primary/20 dark:ring-0"
+            : "text-foreground hover:bg-popover-hover hover:text-foreground"
+        } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
         if (item.external) {
           return (
             <a key={item.href} href={item.href} role="menuitem" onClick={onNavigate} className={className}>
@@ -275,7 +298,7 @@ function ProfileMenu({
           );
         }
         return (
-          <Link key={item.href} href={item.href} role="menuitem" onClick={onNavigate} className={className}>
+          <Link key={item.href} href={item.href} role="menuitem" aria-current={active ? "page" : undefined} onClick={onNavigate} className={className}>
             <item.icon className="h-4 w-4" />
             <span>{item.label}</span>
           </Link>
@@ -285,7 +308,7 @@ function ProfileMenu({
         type="button"
         role="menuitem"
         onClick={onLogout}
-        className="flex w-full items-center gap-3 border-t border-border px-3 py-2.5 text-left text-sm text-red-600 transition-colors hover:bg-red-500/10"
+        className="flex w-full items-center gap-3 rounded-md border-t border-border px-3 py-2.5 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <LogOut className="h-4 w-4" />
         <span>Log Out</span>

@@ -6,6 +6,7 @@ export {
   clearLogin,
   onAuthChange,
   emitUnauthorized,
+  consumeSessionExpired,
   onUnauthorized,
   type StoredUser,
 } from "@/lib/auth-store";
