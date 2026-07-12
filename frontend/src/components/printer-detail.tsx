@@ -34,6 +34,7 @@ import { formatBytes, formatDuration } from "@/lib/format";
 import { buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { providerAddress, providerLabel } from "@/lib/printer-providers";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -77,10 +78,6 @@ const BTN_DANGER = cn(
 );
 const SECTION_CLASS = "overflow-hidden rounded-lg border border-border bg-background";
 const SECTION_HEADER_CLASS = "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
-
-function providerLabel(provider: PrinterRead["provider"]): string {
-  return provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
-}
 
 function checkLabel(name: string): string {
   return name.replaceAll("_", " ");
@@ -420,7 +417,7 @@ export function PrinterDetailPage({
             {printer.name}
           </h1>
           <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-            {providerLabel(printer.provider)}
+            {providerLabel(printer)}
           </span>
           {printer.capabilities.support_level === "beta" && (
             <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
@@ -437,9 +434,7 @@ export function PrinterDetailPage({
           </span>
         </div>
         <p className="font-mono text-xs text-muted-foreground break-all">
-          {printer.provider === "moonraker"
-            ? printer.moonraker_url
-            : printer.bambu_host || "Bambu LAN"}
+          {providerAddress(printer)}
         </p>
       </div>
 

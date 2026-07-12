@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.9.0
+
+### Added
+
+- **PrusaLink local FDM support (beta).** Connect modern PrusaLink with Digest
+  username/password authentication or legacy installations with an API key.
+  PrintStash supports live status, G-code upload, explicit start, remote file
+  inventory/deletion, and pause/resume/cancel without using Prusa Connect cloud.
+- **Elegoo Neptune 4-family setup.** Neptune 4, Pro, Plus, and Max can be added
+  through a dedicated preset backed by the existing Moonraker/Klipper provider,
+  keeping one tested transport and an identifiable printer variant.
+- **Elegoo Centauri Carbon support (beta).** Original Carbon printers connect
+  locally over SDCP/WebSocket, while Carbon 2 uses its access-code-protected
+  local MQTT API. Both provide status and start/pause/resume/cancel controls.
+  Upload and file inventory stay disabled because current firmware exposes no
+  safe confirmed file API.
+- **OctoPrint support (beta).** Connect a local OctoPrint/OctoPi instance with
+  an API key for live status, G-code upload, explicit start, remote file
+  inventory/deletion, and pause/resume/cancel.
+- **Provider-aware printer setup.** The add-printer flow now offers Moonraker,
+  Elegoo Neptune 4, PrusaLink, OctoPrint, and Bambu LAN with only the
+  credentials required by each integration.
+- **Printer model detection on the printer card.** Bambu (from its serial
+  prefix) and Elegoo Neptune 4/Centauri (from the setup preset) show a
+  best-effort hardware model automatically. Any printer's model can be set or
+  corrected from a curated picklist to avoid typos, with an "Other" option
+  for custom builds.
+- **Bambu LAN Vault send support (beta).** PrintStash can upload plain-text
+  G-code to a Bambu printer's local cache over implicit FTPS, then start the
+  uploaded file through the local MQTT connection. Upload-only remains the
+  default; starting requires the explicit **Start print immediately** option.
+- **Provider-safe Bambu send guard.** Bambu sends now verify that the printer
+  reports an idle/ready state before creating a transfer job, so an active or
+  unreachable printer is rejected without leaving a job stuck uploading.
+- **Provider capability matrix.** Printer integrations declare supported
+  actions from one shared capability set (status, upload, start, controls,
+  file inventory, raw G-code, and measured consumption). API diagnostics and
+  frontend actions are derived from that data instead of provider-specific UI
+  checks.
+- **Provider conformance suite.** Every printer integration is exercised by one
+  shared test pack: it must register, reject incomplete credentials, refuse the
+  actions it does not declare without touching the network, and keep transport
+  failures behind the common provider error surface. Adding a printer backend is
+  now a single small class, so future providers arrive faster and behave
+  consistently from the first release.
+
+### Fixed
+
+- **Predictable reconnect behavior.** Initial connection and subscription
+  failures now use bounded exponential backoff, while a recovered provider
+  clears its stale offline/error state on the first successful status update.
+- **Bambu status failures reach the printer hub.** Polling errors no longer stay
+  hidden inside the provider loop, preventing stale online state during a LAN
+  outage and allowing the shared reconnect policy to take over.
+- **Mixed-provider send controls are capability-aware.** The send dialog keeps
+  upload-only printers selectable but disables **Send & Print** when any
+  selected printer cannot start the uploaded file.
+
+### Performance
+
+- **Live job database writes are bounded.** Unchanged progress updates are
+  coalesced to a five-second interval. Three consecutive job-sync database
+  failures open a per-printer circuit breaker with increasing retry delays,
+  preventing a database outage from becoming a write storm.
+
+### Ops
+
+- Node.js 24 is pinned for frontend development and release builds, matching
+  CI and the production frontend image.
+- Provider documentation, limitations, diagnostics, manual hardware checks,
+  and the public roadmap now describe the 0.9.0 capability surface.
+
 ## 0.8.5
 
 ### Security

@@ -97,6 +97,9 @@ def _derive_printer_status(snapshot: Dict[str, Any]) -> tuple[str, PrinterStatus
 # Re-write an unchanged printer status at most this often; keeps last_seen_at
 # reasonably fresh without a DB commit per Moonraker status tick.
 _STATUS_WRITE_INTERVAL_S = 30.0
+_JOB_PROGRESS_WRITE_INTERVAL_S = 5.0
+_JOB_SYNC_BREAKER_THRESHOLD = 3
+_JOB_SYNC_BREAKER_MAX_DELAY_S = 300.0
 
 
 class PrinterHub:
@@ -113,6 +116,10 @@ class PrinterHub:
         # the PrintJob lookup query and go straight to a PK get(). Falls back
         # to the query whenever the cache misses or the cached row is stale.
         self._active_job_cache: Dict[int, tuple[str, int]] = {}
+        # printer_id -> (consecutive failures, retry-after monotonic timestamp)
+        self._job_sync_breakers: Dict[int, tuple[int, float]] = {}
+        # printer_id -> (filename, state, progress, monotonic time) for DB write coalescing
+        self._last_job_sync_write: Dict[int, tuple[str, str, float, float]] = {}
 
     @staticmethod
     def _channel(printer_id: int) -> str:
@@ -156,6 +163,8 @@ class PrinterHub:
             task = self.tasks.pop(printer_id, None)
             self.snapshots.pop(printer_id, None)
             self._last_status_write.pop(printer_id, None)
+            self._job_sync_breakers.pop(printer_id, None)
+            self._last_job_sync_write.pop(printer_id, None)
         if stop:
             stop.set()
         if task:
@@ -193,6 +202,7 @@ class PrinterHub:
 
     async def _run_printer(self, printer_id: int, stop: asyncio.Event) -> None:
         # Load the printer row (re-load on each reconnect to pick up edits).
+        reconnect_delay = 1.0
         while not stop.is_set():
             with get_session_factory().session() as session:
                 printer = session.get(Printer, printer_id)
@@ -207,7 +217,8 @@ class PrinterHub:
                         PrinterStatus.ERROR,
                         error=f"{exc.code}: {exc.detail}",
                     )
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, 30.0)
                     continue
 
             async def on_status(status: Dict[str, Any]) -> None:
@@ -230,11 +241,13 @@ class PrinterHub:
                     printer_id,
                     exc,
                 )
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 30.0)
                 continue
 
             try:
                 await client.subscribe_status(on_status, stop_event=stop)
+                reconnect_delay = 1.0
             except Exception as exc:  # noqa: BLE001 — last-ditch
                 logger.exception(
                     "printer worker[%s] subscribe crash: %s", printer_id, exc
@@ -242,11 +255,8 @@ class PrinterHub:
                 await self._mark_status(
                     printer_id, PrinterStatus.OFFLINE, error=str(exc)
                 )
-                # back-off before reloading config
-                try:
-                    await asyncio.wait_for(stop.wait(), timeout=10.0)
-                except asyncio.TimeoutError:
-                    pass
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 30.0)
 
     async def _handle_status(self, printer_id: int, status: Dict[str, Any]) -> None:
         # Merge into in-memory snapshot.
@@ -341,6 +351,18 @@ class PrinterHub:
             return
         if restore_in_progress():
             return
+        now = time.monotonic()
+        breaker = self._job_sync_breakers.get(printer_id)
+        if breaker is not None and now < breaker[1]:
+            return
+        last = self._last_job_sync_write.get(printer_id)
+        if (
+            last is not None
+            and last[0] == filename
+            and last[1] == ms_state
+            and now - last[3] < _JOB_PROGRESS_WRITE_INTERVAL_S
+        ):
+            return
         try:
             await asyncio.to_thread(
                 self._sync_active_job_db,
@@ -350,7 +372,22 @@ class PrinterHub:
                 progress,
                 print_stats,
             )
+            self._job_sync_breakers.pop(printer_id, None)
+            self._last_job_sync_write[printer_id] = (
+                filename,
+                ms_state,
+                progress,
+                now,
+            )
         except Exception:
+            failures = (breaker[0] if breaker is not None else 0) + 1
+            delay = 0.0
+            if failures >= _JOB_SYNC_BREAKER_THRESHOLD:
+                delay = min(
+                    30.0 * (2 ** (failures - _JOB_SYNC_BREAKER_THRESHOLD)),
+                    _JOB_SYNC_BREAKER_MAX_DELAY_S,
+                )
+            self._job_sync_breakers[printer_id] = (failures, now + delay)
             logger.exception("printer hub: job sync failed for printer %s", printer_id)
 
     def _sync_active_job_db(

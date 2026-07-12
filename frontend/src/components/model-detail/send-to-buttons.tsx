@@ -83,6 +83,9 @@ export function SendToButtons({
     () => printers.filter((printer) => printer.capabilities.can_upload),
     [printers],
   );
+  const selectedPrintersCanStart = selectedPrinters.every(
+    (printer) => printer.capabilities.can_start,
+  );
   const onlineCount = selectedPrinters.filter(
     (printer) => printer.status !== "offline" && printer.status !== "unknown",
   ).length;
@@ -103,6 +106,10 @@ export function SendToButtons({
 
   async function send() {
     if (!selectedFile || selectedPrinters.length === 0) return;
+    if (startPrint && !selectedPrintersCanStart) {
+      setError("One or more selected printers support upload only.");
+      return;
+    }
     const file = gcodeFiles.find((candidate) => candidate.id === selectedFile);
     const taskId = createTask({
       title: `Send ${file?.original_filename ?? "G-code"}`,
@@ -275,9 +282,20 @@ export function SendToButtons({
             ))}
           </select>
           <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
-            <input type="checkbox" checked={startPrint} onChange={(e) => setStartPrint(e.target.checked)} className="rounded" />
+            <input
+              type="checkbox"
+              checked={startPrint}
+              onChange={(e) => setStartPrint(e.target.checked)}
+              disabled={!selectedPrintersCanStart || sending}
+              className="rounded"
+            />
             Start print immediately
           </label>
+          {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
+            <p className="text-[11px] text-amber-600 font-mono">
+              Selected printers support upload only. Remove them to enable start.
+            </p>
+          )}
           {spoolmanEnabled && spools.length > 0 && (
             <select
               value={selectedSpoolId}
@@ -311,7 +329,7 @@ export function SendToButtons({
           )}
           <div className="flex gap-2">
             <button onClick={() => setShowSend(false)} disabled={sending} className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50">Cancel</button>
-            <button onClick={send} disabled={sending || selectedPrinters.length === 0} className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
+            <button onClick={send} disabled={sending || selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)} className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {sending ? "Sending…" : startPrint ? "Send & Print" : "Send"}
             </button>

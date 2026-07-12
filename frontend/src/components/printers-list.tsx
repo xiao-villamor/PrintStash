@@ -3,15 +3,23 @@
 import { useState } from "react";
 import { Link } from "@/lib/navigation";
 import { PrinterRead } from "@/types";
-import { createPrinter, deletePrinter } from "@/lib/api";
+import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
 import { usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import {
+  PRINTER_MODEL_OPTIONS,
+  PRINTER_SETUP_OPTIONS,
+  providerAddress,
+  providerLabel,
+  setupProviderFields,
+  type PrinterSetupKind,
+} from "@/lib/printer-providers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal";
-import { Plus, Trash2, RefreshCw, ArrowRight, Printer as PrinterIcon } from "lucide-react";
+import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
@@ -21,16 +29,6 @@ const STATUS_COLORS: Record<string, string> = {
   unknown: "bg-slate-400",
   error: "bg-red-600",
 };
-
-function providerLabel(p: PrinterRead): string {
-  return p.provider === "bambu_lan" ? "Bambu LAN" : "Moonraker";
-}
-
-function providerAddress(p: PrinterRead): string {
-  return p.provider === "bambu_lan"
-    ? p.bambu_host || "Bambu LAN"
-    : p.moonraker_url;
-}
 
 export function PrintersPage() {
   const auth = useRequireAuth();
@@ -128,7 +126,7 @@ export function PrintersPage() {
                   <h3 className="text-[15px] font-semibold text-foreground truncate">
                     {p.name}
                   </h3>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <span className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                       {providerLabel(p)}
                     </span>
@@ -137,6 +135,7 @@ export function PrintersPage() {
                         Beta
                       </span>
                     )}
+                    <PrinterModelBadge printer={p} canEdit={auth.isAuthenticated} />
                   </div>
                 </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
@@ -200,6 +199,106 @@ export function PrintersPage() {
   );
 }
 
+const OTHER_MODEL_OPTION = "__other__";
+
+function PrinterModelBadge({
+  printer,
+  canEdit,
+}: {
+  printer: PrinterRead;
+  canEdit: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const displayModel = printer.model_name || printer.detected_model;
+  const [selected, setSelected] = useState(() =>
+    displayModel && PRINTER_MODEL_OPTIONS.includes(displayModel)
+      ? displayModel
+      : displayModel
+        ? OTHER_MODEL_OPTION
+        : "",
+  );
+  const [customValue, setCustomValue] = useState(
+    displayModel && !PRINTER_MODEL_OPTIONS.includes(displayModel) ? displayModel : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const modelName = selected === OTHER_MODEL_OPTION ? customValue.trim() : selected;
+    setSaving(true);
+    try {
+      await updatePrinter(printer.id, { model_name: modelName });
+      setEditing(false);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={save}
+        className="flex items-center gap-1"
+      >
+        <select
+          autoFocus
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setEditing(false);
+            }
+          }}
+          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+        >
+          <option value="">Select model</option>
+          {PRINTER_MODEL_OPTIONS.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+          <option value={OTHER_MODEL_OPTION}>Other…</option>
+        </select>
+        {selected === OTHER_MODEL_OPTION && (
+          <input
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            placeholder="Custom model name"
+            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+          />
+        )}
+        <button
+          type="submit"
+          disabled={saving || (selected === OTHER_MODEL_OPTION && !customValue.trim())}
+          className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
+        >
+          Save
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <span
+      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground"
+      onClick={(e) => {
+        if (!canEdit) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setEditing(true);
+      }}
+    >
+      {displayModel || (canEdit ? "Set model" : "Model unknown")}
+      {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
+    </span>
+  );
+}
+
 function AddPrinterModal({
   onClose,
   onCreated,
@@ -208,8 +307,17 @@ function AddPrinterModal({
   onCreated: () => void;
 }) {
   const [name, setName] = useState("");
+  const [setupKind, setSetupKind] = useState<PrinterSetupKind>("moonraker");
   const [url, setUrl] = useState("");
   const [moonrakerKey, setMoonrakerKey] = useState("");
+  const [bambuSerial, setBambuSerial] = useState("");
+  const [bambuAccessCode, setBambuAccessCode] = useState("");
+  const [prusaAuthMode, setPrusaAuthMode] = useState<"digest" | "api_key">("digest");
+  const [prusaUsername, setPrusaUsername] = useState("maker");
+  const [prusaSecret, setPrusaSecret] = useState("");
+  const [octoprintApiKey, setOctoprintApiKey] = useState("");
+  const [centauriAccessCode, setCentauriAccessCode] = useState("");
+  const [centauriMainboardId, setCentauriMainboardId] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -222,15 +330,59 @@ function AddPrinterModal({
       await createPrinter(
         {
           name: name.trim(),
-          moonraker_url: url.trim(),
-          api_key: moonrakerKey || undefined,
+          ...setupProviderFields(setupKind),
+          ...(setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+            ? {
+                moonraker_url: url.trim(),
+                api_key: moonrakerKey || undefined,
+              }
+            : {}),
+          ...(setupKind === "bambu_lan"
+            ? {
+                bambu_host: url.trim(),
+                bambu_serial: bambuSerial.trim(),
+                bambu_access_code: bambuAccessCode,
+              }
+            : {}),
+          ...(setupKind === "prusalink"
+            ? {
+                prusalink_url: url.trim(),
+                prusalink_auth_mode: prusaAuthMode,
+                prusalink_username:
+                  prusaAuthMode === "digest" ? prusaUsername.trim() : undefined,
+                prusalink_password:
+                  prusaAuthMode === "digest" ? prusaSecret : undefined,
+                prusalink_api_key:
+                  prusaAuthMode === "api_key" ? prusaSecret : undefined,
+              }
+            : {}),
+          ...(setupKind === "elegoo_centauri_carbon" ||
+          setupKind === "elegoo_centauri_carbon_2"
+            ? {
+                elegoo_centauri_host: url.trim(),
+                elegoo_centauri_access_code:
+                  setupKind === "elegoo_centauri_carbon_2"
+                    ? centauriAccessCode
+                    : undefined,
+                elegoo_centauri_mainboard_id:
+                  setupKind === "elegoo_centauri_carbon"
+                    ? centauriMainboardId.trim() || undefined
+                    : undefined,
+              }
+            : {}),
+          ...(setupKind === "octoprint"
+            ? {
+                octoprint_url: url.trim(),
+                octoprint_api_key: octoprintApiKey,
+              }
+            : {}),
           notes: notes || undefined,
         },
       );
       toast.success(`Printer "${name.trim()}" added`);
       onCreated();
-    } catch (e: any) {
-      setErr(e.message);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Could not add printer");
       toast.error(e);
     } finally {
       setSubmitting(false);
@@ -247,10 +399,11 @@ function AddPrinterModal({
         </h3>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label htmlFor="printer-name" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Name
             </label>
             <input
+              id="printer-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
@@ -259,37 +412,137 @@ function AddPrinterModal({
             />
           </div>
           <div>
-            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
-              Moonraker URL
+            <label htmlFor="printer-integration" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+              Integration
+            </label>
+            <select
+              id="printer-integration"
+              value={setupKind}
+              onChange={(e) => {
+                setSetupKind(e.target.value as PrinterSetupKind);
+                setUrl("");
+              }}
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+            >
+              {PRINTER_SETUP_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {PRINTER_SETUP_OPTIONS.find((option) => option.value === setupKind)?.description}
+            </p>
+          </div>
+          <div>
+            <label htmlFor="printer-address" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+              {setupKind === "prusalink"
+                ? "PrusaLink URL"
+                : setupKind === "octoprint"
+                  ? "OctoPrint URL"
+                  : setupKind === "moonraker"
+                    ? "Moonraker URL"
+                    : setupKind === "elegoo_neptune4"
+                      ? "Printer URL"
+                      : "Printer host or IP"}
             </label>
             <input
+              id="printer-address"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              placeholder="http://voron.local:7125"
+              placeholder={
+                setupKind === "prusalink"
+                  ? "http://mk4.local"
+                  : setupKind === "octoprint"
+                    ? "http://octopi.local"
+                    : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+                      ? "http://printer.local:7125"
+                      : "192.168.1.50"
+              }
               required
             />
           </div>
-          <div>
-            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
-              Moonraker API key{" "}
+          {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && <div>
+            <label htmlFor="moonraker-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+              {setupKind === "elegoo_neptune4" ? "API key" : "Moonraker API key"}{" "}
               <span className="font-normal normal-case tracking-normal opacity-60">
                 (optional)
               </span>
             </label>
             <input
+              id="moonraker-api-key"
               type="password"
               value={moonrakerKey}
               onChange={(e) => setMoonrakerKey(e.target.value)}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               placeholder="Leave blank if auth is disabled"
             />
-          </div>
+          </div>}
+          {setupKind === "bambu_lan" && <>
+            <div>
+              <label htmlFor="bambu-serial" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Printer serial</label>
+              <input id="bambu-serial" value={bambuSerial} onChange={(e) => setBambuSerial(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+            </div>
+            <div>
+              <label htmlFor="bambu-access-code" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">LAN access code</label>
+              <input id="bambu-access-code" type="password" value={bambuAccessCode} onChange={(e) => setBambuAccessCode(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+            </div>
+          </>}
+          {setupKind === "prusalink" && <>
+            <div>
+              <label htmlFor="prusalink-auth" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Authentication</label>
+              <select id="prusalink-auth" value={prusaAuthMode} onChange={(e) => { setPrusaAuthMode(e.target.value as "digest" | "api_key"); setPrusaSecret(""); }} className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]">
+                <option value="digest">Username and password (recommended)</option>
+                <option value="api_key">Legacy API key</option>
+              </select>
+            </div>
+            {prusaAuthMode === "digest" && <div>
+              <label htmlFor="prusalink-username" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Username</label>
+              <input id="prusalink-username" value={prusaUsername} onChange={(e) => setPrusaUsername(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+            </div>}
+            <div>
+              <label htmlFor="prusalink-secret" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">{prusaAuthMode === "digest" ? "Password" : "API key"}</label>
+              <input id="prusalink-secret" type="password" value={prusaSecret} onChange={(e) => setPrusaSecret(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+            </div>
+          </>}
+          {setupKind === "octoprint" && <div>
+            <label htmlFor="octoprint-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">API key</label>
+            <input id="octoprint-api-key" type="password" value={octoprintApiKey} onChange={(e) => setOctoprintApiKey(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+          </div>}
+          {setupKind === "elegoo_centauri_carbon" && <div>
+            <label htmlFor="centauri-mainboard-id" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+              Mainboard ID <span className="font-normal normal-case tracking-normal opacity-60">(recommended)</span>
+            </label>
+            <input
+              id="centauri-mainboard-id"
+              value={centauriMainboardId}
+              onChange={(e) => setCentauriMainboardId(e.target.value)}
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+              placeholder="From printer discovery or diagnostics"
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">Needed for reliable reconnection while paused or errored.</p>
+          </div>}
+          {setupKind === "elegoo_centauri_carbon_2" && <>
+            <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">
+              Enable LAN Only in printer network settings before connecting.
+            </div>
+            <div>
+              <label htmlFor="centauri-access-code" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Printer access code</label>
+              <input
+                id="centauri-access-code"
+                type="password"
+                value={centauriAccessCode}
+                onChange={(e) => setCentauriAccessCode(e.target.value)}
+                required
+                className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+              />
+            </div>
+          </>}
           <div>
-            <label className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label htmlFor="printer-notes" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Notes
             </label>
             <input
+              id="printer-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"

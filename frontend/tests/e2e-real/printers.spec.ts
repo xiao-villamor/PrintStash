@@ -9,7 +9,7 @@ test("add and remove a printer", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add printer" }).click();
   await page.getByPlaceholder("Voron 2.4").fill(name);
-  await page.getByPlaceholder("http://voron.local:7125").fill("http://127.0.0.1:7125");
+  await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
   await page.getByRole("button", { name: "Add printer" }).last().click();
 
   const card = page.getByRole("link", { name: new RegExp(name) });

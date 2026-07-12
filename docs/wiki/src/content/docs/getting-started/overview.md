@@ -44,7 +44,7 @@ is already on the printer.
   and compare two revisions' settings side by side.
 - **Talk to printers:** Moonraker/Klipper with live status, send-to-print,
   remote file sync, and print-history import with measured filament and cost.
-  Bambu LAN status and controls are in beta.
+  Bambu LAN, PrusaLink, and Elegoo Centauri integrations are in beta.
 - **Measure:** a Statistics dashboard turns completed prints into cost,
   filament, and print-time trends, and share a single model via an expiring,
   read-only public link.
@@ -75,7 +75,7 @@ issue.
 | Frontend  | React 19, React Router 7, TanStack Query, Vite, Tailwind  |
 | Database  | SQLite by default; Postgres optional                       |
 | Storage   | Local disk by default; S3/R2-compatible optional           |
-| Printers  | Moonraker/Klipper (stable), Bambu LAN (beta)               |
+| Printers  | Moonraker/Klipper (stable); Bambu, PrusaLink, Centauri (beta) |
 
 New here? Go to [Installation](/getting-started/installation/). Want
 the vocabulary first? [Core concepts](/concepts/core-concepts/)

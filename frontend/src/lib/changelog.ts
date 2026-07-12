@@ -22,6 +22,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.9.0",
+    date: "Jul 2026",
+    changes: [
+      "PrusaLink beta: connect local Prusa FDM printers using Digest credentials or a legacy API key, with status, files, send/start, and print controls",
+      "Elegoo Neptune 4, Pro, Plus, and Max now have a guided setup preset backed by the stable Moonraker integration",
+      "Elegoo Centauri Carbon and Carbon 2 beta support adds local status and print controls through each model's native LAN protocol",
+      "Printer setup now presents Moonraker, Elegoo Neptune 4, PrusaLink, and Bambu LAN fields without exposing stored secrets",
+      "Bambu LAN beta: upload plain-text Vault G-code over local FTPS, then optionally start it through local MQTT with an explicit Send & Print choice",
+      "Bambu sends verify the printer is idle before creating a transfer job; upload-only remains the safe default",
+      "Printer actions and diagnostics now come from each provider's advertised capabilities, so unsupported controls stay clearly disabled",
+      "Connection failures use bounded backoff, while Bambu polling failures now correctly mark the printer offline and recover on the next successful status",
+      "Live job progress writes are coalesced and repeated database failures are circuit-broken to avoid write storms",
+    ],
+  },
+  {
     version: "0.8.5",
     date: "Jul 2026",
     changes: [

@@ -104,6 +104,36 @@ class TestCreatePrinter:
         assert resp.status_code == 201
         assert resp.json()["moonraker_url"] == "http://10.0.0.2:7125"
 
+    def test_create_detects_neptune4_model(self, client: TestClient, auth_headers):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Neptune",
+                "moonraker_url": "http://10.0.0.3:7125",
+                "provider_variant": "elegoo_neptune4",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["detected_model"] == "Elegoo Neptune 4 family"
+        assert data["model_name"] is None
+
+    def test_create_with_manual_model_name(self, client: TestClient, auth_headers):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Voron",
+                "moonraker_url": "http://10.0.0.4:7125",
+                "model_name": "Voron 2.4",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["model_name"] == "Voron 2.4"
+        assert data["detected_model"] is None
+
 
 class TestGetPrinter:
     def test_get_returns_printer(
@@ -155,6 +185,29 @@ class TestUpdatePrinter:
             headers=auth_headers,
         )
         assert resp.status_code == 404
+
+    def test_update_manual_model_name_overrides_display(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(
+            name="Neptune",
+            moonraker_url="http://10.0.0.1:7125",
+            provider_variant="elegoo_neptune4",
+            detected_model="Elegoo Neptune 4 family",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.patch(
+            f"/api/v1/printers/{p.id}",
+            json={"model_name": "Neptune 4 Pro"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model_name"] == "Neptune 4 Pro"
+        assert data["detected_model"] == "Elegoo Neptune 4 family"
 
 
 class TestDeletePrinter:
@@ -347,10 +400,11 @@ class TestBambuPrinter:
         assert resp.status_code == 201
         body = resp.json()
         assert body["provider"] == "bambu_lan"
-        assert body["capabilities"]["can_upload"] is False
+        assert body["capabilities"]["can_upload"] is True
+        assert body["capabilities"]["can_start"] is True
         assert body["capabilities"]["can_pause"] is True
         assert body["capabilities"]["support_level"] == "beta"
-        assert "send" in body["capabilities"]["unsupported_actions"]
+        assert "list_files" in body["capabilities"]["unsupported_actions"]
 
     def test_create_bambu_missing_fields_422(self, client: TestClient, auth_headers):
         resp = client.post(
@@ -360,8 +414,189 @@ class TestBambuPrinter:
         )
         assert resp.status_code == 422
 
-    def test_bambu_send_rejected(
-        self, client: TestClient, db_session: Session, auth_headers
+
+class TestPrusaLinkPrinter:
+    def test_create_digest_credentials_are_redacted(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Prusa MK4",
+                "provider": "prusalink",
+                "prusalink_url": "http://mk4.local/",
+                "prusalink_auth_mode": "digest",
+                "prusalink_username": "maker",
+                "prusalink_password": "secret",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["provider"] == "prusalink"
+        assert body["prusalink_url"] == "http://mk4.local"
+        assert body["prusalink_username"] == "maker"
+        assert body["has_prusalink_password"] is True
+        assert body["has_prusalink_api_key"] is False
+        assert "prusalink_password" not in body
+        assert body["capabilities"]["support_level"] == "beta"
+        row = db_session.exec(select(Printer).where(Printer.name == "Prusa MK4")).one()
+        assert row.prusalink_password == "secret"
+
+    def test_create_api_key_credentials_are_redacted(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Prusa MINI",
+                "provider": "prusalink",
+                "prusalink_url": "http://mini.local",
+                "prusalink_auth_mode": "api_key",
+                "prusalink_api_key": "legacy-key",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["has_prusalink_api_key"] is True
+        assert "prusalink_api_key" not in body
+
+    def test_create_requires_credentials_for_selected_mode(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Prusa",
+                "provider": "prusalink",
+                "prusalink_url": "http://prusa.local",
+                "prusalink_auth_mode": "digest",
+                "prusalink_username": "maker",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_elegoo_neptune_variant_uses_moonraker(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Neptune 4 Plus",
+                "provider": "moonraker",
+                "provider_variant": "elegoo_neptune4",
+                "moonraker_url": "http://neptune.local:7125",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["provider"] == "moonraker"
+        assert body["provider_variant"] == "elegoo_neptune4"
+        assert body["capabilities"]["support_level"] == "stable"
+
+
+class TestOctoPrintPrinter:
+    def test_create_credentials_are_redacted(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "OctoPi",
+                "provider": "octoprint",
+                "octoprint_url": "http://octopi.local/",
+                "octoprint_api_key": "secret-key",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["provider"] == "octoprint"
+        assert body["octoprint_url"] == "http://octopi.local"
+        assert body["has_octoprint_api_key"] is True
+        assert "octoprint_api_key" not in body
+        assert body["capabilities"]["support_level"] == "beta"
+        row = db_session.exec(select(Printer).where(Printer.name == "OctoPi")).one()
+        assert row.octoprint_api_key == "secret-key"
+
+    def test_create_requires_url_and_api_key(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={"name": "OctoPi", "provider": "octoprint"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+
+class TestElegooCentauriPrinter:
+    def test_create_original_carbon_without_access_code(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Centauri Carbon",
+                "provider": "elegoo_centauri",
+                "provider_variant": "elegoo_centauri_carbon",
+                "elegoo_centauri_host": "192.168.1.50",
+                "elegoo_centauri_mainboard_id": "mainboard-123",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["provider"] == "elegoo_centauri"
+        assert body["provider_variant"] == "elegoo_centauri_carbon"
+        assert body["elegoo_centauri_host"] == "192.168.1.50"
+        assert body["elegoo_centauri_mainboard_id"] == "mainboard-123"
+        assert body["capabilities"]["can_live_status"] is True
+        assert body["capabilities"]["can_upload"] is False
+
+    def test_create_carbon_2_redacts_access_code(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Centauri Carbon 2",
+                "provider": "elegoo_centauri",
+                "provider_variant": "elegoo_centauri_carbon_2",
+                "elegoo_centauri_host": "192.168.1.51",
+                "elegoo_centauri_access_code": "ABC123",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["has_elegoo_centauri_access_code"] is True
+        assert "elegoo_centauri_access_code" not in body
+        row = db_session.exec(
+            select(Printer).where(Printer.name == "Centauri Carbon 2")
+        ).one()
+        assert row.elegoo_centauri_access_code == "ABC123"
+
+    def test_carbon_2_requires_access_code(self, client: TestClient, auth_headers):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Centauri Carbon 2",
+                "provider": "elegoo_centauri",
+                "provider_variant": "elegoo_centauri_carbon_2",
+                "elegoo_centauri_host": "192.168.1.51",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+
+class TestBambuPrinterOperations:
+    def test_bambu_send_uploads_when_ready(
+        self, client: TestClient, db_session: Session, auth_headers, tmp_path
     ):
         from app.db.models import File, Model
 
@@ -395,13 +630,66 @@ class TestBambuPrinter:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/send",
-            json={"file_id": f.id, "start_print": False},
-            headers=auth_headers,
+        local = tmp_path / "model.gcode"
+        local.write_text("G28\n")
+
+        class FakeBackend:
+            def exists(self, _path):
+                return True
+
+            def download_to_path(self, _path, _target):
+                return local
+
+        with (
+            patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
+            patch(
+                "app.services.printer_provider.BambuLanProvider.query_status",
+                new_callable=AsyncMock,
+                return_value={
+                    "result": {"status": {"print_stats": {"state": "standby"}}}
+                },
+            ),
+            patch(
+                "app.services.printer_provider.BambuLanProvider.upload",
+                new_callable=AsyncMock,
+                return_value={"ok": True},
+            ) as upload,
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        assert resp.json()["state"] == "completed"
+        upload.assert_awaited_once()
+
+    def test_bambu_send_rejects_busy_printer(
+        self, client: TestClient, db_session: Session, auth_headers
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
         )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+            return_value={"result": {"status": {"print_stats": {"state": "printing"}}}},
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": 999, "start_print": False},
+                headers=auth_headers,
+            )
         assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.json()["detail"] == "printer_not_ready"
 
     def test_send_rejects_binary_bgcode(
         self, client: TestClient, db_session: Session, auth_headers
@@ -464,7 +752,7 @@ class TestBambuPrinter:
             assert resp.status_code == 200
             assert resp.json() == {"ok": True}
 
-    def test_bambu_diagnostics_reports_beta_without_send_parity(
+    def test_bambu_diagnostics_reports_beta_capabilities(
         self, client: TestClient, auth_headers, db_session: Session
     ):
         p = Printer(
@@ -491,7 +779,9 @@ class TestBambuPrinter:
         assert resp.status_code == 200
         body = resp.json()
         assert body["support_level"] == "beta"
-        assert "send" in body["unsupported_actions"]
+        assert body["capabilities"]["can_upload"] is True
+        assert body["capabilities"]["can_start"] is True
+        assert "list_files" in body["unsupported_actions"]
         assert body["ok"] is True
         assert [check["name"] for check in body["checks"]] == [
             "configuration",
@@ -568,7 +858,9 @@ class TestPrinterConfig:
         ):
             mock_server_info.return_value = {"result": {"klippy_state": "ready"}}
             mock_printer_info.return_value = {"result": {"software_version": "v1"}}
-            mock_server_config.return_value = {"result": {"server": {"host": "0.0.0.0"}}}
+            mock_server_config.return_value = {
+                "result": {"server": {"host": "0.0.0.0"}}
+            }
             mock_printer_config.return_value = {
                 "result": {"status": {"configfile": {"config": {"printer": {}}}}}
             }
@@ -683,7 +975,9 @@ class TestPrinterJobs:
         self, client: TestClient, db_session: Session
     ):
         headers = _user_headers(db_session, "job-viewer")
-        viewer = db_session.exec(select(User).where(User.username == "job-viewer")).one()
+        viewer = db_session.exec(
+            select(User).where(User.username == "job-viewer")
+        ).one()
         allowed = Collection(name="Allowed", slug="allowed", path="allowed")
         denied = Collection(name="Denied", slug="denied", path="denied")
         db_session.add_all([allowed, denied])
@@ -1167,7 +1461,7 @@ class TestPrinterFiles:
         assert sentinel_file.sha256 == SENTINEL_FILE_HASH
         mock_start.assert_awaited_once_with("external.gcode")
 
-    def test_start_unsupported_provider(
+    def test_start_bambu_provider(
         self, client: TestClient, db_session: Session, auth_headers
     ):
         p = Printer(
@@ -1182,14 +1476,18 @@ class TestPrinterFiles:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/start",
-            json={"remote_filename": "part.gcode"},
-            headers=auth_headers,
-        )
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.start",
+            new_callable=AsyncMock,
+            return_value={"ok": True},
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "part.gcode"},
+                headers=auth_headers,
+            )
 
-        assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.status_code == 200
 
 
 class TestSendToPrinter:
@@ -1241,12 +1539,10 @@ class TestSendToPrinter:
         assert resp.status_code == 400
         assert resp.json()["detail"] == "file_not_gcode"
 
-    def test_send_unsupported_provider_creates_no_job(
+    def test_send_busy_bambu_creates_no_job(
         self, client: TestClient, auth_headers, db_session: Session
     ):
-        """Regression test for 0.8.5 addenda #3: the provider check must run
-        before the PrintJob is created, or a 409 here leaves a row stuck in
-        UPLOADING forever."""
+        """The Bambu ready-state guard must run before creating a PrintJob."""
         from app.db.models import File, Model
 
         m = Model(name="Model", slug="model-bambu-send", hash="m" * 64)
@@ -1279,14 +1575,19 @@ class TestSendToPrinter:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/send",
-            json={"file_id": f.id, "start_print": False},
-            headers=auth_headers,
-        )
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+            return_value={"result": {"status": {"print_stats": {"state": "printing"}}}},
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
 
         assert resp.status_code == 409
-        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+        assert resp.json()["detail"] == "printer_not_ready"
         jobs = db_session.exec(
             select(PrintJob).where(PrintJob.printer_id == p.id)
         ).all()

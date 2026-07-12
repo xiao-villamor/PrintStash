@@ -1,6 +1,6 @@
 ---
 title: Printers & providers
-description: What Moonraker/Klipper and Bambu LAN can do, and how to connect them.
+description: What each local printer provider can do and how to connect it.
 ---
 
 PrintStash is Moonraker/Klipper-first, and the design has an opinion about it:
@@ -46,20 +46,39 @@ Do this once on a printer where a mistake is harmless:
 
 ## Bambu LAN (beta)
 
-Local Bambu support exists, but it's intentionally narrow for now:
+Local Bambu support remains beta.
 
-**Works:** local status polling, plus pause / resume / cancel.
+**Works:** local status, plain-text G-code upload, explicit start, and pause /
+resume / cancel.
 
 **Not supported yet:**
 
-- Uploading or sending files from the vault
-- Starting remote files
 - Remote file inventory
+- Remote file deletion
 - Any cloud-based control
 
-The UI labels Bambu LAN as beta and disables the actions above. Upload/send
-parity is on the roadmap, not in the current release, so don't build a workflow
-that depends on it.
+The UI labels Bambu LAN as beta and disables unsupported actions.
+
+## PrusaLink (beta)
+
+PrusaLink connects locally using modern Digest username/password credentials or
+a legacy API key. Status, upload/start, file inventory/deletion, and
+pause/resume/cancel work without Prusa Connect cloud.
+
+## Elegoo Neptune 4 family
+
+Neptune 4, Pro, Plus, and Max use a guided preset over the stable Moonraker
+provider. This keeps one implementation of the Klipper/Moonraker protocol.
+
+## Elegoo Centauri Carbon (beta)
+
+Original Carbon uses local SDCP/WebSocket. Carbon 2 uses access-code-protected
+MQTT and requires **LAN Only** enabled on the printer. Both expose live status,
+temperatures, progress, start-existing-file, pause, resume, and cancel.
+
+Upload and file inventory are deliberately disabled: original Carbon file
+probes can crash its printer daemon, while Carbon 2's file-list request does not
+answer on validated firmware.
 
 ## Diagnostics
 

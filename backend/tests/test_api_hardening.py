@@ -78,7 +78,17 @@ def test_health_reports_release_components(client: TestClient) -> None:
     providers = body["components"]["printer_providers"]["providers"]
     bambu = next(p for p in providers if p["provider"] == "bambu_lan")
     assert bambu["support_level"] == "beta"
-    assert "send" in bambu["unsupported_actions"]
+    assert bambu["capabilities"]["can_upload"] is True
+    assert bambu["capabilities"]["can_start"] is True
+    assert "list_files" in bambu["unsupported_actions"]
+    prusalink = next(p for p in providers if p["provider"] == "prusalink")
+    assert prusalink["support_level"] == "beta"
+    assert prusalink["capabilities"]["can_list_files"] is True
+    assert prusalink["capabilities"]["can_send_gcode"] is False
+    centauri = next(p for p in providers if p["provider"] == "elegoo_centauri")
+    assert centauri["support_level"] == "beta"
+    assert centauri["capabilities"]["can_live_status"] is True
+    assert centauri["capabilities"]["can_upload"] is False
 
 
 def test_write_payloads_reject_unknown_fields(

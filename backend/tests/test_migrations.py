@@ -220,8 +220,12 @@ def test_orphan_db_stamps_then_upgrades(tmp_path, monkeypatch) -> None:
 
     spy = _Spy()
     # Re-point spies at the SAME url (already has tables).
-    monkeypatch.setattr(migrate_mod.command, "upgrade", lambda *a, **k: spy.upgrade.append(a))
-    monkeypatch.setattr(migrate_mod.command, "stamp", lambda *a, **k: spy.stamp.append(a))
+    monkeypatch.setattr(
+        migrate_mod.command, "upgrade", lambda *a, **k: spy.upgrade.append(a)
+    )
+    monkeypatch.setattr(
+        migrate_mod.command, "stamp", lambda *a, **k: spy.stamp.append(a)
+    )
     monkeypatch.setattr(migrate_mod, "_create_all", lambda u: spy.create_all.append(u))
 
     migrate_mod.run_migrations(url)
@@ -234,8 +238,12 @@ def test_managed_db_only_upgrades(tmp_path, monkeypatch) -> None:
     migrate_mod.run_migrations(url)  # make it managed (real run)
 
     spy = _Spy()
-    monkeypatch.setattr(migrate_mod.command, "upgrade", lambda *a, **k: spy.upgrade.append(a))
-    monkeypatch.setattr(migrate_mod.command, "stamp", lambda *a, **k: spy.stamp.append(a))
+    monkeypatch.setattr(
+        migrate_mod.command, "upgrade", lambda *a, **k: spy.upgrade.append(a)
+    )
+    monkeypatch.setattr(
+        migrate_mod.command, "stamp", lambda *a, **k: spy.stamp.append(a)
+    )
     monkeypatch.setattr(migrate_mod, "_create_all", lambda u: spy.create_all.append(u))
 
     migrate_mod.run_migrations(url)
@@ -257,7 +265,9 @@ _PRE_0_8_0 = "f7a5b3c9d2e1"
 def test_single_head_and_revisions_all_resolve(tmp_path: Path) -> None:
     cfg = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
     script = ScriptDirectory.from_config(cfg)
-    assert len(script.get_heads()) == 1, "multiple alembic heads — `upgrade head` is ambiguous"
+    assert len(script.get_heads()) == 1, (
+        "multiple alembic heads — `upgrade head` is ambiguous"
+    )
     # Walking every revision resolves each down_revision; a deleted/renamed file
     # raises here — i.e. the "Can't locate revision X" startup crash, in CI.
     assert len(list(script.walk_revisions())) > 1
@@ -296,6 +306,18 @@ def test_upgrade_from_pre_0_8_0_release_preserves_data(tmp_path: Path) -> None:
         inspector = inspect(engine)
         assert "documents" in inspector.get_table_names()  # new 0.8.0 table
         assert "readme" in {c["name"] for c in inspector.get_columns("collections")}
+        printer_columns = {c["name"] for c in inspector.get_columns("printers")}
+        assert {
+            "provider_variant",
+            "prusalink_url",
+            "prusalink_auth_mode",
+            "prusalink_username",
+            "prusalink_password",
+            "prusalink_api_key",
+            "elegoo_centauri_host",
+            "elegoo_centauri_access_code",
+            "elegoo_centauri_mainboard_id",
+        } <= printer_columns
         with engine.connect() as conn:
             # Existing data survived the ALTER TABLE / CREATE TABLE migrations.
             assert conn.execute(text("SELECT count(*) FROM collections")).scalar() == 1

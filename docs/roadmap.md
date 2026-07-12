@@ -8,7 +8,7 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current Release: 0.8.x — Self-Hosted Library
+## Current Release: 0.9.0 — Provider Maturity
 
 Production hardening is in place. The app is useful for local-first 3D print
 library workflows, installable through Docker Compose (the default compose pulls
@@ -39,7 +39,8 @@ Developed features in the current app:
 - Prometheus `/metrics` endpoint (request latency, ingestion counts, live printer status) and operational health output for database, storage, backup, background jobs, external-library scans, and printer provider readiness
 - Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history
 - Optional Spoolman integration (OFF by default): spool inventory display, per-print spool selection, consumption write-back on measured-print completion, and Moonraker-native-hook double-count detection
-- Bambu LAN beta provider with local status plus pause/resume/cancel controls; upload/send, remote file inventory, and remote-file start remain unsupported
+- Bambu LAN beta provider with local status, upload/send with explicit opt-in start, and pause/resume/cancel controls; remote file inventory remains unsupported
+- PrusaLink and OctoPrint beta providers (status, upload/send, file inventory, pause/resume/cancel), plus Elegoo Neptune 4-family and Centauri Carbon/Carbon 2 support; every provider declares its capabilities, and the UI disables what a printer cannot do
 - Responsive Vite/React UI with a light/dark theme toggle (system-preference aware) and a refreshed mobile layout: a five-slot bottom navigation with an overflow "More" sheet, on-canvas mobile search, slide-out filter drawers, and a floating action button across the library, model detail, upload, taxonomy, profiles, settings, setup, and printer workflows
 
 The releases below are intentionally small: each is meant to be a single,
@@ -110,24 +111,35 @@ Shipped in 0.8.0:
   a manual "write back anyway" override), plus a UI warning — so a print is
   never counted twice
 
-## 0.9 — Provider Maturity (Bambu + reliability)
+## 0.9 — Provider Maturity (delivered in 0.9.0)
 
-Goal: make printer integrations predictable across normal home setups.
+Goal: make printer integrations predictable across normal home setups, and
+cover the other common homelab print stacks. This absorbs what was previously
+listed as a separate "0.10 — More Providers" release: the provider work landed
+together, so it ships as one release.
 
-- Bambu LAN upload/send parity, with provider-safe guardrails
-- More disconnect/reconnect coverage for mixed fleets
-- Clear UI states for unsupported printer actions
-- Broader hardware validation and notes for tested Moonraker and Bambu setups
+- Bambu LAN upload/send parity for plain-text Vault G-code, with idle-state
+  guardrails and explicit opt-in start
+- PrusaLink local FDM beta with Digest/API-key authentication, status, G-code
+  upload/start, file inventory/deletion, and pause/resume/cancel
+- OctoPrint beta provider: status, upload/send, file inventory, and
+  pause/resume/cancel
+- Elegoo Neptune 4-family guided setup over the existing Moonraker transport
+- Elegoo Centauri Carbon and Carbon 2 beta local status/control integration;
+  upload stays disabled until firmware exposes a safe confirmed file API
+- Exponential reconnect backoff and circuit-breaking for repeated job-sync DB
+  failures
+- Capability-driven UI states for unsupported printer actions
+- A provider conformance test suite every provider must pass, so a new printer
+  backend is one small class rather than a new set of special cases
+- Broader hardware validation notes for Moonraker, Bambu, PrusaLink, OctoPrint,
+  and Neptune 4-family setups
 
-## 0.10 — More Providers
+Not in 0.9, added on demand: Prusa Connect (cloud, unlike the local PrusaLink
+support that shipped here) and Elegoo models beyond the Neptune 4 and Centauri
+Carbon families.
 
-Goal: cover the other common homelab print stacks.
-
-- OctoPrint provider (status, send, basic controls)
-- PrusaLink / Prusa Connect provider
-- Shared provider capability matrix so the UI shows exactly what each one supports
-
-## 0.11 — Library Workflow Polish
+## 0.10 — Library Workflow Polish
 
 Goal: make the vault better as a daily-use 3D print library.
 
@@ -137,7 +149,7 @@ Goal: make the vault better as a daily-use 3D print library.
 - More useful model detail pages for repeated reprints, including deeper print-history analytics
 - Import/export paths for people migrating from folders or other tools
 
-## 0.12 — Fleet and Scheduling
+## 0.11 — Fleet and Scheduling
 
 Goal: help small printer farms without turning PrintStash into a full slicer or
 queue manager.
@@ -146,7 +158,7 @@ queue manager.
 - Optional routing strategies: manual, default printer, least busy
 - Printer maintenance windows, soft-drain mode, and a simple maintenance log
 
-## 0.13 — Auth and Platform
+## 0.12 — Auth and Platform
 
 Goal: fit cleanly into existing homelab infrastructure.
 
