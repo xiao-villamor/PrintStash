@@ -4,7 +4,7 @@ import { ReactNode, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useMountTransition, useOverlayBehavior } from "@/lib/overlay";
+import { DURATION, useMountTransition, useOverlayBehavior } from "@/lib/overlay";
 
 /**
  * Low-level dialog chrome: portal, animated backdrop + panel, focus trap,
@@ -24,7 +24,8 @@ export function ModalShell({
   className?: string;
   children: ReactNode;
 }) {
-  const { mounted, state } = useMountTransition(open, 150);
+  // Must match the panel's `duration-fast` exit transition below.
+  const { mounted, state } = useMountTransition(open, DURATION.fast);
   const panelRef = useRef<HTMLDivElement>(null);
   useOverlayBehavior(open, onClose, panelRef);
 

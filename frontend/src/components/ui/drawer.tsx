@@ -3,7 +3,7 @@
 import { ReactNode, useRef } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
-import { useMountTransition, useOverlayBehavior } from "@/lib/overlay";
+import { DURATION, useMountTransition, useOverlayBehavior } from "@/lib/overlay";
 
 const SIDE_CLASSES = {
   left: cn(
@@ -35,7 +35,8 @@ export function Drawer({
   className?: string;
   children: ReactNode;
 }) {
-  const { mounted, state } = useMountTransition(open, 200);
+  // Must match the `duration-fast` slide transition in SIDE_CLASSES.
+  const { mounted, state } = useMountTransition(open, DURATION.fast);
   const panelRef = useRef<HTMLDivElement>(null);
   useOverlayBehavior(open, onClose, panelRef);
 

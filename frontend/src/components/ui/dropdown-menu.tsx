@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
-import { useMountTransition } from "@/lib/overlay";
+import { DURATION, useMountTransition } from "@/lib/overlay";
 
 /**
  * Anchored floating panel: trigger + content in a relative wrapper.
@@ -34,7 +34,8 @@ export function DropdownMenu({
   children: ReactNode;
 }) {
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const { mounted, state } = useMountTransition(open, 150);
+  // Must match the content's `duration-press` exit transition below.
+  const { mounted, state } = useMountTransition(open, DURATION.press);
 
   useEffect(() => {
     if (!open) return;

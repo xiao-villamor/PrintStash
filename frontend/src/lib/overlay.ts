@@ -1,6 +1,18 @@
 import { RefObject, useEffect, useRef, useState } from "react";
 
 /**
+ * The --duration-* scale from globals.css, in milliseconds.
+ *
+ * An overlay's unmount timer and its CSS exit transition are two halves of one
+ * animation, but they live in different languages and nothing type-checks them
+ * against each other. Hand-typing the millisecond count on the JS side is how
+ * they drift: a timer shorter than the transition tears the panel out of the
+ * DOM mid-animation and the close visibly snaps. Pass one of these and match it
+ * to the `duration-*` class the panel actually uses.
+ */
+export const DURATION = { press: 150, fast: 200, slow: 300 } as const;
+
+/**
  * Keeps an overlay mounted during its exit transition. `state` drives
  * data-state CSS; flipping to "open" is deferred two frames so the browser
  * paints the closed styles first and the entrance transition actually runs.
