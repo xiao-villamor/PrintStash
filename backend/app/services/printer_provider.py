@@ -1,4 +1,15 @@
-"""Provider abstraction for printer backends (Moonraker, Bambu LAN)."""
+"""Provider abstraction for printer backends.
+
+Adding a provider means writing one class: declare its ``provider`` enum member
+and its ``capabilities``, point it at a client, implement ``build()``, and
+decorate it with ``@register``. Everything else — the not-supported responses,
+the error translation, the capability lookup, the credential error — comes from
+``BaseProvider`` and the registry below.
+
+The capability set is the single source of truth: a method whose capability a
+provider does not declare raises ``operation_not_supported_for_provider``
+without touching the network. Providers never hand-write those stubs.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +21,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from ftplib import FTP_TLS  # nosec B402 - Bambu LAN's implicit-TLS FTPS, not plaintext
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Optional, Protocol
+from typing import Any, Awaitable, Callable, Optional, Protocol, runtime_checkable
 from uuid import uuid4
 
 import httpx
@@ -65,6 +76,31 @@ class Capability(StrEnum):
     LIST_FILES = "list_files"
     SEND_GCODE = "send_gcode"
     MEASURED_CONSUMPTION = "measured_consumption"
+    # Not surfaced as UI action flags, but gated the same way.
+    DELETE_FILE = "delete_file"
+    EMERGENCY_STOP = "emergency_stop"
+    SERVER_INFO = "server_info"
+    SERVER_CONFIG = "server_config"
+    PRINTER_CONFIG = "printer_config"
+
+
+# Provider method -> capability that must be declared for it to run. Methods
+# absent here (info, subscribe_status) are mandatory for every provider.
+_METHOD_CAPABILITY: dict[str, Capability] = {
+    "query_status": Capability.LIVE_STATUS,
+    "list_files": Capability.LIST_FILES,
+    "upload": Capability.UPLOAD,
+    "delete_file": Capability.DELETE_FILE,
+    "start": Capability.START,
+    "pause": Capability.PAUSE,
+    "resume": Capability.RESUME,
+    "cancel": Capability.CANCEL,
+    "run_gcode": Capability.SEND_GCODE,
+    "emergency_stop": Capability.EMERGENCY_STOP,
+    "server_info": Capability.SERVER_INFO,
+    "server_config": Capability.SERVER_CONFIG,
+    "printer_config": Capability.PRINTER_CONFIG,
+}
 
 
 @dataclass(frozen=True)
@@ -72,7 +108,6 @@ class ProviderCapabilities:
     supported: frozenset[Capability]
     support_level: str = "stable"
     support_notes: tuple[str, ...] = ()
-    unsupported_actions: tuple[str, ...] = ()
     requires_ready_before_send: bool = False
 
     def supports(self, capability: Capability) -> bool:
@@ -114,6 +149,17 @@ class ProviderCapabilities:
     def can_measure_consumption(self) -> bool:
         return self.supports(Capability.MEASURED_CONSUMPTION)
 
+    @property
+    def unsupported_actions(self) -> tuple[str, ...]:
+        """User-facing action names this provider cannot perform.
+
+        Derived from ``supported`` rather than hand-listed, so a capability set
+        and the "what's missing" copy can never drift apart.
+        """
+        return tuple(
+            cap.value for cap in _UNSUPPORTED_ACTION_ORDER if not self.supports(cap)
+        )
+
     def action_flags(self) -> dict[str, bool]:
         return {
             "can_start": self.can_start,
@@ -136,6 +182,19 @@ class ProviderCapabilities:
         }
 
 
+# Order the UI shows missing actions in; also fixes which capabilities are worth
+# naming to a user (SERVER_CONFIG etc. are internal plumbing, not user actions).
+_UNSUPPORTED_ACTION_ORDER: tuple[Capability, ...] = (
+    Capability.UPLOAD,
+    Capability.LIST_FILES,
+    Capability.DELETE_FILE,
+    Capability.SEND_GCODE,
+    Capability.EMERGENCY_STOP,
+    Capability.MEASURED_CONSUMPTION,
+)
+
+
+@runtime_checkable
 class PrinterProviderClient(Protocol):
     capabilities: ProviderCapabilities
 
@@ -177,102 +236,90 @@ class PrinterProviderClient(Protocol):
     ) -> None: ...
 
 
-class MoonrakerProvider:
-    capabilities = ProviderCapabilities(
-        supported=frozenset(Capability),
-        support_level="stable",
-    )
+def _require(printer: Printer, *fields: str) -> None:
+    """Reject a printer row missing any credential field this provider needs."""
+    if any(not getattr(printer, field, None) for field in fields):
+        raise ProviderError(
+            "provider_credentials_missing", code="provider_credentials_missing"
+        )
 
-    def __init__(self, base_url: str, api_key: str | None = None) -> None:
-        self.client = MoonrakerClient(base_url, api_key)
+
+class BaseProvider:
+    """Capability-gated default implementation of every provider method.
+
+    Subclasses override only what they actually support; the rest raises
+    ``operation_not_supported_for_provider`` before any I/O happens.
+    """
+
+    provider: PrinterProvider
+    capabilities: ProviderCapabilities
+
+    @classmethod
+    def build(cls, printer: Printer) -> "BaseProvider":  # pragma: no cover - abstract
+        raise NotImplementedError
+
+    def _check(self, method: str) -> None:
+        capability = _METHOD_CAPABILITY.get(method)
+        if capability is not None and not self.capabilities.supports(capability):
+            raise ProviderError(
+                "operation_not_supported_for_provider",
+                code="operation_not_supported_for_provider",
+            )
 
     async def info(self) -> dict[str, Any]:
-        try:
-            return await self.client.info()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        raise NotImplementedError
 
     async def server_info(self) -> dict[str, Any]:
-        try:
-            return await self.client.server_info()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("server_info")
+        return await self.info()
 
     async def server_config(self) -> dict[str, Any]:
-        try:
-            return await self.client.server_config()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("server_config")
+        raise NotImplementedError
 
     async def printer_config(self) -> dict[str, Any]:
-        try:
-            return await self.client.query_configfile()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("printer_config")
+        raise NotImplementedError
 
     async def query_status(self) -> dict[str, Any]:
-        try:
-            return await self.client.query_status()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("query_status")
+        raise NotImplementedError
 
     async def list_files(self) -> list[dict[str, Any]]:
-        try:
-            body = await self.client.list_gcode_files()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
-        result = body.get("result", [])
-        return result if isinstance(result, list) else []
+        self._check("list_files")
+        raise NotImplementedError
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
-        try:
-            return await self.client.upload_gcode(
-                local_path, remote_filename, start_print=False
-            )
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
-
-    async def start(self, remote_filename: str) -> dict[str, Any]:
-        try:
-            return await self.client.start_print(remote_filename)
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("upload")
+        raise NotImplementedError
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        try:
-            return await self.client.delete_gcode_file(remote_filename)
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("delete_file")
+        raise NotImplementedError
+
+    async def start(self, remote_filename: str) -> dict[str, Any]:
+        self._check("start")
+        raise NotImplementedError
 
     async def pause(self) -> dict[str, Any]:
-        try:
-            return await self.client.pause_print()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("pause")
+        raise NotImplementedError
 
     async def resume(self) -> dict[str, Any]:
-        try:
-            return await self.client.resume_print()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("resume")
+        raise NotImplementedError
 
     async def cancel(self) -> dict[str, Any]:
-        try:
-            return await self.client.cancel_print()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("cancel")
+        raise NotImplementedError
 
     async def run_gcode(self, script: str) -> dict[str, Any]:
-        try:
-            return await self.client.run_gcode(script)
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("run_gcode")
+        raise NotImplementedError
 
     async def emergency_stop(self) -> dict[str, Any]:
-        try:
-            return await self.client.emergency_stop()
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+        self._check("emergency_stop")
+        raise NotImplementedError
 
     async def subscribe_status(
         self,
@@ -280,13 +327,135 @@ class MoonrakerProvider:
         *,
         stop_event: asyncio.Event | None = None,
     ) -> None:
+        raise NotImplementedError
+
+
+class DelegatingProvider(BaseProvider):
+    """Provider whose client already speaks the provider vocabulary.
+
+    Every supported method forwards to the client method of the same name
+    (unless ``method_map`` renames it) and translates ``client_error`` into
+    ``ProviderError``. That is all PrusaLink/OctoPrint/Elegoo/Moonraker need.
+    """
+
+    client_error: type[Exception]
+    method_map: dict[str, str] = {}
+
+    def __init__(self, client: Any) -> None:
+        self.client = client
+
+    async def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        self._check(method)
         try:
-            await self.client.subscribe(on_status, stop_event=stop_event)
-        except MoonrakerError as exc:
-            raise ProviderError(str(exc), code="provider_transport_error") from exc
+            target = getattr(self.client, self.method_map.get(method, method))
+            return await target(*args, **kwargs)
+        except self.client_error as exc:
+            raise ProviderError(
+                str(exc), code=getattr(exc, "code", "provider_transport_error")
+            ) from exc
+
+    async def info(self) -> dict[str, Any]:
+        return await self._call("info")
+
+    async def server_info(self) -> dict[str, Any]:
+        self._check("server_info")
+        return await self.info()
+
+    async def server_config(self) -> dict[str, Any]:
+        return await self._call("server_config")
+
+    async def printer_config(self) -> dict[str, Any]:
+        return await self._call("printer_config")
+
+    async def query_status(self) -> dict[str, Any]:
+        return await self._call("query_status")
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        return await self._call("list_files")
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        return await self._call("upload", local_path, remote_filename)
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("delete_file", remote_filename)
+
+    async def start(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("start", remote_filename)
+
+    async def pause(self) -> dict[str, Any]:
+        return await self._call("pause")
+
+    async def resume(self) -> dict[str, Any]:
+        return await self._call("resume")
+
+    async def cancel(self) -> dict[str, Any]:
+        return await self._call("cancel")
+
+    async def run_gcode(self, script: str) -> dict[str, Any]:
+        return await self._call("run_gcode", script)
+
+    async def emergency_stop(self) -> dict[str, Any]:
+        return await self._call("emergency_stop")
+
+    async def subscribe_status(
+        self,
+        on_status: Callable[[dict[str, Any]], Awaitable[None]],
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        await self._call("subscribe_status", on_status, stop_event=stop_event)
 
 
-class BambuLanProvider:
+PROVIDERS: dict[PrinterProvider, type[BaseProvider]] = {}
+
+
+def register(cls: type[BaseProvider]) -> type[BaseProvider]:
+    PROVIDERS[cls.provider] = cls
+    return cls
+
+
+@register
+class MoonrakerProvider(DelegatingProvider):
+    provider = PrinterProvider.MOONRAKER
+    capabilities = ProviderCapabilities(
+        supported=frozenset(Capability),
+        support_level="stable",
+    )
+    client_error = MoonrakerError
+    method_map = {
+        "printer_config": "query_configfile",
+        "list_files": "list_gcode_files",
+        "upload": "upload_gcode",
+        "start": "start_print",
+        "pause": "pause_print",
+        "resume": "resume_print",
+        "cancel": "cancel_print",
+        "delete_file": "delete_gcode_file",
+        "subscribe_status": "subscribe",
+    }
+
+    def __init__(self, base_url: str, api_key: str | None = None) -> None:
+        super().__init__(MoonrakerClient(base_url, api_key))
+
+    @classmethod
+    def build(cls, printer: Printer) -> "MoonrakerProvider":
+        _require(printer, "moonraker_url")
+        return cls(printer.moonraker_url, printer.api_key)
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        body = await self._call("list_files")
+        result = body.get("result", [])
+        return result if isinstance(result, list) else []
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        return await self._call(
+            "upload", local_path, remote_filename, start_print=False
+        )
+
+
+@register
+class BambuLanProvider(BaseProvider):
+    provider = PrinterProvider.BAMBU_LAN
     capabilities = ProviderCapabilities(
         supported=frozenset(
             {
@@ -303,7 +472,6 @@ class BambuLanProvider:
             "Bambu LAN upload and explicit start are beta features.",
             "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
         ),
-        unsupported_actions=("list_files", "delete_file", "send_gcode"),
         requires_ready_before_send=True,
     )
 
@@ -314,35 +482,20 @@ class BambuLanProvider:
         self._request_topic = f"device/{serial}/request"
         self._report_topic = f"device/{serial}/report"
 
+    @classmethod
+    def build(cls, printer: Printer) -> "BambuLanProvider":
+        _require(printer, "bambu_host", "bambu_serial", "bambu_access_code")
+        return cls(
+            host=printer.bambu_host,
+            serial=printer.bambu_serial,
+            access_code=printer.bambu_access_code,
+        )
+
     def _mqtt_client(self) -> mqtt.Client:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.username_pw_set("bblp", self.access_code)
         client.tls_set()
         return client
-
-    async def server_info(self) -> dict[str, Any]:
-        raise ProviderError(
-            "Provider does not expose Moonraker server info.",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def server_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "Provider does not expose Moonraker server config.",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def printer_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "Provider does not expose Klipper config.",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        raise ProviderError(
-            "Provider does not support remote file deletion.",
-            code="operation_not_supported_for_provider",
-        )
 
     async def _send_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         def _publish() -> None:
@@ -397,6 +550,7 @@ class BambuLanProvider:
         return _ImplicitFTP_TLS(context=context, timeout=30)
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        self._check("upload")
         try:
             await asyncio.to_thread(self._upload_via_ftps, local_path, remote_filename)
             return {"ok": True, "remote_filename": remote_filename}
@@ -447,6 +601,7 @@ class BambuLanProvider:
         }
 
     async def query_status(self) -> dict[str, Any]:
+        self._check("query_status")
         url = f"https://{self.host}:6000/api/v1/status"
         try:
             # Bambu LAN mode serves a self-signed cert on the printer itself —
@@ -471,13 +626,8 @@ class BambuLanProvider:
             raise ProviderError(str(exc), code="provider_transport_error") from exc
         return {"result": {"status": self._normalize_status(body)}}
 
-    async def list_files(self) -> list[dict[str, Any]]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
     async def start(self, remote_filename: str) -> dict[str, Any]:
+        self._check("start")
         remote_name = Path(remote_filename).name
         if not remote_name or remote_name != remote_filename:
             raise ProviderError("invalid_bambu_remote_filename", code="provider_error")
@@ -492,30 +642,21 @@ class BambuLanProvider:
         )
 
     async def pause(self) -> dict[str, Any]:
+        self._check("pause")
         return await self._send_command(
             {"print": {"sequence_id": "0", "command": "pause"}}
         )
 
     async def resume(self) -> dict[str, Any]:
+        self._check("resume")
         return await self._send_command(
             {"print": {"sequence_id": "0", "command": "resume"}}
         )
 
     async def cancel(self) -> dict[str, Any]:
+        self._check("cancel")
         return await self._send_command(
             {"print": {"sequence_id": "0", "command": "stop"}}
-        )
-
-    async def run_gcode(self, script: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def emergency_stop(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
         )
 
     async def subscribe_status(
@@ -524,6 +665,8 @@ class BambuLanProvider:
         *,
         stop_event: asyncio.Event | None = None,
     ) -> None:
+        # ponytail: poll-based "subscription" — Bambu's MQTT report topic would
+        # be a push feed, swap it in if 2s polling costs too much.
         if stop_event is not None and stop_event.is_set():
             return
         status = await self.query_status()
@@ -537,7 +680,9 @@ class BambuLanProvider:
             return
 
 
-class PrusaLinkProvider:
+@register
+class PrusaLinkProvider(DelegatingProvider):
+    provider = PrinterProvider.PRUSALINK
     capabilities = ProviderCapabilities(
         supported=frozenset(
             {
@@ -548,6 +693,8 @@ class PrusaLinkProvider:
                 Capability.LIVE_STATUS,
                 Capability.UPLOAD,
                 Capability.LIST_FILES,
+                Capability.DELETE_FILE,
+                Capability.SERVER_INFO,
             }
         ),
         support_level="beta",
@@ -555,85 +702,30 @@ class PrusaLinkProvider:
             "PrusaLink local FDM support is beta pending broader hardware validation.",
             "Raw G-code controls and measured filament consumption are unavailable.",
         ),
-        unsupported_actions=("send_gcode", "emergency_stop"),
     )
+    client_error = PrusaLinkError
 
-    def __init__(self, client: PrusaLinkClient) -> None:
-        self.client = client
-
-    async def _call(self, method: str, *args: Any) -> Any:
-        try:
-            return await getattr(self.client, method)(*args)
-        except PrusaLinkError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
-
-    async def info(self) -> dict[str, Any]:
-        return await self._call("info")
-
-    async def server_info(self) -> dict[str, Any]:
-        return await self.info()
-
-    async def server_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
+    @classmethod
+    def build(cls, printer: Printer) -> "PrusaLinkProvider":
+        _require(printer, "prusalink_url", "prusalink_auth_mode")
+        if printer.prusalink_auth_mode == "digest":
+            _require(printer, "prusalink_username", "prusalink_password")
+        if printer.prusalink_auth_mode == "api_key":
+            _require(printer, "prusalink_api_key")
+        return cls(
+            PrusaLinkClient(
+                printer.prusalink_url,
+                auth_mode=printer.prusalink_auth_mode,
+                username=printer.prusalink_username,
+                password=printer.prusalink_password,
+                api_key=printer.prusalink_api_key,
+            )
         )
 
-    async def printer_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
 
-    async def query_status(self) -> dict[str, Any]:
-        return await self._call("query_status")
-
-    async def list_files(self) -> list[dict[str, Any]]:
-        return await self._call("list_files")
-
-    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
-        return await self._call("upload", local_path, remote_filename)
-
-    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        return await self._call("delete_file", remote_filename)
-
-    async def start(self, remote_filename: str) -> dict[str, Any]:
-        return await self._call("start", remote_filename)
-
-    async def pause(self) -> dict[str, Any]:
-        return await self._call("pause")
-
-    async def resume(self) -> dict[str, Any]:
-        return await self._call("resume")
-
-    async def cancel(self) -> dict[str, Any]:
-        return await self._call("cancel")
-
-    async def run_gcode(self, script: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def emergency_stop(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def subscribe_status(
-        self,
-        on_status: Callable[[dict[str, Any]], Awaitable[None]],
-        *,
-        stop_event: asyncio.Event | None = None,
-    ) -> None:
-        try:
-            await self.client.subscribe_status(on_status, stop_event=stop_event)
-        except PrusaLinkError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
-
-
-class OctoPrintProvider:
+@register
+class OctoPrintProvider(DelegatingProvider):
+    provider = PrinterProvider.OCTOPRINT
     capabilities = ProviderCapabilities(
         supported=frozenset(
             {
@@ -644,6 +736,8 @@ class OctoPrintProvider:
                 Capability.LIVE_STATUS,
                 Capability.UPLOAD,
                 Capability.LIST_FILES,
+                Capability.DELETE_FILE,
+                Capability.SERVER_INFO,
             }
         ),
         support_level="beta",
@@ -651,85 +745,20 @@ class OctoPrintProvider:
             "OctoPrint support is beta pending broader hardware validation.",
             "Raw G-code controls and measured filament consumption are unavailable.",
         ),
-        unsupported_actions=("send_gcode", "emergency_stop"),
     )
+    client_error = OctoPrintError
 
-    def __init__(self, client: OctoPrintClient) -> None:
-        self.client = client
-
-    async def _call(self, method: str, *args: Any) -> Any:
-        try:
-            return await getattr(self.client, method)(*args)
-        except OctoPrintError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
-
-    async def info(self) -> dict[str, Any]:
-        return await self._call("info")
-
-    async def server_info(self) -> dict[str, Any]:
-        return await self.info()
-
-    async def server_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
+    @classmethod
+    def build(cls, printer: Printer) -> "OctoPrintProvider":
+        _require(printer, "octoprint_url", "octoprint_api_key")
+        return cls(
+            OctoPrintClient(printer.octoprint_url, api_key=printer.octoprint_api_key)
         )
 
-    async def printer_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
 
-    async def query_status(self) -> dict[str, Any]:
-        return await self._call("query_status")
-
-    async def list_files(self) -> list[dict[str, Any]]:
-        return await self._call("list_files")
-
-    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
-        return await self._call("upload", local_path, remote_filename)
-
-    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        return await self._call("delete_file", remote_filename)
-
-    async def start(self, remote_filename: str) -> dict[str, Any]:
-        return await self._call("start", remote_filename)
-
-    async def pause(self) -> dict[str, Any]:
-        return await self._call("pause")
-
-    async def resume(self) -> dict[str, Any]:
-        return await self._call("resume")
-
-    async def cancel(self) -> dict[str, Any]:
-        return await self._call("cancel")
-
-    async def run_gcode(self, script: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def emergency_stop(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def subscribe_status(
-        self,
-        on_status: Callable[[dict[str, Any]], Awaitable[None]],
-        *,
-        stop_event: asyncio.Event | None = None,
-    ) -> None:
-        try:
-            await self.client.subscribe_status(on_status, stop_event=stop_event)
-        except OctoPrintError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
-
-
-class ElegooCentauriProvider:
+@register
+class ElegooCentauriProvider(DelegatingProvider):
+    provider = PrinterProvider.ELEGOO_CENTAURI
     capabilities = ProviderCapabilities(
         supported=frozenset(
             {
@@ -738,6 +767,7 @@ class ElegooCentauriProvider:
                 Capability.RESUME,
                 Capability.CANCEL,
                 Capability.LIVE_STATUS,
+                Capability.SERVER_INFO,
             }
         ),
         support_level="beta",
@@ -745,109 +775,32 @@ class ElegooCentauriProvider:
             "Centauri Carbon uses local SDCP; Carbon 2 uses local authenticated MQTT.",
             "Upload and file inventory are unavailable because current firmware does not expose a safe confirmed file API.",
         ),
-        unsupported_actions=(
-            "upload",
-            "list_files",
-            "delete_file",
-            "send_gcode",
-            "measured_consumption",
-        ),
     )
+    client_error = ElegooCentauriError
 
-    def __init__(self, client: ElegooCentauriClient) -> None:
-        self.client = client
+    _VARIANTS = {"elegoo_centauri_carbon", "elegoo_centauri_carbon_2"}
 
-    async def _call(self, method: str, *args: Any) -> Any:
-        try:
-            return await getattr(self.client, method)(*args)
-        except ElegooCentauriError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
-
-    async def info(self) -> dict[str, Any]:
-        return await self._call("info")
-
-    async def server_info(self) -> dict[str, Any]:
-        return await self.info()
-
-    async def server_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
+    @classmethod
+    def build(cls, printer: Printer) -> "ElegooCentauriProvider":
+        _require(printer, "elegoo_centauri_host")
+        if printer.provider_variant not in cls._VARIANTS:
+            raise ProviderError(
+                "provider_credentials_missing", code="provider_credentials_missing"
+            )
+        if printer.provider_variant == "elegoo_centauri_carbon_2":
+            _require(printer, "elegoo_centauri_access_code")
+        return cls(
+            ElegooCentauriClient(
+                printer.elegoo_centauri_host,
+                model=printer.provider_variant,
+                access_code=printer.elegoo_centauri_access_code,
+                mainboard_id=printer.elegoo_centauri_mainboard_id,
+            )
         )
-
-    async def printer_config(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def query_status(self) -> dict[str, Any]:
-        return await self._call("query_status")
-
-    async def list_files(self) -> list[dict[str, Any]]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def start(self, remote_filename: str) -> dict[str, Any]:
-        return await self._call("start", remote_filename)
-
-    async def pause(self) -> dict[str, Any]:
-        return await self._call("pause")
-
-    async def resume(self) -> dict[str, Any]:
-        return await self._call("resume")
-
-    async def cancel(self) -> dict[str, Any]:
-        return await self._call("cancel")
-
-    async def run_gcode(self, script: str) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def emergency_stop(self) -> dict[str, Any]:
-        raise ProviderError(
-            "operation_not_supported_for_provider",
-            code="operation_not_supported_for_provider",
-        )
-
-    async def subscribe_status(
-        self,
-        on_status: Callable[[dict[str, Any]], Awaitable[None]],
-        *,
-        stop_event: asyncio.Event | None = None,
-    ) -> None:
-        try:
-            await self.client.subscribe_status(on_status, stop_event=stop_event)
-        except ElegooCentauriError as exc:
-            raise ProviderError(str(exc), code=exc.code) from exc
 
 
 def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities:
-    if provider == PrinterProvider.BAMBU_LAN:
-        return BambuLanProvider.capabilities
-    if provider == PrinterProvider.PRUSALINK:
-        return PrusaLinkProvider.capabilities
-    if provider == PrinterProvider.ELEGOO_CENTAURI:
-        return ElegooCentauriProvider.capabilities
-    if provider == PrinterProvider.OCTOPRINT:
-        return OctoPrintProvider.capabilities
-    return MoonrakerProvider.capabilities
+    return PROVIDERS[provider].capabilities
 
 
 # Bambu serial number prefix -> friendly model name. Community-sourced
@@ -897,86 +850,4 @@ def provider_diagnostic_summary(provider: PrinterProvider) -> dict[str, object]:
 
 
 def get_provider_client(printer: Printer) -> PrinterProviderClient:
-    if printer.provider == PrinterProvider.BAMBU_LAN:
-        if (
-            not printer.bambu_host
-            or not printer.bambu_serial
-            or not printer.bambu_access_code
-        ):
-            raise ProviderError(
-                "provider_credentials_missing",
-                code="provider_credentials_missing",
-            )
-        return BambuLanProvider(
-            host=printer.bambu_host,
-            serial=printer.bambu_serial,
-            access_code=printer.bambu_access_code,
-        )
-
-    if printer.provider == PrinterProvider.PRUSALINK:
-        if not printer.prusalink_url or not printer.prusalink_auth_mode:
-            raise ProviderError(
-                "provider_credentials_missing", code="provider_credentials_missing"
-            )
-        if printer.prusalink_auth_mode == "digest" and (
-            not printer.prusalink_username or not printer.prusalink_password
-        ):
-            raise ProviderError(
-                "provider_credentials_missing", code="provider_credentials_missing"
-            )
-        if printer.prusalink_auth_mode == "api_key" and not printer.prusalink_api_key:
-            raise ProviderError(
-                "provider_credentials_missing", code="provider_credentials_missing"
-            )
-        return PrusaLinkProvider(
-            PrusaLinkClient(
-                printer.prusalink_url,
-                auth_mode=printer.prusalink_auth_mode,
-                username=printer.prusalink_username,
-                password=printer.prusalink_password,
-                api_key=printer.prusalink_api_key,
-            )
-        )
-
-    if printer.provider == PrinterProvider.ELEGOO_CENTAURI:
-        if not printer.elegoo_centauri_host or printer.provider_variant not in {
-            "elegoo_centauri_carbon",
-            "elegoo_centauri_carbon_2",
-        }:
-            raise ProviderError(
-                "provider_credentials_missing",
-                code="provider_credentials_missing",
-            )
-        if (
-            printer.provider_variant == "elegoo_centauri_carbon_2"
-            and not printer.elegoo_centauri_access_code
-        ):
-            raise ProviderError(
-                "provider_credentials_missing",
-                code="provider_credentials_missing",
-            )
-        return ElegooCentauriProvider(
-            ElegooCentauriClient(
-                printer.elegoo_centauri_host,
-                model=printer.provider_variant,
-                access_code=printer.elegoo_centauri_access_code,
-                mainboard_id=printer.elegoo_centauri_mainboard_id,
-            )
-        )
-
-    if printer.provider == PrinterProvider.OCTOPRINT:
-        if not printer.octoprint_url or not printer.octoprint_api_key:
-            raise ProviderError(
-                "provider_credentials_missing",
-                code="provider_credentials_missing",
-            )
-        return OctoPrintProvider(
-            OctoPrintClient(printer.octoprint_url, api_key=printer.octoprint_api_key)
-        )
-
-    if not printer.moonraker_url:
-        raise ProviderError(
-            "provider_credentials_missing",
-            code="provider_credentials_missing",
-        )
-    return MoonrakerProvider(printer.moonraker_url, printer.api_key)
+    return PROVIDERS[printer.provider].build(printer)
