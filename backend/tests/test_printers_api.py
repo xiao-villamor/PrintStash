@@ -104,6 +104,36 @@ class TestCreatePrinter:
         assert resp.status_code == 201
         assert resp.json()["moonraker_url"] == "http://10.0.0.2:7125"
 
+    def test_create_detects_neptune4_model(self, client: TestClient, auth_headers):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Neptune",
+                "moonraker_url": "http://10.0.0.3:7125",
+                "provider_variant": "elegoo_neptune4",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["detected_model"] == "Elegoo Neptune 4 family"
+        assert data["model_name"] is None
+
+    def test_create_with_manual_model_name(self, client: TestClient, auth_headers):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "Voron",
+                "moonraker_url": "http://10.0.0.4:7125",
+                "model_name": "Voron 2.4",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["model_name"] == "Voron 2.4"
+        assert data["detected_model"] is None
+
 
 class TestGetPrinter:
     def test_get_returns_printer(
@@ -155,6 +185,29 @@ class TestUpdatePrinter:
             headers=auth_headers,
         )
         assert resp.status_code == 404
+
+    def test_update_manual_model_name_overrides_display(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(
+            name="Neptune",
+            moonraker_url="http://10.0.0.1:7125",
+            provider_variant="elegoo_neptune4",
+            detected_model="Elegoo Neptune 4 family",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.patch(
+            f"/api/v1/printers/{p.id}",
+            json={"model_name": "Neptune 4 Pro"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["model_name"] == "Neptune 4 Pro"
+        assert data["detected_model"] == "Elegoo Neptune 4 family"
 
 
 class TestDeletePrinter:
@@ -443,6 +496,41 @@ class TestPrusaLinkPrinter:
         assert body["provider"] == "moonraker"
         assert body["provider_variant"] == "elegoo_neptune4"
         assert body["capabilities"]["support_level"] == "stable"
+
+
+class TestOctoPrintPrinter:
+    def test_create_credentials_are_redacted(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={
+                "name": "OctoPi",
+                "provider": "octoprint",
+                "octoprint_url": "http://octopi.local/",
+                "octoprint_api_key": "secret-key",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["provider"] == "octoprint"
+        assert body["octoprint_url"] == "http://octopi.local"
+        assert body["has_octoprint_api_key"] is True
+        assert "octoprint_api_key" not in body
+        assert body["capabilities"]["support_level"] == "beta"
+        row = db_session.exec(select(Printer).where(Printer.name == "OctoPi")).one()
+        assert row.octoprint_api_key == "secret-key"
+
+    def test_create_requires_url_and_api_key(
+        self, client: TestClient, auth_headers
+    ):
+        resp = client.post(
+            "/api/v1/printers",
+            json={"name": "OctoPi", "provider": "octoprint"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
 
 
 class TestElegooCentauriPrinter:

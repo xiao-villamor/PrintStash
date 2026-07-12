@@ -40,6 +40,7 @@ _REDACTED_FIELDS = {
     "prusalink_password",
     "prusalink_api_key",
     "elegoo_centauri_access_code",
+    "octoprint_api_key",
     "hashed_password",
     "key_hash",
     "token_hash",

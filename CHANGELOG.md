@@ -16,9 +16,17 @@
   local MQTT API. Both provide status and start/pause/resume/cancel controls.
   Upload and file inventory stay disabled because current firmware exposes no
   safe confirmed file API.
+- **OctoPrint support (beta).** Connect a local OctoPrint/OctoPi instance with
+  an API key for live status, G-code upload, explicit start, remote file
+  inventory/deletion, and pause/resume/cancel.
 - **Provider-aware printer setup.** The add-printer flow now offers Moonraker,
-  Elegoo Neptune 4, PrusaLink, and Bambu LAN with only the credentials required
-  by each integration.
+  Elegoo Neptune 4, PrusaLink, OctoPrint, and Bambu LAN with only the
+  credentials required by each integration.
+- **Printer model detection on the printer card.** Bambu (from its serial
+  prefix) and Elegoo Neptune 4/Centauri (from the setup preset) show a
+  best-effort hardware model automatically. Any printer's model can be set or
+  corrected from a curated picklist to avoid typos, with an "Other" option
+  for custom builds.
 - **Bambu LAN Vault send support (beta).** PrintStash can upload plain-text
   G-code to a Bambu printer's local cache over implicit FTPS, then start the
   uploaded file through the local MQTT connection. Upload-only remains the

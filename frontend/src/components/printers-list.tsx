@@ -3,11 +3,12 @@
 import { useState } from "react";
 import { Link } from "@/lib/navigation";
 import { PrinterRead } from "@/types";
-import { createPrinter, deletePrinter } from "@/lib/api";
+import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
 import { usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import {
+  PRINTER_MODEL_OPTIONS,
   PRINTER_SETUP_OPTIONS,
   providerAddress,
   providerLabel,
@@ -15,7 +16,7 @@ import {
   type PrinterSetupKind,
 } from "@/lib/printer-providers";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Trash2, RefreshCw, ArrowRight, Printer as PrinterIcon } from "lucide-react";
+import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
@@ -122,7 +123,7 @@ export function PrintersPage() {
                   <h3 className="text-[15px] font-semibold text-foreground truncate">
                     {p.name}
                   </h3>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
                     <span className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground">
                       {providerLabel(p)}
                     </span>
@@ -131,6 +132,7 @@ export function PrintersPage() {
                         Beta
                       </span>
                     )}
+                    <PrinterModelBadge printer={p} canEdit={auth.isAuthenticated} />
                   </div>
                 </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
@@ -194,6 +196,106 @@ export function PrintersPage() {
   );
 }
 
+const OTHER_MODEL_OPTION = "__other__";
+
+function PrinterModelBadge({
+  printer,
+  canEdit,
+}: {
+  printer: PrinterRead;
+  canEdit: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const displayModel = printer.model_name || printer.detected_model;
+  const [selected, setSelected] = useState(() =>
+    displayModel && PRINTER_MODEL_OPTIONS.includes(displayModel)
+      ? displayModel
+      : displayModel
+        ? OTHER_MODEL_OPTION
+        : "",
+  );
+  const [customValue, setCustomValue] = useState(
+    displayModel && !PRINTER_MODEL_OPTIONS.includes(displayModel) ? displayModel : "",
+  );
+  const [saving, setSaving] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const modelName = selected === OTHER_MODEL_OPTION ? customValue.trim() : selected;
+    setSaving(true);
+    try {
+      await updatePrinter(printer.id, { model_name: modelName });
+      setEditing(false);
+    } catch (err) {
+      toast.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={save}
+        className="flex items-center gap-1"
+      >
+        <select
+          autoFocus
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setEditing(false);
+            }
+          }}
+          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+        >
+          <option value="">Select model</option>
+          {PRINTER_MODEL_OPTIONS.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+          <option value={OTHER_MODEL_OPTION}>Other…</option>
+        </select>
+        {selected === OTHER_MODEL_OPTION && (
+          <input
+            value={customValue}
+            onChange={(e) => setCustomValue(e.target.value)}
+            placeholder="Custom model name"
+            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+          />
+        )}
+        <button
+          type="submit"
+          disabled={saving || (selected === OTHER_MODEL_OPTION && !customValue.trim())}
+          className="rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
+        >
+          Save
+        </button>
+      </form>
+    );
+  }
+
+  return (
+    <span
+      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground"
+      onClick={(e) => {
+        if (!canEdit) return;
+        e.preventDefault();
+        e.stopPropagation();
+        setEditing(true);
+      }}
+    >
+      {displayModel || (canEdit ? "Set model" : "Model unknown")}
+      {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
+    </span>
+  );
+}
+
 function AddPrinterModal({
   onClose,
   onCreated,
@@ -210,6 +312,7 @@ function AddPrinterModal({
   const [prusaAuthMode, setPrusaAuthMode] = useState<"digest" | "api_key">("digest");
   const [prusaUsername, setPrusaUsername] = useState("maker");
   const [prusaSecret, setPrusaSecret] = useState("");
+  const [octoprintApiKey, setOctoprintApiKey] = useState("");
   const [centauriAccessCode, setCentauriAccessCode] = useState("");
   const [centauriMainboardId, setCentauriMainboardId] = useState("");
   const [notes, setNotes] = useState("");
@@ -262,6 +365,12 @@ function AddPrinterModal({
                   setupKind === "elegoo_centauri_carbon"
                     ? centauriMainboardId.trim() || undefined
                     : undefined,
+              }
+            : {}),
+          ...(setupKind === "octoprint"
+            ? {
+                octoprint_url: url.trim(),
+                octoprint_api_key: octoprintApiKey,
               }
             : {}),
           notes: notes || undefined,
@@ -326,11 +435,13 @@ function AddPrinterModal({
             <label htmlFor="printer-address" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               {setupKind === "prusalink"
                 ? "PrusaLink URL"
-                : setupKind === "moonraker"
-                  ? "Moonraker URL"
-                  : setupKind === "elegoo_neptune4"
-                    ? "Printer URL"
-                    : "Printer host or IP"}
+                : setupKind === "octoprint"
+                  ? "OctoPrint URL"
+                  : setupKind === "moonraker"
+                    ? "Moonraker URL"
+                    : setupKind === "elegoo_neptune4"
+                      ? "Printer URL"
+                      : "Printer host or IP"}
             </label>
             <input
               id="printer-address"
@@ -340,9 +451,11 @@ function AddPrinterModal({
               placeholder={
                 setupKind === "prusalink"
                   ? "http://mk4.local"
-                  : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
-                    ? "http://printer.local:7125"
-                    : "192.168.1.50"
+                  : setupKind === "octoprint"
+                    ? "http://octopi.local"
+                    : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+                      ? "http://printer.local:7125"
+                      : "192.168.1.50"
               }
               required
             />
@@ -390,6 +503,10 @@ function AddPrinterModal({
               <input id="prusalink-secret" type="password" value={prusaSecret} onChange={(e) => setPrusaSecret(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
             </div>
           </>}
+          {setupKind === "octoprint" && <div>
+            <label htmlFor="octoprint-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">API key</label>
+            <input id="octoprint-api-key" type="password" value={octoprintApiKey} onChange={(e) => setOctoprintApiKey(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
+          </div>}
           {setupKind === "elegoo_centauri_carbon" && <div>
             <label htmlFor="centauri-mainboard-id" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               Mainboard ID <span className="font-normal normal-case tracking-normal opacity-60">(recommended)</span>

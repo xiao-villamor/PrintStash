@@ -10,7 +10,8 @@ export type PrinterProvider =
   | "moonraker"
   | "bambu_lan"
   | "prusalink"
-  | "elegoo_centauri";
+  | "elegoo_centauri"
+  | "octoprint";
 export type PrinterVariant =
   | "generic"
   | "elegoo_neptune4"
@@ -46,6 +47,10 @@ export interface PrinterRead {
   elegoo_centauri_host?: string | null;
   elegoo_centauri_mainboard_id?: string | null;
   has_elegoo_centauri_access_code?: boolean;
+  octoprint_url?: string | null;
+  has_octoprint_api_key?: boolean;
+  model_name?: string | null;
+  detected_model?: string | null;
   capabilities: PrinterCapabilities;
   notes: string | null;
   group: string | null;
@@ -143,6 +148,9 @@ export interface PrinterCreate {
   elegoo_centauri_host?: string;
   elegoo_centauri_access_code?: string;
   elegoo_centauri_mainboard_id?: string;
+  octoprint_url?: string;
+  octoprint_api_key?: string;
+  model_name?: string;
   notes?: string;
   group?: string;
 }
@@ -164,6 +172,9 @@ export interface PrinterUpdate {
   elegoo_centauri_host?: string;
   elegoo_centauri_access_code?: string;
   elegoo_centauri_mainboard_id?: string;
+  octoprint_url?: string;
+  octoprint_api_key?: string;
+  model_name?: string;
   notes?: string;
   group?: string;
 }

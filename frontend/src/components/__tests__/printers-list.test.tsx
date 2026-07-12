@@ -8,9 +8,23 @@ import { PrintersPage } from "@/components/printers-list";
 vi.mock("@/lib/api", () => ({
   createPrinter: vi.fn().mockResolvedValue({}),
   deletePrinter: vi.fn(),
+  updatePrinter: vi.fn().mockResolvedValue({}),
+}));
+const mockUsePrinters = vi.fn<
+  () => {
+    data: PrinterRead[];
+    isLoading: boolean;
+    error: Error | null;
+    refetch: () => void;
+  }
+>(() => ({
+  data: [],
+  isLoading: false,
+  error: null,
+  refetch: vi.fn(),
 }));
 vi.mock("@/lib/queries", () => ({
-  usePrinters: () => ({ data: [], isLoading: false, error: null, refetch: vi.fn() }),
+  usePrinters: () => mockUsePrinters(),
 }));
 vi.mock("@/lib/use-require-auth", () => ({
   useRequireAuth: () => ({ isAuthenticated: true, showAuthRequiredToast: vi.fn() }),
@@ -24,7 +38,40 @@ vi.mock("@/lib/toast", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-import { createPrinter } from "@/lib/api";
+import { createPrinter, updatePrinter } from "@/lib/api";
+import type { PrinterRead } from "@/types";
+
+function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
+  return {
+    id: 1,
+    name: "Voron 2.4",
+    provider: "moonraker",
+    moonraker_url: "http://10.0.0.1:7125",
+    has_api_key: false,
+    capabilities: {
+      can_start: true,
+      can_pause: true,
+      can_resume: true,
+      can_cancel: true,
+      can_live_status: true,
+      can_upload: true,
+      can_list_files: true,
+      can_send_gcode: true,
+      can_measure_consumption: true,
+      support_level: "stable",
+      support_notes: [],
+      unsupported_actions: [],
+    },
+    notes: null,
+    group: null,
+    status: "ready",
+    last_seen_at: null,
+    last_error: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -87,5 +134,76 @@ describe("printer setup", () => {
       elegoo_centauri_host: "192.168.1.51",
       elegoo_centauri_access_code: "ABC123",
     })));
+  });
+
+  it("submits OctoPrint URL and API key", async () => {
+    await openForm();
+    await userEvent.type(screen.getByLabelText("Name"), "OctoPi");
+    await userEvent.selectOptions(screen.getByLabelText("Integration"), "octoprint");
+    await userEvent.type(screen.getByLabelText("OctoPrint URL"), "http://octopi.local");
+    await userEvent.type(screen.getByLabelText("API key"), "secret-key");
+    await userEvent.click(screen.getAllByRole("button", { name: /^add printer$/i }).at(-1)!);
+
+    await waitFor(() => expect(createPrinter).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "octoprint",
+      octoprint_url: "http://octopi.local",
+      octoprint_api_key: "secret-key",
+    })));
+  });
+});
+
+describe("printer card", () => {
+  it("shows the detected model", () => {
+    mockUsePrinters.mockReturnValueOnce({
+      data: [makePrinter({ detected_model: "Bambu Lab X1 Carbon" })],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<PrintersPage />);
+
+    expect(screen.getByText("Bambu Lab X1 Carbon")).toBeInTheDocument();
+  });
+
+  it("lets the user pick a model from the list when nothing was detected", async () => {
+    mockUsePrinters.mockReturnValueOnce({
+      data: [makePrinter()],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<PrintersPage />);
+
+    await userEvent.click(screen.getByText("Set model"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "Voron 2.4");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updatePrinter).toHaveBeenCalledWith(1, { model_name: "Voron 2.4" }),
+    );
+  });
+
+  it("falls back to a custom text field for a model not in the list", async () => {
+    mockUsePrinters.mockReturnValueOnce({
+      data: [makePrinter()],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<PrintersPage />);
+
+    await userEvent.click(screen.getByText("Set model"));
+    await userEvent.selectOptions(screen.getByRole("combobox"), "Other…");
+    await userEvent.type(
+      screen.getByPlaceholderText("Custom model name"),
+      "Homebrew CoreXY",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updatePrinter).toHaveBeenCalledWith(1, {
+        model_name: "Homebrew CoreXY",
+      }),
+    );
   });
 });

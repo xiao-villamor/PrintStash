@@ -64,6 +64,7 @@ class PrinterProvider(str, Enum):
     BAMBU_LAN = "bambu_lan"
     PRUSALINK = "prusalink"
     ELEGOO_CENTAURI = "elegoo_centauri"
+    OCTOPRINT = "octoprint"
 
 
 class PrintJobState(str, Enum):
@@ -423,6 +424,14 @@ class Printer(SQLModel, table=True):
     elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
+    octoprint_url: Optional[str] = Field(default=None, max_length=512)
+    octoprint_api_key: Optional[str] = Field(default=None, max_length=255)
+    # Hardware model label shown on the printer card. ``model_name`` is a
+    # user-set override; ``detected_model`` is a best-effort guess from
+    # provider_variant/bambu_serial, recomputed on create/update. Display
+    # precedence is model_name, falling back to detected_model.
+    model_name: Optional[str] = Field(default=None, max_length=128)
+    detected_model: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = None
     group: Optional[str] = Field(default=None, max_length=128, index=True)
 

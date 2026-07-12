@@ -67,6 +67,7 @@ from app.services.printer_hub import (
 from app.services.printer_provider import (
     ProviderError,
     capabilities_for_provider,
+    detect_printer_model,
     get_provider_client,
     provider_diagnostic_summary,
 )
@@ -123,6 +124,11 @@ def _validate_provider_config(p: Printer) -> None:
                 status_code=400,
                 detail="elegoo_centauri_access_code_required",
             )
+    if p.provider == PrinterProvider.OCTOPRINT:
+        if not p.octoprint_url:
+            raise HTTPException(status_code=400, detail="octoprint_url_required")
+        if not p.octoprint_api_key:
+            raise HTTPException(status_code=400, detail="octoprint_api_key_required")
 
 
 def _to_read(p: Printer) -> PrinterRead:
@@ -145,6 +151,10 @@ def _to_read(p: Printer) -> PrinterRead:
         elegoo_centauri_host=p.elegoo_centauri_host,
         elegoo_centauri_mainboard_id=p.elegoo_centauri_mainboard_id,
         has_elegoo_centauri_access_code=bool(p.elegoo_centauri_access_code),
+        octoprint_url=p.octoprint_url,
+        has_octoprint_api_key=bool(p.octoprint_api_key),
+        model_name=p.model_name,
+        detected_model=p.detected_model,
         capabilities=PrinterCapabilities(**caps.as_api_dict()),
         notes=p.notes,
         group=p.group,
@@ -489,10 +499,14 @@ async def create_printer(
         elegoo_centauri_host=(payload.elegoo_centauri_host or "").strip() or None,
         elegoo_centauri_access_code=payload.elegoo_centauri_access_code or None,
         elegoo_centauri_mainboard_id=payload.elegoo_centauri_mainboard_id or None,
+        octoprint_url=(payload.octoprint_url or "").strip().rstrip("/") or None,
+        octoprint_api_key=payload.octoprint_api_key or None,
+        model_name=payload.model_name.strip() if payload.model_name else None,
         notes=payload.notes,
         group=payload.group.strip() if payload.group else None,
     )
     _validate_provider_config(p)
+    p.detected_model = detect_printer_model(p)
     session.add(p)
     session.commit()
     session.refresh(p)
@@ -548,11 +562,18 @@ async def update_printer(
         p.elegoo_centauri_mainboard_id = (
             payload.elegoo_centauri_mainboard_id.strip() or None
         )
+    if payload.octoprint_url is not None:
+        p.octoprint_url = payload.octoprint_url.strip().rstrip("/") or None
+    if payload.octoprint_api_key is not None:
+        p.octoprint_api_key = payload.octoprint_api_key or None
+    if payload.model_name is not None:
+        p.model_name = payload.model_name.strip() or None
     if payload.notes is not None:
         p.notes = payload.notes
     if payload.group is not None:
         p.group = payload.group.strip() or None
     _validate_provider_config(p)
+    p.detected_model = detect_printer_model(p)
     p.updated_at = utcnow()
     session.add(p)
     session.commit()

@@ -63,6 +63,9 @@ class PrinterCreate(BaseModel):
     elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
+    octoprint_url: Optional[str] = Field(default=None, max_length=512)
+    octoprint_api_key: Optional[str] = Field(default=None, max_length=255)
+    model_name: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
 
@@ -101,6 +104,11 @@ class PrinterCreate(BaseModel):
                 and not self.elegoo_centauri_access_code
             ):
                 raise ValueError("elegoo_centauri_access_code_required")
+        if self.provider == PrinterProvider.OCTOPRINT:
+            if not self.octoprint_url:
+                raise ValueError("octoprint_url_required")
+            if not self.octoprint_api_key:
+                raise ValueError("octoprint_api_key_required")
         return self
 
 
@@ -130,6 +138,9 @@ class PrinterUpdate(BaseModel):
     elegoo_centauri_host: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_access_code: Optional[str] = Field(default=None, max_length=255)
     elegoo_centauri_mainboard_id: Optional[str] = Field(default=None, max_length=128)
+    octoprint_url: Optional[str] = Field(default=None, max_length=512)
+    octoprint_api_key: Optional[str] = Field(default=None, max_length=255)
+    model_name: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
 
@@ -152,6 +163,10 @@ class PrinterRead(BaseModel):
     elegoo_centauri_host: Optional[str] = None
     elegoo_centauri_mainboard_id: Optional[str] = None
     has_elegoo_centauri_access_code: bool = False
+    octoprint_url: Optional[str] = None
+    has_octoprint_api_key: bool = False
+    model_name: Optional[str] = None
+    detected_model: Optional[str] = None
     capabilities: PrinterCapabilities
     notes: Optional[str] = None
     group: Optional[str] = None

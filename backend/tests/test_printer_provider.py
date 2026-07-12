@@ -11,9 +11,11 @@ from app.services.printer_provider import (
     BambuLanProvider,
     ElegooCentauriProvider,
     MoonrakerProvider,
+    OctoPrintProvider,
     ProviderError,
     PrusaLinkProvider,
     capabilities_for_provider,
+    detect_printer_model,
     get_provider_client,
 )
 
@@ -51,6 +53,53 @@ class TestCapabilities:
         assert caps.can_list_files is False
         assert caps.can_send_gcode is False
         assert caps.support_level == "beta"
+
+    def test_octoprint_capabilities_are_beta_and_honest(self):
+        caps = OctoPrintProvider.capabilities
+        assert caps.can_upload is True
+        assert caps.can_start is True
+        assert caps.can_list_files is True
+        assert caps.can_send_gcode is False
+        assert caps.can_measure_consumption is False
+        assert caps.support_level == "beta"
+
+
+class TestDetectPrinterModel:
+    def test_detects_bambu_model_from_serial_prefix(self):
+        p = Printer(
+            name="X1C",
+            provider=PrinterProvider.BAMBU_LAN,
+            bambu_serial="01P00A123456",
+        )
+        assert detect_printer_model(p) == "Bambu Lab X1 Carbon"
+
+    def test_unknown_bambu_serial_prefix_returns_none(self):
+        p = Printer(
+            name="Mystery",
+            provider=PrinterProvider.BAMBU_LAN,
+            bambu_serial="ZZZ00A123456",
+        )
+        assert detect_printer_model(p) is None
+
+    def test_detects_elegoo_neptune4_from_provider_variant(self):
+        p = Printer(
+            name="Neptune",
+            provider=PrinterProvider.MOONRAKER,
+            provider_variant="elegoo_neptune4",
+        )
+        assert detect_printer_model(p) == "Elegoo Neptune 4 family"
+
+    def test_detects_elegoo_centauri_carbon_2_from_provider_variant(self):
+        p = Printer(
+            name="Centauri",
+            provider=PrinterProvider.ELEGOO_CENTAURI,
+            provider_variant="elegoo_centauri_carbon_2",
+        )
+        assert detect_printer_model(p) == "Elegoo Centauri Carbon 2"
+
+    def test_plain_moonraker_is_undetectable(self):
+        p = Printer(name="Voron", provider=PrinterProvider.MOONRAKER)
+        assert detect_printer_model(p) is None
 
 
 class TestProviderFactory:
@@ -127,6 +176,26 @@ class TestProviderFactory:
         )
         with pytest.raises(ProviderError, match="provider_credentials_missing"):
             get_provider_client(p)
+
+    def test_get_octoprint_provider(self):
+        p = Printer(
+            name="octopi",
+            provider=PrinterProvider.OCTOPRINT,
+            octoprint_url="http://octopi.local",
+            octoprint_api_key="key-123",
+        )
+        client = get_provider_client(p)
+        assert isinstance(client, OctoPrintProvider)
+
+    def test_octoprint_missing_credentials_rejected(self):
+        p = Printer(
+            name="octopi",
+            provider=PrinterProvider.OCTOPRINT,
+            octoprint_url="http://octopi.local",
+        )
+        with pytest.raises(ProviderError) as exc:
+            get_provider_client(p)
+        assert exc.value.code == "provider_credentials_missing"
 
 
 class TestBambuLanProvider:

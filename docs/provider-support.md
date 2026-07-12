@@ -72,6 +72,22 @@ Raw G-code commands and measured filament consumption are not supported.
 Physical-printer coverage is still expanding, so supervise first prints after
 adding or updating a PrusaLink device.
 
+## OctoPrint
+
+Support level: beta.
+
+PrintStash connects to an OctoPrint/OctoPi instance on the local network
+using an `X-Api-Key`. Supported:
+
+- polled printer/job status and temperatures
+- G-code upload and explicit start of an existing file
+- remote G-code inventory and deletion
+- pause, resume, and cancel controls
+
+Raw G-code commands and measured filament consumption are not supported.
+Physical-printer coverage is still expanding, so supervise first prints after
+adding or updating an OctoPrint device.
+
 ## Elegoo Neptune 4 family
 
 Neptune 4, 4 Pro, 4 Plus, and 4 Max use the Moonraker provider through a

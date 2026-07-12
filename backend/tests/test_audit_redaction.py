@@ -24,6 +24,7 @@ def test_secret_field_update_is_redacted(db_session: Session) -> None:
         prusalink_password="old-prusa-password",
         prusalink_api_key="old-prusa-key",
         elegoo_centauri_access_code="old-centauri-code",
+        octoprint_api_key="old-octoprint-key",
     )
     db_session.add(printer)
     db_session.commit()
@@ -32,6 +33,7 @@ def test_secret_field_update_is_redacted(db_session: Session) -> None:
     printer.prusalink_password = "new-prusa-password"
     printer.prusalink_api_key = "new-prusa-key"
     printer.elegoo_centauri_access_code = "new-centauri-code"
+    printer.octoprint_api_key = "new-octoprint-key"
     db_session.add(printer)
     db_session.commit()
 
@@ -51,6 +53,8 @@ def test_secret_field_update_is_redacted(db_session: Session) -> None:
     assert "new-prusa-key" not in raw
     assert "old-centauri-code" not in raw
     assert "new-centauri-code" not in raw
+    assert "old-octoprint-key" not in raw
+    assert "new-octoprint-key" not in raw
 
     diff = json.loads(rows[-1].diff_json)
     assert diff["api_key"] == {"before": "[redacted]", "after": "[redacted]"}
@@ -63,6 +67,10 @@ def test_secret_field_update_is_redacted(db_session: Session) -> None:
         "after": "[redacted]",
     }
     assert diff["elegoo_centauri_access_code"] == {
+        "before": "[redacted]",
+        "after": "[redacted]",
+    }
+    assert diff["octoprint_api_key"] == {
         "before": "[redacted]",
         "after": "[redacted]",
     }

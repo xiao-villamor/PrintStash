@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from ftplib import FTP_TLS  # nosec B402 - Bambu LAN's implicit-TLS FTPS, not plaintext
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Optional, Protocol
 from uuid import uuid4
 
 import httpx
@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.db.models import Printer, PrinterProvider
 from app.services.elegoo_centauri import ElegooCentauriClient, ElegooCentauriError
 from app.services.moonraker import MoonrakerClient, MoonrakerError
+from app.services.octoprint import OctoPrintClient, OctoPrintError
 from app.services.prusalink import PrusaLinkClient, PrusaLinkError
 
 logger = get_logger(__name__)
@@ -632,6 +633,102 @@ class PrusaLinkProvider:
             raise ProviderError(str(exc), code=exc.code) from exc
 
 
+class OctoPrintProvider:
+    capabilities = ProviderCapabilities(
+        supported=frozenset(
+            {
+                Capability.START,
+                Capability.PAUSE,
+                Capability.RESUME,
+                Capability.CANCEL,
+                Capability.LIVE_STATUS,
+                Capability.UPLOAD,
+                Capability.LIST_FILES,
+            }
+        ),
+        support_level="beta",
+        support_notes=(
+            "OctoPrint support is beta pending broader hardware validation.",
+            "Raw G-code controls and measured filament consumption are unavailable.",
+        ),
+        unsupported_actions=("send_gcode", "emergency_stop"),
+    )
+
+    def __init__(self, client: OctoPrintClient) -> None:
+        self.client = client
+
+    async def _call(self, method: str, *args: Any) -> Any:
+        try:
+            return await getattr(self.client, method)(*args)
+        except OctoPrintError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+    async def info(self) -> dict[str, Any]:
+        return await self._call("info")
+
+    async def server_info(self) -> dict[str, Any]:
+        return await self.info()
+
+    async def server_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def printer_config(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def query_status(self) -> dict[str, Any]:
+        return await self._call("query_status")
+
+    async def list_files(self) -> list[dict[str, Any]]:
+        return await self._call("list_files")
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        return await self._call("upload", local_path, remote_filename)
+
+    async def delete_file(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("delete_file", remote_filename)
+
+    async def start(self, remote_filename: str) -> dict[str, Any]:
+        return await self._call("start", remote_filename)
+
+    async def pause(self) -> dict[str, Any]:
+        return await self._call("pause")
+
+    async def resume(self) -> dict[str, Any]:
+        return await self._call("resume")
+
+    async def cancel(self) -> dict[str, Any]:
+        return await self._call("cancel")
+
+    async def run_gcode(self, script: str) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def emergency_stop(self) -> dict[str, Any]:
+        raise ProviderError(
+            "operation_not_supported_for_provider",
+            code="operation_not_supported_for_provider",
+        )
+
+    async def subscribe_status(
+        self,
+        on_status: Callable[[dict[str, Any]], Awaitable[None]],
+        *,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        try:
+            await self.client.subscribe_status(on_status, stop_event=stop_event)
+        except OctoPrintError as exc:
+            raise ProviderError(str(exc), code=exc.code) from exc
+
+
 class ElegooCentauriProvider:
     capabilities = ProviderCapabilities(
         supported=frozenset(
@@ -748,7 +845,44 @@ def capabilities_for_provider(provider: PrinterProvider) -> ProviderCapabilities
         return PrusaLinkProvider.capabilities
     if provider == PrinterProvider.ELEGOO_CENTAURI:
         return ElegooCentauriProvider.capabilities
+    if provider == PrinterProvider.OCTOPRINT:
+        return OctoPrintProvider.capabilities
     return MoonrakerProvider.capabilities
+
+
+# Bambu serial number prefix -> friendly model name. Community-sourced
+# (Bambu doesn't publish this mapping); best-effort only. An unrecognized
+# prefix or a wrong guess is not fatal — the printer's model field is always
+# user-editable and a manual value always wins over this detection.
+_BAMBU_SERIAL_MODEL_PREFIXES: dict[str, str] = {
+    "00M": "Bambu Lab P1P",
+    "01S": "Bambu Lab X1",
+    "01P": "Bambu Lab X1 Carbon",
+    "030": "Bambu Lab A1 mini",
+    "039": "Bambu Lab A1",
+}
+
+_PROVIDER_VARIANT_MODEL_NAMES: dict[str, str] = {
+    "elegoo_neptune4": "Elegoo Neptune 4 family",
+    "elegoo_centauri_carbon": "Elegoo Centauri Carbon",
+    "elegoo_centauri_carbon_2": "Elegoo Centauri Carbon 2",
+}
+
+
+def detect_printer_model(printer: Printer) -> Optional[str]:
+    """Best-effort hardware model name from data already on the printer row.
+
+    No network calls — this only reads fields the user already supplied
+    (provider_variant, bambu_serial), so it's free to recompute on every
+    create/update. Returns None when nothing is knowable (e.g. plain
+    Moonraker/Klipper, which is DIY hardware with no reliable model field);
+    callers should let the user set the model manually in that case.
+    """
+    if printer.provider_variant in _PROVIDER_VARIANT_MODEL_NAMES:
+        return _PROVIDER_VARIANT_MODEL_NAMES[printer.provider_variant]
+    if printer.provider == PrinterProvider.BAMBU_LAN and printer.bambu_serial:
+        return _BAMBU_SERIAL_MODEL_PREFIXES.get(printer.bambu_serial[:3].upper())
+    return None
 
 
 def provider_diagnostic_summary(provider: PrinterProvider) -> dict[str, object]:
@@ -828,6 +962,16 @@ def get_provider_client(printer: Printer) -> PrinterProviderClient:
                 access_code=printer.elegoo_centauri_access_code,
                 mainboard_id=printer.elegoo_centauri_mainboard_id,
             )
+        )
+
+    if printer.provider == PrinterProvider.OCTOPRINT:
+        if not printer.octoprint_url or not printer.octoprint_api_key:
+            raise ProviderError(
+                "provider_credentials_missing",
+                code="provider_credentials_missing",
+            )
+        return OctoPrintProvider(
+            OctoPrintClient(printer.octoprint_url, api_key=printer.octoprint_api_key)
         )
 
     if not printer.moonraker_url:
