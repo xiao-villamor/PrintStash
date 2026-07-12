@@ -49,8 +49,12 @@ docs/feature-inventory.md
 docs/internal/
 docs/*-internal.md
 
-# AI assistant tooling (kept local, not published)
-.claude/
+# AI assistant tooling (kept local, not published) — except the shared
+# project skill in .claude/skills/printstash/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/printstash/
 .opencode/
 .agents/
 skills-lock.json
