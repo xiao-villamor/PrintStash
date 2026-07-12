@@ -6,6 +6,7 @@ import { CollectionRead, TagRead } from "@/types";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
+import { DURATION, useMountTransition } from "@/lib/overlay";
 
 /**
  * Floating action bar shown when one or more models are selected in the grid.
@@ -35,13 +36,18 @@ export function BatchToolbar({
   const [moveOpen, setMoveOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Must match the pill's `duration-fast` transition below.
+  const { mounted, state } = useMountTransition(count > 0, DURATION.fast);
 
-  if (count === 0) return null;
+  if (!mounted) return null;
 
   return (
     <>
       <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4 pointer-events-none">
-        <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur">
+        <div
+          data-state={state}
+          className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 shadow-lg backdrop-blur transition-[opacity,transform] duration-fast ease-out data-[state=closed]:translate-y-2 data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:translate-y-0"
+        >
           <span className="px-2 font-mono text-xs font-semibold text-foreground">
             {count} selected
           </span>

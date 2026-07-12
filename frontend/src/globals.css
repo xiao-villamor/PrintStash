@@ -179,16 +179,17 @@
   }
 }
 
-/* Smooth theme transitions — only active during the class swap, not on hovers */
+/* Smooth theme transitions — only active during the class swap, not on hovers.
+   Color properties only: box-shadow is not composited and this selector hits
+   every node in the document. */
 .theme-transitioning,
 .theme-transitioning *,
 .theme-transitioning *::before,
 .theme-transitioning *::after {
   transition:
-    background-color 280ms ease,
-    border-color 280ms ease,
-    color 200ms ease,
-    box-shadow 200ms ease !important;
+    background-color var(--duration-slow) var(--ease-out),
+    border-color var(--duration-slow) var(--ease-out),
+    color var(--duration-fast) var(--ease-out) !important;
 }
 
 @keyframes theme-icon-in {
@@ -259,6 +260,16 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* Sonner's defaults (400ms, its own curve) are off the house scale; retune them.
+   `height` is Sonner's stack collapse when one of several toasts is dismissed —
+   it stays in the list, retimed, because dropping it makes the stack snap. */
+[data-sonner-toast] {
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out),
+    height var(--duration-fast) var(--ease-out) !important;
 }
 
 /* Thin styled scrollbars */

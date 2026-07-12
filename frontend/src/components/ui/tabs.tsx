@@ -85,10 +85,9 @@ export function TabBar<K extends string>({
       {indicator && (
         <span
           aria-hidden
-          className="absolute bottom-0 h-0.5 rounded-full bg-primary transition-[transform,width] duration-fast ease-in-out motion-reduce:transition-none"
+          className="absolute bottom-0 left-0 h-0.5 w-px origin-left rounded-full bg-primary transition-transform duration-fast ease-in-out motion-reduce:transition-none"
           style={{
-            width: Math.max(0, indicator.width - indicatorInset * 2),
-            transform: `translateX(${indicator.left + indicatorInset}px)`,
+            transform: `translateX(${indicator.left + indicatorInset}px) scaleX(${Math.max(0, indicator.width - indicatorInset * 2)})`,
           }}
         />
       )}
