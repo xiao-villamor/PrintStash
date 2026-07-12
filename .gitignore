@@ -52,8 +52,8 @@ docs/*-internal.md
 # AI assistant tooling (kept local, not published)
 .claude/
 .opencode/
-AGENTS.md
-CLAUDE.md
+.agents/
+skills-lock.json
 docs/agents/
 frontend/test-results/
 frontend/playwright-report/
