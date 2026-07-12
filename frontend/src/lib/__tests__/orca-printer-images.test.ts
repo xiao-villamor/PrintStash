@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { printerArtwork } from "@/lib/orca-printer-images";
+import { PRINTER_MODEL_OPTIONS } from "@/lib/printer-providers";
 
 describe("printerArtwork", () => {
+  it("has artwork for every curated Creality model", () => {
+    for (const model of PRINTER_MODEL_OPTIONS.filter((name) => name.startsWith("Creality "))) {
+      expect(printerArtwork(model).source, model).toBe("orca");
+    }
+  });
+
   it("maps a known model to its OrcaSlicer cover", () => {
     const artwork = printerArtwork("Bambu Lab X1 Carbon");
     expect(artwork.source).toBe("orca");

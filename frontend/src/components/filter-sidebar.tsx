@@ -281,10 +281,18 @@ function DroppableAllModels({
 
   return (
     <>
-      <button
+      <div
         ref={setNodeRef}
-        type="button"
+        role="button"
+        tabIndex={0}
+        aria-label="All Models"
         onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onClick();
+          }
+        }}
         className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
           isOver && dragging !== null
             ? "z-10 bg-accent ring-1 ring-primary"
@@ -307,7 +315,7 @@ function DroppableAllModels({
         )}
         <FolderOpen className="h-4 w-4 mr-2 text-primary" />
         All Models
-      </button>
+      </div>
       {isExpanded && displayModels.length > 0 && (
         <div className="ml-5 border-l border-border pl-4 min-w-0">
           {displayModels.map((model) => (

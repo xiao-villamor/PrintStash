@@ -8,7 +8,7 @@ test("log a manual print against an ad-hoc printer; it shows in history", async 
 
   await modelCard(page, name).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("tab", { name: "History" }).click();
   await page.getByRole("button", { name: /Add Record/ }).click();
 
   // Free-text printer name path: pick "Other (not listed)…" and type a name.

@@ -33,8 +33,8 @@ async function grant(
 async function createUser(page: import("@playwright/test").Page, username: string) {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Users & Access" }).click();
-  await page.getByPlaceholder("Username").fill(username);
-  await page.getByPlaceholder("Initial password").fill(USER_PW);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Initial password").fill(USER_PW);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: username })).toBeVisible();
 }
@@ -60,8 +60,8 @@ test("a non-admin user sees only collections granted to them", async ({ page, br
   // ── Admin: create a regular user ────────────────────────────────────────────
   await page.goto("/settings");
   await page.getByRole("button", { name: "Users & Access" }).click();
-  await page.getByPlaceholder("Username").fill(username);
-  await page.getByPlaceholder("Initial password").fill(USER_PW);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Initial password").fill(USER_PW);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("paragraph").filter({ hasText: username })).toBeVisible();
 

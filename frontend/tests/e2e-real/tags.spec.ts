@@ -19,8 +19,9 @@ test("create and delete a tag", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("button", { name: `Delete tag ${tag}` })).toBeVisible();
 
-  // A fresh tag has 0 models, so delete needs no window.confirm.
+  // Tags use the shared confirmation dialog regardless of assignment count.
   await page.getByRole("button", { name: `Delete tag ${tag}` }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
   await expect(page.getByRole("button", { name: `Delete tag ${tag}` })).toHaveCount(0);
 });
 
@@ -35,8 +36,8 @@ test("delete a tag that is assigned to a model (with confirm)", async ({ page })
   const del = page.getByRole("button", { name: `Delete tag ${tag}` });
   await expect(del).toBeVisible();
 
-  // model_count > 0 triggers a window.confirm before deletion.
-  page.once("dialog", (d) => d.accept());
+  // Assigned tags describe their impact in the shared confirmation dialog.
   await del.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
   await expect(page.getByRole("button", { name: `Delete tag ${tag}` })).toHaveCount(0);
 });

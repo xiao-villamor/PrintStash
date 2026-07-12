@@ -4,8 +4,8 @@ test("admin can promote, disable, and reset a user", async ({ page }) => {
   const username = `e2e-mgmt-${Date.now()}`;
   await page.goto("/settings");
   await page.getByRole("button", { name: "Users & Access" }).click();
-  await page.getByPlaceholder("Username").fill(username);
-  await page.getByPlaceholder("Initial password").fill("initpass123");
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Initial password").fill("initpass123");
   await page.getByRole("button", { name: "Create" }).click();
 
   // The user's row: scoped by its username + its own password-reset field.

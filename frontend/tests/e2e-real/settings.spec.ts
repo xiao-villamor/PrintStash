@@ -7,7 +7,7 @@ test("create and revoke an API key", async ({ page }) => {
   await page.getByRole("button", { name: "Users & Access" }).click();
 
   // The key-name field is the input next to the Generate button (pre-filled).
-  const keyField = page.getByRole("button", { name: "Generate" }).locator("xpath=../input");
+  const keyField = page.getByLabel("Key name");
   await keyField.fill(keyName);
   await page.getByRole("button", { name: "Generate" }).click();
 
@@ -106,7 +106,7 @@ test("auto-mark-known-good toggle persists across reload", async ({ page }) => {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Design" }).click();
 
-  const sw = page.getByRole("switch");
+  const sw = page.getByRole("switch", { name: "Auto-mark known good on successful print" });
   await expect(sw).toBeVisible();
   const before = await sw.getAttribute("aria-checked");
 
@@ -121,14 +121,14 @@ test("auto-mark-known-good toggle persists across reload", async ({ page }) => {
 
   await page.reload();
   await page.getByRole("button", { name: "Design" }).click();
-  await expect(page.getByRole("switch")).toHaveAttribute("aria-checked", after!);
+  await expect(page.getByRole("switch", { name: "Auto-mark known good on successful print" })).toHaveAttribute("aria-checked", after!);
 
   // Restore the original so the shared DB doesn't drift for later runs.
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
     ),
-    page.getByRole("switch").click(),
+    page.getByRole("switch", { name: "Auto-mark known good on successful print" }).click(),
   ]);
 });
 
@@ -175,7 +175,7 @@ test("purge-expired empties the trash", async ({ page }) => {
   const name = `e2e-purge-${Date.now()}`;
   await uploadGcodeModel(page, name);
   await modelCard(page, name).click();
-  await page.getByRole("button", { name: /^Delete$/ }).click();
+  await page.getByTitle("Delete model").click();
   await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
 
   await page.goto("/settings");

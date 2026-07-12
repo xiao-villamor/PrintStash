@@ -60,7 +60,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
 
   if (collection) {
     await dialog.getByRole("button", { name: "None" }).click();
-    await dialog.getByRole("button", { name: new RegExp(collection) }).click();
+    await dialog.getByRole("option", { name: new RegExp(collection) }).click();
   }
   if (tag) {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");

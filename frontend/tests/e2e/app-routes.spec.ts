@@ -122,6 +122,12 @@ test("printer detail route preserves the dynamic id and renders live status", as
   await expect(page.getByText("Moonraker", { exact: true })).toBeVisible();
   await expect(page.getByText("ready", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Temperatures")).toBeVisible();
+  await page.getByRole("tab", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Printer settings" })).toBeVisible();
+  const printerName = page.getByLabel("Name");
+  await printerName.fill("Workshop printer");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("heading", { name: "Workshop printer" })).toBeVisible();
   await page.getByRole("tab", { name: "Files" }).click();
   await expect(page.getByText("skadis_kitchen-roll_screw_PLA_30m12s.gcode")).toBeVisible();
   await expect(page.getByText("Failed to fetch")).toHaveCount(0);

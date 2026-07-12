@@ -10,6 +10,7 @@ import {
   PrinterRead,
   PrinterSnapshot,
   PrinterStatus,
+  PrinterUpdate,
 } from "@/types";
 import {
   cancelPrinter,
@@ -27,11 +28,13 @@ import {
   setPrinterTemperature,
   startPrinterFile,
   syncPrinterFiles,
+  updatePrinter,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { cn } from "@/lib/utils";
@@ -64,12 +67,12 @@ const PREHEAT_PRESETS: { name: string; hotend: number; bed: number }[] = [
 ];
 
 const STATUS_COLORS: Record<PrinterStatus, string> = {
-  ready: "bg-emerald-500",
+  ready: "bg-success",
   printing: "bg-primary",
-  paused: "bg-amber-500",
-  offline: "bg-slate-400",
-  unknown: "bg-slate-400",
-  error: "bg-red-600",
+  paused: "bg-warning",
+  offline: "bg-muted-foreground",
+  unknown: "bg-muted-foreground",
+  error: "bg-destructive",
 };
 
 const BTN_SECONDARY = cn(buttonVariants({ variant: "outline", size: "xs" }), "hover:bg-muted");
@@ -131,7 +134,7 @@ export function PrinterDetailPage({
   const [machineBusy, setMachineBusy] = useState<string | null>(null);
   const [hotendTarget, setHotendTarget] = useState("");
   const [bedTarget, setBedTarget] = useState("");
-  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "config" | "diagnostics">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "config" | "diagnostics" | "settings">("status");
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
@@ -380,6 +383,7 @@ export function PrinterDetailPage({
   const toolhead = snapshot.toolhead || {};
   const webhook = snapshot.webhooks || {};
   const progress = typeof vs.progress === "number" ? vs.progress * 100 : null;
+  const hasCurrentPrint = Boolean(ps.filename || ps.state === "printing" || ps.state === "paused");
 
   if (!printer) {
     return (
@@ -494,6 +498,7 @@ export function PrinterDetailPage({
               ? [{ key: "config" as const, label: "Config" }]
               : []),
             { key: "diagnostics" as const, label: "Diagnostics" },
+            { key: "settings" as const, label: "Settings" },
           ]}
           active={activeTab}
           onChange={(k) => {
@@ -507,7 +512,7 @@ export function PrinterDetailPage({
       </div>
 
       {activeTab === "status" && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-panel-in">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 animate-panel-in">
         {/* Current print */}
         <section className={`${SECTION_CLASS} lg:col-span-2`}>
           <div className={SECTION_HEADER_CLASS}>
@@ -515,7 +520,8 @@ export function PrinterDetailPage({
               Current print
             </h2>
           </div>
-          <div className="p-6 space-y-5">
+          {hasCurrentPrint ? (
+          <div className="space-y-5 p-6">
             <Row label="FILE" value={ps.filename || "—"} truncate />
             <Row label="STATE" value={ps.state || "—"} capitalize />
 
@@ -578,6 +584,29 @@ export function PrinterDetailPage({
               </p>
             </div>
           </div>
+          ) : (
+            <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
+              <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
+                <FileText className="h-5 w-5" />
+              </span>
+              <h3 className="text-sm font-semibold text-foreground">No active print</h3>
+              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                {printer.status === "offline"
+                  ? "Printer is offline. Print details will appear after it reconnects."
+                  : "Start a file from the Files tab to see live progress and controls here."}
+              </p>
+              {printer.status !== "offline" && printer.capabilities.can_list_files && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("files")}
+                  className={cn(BTN_SECONDARY, "mt-5")}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Browse files
+                </button>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Temperatures */}
@@ -590,9 +619,11 @@ export function PrinterDetailPage({
             </h2>
             </div>
           </div>
-          <div className="p-6 space-y-5">
-            <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
-            <TempRow label="Bed" cur={bed.temperature} tgt={bed.target} />
+          <div className="space-y-5 p-5">
+            <div className="grid grid-cols-2 gap-3">
+              <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
+              <TempRow label="Bed" cur={bed.temperature} tgt={bed.target} />
+            </div>
 
             {printer.capabilities.can_send_gcode && (
               <div className="border-t border-border pt-4 space-y-4">
@@ -824,6 +855,14 @@ export function PrinterDetailPage({
           </div>
         )}
       </section>
+      )}
+
+      {activeTab === "settings" && (
+        <PrinterSettings
+          printer={printer}
+          canEdit={auth.isAuthenticated}
+          onSaved={(updated) => setPrinter(updated)}
+        />
       )}
 
       {/* History */}
@@ -1119,6 +1158,173 @@ function ConfigSummary({
   );
 }
 
+function PrinterSettings({
+  printer,
+  canEdit,
+  onSaved,
+}: {
+  printer: PrinterRead;
+  canEdit: boolean;
+  onSaved: (printer: PrinterRead) => void;
+}) {
+  const [name, setName] = useState(printer.name);
+  const [modelName, setModelName] = useState(printer.model_name ?? "");
+  const [group, setGroup] = useState(printer.group ?? "");
+  const [notes, setNotes] = useState(printer.notes ?? "");
+  const [address, setAddress] = useState(providerAddress(printer));
+  const [serial, setSerial] = useState(printer.bambu_serial ?? "");
+  const [username, setUsername] = useState(printer.prusalink_username ?? "");
+  const [mainboardId, setMainboardId] = useState(printer.elegoo_centauri_mainboard_id ?? "");
+  const [secret, setSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const secretLabel = printer.provider === "bambu_lan"
+    ? "LAN access code"
+    : printer.provider === "prusalink"
+      ? printer.prusalink_auth_mode === "api_key" ? "API key" : "Password"
+      : printer.provider === "elegoo_centauri"
+        ? "Printer access code"
+        : printer.provider === "octoprint"
+          ? "API key"
+          : "Moonraker API key";
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canEdit || saving) return;
+    setSaving(true);
+    setError(null);
+    const payload: PrinterUpdate = {
+      name: name.trim(),
+      model_name: modelName,
+      group,
+      notes,
+    };
+    if (printer.provider === "moonraker") {
+      payload.moonraker_url = address;
+      if (secret) payload.api_key = secret;
+    } else if (printer.provider === "bambu_lan") {
+      payload.bambu_host = address;
+      payload.bambu_serial = serial;
+      if (secret) payload.bambu_access_code = secret;
+    } else if (printer.provider === "prusalink") {
+      payload.prusalink_url = address;
+      payload.prusalink_username = username;
+      if (secret) {
+        if (printer.prusalink_auth_mode === "api_key") payload.prusalink_api_key = secret;
+        else payload.prusalink_password = secret;
+      }
+    } else if (printer.provider === "elegoo_centauri") {
+      payload.elegoo_centauri_host = address;
+      payload.elegoo_centauri_mainboard_id = mainboardId;
+      if (secret) payload.elegoo_centauri_access_code = secret;
+    } else if (printer.provider === "octoprint") {
+      payload.octoprint_url = address;
+      if (secret) payload.octoprint_api_key = secret;
+    }
+    try {
+      const updated = await updatePrinter(printer.id, payload);
+      onSaved(updated);
+      setSecret("");
+      toast.success("Printer settings saved");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not save printer settings";
+      setError(message);
+      toast.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
+      <div className={SECTION_HEADER_CLASS}>
+        <div className="flex items-center gap-2">
+          <Settings className="h-4 w-4 text-muted-foreground" />
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Printer settings</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Connection and display details</p>
+          </div>
+        </div>
+        <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
+          Save changes
+        </Button>
+      </div>
+      <div className="grid gap-6 p-5 lg:grid-cols-2 lg:p-6">
+        <div className="space-y-4">
+          <SettingsField label="Name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} required disabled={!canEdit} />
+          </SettingsField>
+          <SettingsField label="Model" hint="Optional display override">
+            <Input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder={printer.detected_model ?? "Auto-detected"} disabled={!canEdit} />
+          </SettingsField>
+          <SettingsField label="Group" hint="Optional farm grouping">
+            <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Workshop" disabled={!canEdit} />
+          </SettingsField>
+          <SettingsField label="Notes">
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={4}
+              disabled={!canEdit}
+              className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </SettingsField>
+        </div>
+        <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Connection</p>
+            <p className="mt-1 text-xs text-muted-foreground">{providerLabel(printer)} configuration</p>
+          </div>
+          <SettingsField label={printer.provider === "moonraker" || printer.provider === "prusalink" || printer.provider === "octoprint" ? "URL" : "Host or IP"}>
+            <Input value={address} onChange={(e) => setAddress(e.target.value)} required disabled={!canEdit} />
+          </SettingsField>
+          {printer.provider === "bambu_lan" && (
+            <SettingsField label="Printer serial">
+              <Input value={serial} onChange={(e) => setSerial(e.target.value)} required disabled={!canEdit} />
+            </SettingsField>
+          )}
+          {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
+            <SettingsField label="Username">
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} required disabled={!canEdit} />
+            </SettingsField>
+          )}
+          {printer.provider === "elegoo_centauri" && printer.provider_variant === "elegoo_centauri_carbon" && (
+            <SettingsField label="Mainboard ID" hint="Used for reliable reconnection">
+              <Input value={mainboardId} onChange={(e) => setMainboardId(e.target.value)} disabled={!canEdit} />
+            </SettingsField>
+          )}
+          <SettingsField label={secretLabel} hint="Leave blank to keep current value">
+            <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Unchanged" disabled={!canEdit} />
+          </SettingsField>
+          {!canEdit && <p className="text-xs text-warning">Sign in to edit printer settings.</p>}
+          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function SettingsField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block space-y-1.5">
+      <span className="flex items-center justify-between gap-3 text-xs font-medium text-foreground">
+        {label}
+        {hint && <span className="font-normal text-muted-foreground">{hint}</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
 function ConfigBlock({
   title,
   data,
@@ -1295,22 +1501,22 @@ function TempRow({
     ? Math.min(100, Math.max(0, (cur / tgt) * 100))
     : null;
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className="rounded-md border border-border bg-muted/30 p-3">
+      <div className="flex items-center gap-1.5">
+        <Thermometer className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
-        <span className="font-mono text-xs text-foreground font-semibold">
-          {cur != null ? cur.toFixed(1) : "—"}°C
-          {tgt != null && tgt > 0 && (
-            <span className="ml-1.5 text-muted-foreground font-normal">
-              / {tgt.toFixed(0)}°C
-            </span>
-          )}
-        </span>
+      </div>
+      <div className="mt-2 font-mono text-xl font-semibold leading-none text-foreground">
+        {cur != null ? cur.toFixed(1) : "—"}
+        <span className="ml-0.5 text-xs font-normal text-muted-foreground">°C</span>
+      </div>
+      <div className="mt-1 min-h-4 font-mono text-3xs text-muted-foreground">
+        {tgt != null && tgt > 0 ? `Target ${tgt.toFixed(0)}°C` : "No target"}
       </div>
       {pct != null && (
-        <div className="h-1 w-full overflow-hidden rounded bg-muted">
+        <div className="mt-2 h-1 w-full overflow-hidden rounded bg-muted">
           <div
             className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
             style={{ transform: `scaleX(${pct / 100})` }}

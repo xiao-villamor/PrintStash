@@ -441,6 +441,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/printers/3") {
+    if (req.method === "PATCH") {
+      drainRequest(req, () => sendJson(res, { ...printer, name: "Workshop printer" }));
+      return;
+    }
     sendJson(res, printer);
     return;
   }

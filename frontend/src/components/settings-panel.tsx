@@ -1500,6 +1500,7 @@ export function SettingsPanel() {
               <button
                 type="button"
                 role="switch"
+                aria-label="Auto-mark known good on successful print"
                 aria-checked={autoMarkKnownGood}
                 disabled={!user || autoMarkBusy}
                 onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}

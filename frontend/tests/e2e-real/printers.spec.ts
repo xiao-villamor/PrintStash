@@ -19,8 +19,8 @@ test("add and remove a printer", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-  // Remove — the list uses a native confirm() dialog.
-  page.on("dialog", (d) => d.accept());
-  await page.getByRole("button", { name: "Remove" }).click();
+  // Remove through the card action and shared confirmation dialog.
+  await card.locator("xpath=ancestor::article").getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
   await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
 });

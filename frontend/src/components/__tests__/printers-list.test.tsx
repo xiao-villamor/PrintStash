@@ -84,6 +84,25 @@ async function openForm() {
 }
 
 describe("printer setup", () => {
+  it("submits only once when add is triggered twice before request resolves", async () => {
+    let resolveCreate!: () => void;
+    vi.mocked(createPrinter).mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = () => resolve({} as PrinterRead); }),
+    );
+    await openForm();
+    await userEvent.type(screen.getByLabelText("Name"), "Voron");
+    await userEvent.type(screen.getByLabelText("Moonraker URL"), "http://voron.local:7125");
+    const form = screen.getAllByRole("button", { name: /^add printer$/i }).at(-1)!
+      .closest("form")!;
+
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(createPrinter).toHaveBeenCalledTimes(1);
+    resolveCreate();
+    await waitFor(() => expect(screen.queryByText("Adding...")).not.toBeInTheDocument());
+  });
+
   it("submits PrusaLink Digest credentials without mixing provider fields", async () => {
     await openForm();
     await userEvent.type(screen.getByLabelText("Name"), "Prusa MK4");

@@ -29,7 +29,7 @@ test("a username + API key authenticates, and stops once revoked", async ({ page
   await page.goto("/settings");
   await page.getByRole("button", { name: "Users & Access" }).click();
 
-  await page.getByRole("button", { name: "Generate" }).locator("xpath=../input").fill(keyName);
+  await page.getByLabel("Key name").fill(keyName);
   await page.getByRole("button", { name: "Generate" }).click();
   const secret = (await page.locator("code").first().innerText()).trim();
   expect(secret.length).toBeGreaterThan(10);

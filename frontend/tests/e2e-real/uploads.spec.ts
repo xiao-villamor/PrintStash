@@ -9,7 +9,7 @@ test("upload an STL mesh-only model; the mesh lands as the source", async ({ pag
   // ingest without a rendered thumbnail. Prove the mesh attached as the source.
   await modelCard(page, name).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await page.getByRole("button", { name: /Files/ }).click();
+  await page.getByRole("tab", { name: /Files/ }).click();
   await expect(page.getByText(`${name}.stl`).first()).toBeVisible();
 });
 

@@ -45,6 +45,19 @@
   failures behind the common provider error surface. Adding a printer backend is
   now a single small class, so future providers arrive faster and behave
   consistently from the first release.
+- **Printer management refresh.** Printer cards can optionally show model
+  artwork, detected models can be corrected inline, and provider badges now use
+  the shared visual language. Printer detail has a clearer idle/offline Status
+  view, compact temperature telemetry, and a new Settings tab for editing names,
+  groups, notes, model overrides, connection addresses, and provider credentials.
+- **Dashboard-wide UI polish.** Document pages now share one responsive width
+  and heading pattern; Settings, Statistics, Profiles, Organize, navigation,
+  empty states, errors, and destructive confirmations use the same semantic
+  surfaces and controls. Browser tabs also identify the current PrintStash page.
+- **Consistent motion and feedback.** Model grids settle in with a short capped
+  stagger, the batch toolbar rises and fades with selection, tabs move on the
+  compositor, and modals, drawers, menus, and toasts use the same fast motion
+  scale with symmetric close animations and reduced-motion support.
 
 ### Fixed
 
@@ -65,6 +78,12 @@
 - **The batch selection toolbar animates.** Selecting models popped the toolbar
   into existence with no transition; it now rises and fades, and reverses
   cleanly when a selection is toggled rapidly.
+- **Printer creation ignores duplicate submits.** Rapidly pressing **Add
+  printer** can no longer create multiple database rows and unexpectedly advance
+  the printer URL ID.
+- **Navigation and overlays are more accessible.** Active navigation links now
+  expose their current-page state, focus behavior is consistent, and shared
+  confirmation dialogs replace browser-native destructive prompts.
 
 ### Performance
 

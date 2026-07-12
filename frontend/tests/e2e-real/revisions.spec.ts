@@ -17,7 +17,7 @@ test("g-code revision workflow: auto-recommend, re-recommend, status, compare", 
   await expect(page.getByRole("heading", { name })).toBeVisible();
 
   // The first uploaded G-code is auto-marked recommended.
-  await page.getByRole("button", { name: /Revisions/ }).click();
+  await page.getByRole("tab", { name: /Revisions/ }).click();
   await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
   await expect(revRow(page, 1).getByText("Recommended")).toBeVisible();
 

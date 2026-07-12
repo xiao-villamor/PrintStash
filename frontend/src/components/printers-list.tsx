@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "@/lib/navigation";
 import { PrinterRead } from "@/types";
 import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
@@ -18,6 +18,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ModalShell } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
@@ -155,9 +156,12 @@ export function PrintersPage() {
                     {p.name}
                   </Link>
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <span className="rounded border border-border px-1.5 py-0.5 text-3xs uppercase tracking-wider text-muted-foreground">
+                    <Badge
+                      variant="outline"
+                      className="h-5 border-border bg-muted/50 px-2 font-mono text-3xs font-medium uppercase tracking-wider text-muted-foreground"
+                    >
                       {providerLabel(p)}
-                    </span>
+                    </Badge>
                     {p.capabilities.support_level === "beta" && (
                       <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-3xs uppercase tracking-wider text-amber-600">
                         Beta
@@ -339,7 +343,7 @@ function PrinterModelBadge({
               setEditing(false);
             }
           }}
-          className="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="rounded border border-border bg-background px-1.5 py-0.5 text-3xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           <option value="">Select model</option>
           {PRINTER_MODEL_OPTIONS.map((model) => (
@@ -354,7 +358,7 @@ function PrinterModelBadge({
             value={customValue}
             onChange={(e) => setCustomValue(e.target.value)}
             placeholder="Custom model name"
-            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-3xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
         )}
         <button
@@ -407,10 +411,13 @@ function AddPrinterModal({
   const [centauriMainboardId, setCentauriMainboardId] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setErr(null);
     try {
@@ -472,6 +479,7 @@ function AddPrinterModal({
       setErr(e instanceof Error ? e.message : "Could not add printer");
       toast.error(e);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
@@ -642,20 +650,20 @@ function AddPrinterModal({
             </div>
           )}
           <div className="flex justify-end gap-3 pt-2">
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={onClose}
-              className="px-4 py-2 rounded border border-border text-muted-foreground text-xs uppercase tracking-wider hover:bg-muted transition-colors"
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
-              disabled={submitting || !name || !url}
-              className="px-4 py-2 rounded bg-primary text-primary-foreground text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              loading={submitting}
+              disabled={!name || !url}
             >
-              {submitting ? "Adding..." : "Add printer"}
-            </button>
+              Add printer
+            </Button>
           </div>
         </form>
     </ModalShell>

@@ -78,10 +78,10 @@ test("create, edit and preview a markdown document in a collection", async ({ pa
   const card = page.getByText("Assembly guide");
   await expect(card).toBeVisible();
 
-  // Cleanup: delete the doc (window.confirm) so the shared DB stays clean.
-  page.once("dialog", (d) => d.accept());
+  // Cleanup: delete the doc through the shared confirmation dialog.
   await card.hover();
   await page.getByTitle("Delete document").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
   await expect(page.getByText("No documents here yet.")).toBeVisible();
 });
 
@@ -122,8 +122,8 @@ test("upload a PDF and render it in the pdf.js viewer", async ({ page }) => {
   await page.goto(`/?c=${col}&v=docs`);
   const docCard = page.locator('a[href^="/documents/"]').first();
   await expect(docCard).toBeVisible();
-  page.once("dialog", (d) => d.accept());
   await docCard.hover();
   await page.getByTitle("Delete document").click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
   await expect(page.getByText("No documents here yet.")).toBeVisible();
 });
