@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -12,11 +12,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { BarChart3, Boxes, Clock, Coins, Layers, Weight } from "lucide-react";
+import { BarChart3, Boxes, Clock, Coins, Layers, Settings2, Weight } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -49,14 +51,8 @@ const CHART_TYPES = [
 ] as const;
 type ChartType = (typeof CHART_TYPES)[number]["id"];
 
-// Shared accent — the app's light-mode blue, legible on both themes.
-const ACCENT = "#3b82f6";
-
-// Recharts renders axes/cursor as SVG attributes, where `var(--…)` does NOT
-// resolve (it falls back to black — invisible on dark). So chart chrome uses a
-// fixed slate tone (slate-400) that reads on both light and dark backgrounds.
-// The tooltip is the exception: it's real DOM, so it can use theme classes.
-const CHROME = "#94a3b8";
+const ACCENT = "var(--chart-1)";
+const CHROME = "var(--chart-grid)";
 const AXIS_TICK = { fill: CHROME } as const;
 const CURSOR_FILL = { fill: CHROME, fillOpacity: 0.18 } as const;
 const CURSOR_LINE = { stroke: ACCENT, strokeOpacity: 0.4 } as const;
@@ -115,8 +111,8 @@ function Segmented<T extends string>({
           aria-pressed={value === opt.id}
           className={`rounded px-2.5 py-1 text-xs font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${
             value === opt.id
-              ? "bg-primary text-primary-foreground"
-              : "text-muted-foreground hover:text-foreground"
+              ? "bg-accent text-accent-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
           {opt.label}
@@ -130,15 +126,22 @@ function MetricCard({
   icon: Icon,
   label,
   value,
+  tone = "blue",
 }: {
   icon: typeof Coins;
   label: string;
   value: string;
+  tone?: "blue" | "cyan" | "violet";
 }) {
+  const toneClasses = {
+    blue: "bg-accent text-primary",
+    cyan: "bg-chart-cyan-soft text-chart-cyan",
+    violet: "bg-chart-violet-soft text-chart-violet",
+  }[tone];
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardContent className="flex items-center gap-3 p-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-primary">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${toneClasses}`}>
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0">
@@ -155,6 +158,61 @@ function MetricCard({
 function filamentLabel(f: FilamentStatRead): string {
   if (f.material_type && f.material_brand) return `${f.material_brand} ${f.material_type}`;
   return f.material_type || f.material_brand || "Unknown";
+}
+
+type WidgetId = "collections" | "filaments" | "models" | "printers";
+const WIDGETS: { id: WidgetId; label: string }[] = [
+  { id: "models", label: "Most printed models" },
+  { id: "printers", label: "Printer workload" },
+  { id: "filaments", label: "Filament usage" },
+  { id: "collections", label: "Top collections" },
+];
+
+function RankingCard({
+  title,
+  data,
+  valueLabel,
+  tone = "blue",
+  formatValue = (value) => String(value),
+}: {
+  title: string;
+  data: { name: string; value: number }[];
+  valueLabel: string;
+  tone?: "blue" | "cyan" | "violet";
+  formatValue?: (value: number) => string;
+}) {
+  const max = Math.max(...data.map((item) => item.value), 1);
+  const fill = {
+    blue: "bg-chart-blue",
+    cyan: "bg-chart-cyan",
+    violet: "bg-chart-violet",
+  }[tone];
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b border-border/70 pb-3">
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+        <p className="text-xs text-muted-foreground">Ranked by {valueLabel.toLowerCase()}</p>
+      </CardHeader>
+      <CardContent className="pt-4">
+        {data.length === 0 ? (
+          <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">No data for this period</p>
+        ) : (
+          <ol className="space-y-3">
+            {data.slice(0, 8).map((item, index) => (
+              <li key={`${item.name}-${index}`} className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
+                <span className="row-span-2 font-mono text-2xs tabular-nums text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                <span className="truncate text-xs font-medium text-foreground" title={item.name}>{item.name}</span>
+                <span className="font-mono text-2xs tabular-nums text-muted-foreground">{formatValue(item.value)}</span>
+                <div className="col-span-2 col-start-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div className={`h-full origin-left rounded-full ${fill}`} style={{ transform: `scaleX(${item.value / max})` }} />
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function TimeSeriesCard({
@@ -186,15 +244,17 @@ function TimeSeriesCard({
         : String(Math.round(v));
 
   const grid = (
-    <CartesianGrid strokeDasharray="3 3" stroke={CHROME} strokeOpacity={0.25} />
+    <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={CHROME} strokeOpacity={0.32} />
   );
   const xAxis = (
-    <XAxis dataKey="bucket" fontSize={11} tickLine={false} tick={AXIS_TICK} />
+    <XAxis dataKey="bucket" fontSize={11} tickLine={false} axisLine={false} tickMargin={10} tick={AXIS_TICK} tickFormatter={(value) => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${value}T00:00:00`))} />
   );
   const yAxis = (
     <YAxis
       fontSize={11}
       tickLine={false}
+      axisLine={false}
+      tickMargin={8}
       width={56}
       tick={AXIS_TICK}
       tickFormatter={(v) => formatValue(Number(v))}
@@ -208,9 +268,9 @@ function TimeSeriesCard({
   );
 
   return (
-    <Card>
-      <CardHeader className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <CardTitle className="text-base">{metricLabel} over time</CardTitle>
+    <Card className="overflow-hidden">
+      <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div><CardTitle className="text-sm font-semibold">{metricLabel} over time</CardTitle><p className="mt-1 text-xs text-muted-foreground">Completed jobs in selected period</p></div>
         <div className="flex flex-wrap gap-2">
           <Segmented options={METRICS} value={metric} onChange={setMetric} />
           <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
@@ -222,7 +282,7 @@ function TimeSeriesCard({
             <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={ACCENT} stopOpacity={0.4} />
+                  <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
                   <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
                 </linearGradient>
               </defs>
@@ -236,6 +296,7 @@ function TimeSeriesCard({
                 stroke={ACCENT}
                 strokeWidth={2}
                 fill="url(#metricFill)"
+                activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
               />
             </AreaChart>
           ) : chartType === "line" ? (
@@ -250,6 +311,7 @@ function TimeSeriesCard({
                 stroke={ACCENT}
                 strokeWidth={2}
                 dot={false}
+                activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
               />
             </LineChart>
           ) : (
@@ -270,9 +332,11 @@ function TimeSeriesCard({
 function StatsContent({
   stats,
   currency,
+  visibleWidgets,
 }: {
   stats: PrintStatisticsRead;
   currency: string;
+  visibleWidgets: Set<WidgetId>;
 }) {
   if (stats.total_prints === 0) {
     return (
@@ -293,22 +357,30 @@ function StatsContent({
   }));
   const filamentData = stats.top_filaments.map((f) => ({
     name: filamentLabel(f),
-    prints: f.print_count,
+    value: f.total_g ?? 0,
   }));
+  const modelData = stats.top_models.map((m) => ({ name: m.name, value: m.print_count }));
+  const printerData = stats.top_printers.map((p) => ({ name: p.name, value: Math.round(p.print_time_s / 3600) }));
+  const collectionRanking = collectionData.map((c) => ({ name: c.name, value: c.prints }));
+  const periodDays = stats.start_at
+    ? Math.max(1, (new Date(stats.end_at).getTime() - new Date(stats.start_at).getTime()) / 86400000)
+    : Math.max(1, stats.cost_over_time.length);
+  const weeklyFilament = stats.total_filament_g == null ? null : stats.total_filament_g / periodDays * 7;
 
   return (
     <div className="space-y-6 animate-panel-in">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard
           icon={Coins}
           label="Total cost"
           value={formatCurrency(stats.total_cost, currency)}
         />
-        <MetricCard icon={Boxes} label="Prints" value={String(stats.total_prints)} />
+        <MetricCard icon={Boxes} label="Prints" value={String(stats.total_prints)} tone="cyan" />
         <MetricCard
           icon={Weight}
           label="Filament used"
           value={formatFilament(stats.total_filament_g)}
+          tone="violet"
         />
         <MetricCard
           icon={Layers}
@@ -320,82 +392,18 @@ function StatsContent({
           label="Print time"
           value={formatDuration(stats.total_print_time_s)}
         />
+        <MetricCard icon={Weight} label="7-day forecast" value={formatFilament(weeklyFilament)} tone="violet" />
       </div>
 
       <TimeSeriesCard stats={stats} currency={currency} />
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Top collections</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={Math.max(160, collectionData.length * 36)}>
-              <BarChart
-                data={collectionData}
-                layout="vertical"
-                margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-              >
-                <XAxis
-                  type="number"
-                  fontSize={11}
-                  tickLine={false}
-                  allowDecimals={false}
-                  tick={AXIS_TICK}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  fontSize={11}
-                  tickLine={false}
-                  width={120}
-                  tick={AXIS_TICK}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Prints" />}
-                  cursor={CURSOR_FILL}
-                />
-                <Bar dataKey="prints" fill={ACCENT} radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <p className="-mt-3 text-xs text-muted-foreground">7-day forecast uses selected period’s daily filament average.</p>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Most used filaments</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={Math.max(160, filamentData.length * 36)}>
-              <BarChart
-                data={filamentData}
-                layout="vertical"
-                margin={{ top: 0, right: 16, left: 0, bottom: 0 }}
-              >
-                <XAxis
-                  type="number"
-                  fontSize={11}
-                  tickLine={false}
-                  allowDecimals={false}
-                  tick={AXIS_TICK}
-                />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  fontSize={11}
-                  tickLine={false}
-                  width={120}
-                  tick={AXIS_TICK}
-                />
-                <Tooltip
-                  content={<ChartTooltip valueLabel="Prints" />}
-                  cursor={CURSOR_FILL}
-                />
-                <Bar dataKey="prints" fill={ACCENT} radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <div className="grid gap-6 lg:grid-cols-2">
+        {visibleWidgets.has("models") && <RankingCard title="Most printed models" data={modelData} valueLabel="Prints" formatValue={(value) => `${value}×`} />}
+        {visibleWidgets.has("printers") && <RankingCard title="Printer workload" data={printerData} valueLabel="Print hours" tone="cyan" formatValue={(value) => `${value}h`} />}
+        {visibleWidgets.has("filaments") && <RankingCard title="Filament usage" data={filamentData} valueLabel="Filament weight" tone="violet" formatValue={formatFilament} />}
+        {visibleWidgets.has("collections") && <RankingCard title="Top collections" data={collectionRanking} valueLabel="Prints" formatValue={(value) => `${value}×`} />}
       </div>
     </div>
   );
@@ -403,18 +411,48 @@ function StatsContent({
 
 export default function StatisticsPage() {
   const [period, setPeriod] = useState<StatsPeriod>("30d");
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(
+    () => new Set(WIDGETS.map((widget) => widget.id)),
+  );
   const { data, isLoading, isError } = usePrintStatistics(period);
   const { data: config } = useVaultConfig();
   const currency = config?.currency ?? "USD";
+
+  useEffect(() => {
+    const saved = window.localStorage.getItem("printstash:statistics-widgets");
+    if (saved) {
+      try { setVisibleWidgets(new Set(JSON.parse(saved) as WidgetId[])); } catch { /* Ignore invalid old preference. */ }
+    }
+  }, []);
+
+  function toggleWidget(id: WidgetId) {
+    setVisibleWidgets((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      window.localStorage.setItem("printstash:statistics-widgets", JSON.stringify([...next]));
+      return next;
+    });
+  }
 
   return (
     <PageContainer>
       <PageHeader
         title="Statistics"
         description="Cost, filament and print activity from completed jobs"
-        actions={
+        actions={<div className="flex flex-wrap items-center gap-2">
           <Segmented options={PERIODS.map((p) => ({ id: p.value, label: p.label }))} value={period} onChange={setPeriod} />
-        }
+          <DropdownMenu
+            open={customizeOpen}
+            onOpenChange={setCustomizeOpen}
+            role="dialog"
+            trigger={<Button data-menu-trigger variant="outline" size="xs" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={() => setCustomizeOpen((open) => !open)}><Settings2 className="h-3.5 w-3.5" />Customize</Button>}
+            contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
+          >
+            <p className="px-2 pb-2 text-xs font-semibold">Visible ranking charts</p>
+            {WIDGETS.map((widget) => <label key={widget.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"><input type="checkbox" checked={visibleWidgets.has(widget.id)} onChange={() => toggleWidget(widget.id)} className="h-4 w-4 accent-primary" />{widget.label}</label>)}
+          </DropdownMenu>
+        </div>}
       />
 
       {isLoading && (
@@ -429,7 +467,7 @@ export default function StatisticsPage() {
           </CardContent>
         </Card>
       )}
-      {data && <StatsContent stats={data} currency={currency} />}
+      {data && <StatsContent stats={data} currency={currency} visibleWidgets={visibleWidgets} />}
     </PageContainer>
   );
 }

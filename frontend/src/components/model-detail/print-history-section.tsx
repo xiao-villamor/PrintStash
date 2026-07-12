@@ -164,8 +164,8 @@ export function PrintHistorySection({
                 onClick={() => { setMode(m); setImportResults([]); setImportDone(false); }}
                 className={`px-3 py-1 font-mono text-3xs uppercase tracking-wider rounded transition-colors ${
                   mode === m
-                    ? "bg-primary text-primary-foreground"
-                    : "border border-outline-variant text-on-surface-variant hover:bg-surface-container-high"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-on-surface-variant hover:bg-surface-container-high"
                 }`}
               >
                 {m === "manual" ? "Manual Entry" : "Auto from Printer"}

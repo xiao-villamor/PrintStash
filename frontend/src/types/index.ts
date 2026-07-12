@@ -20,6 +20,8 @@ export type {
   CollectionStatRead,
   FilamentStatRead,
   TimeBucketRead,
+  ModelStatRead,
+  PrinterStatRead,
   PrintStatisticsRead,
   ModelUpdate,
   ManualPrintJobCreate,

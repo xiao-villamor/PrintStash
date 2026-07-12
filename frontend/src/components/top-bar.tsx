@@ -286,7 +286,7 @@ function ProfileMenu({
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const className = `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
           active
-            ? "bg-accent text-accent-foreground ring-1 ring-inset ring-primary/20 dark:ring-0"
+            ? "bg-accent text-accent-foreground"
             : "text-foreground hover:bg-popover-hover hover:text-foreground"
         } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
         if (item.external) {

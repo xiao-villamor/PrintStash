@@ -1577,7 +1577,7 @@ export function SettingsPanel() {
                           onClick={() => updateCardMetric(slot, opt.id as CardMetricId)}
                           className={`group flex items-center gap-2 px-3 py-2 rounded border text-sm transition-colors ${
                             isSelected
-                              ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                              ? "border-transparent bg-accent text-accent-foreground"
                               : usedInOther
                               ? "border-dashed border-border bg-transparent text-muted-foreground/50 cursor-not-allowed"
                               : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-muted"
@@ -1586,7 +1586,7 @@ export function SettingsPanel() {
                           <span
                             className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${
                               isSelected
-                                ? "border-primary-foreground bg-primary-foreground text-primary"
+                                ? "border-accent-foreground bg-accent-foreground text-accent"
                                 : "border-border text-transparent"
                             }`}
                           >
@@ -1601,7 +1601,7 @@ export function SettingsPanel() {
                             <span
                               className={`font-mono text-3xs uppercase tracking-wider ${
                                 isSelected
-                                  ? "text-primary-foreground/80"
+                                  ? "text-accent-foreground/80"
                                   : "text-muted-foreground"
                               }`}
                             >
@@ -1663,7 +1663,7 @@ export function SettingsPanel() {
                       onClick={() => updateMetadataPreference(field.id, !visible)}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                         visible
-                          ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
+                          ? "border-transparent bg-accent text-accent-foreground hover:bg-accent"
                           : "border-dashed border-border bg-transparent text-muted-foreground/60 hover:border-border hover:text-foreground"
                       }`}
                     >

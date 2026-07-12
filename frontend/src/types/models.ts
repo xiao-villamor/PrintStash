@@ -216,6 +216,20 @@ export interface TimeBucketRead {
   print_count: number;
 }
 
+export interface ModelStatRead {
+  model_id: number;
+  name: string;
+  print_count: number;
+  total_g: number | null;
+}
+
+export interface PrinterStatRead {
+  printer_id: number | null;
+  name: string;
+  print_count: number;
+  print_time_s: number;
+}
+
 export interface PrintStatisticsRead {
   period: string;
   start_at: string | null;
@@ -227,6 +241,8 @@ export interface PrintStatisticsRead {
   total_print_time_s: number;
   top_collections: CollectionStatRead[];
   top_filaments: FilamentStatRead[];
+  top_models: ModelStatRead[];
+  top_printers: PrinterStatRead[];
   cost_over_time: TimeBucketRead[];
 }
 

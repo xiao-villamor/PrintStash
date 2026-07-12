@@ -132,7 +132,7 @@ export default function SharePage() {
               disabled={!canShowModel}
               className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 activeViewerMode === "model"
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={canShowModel ? "3D model view" : "No mesh in this share"}
@@ -145,7 +145,7 @@ export default function SharePage() {
               disabled={!canShowGcode}
               className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 activeViewerMode === "gcode"
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={canShowGcode ? "G-code toolpath preview" : "No G-code in this share"}
@@ -211,7 +211,7 @@ export default function SharePage() {
                     onClick={() => setDisplayMode(mode)}
                     className={`h-9 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors ${
                       displayMode === mode
-                        ? "bg-primary text-primary-foreground"
+                        ? "bg-accent text-accent-foreground"
                         : "text-on-surface-variant hover:bg-surface-container-high"
                     }`}
                   >

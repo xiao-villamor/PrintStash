@@ -248,6 +248,20 @@ class TimeBucketRead(BaseModel):
     print_count: int = 0
 
 
+class ModelStatRead(BaseModel):
+    model_id: int
+    name: str
+    print_count: int = 0
+    total_g: Optional[float] = None
+
+
+class PrinterStatRead(BaseModel):
+    printer_id: Optional[int] = None
+    name: str
+    print_count: int = 0
+    print_time_s: int = 0
+
+
 class PrintStatisticsRead(BaseModel):
     period: str
     start_at: Optional[datetime] = None
@@ -259,6 +273,8 @@ class PrintStatisticsRead(BaseModel):
     total_print_time_s: int = 0
     top_collections: List[CollectionStatRead] = []
     top_filaments: List[FilamentStatRead] = []
+    top_models: List[ModelStatRead] = []
+    top_printers: List[PrinterStatRead] = []
     cost_over_time: List[TimeBucketRead] = []
 
 

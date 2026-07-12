@@ -405,7 +405,7 @@ function PrinterModelPicker({
               type="button"
               aria-pressed={brand === item}
               onClick={() => setBrand(item)}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-press ease-out active:scale-[0.98] ${brand === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-popover-foreground"}`}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-press ease-out active:scale-[0.98] ${brand === item ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-popover-foreground"}`}
             >
               {item}
             </button>

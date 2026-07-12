@@ -38,7 +38,7 @@ export function ViewerToolbar({
             onClick={() => setViewerMode("model")}
             className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
               viewerMode === "model"
-                ? "bg-primary text-primary-foreground"
+                ? "bg-accent text-accent-foreground"
                 : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
             title="3D model view"
@@ -49,7 +49,7 @@ export function ViewerToolbar({
             onClick={() => setViewerMode("gcode")}
             className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
               viewerMode === "gcode"
-                ? "bg-primary text-primary-foreground"
+                ? "bg-accent text-accent-foreground"
                 : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
             title="G-code toolpath preview"
@@ -69,7 +69,7 @@ export function ViewerToolbar({
                 onClick={() => setDisplayMode(m)}
                 className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors ${
                   displayMode === m
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-accent text-accent-foreground"
                     : "text-on-surface-variant hover:bg-surface-container-high"
                 }`}
               >

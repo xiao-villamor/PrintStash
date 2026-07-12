@@ -25,9 +25,10 @@ variable** — `bg-primary`, not `bg-[var(--primary)]`.
 
 ### Color
 
-Every color has a light and a dark value; the dark theme swaps the primary from
-blue to orange. Never hand-encode that swap (`blue-600 dark:orange-400`) — use
-the semantic token and it follows the theme for free.
+Every color has a light and a dark value. Primary actions stay blue in both
+themes so their meaning does not change with appearance. Never hand-encode a
+theme swap (`blue-600 dark:orange-400`) — use the semantic token and it follows
+the theme for free.
 
 | Token | Use |
 | --- | --- |
@@ -36,19 +37,37 @@ the semantic token and it follows the theme for free.
 | `popover` / `popover-foreground` | Floating panels: menus, pickers |
 | `popover-hover` | Perceptible hover/focus fill for items inside floating panels |
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
-| `primary` / `primary-foreground` | Primary action. `primary-hover` for hover, `primary-soft` for selection rings |
-| `accent` / `accent-foreground` | Tinted hover/selected states |
+| `primary` / `primary-foreground` | Primary action only. `primary-hover` for hover, `primary-soft` for focus/selection rings |
+| `accent` / `accent-foreground` | Tinted hover/selected controls; use together without an additional border or ring |
 | `destructive` / `destructive-foreground` | Delete and other irreversible actions |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
 | `surface-*`, `on-surface*`, `outline*` | The elevation scale, for multi-layer panels |
 
 **Pair a background with its `-foreground`.** `bg-primary` takes
-`text-primary-foreground`, which is white in light mode and dark in dark mode.
-Hardcoding `text-white` on a primary button breaks contrast in the dark theme.
+`text-primary-foreground`, which is white in both themes. Keep using the paired
+token rather than hardcoding `text-white`, so future palette changes remain
+safe.
 
 Focus rings are `ring-ring`. A hardcoded `focus:ring-orange-500` is a bug: it
 stays orange in the light theme.
+
+### Action and selection colors
+
+Primary actions and selected controls are deliberately different:
+
+- A command that starts work (`Upload`, `Save`, `Send`) uses
+  `bg-primary text-primary-foreground hover:bg-primary-hover` or the default
+  `Button` variant.
+- A control that represents current state (segmented option, view mode, active
+  filter or selected tab) uses `bg-accent text-accent-foreground`.
+- Do not put `bg-primary text-primary-foreground` on selected controls. It gives
+  navigation the same weight as a primary action.
+- Do not add a border or ring to a filled selected control. Its tinted fill is
+  the state indicator; outlines are reserved for keyboard focus via
+  `focus-visible:ring-ring`.
+- Orange belongs to `warning` or explicitly tertiary/status content. It is not
+  an action or selection color.
 
 ### Radius, type, elevation
 

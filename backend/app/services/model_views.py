@@ -50,6 +50,8 @@ from app.schemas.models import (
     ModelListItem,
     ModelPrinterPresenceRead,
     ModelRead,
+    ModelStatRead,
+    PrinterStatRead,
     PrintStatisticsRead,
     PrintSummaryRead,
     StorageUsageRead,
@@ -977,8 +979,12 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
             PrintJob.finished_at,
             PrintJob.created_at,
             Model.collection_id,
+            Model.id,
+            Model.name,
             Collection.name,
             Collection.path,
+            Printer.id,
+            Printer.name,
             Metadata.material_type,
             Metadata.material_brand,
             Metadata.estimated_time_s,
@@ -987,6 +993,7 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         .outerjoin(Metadata, Metadata.file_id == File.id)
         .join(Model, Model.id == PrintJob.model_id)
         .outerjoin(Collection, Collection.id == Model.collection_id)
+        .outerjoin(Printer, Printer.id == PrintJob.printer_id)
         .where(
             live(PrintJob),
             PrintJob.state == PrintJobState.COMPLETED,
@@ -1009,6 +1016,8 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
 
     collection_acc: dict[Optional[int], dict] = {}
     filament_acc: dict[tuple, dict] = {}
+    model_acc: dict[int, dict] = {}
+    printer_acc: dict[Optional[int], dict] = {}
     time_acc: dict[str, dict] = {}
 
     for (
@@ -1018,8 +1027,12 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         finished_at,
         created_at,
         cid,
+        model_id,
+        model_name,
         cname,
         cpath,
+        printer_id,
+        printer_name,
         mtype,
         mbrand,
         estimated_time_s,
@@ -1052,6 +1065,27 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         if cost is not None:
             c["total_cost"] += cost
             c["has_cost"] = True
+
+        model_stat = model_acc.setdefault(
+            model_id,
+            {"name": model_name, "print_count": 0, "total_g": 0.0, "has_g": False},
+        )
+        model_stat["print_count"] += 1
+        if grams is not None:
+            model_stat["total_g"] += grams
+            model_stat["has_g"] = True
+
+        printer_stat = printer_acc.setdefault(
+            printer_id,
+            {
+                "name": printer_name or "Unassigned / manual",
+                "print_count": 0,
+                "print_time_s": 0,
+            },
+        )
+        printer_stat["print_count"] += 1
+        if duration is not None:
+            printer_stat["print_time_s"] += duration
 
         # Top filaments grouped by (material_type, material_brand).
         f = filament_acc.setdefault(
@@ -1121,6 +1155,30 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         )
     ][:10]
 
+    top_models = [
+        ModelStatRead(
+            model_id=model_id,
+            name=v["name"],
+            print_count=v["print_count"],
+            total_g=round(v["total_g"], 2) if v["has_g"] else None,
+        )
+        for model_id, v in sorted(
+            model_acc.items(), key=lambda kv: kv[1]["print_count"], reverse=True
+        )
+    ][:10]
+
+    top_printers = [
+        PrinterStatRead(
+            printer_id=printer_id,
+            name=v["name"],
+            print_count=v["print_count"],
+            print_time_s=v["print_time_s"],
+        )
+        for printer_id, v in sorted(
+            printer_acc.items(), key=lambda kv: kv[1]["print_time_s"], reverse=True
+        )
+    ][:10]
+
     cost_over_time = [
         TimeBucketRead(
             bucket=key,
@@ -1138,11 +1196,11 @@ def print_statistics(session: Session, period: str) -> PrintStatisticsRead:
         total_prints=len(rows),
         total_cost=round(total_cost, 4) if has_cost else None,
         total_filament_g=round(total_filament_g, 2) if has_filament else None,
-        avg_filament_g=(
-            round(grams_sum / grams_samples, 2) if grams_samples else None
-        ),
+        avg_filament_g=(round(grams_sum / grams_samples, 2) if grams_samples else None),
         total_print_time_s=total_duration_s,
         top_collections=top_collections,
         top_filaments=top_filaments,
+        top_models=top_models,
+        top_printers=top_printers,
         cost_over_time=cost_over_time,
     )

@@ -43,6 +43,12 @@
     --warning: #d97706;
     --warning-foreground: #ffffff;
 
+    /* Data visualisation palette. Stable semantic order across themes. */
+    --chart-1: #2563eb;
+    --chart-2: #0891b2;
+    --chart-3: #7c3aed;
+    --chart-grid: #cbd5e1;
+
     /* Motion tokens — the single source of truth for easing and duration.
        --ease-out is the curve this codebase already used in slide-up/card-in. */
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -96,9 +102,9 @@
     --popover-foreground: #e3eaf3;
     --popover-hover: #26384d;
 
-    /* Interactive */
-    --primary: #fb923c;
-    --primary-foreground: #0b1017;
+    /* Interactive — action semantics stay blue in both themes. */
+    --primary: #2563eb;
+    --primary-foreground: #ffffff;
     --secondary: #94a3b8;
     --secondary-foreground: #0b1017;
 
@@ -106,11 +112,9 @@
     --muted: #1d2a3a;
     --muted-foreground: #a5b5c9;
 
-    /* Accent — orange tint */
-    /* A restrained warm tint keeps selected states distinct without turning
-       dark-mode navigation into a saturated brown block. */
-    --accent: #332316;
-    --accent-foreground: #ffb56b;
+    /* Selected and hovered controls use a quiet blue tint. */
+    --accent: #172554;
+    --accent-foreground: #bfdbfe;
 
     /* Status */
     --destructive: #f87171;
@@ -119,15 +123,19 @@
     /* Borders & inputs */
     --border: #2a3b50;
     --input: #1d2a3a;
-    --ring: #fb923c;
+    --ring: #60a5fa;
 
-    --primary-hover: #ea580c;
-    --primary-soft: rgb(251 146 60 / 0.4);
+    --primary-hover: #1d4ed8;
+    --primary-soft: rgb(96 165 250 / 0.4);
 
     --success: #4ade80;
     --success-foreground: #052e16;
     --warning: #fbbf24;
     --warning-foreground: #451a03;
+    --chart-1: #60a5fa;
+    --chart-2: #22d3ee;
+    --chart-3: #a78bfa;
+    --chart-grid: #48617c;
 
     /* Surface scale — clear luminosity steps */
     --surface: #0b1017;
@@ -142,7 +150,7 @@
     --on-surface-variant: #a5b5c9;
     --outline: #48617c;
     --outline-variant: #2a3b50;
-    --surface-tint: #fb923c;
+    --surface-tint: #60a5fa;
 
     /* Containers */
     --primary-container: #1b3356;
@@ -169,6 +177,16 @@
     --tertiary-fixed: #ffedd5;
     --tertiary-fixed-dim: #fb923c;
   }
+}
+
+@layer utilities {
+  .bg-chart-blue { background-color: var(--chart-1); }
+  .bg-chart-cyan { background-color: var(--chart-2); }
+  .bg-chart-violet { background-color: var(--chart-3); }
+  .bg-chart-cyan-soft { background-color: color-mix(in srgb, var(--chart-2) 14%, transparent); }
+  .bg-chart-violet-soft { background-color: color-mix(in srgb, var(--chart-3) 14%, transparent); }
+  .text-chart-cyan { color: var(--chart-2); }
+  .text-chart-violet { color: var(--chart-3); }
 }
 
 @layer base {

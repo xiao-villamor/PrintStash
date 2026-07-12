@@ -177,7 +177,7 @@ function CollectionTreeRow({
           ref={rowRef}
           className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
             isOver && dragging !== null && canDrop
-              ? "z-10 bg-accent ring-1 ring-primary"
+              ? "z-10 bg-accent"
               : isSelected
               ? "text-accent-foreground bg-accent"
               : "text-foreground hover:bg-muted"
@@ -295,7 +295,7 @@ function DroppableAllModels({
         }}
         className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
           isOver && dragging !== null
-            ? "z-10 bg-accent ring-1 ring-primary"
+            ? "z-10 bg-accent"
             : selected
             ? "text-accent-foreground bg-accent"
             : "text-foreground hover:bg-muted"
