@@ -502,11 +502,18 @@ class BambuLanProvider(BaseProvider):
             client = self._mqtt_client()
             client.connect(self.host, 8883, keepalive=30)
             client.loop_start()
-            client.publish(
+            info = client.publish(
                 self._request_topic, json.dumps(payload), qos=1, retain=False
             )
-            client.loop_stop()
-            client.disconnect()
+            try:
+                info.wait_for_publish(timeout=10)
+            finally:
+                client.loop_stop()
+                client.disconnect()
+            if not info.is_published():
+                raise ProviderError(
+                    "bambu_command_not_published", code="provider_transport_error"
+                )
 
         try:
             await asyncio.to_thread(_publish)

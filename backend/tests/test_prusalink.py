@@ -61,6 +61,23 @@ async def test_api_key_status_is_normalized() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("raw_progress", "expected"), [(1, 0.01), (0.5, 0.005)])
+async def test_low_progress_is_not_misread_as_complete(
+    raw_progress: float, expected: float
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/status":
+            return httpx.Response(200, json={"printer": {"state": "PRINTING"}})
+        return httpx.Response(
+            200,
+            json={"id": 1, "state": "PRINTING", "progress": raw_progress},
+        )
+
+    result = await _client(handler).query_status()
+    assert result["result"]["status"]["virtual_sdcard"]["progress"] == expected
+
+
+@pytest.mark.asyncio
 async def test_digest_auth_challenge_is_answered() -> None:
     requests: list[httpx.Request] = []
 

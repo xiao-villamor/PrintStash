@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from pycentauri.models import Status
 
-from app.services.elegoo_centauri import ElegooCentauriClient
+from app.services.elegoo_centauri import ElegooCentauriClient, ElegooCentauriError
 
 
 def _status(code: int = 13) -> Status:
@@ -118,6 +118,49 @@ async def test_centauri_controls_use_control_enabled_connections() -> None:
         "stop",
     ]
     assert all(connection.closed for connection in connections)
+
+
+@pytest.mark.asyncio
+async def test_network_drop_during_action_becomes_provider_error() -> None:
+    connection = FakeConnection()
+
+    async def failing_status() -> Status:
+        raise OSError("connection reset")
+
+    connection.status = failing_status  # type: ignore[method-assign]
+
+    async def connector(enable_control: bool) -> FakeConnection:
+        return connection
+
+    client = ElegooCentauriClient(
+        "192.168.1.50",
+        model="elegoo_centauri_carbon",
+        connector=connector,
+    )
+    with pytest.raises(ElegooCentauriError):
+        await client.query_status()
+    assert connection.closed is True
+
+
+@pytest.mark.asyncio
+async def test_close_failure_in_finally_is_swallowed() -> None:
+    connection = FakeConnection()
+
+    async def failing_close() -> None:
+        raise OSError("already gone")
+
+    connection.close = failing_close  # type: ignore[method-assign]
+
+    async def connector(enable_control: bool) -> FakeConnection:
+        return connection
+
+    client = ElegooCentauriClient(
+        "192.168.1.50",
+        model="elegoo_centauri_carbon",
+        connector=connector,
+    )
+    result = await client.query_status()
+    assert result["result"]["status"]["print_stats"]["state"] == "printing"
 
 
 @pytest.mark.asyncio

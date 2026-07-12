@@ -641,7 +641,7 @@ async def send_to_printer(
             .get("print_stats", {})
             .get("state", "")
         ).lower()
-        if state not in {"standby", "ready", "idle"}:
+        if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
             raise HTTPException(status_code=409, detail="printer_not_ready")
     f = get_or_404(session, File, payload.file_id, "file_not_found")
     if f.file_type != FileType.GCODE:

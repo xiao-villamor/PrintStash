@@ -81,6 +81,59 @@ async def test_idle_printer_has_no_file_and_is_standby() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_files_flattens_nested_folders() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    {
+                        "name": "sub",
+                        "path": "sub",
+                        "type": "folder",
+                        "children": [
+                            {
+                                "name": "nested.gcode",
+                                "path": "sub/nested.gcode",
+                                "type": "machinecode",
+                                "size": 9,
+                            }
+                        ],
+                    },
+                    {
+                        "name": "top.gcode",
+                        "path": "top.gcode",
+                        "type": "machinecode",
+                        "size": 5,
+                    },
+                ]
+            },
+        )
+
+    files = await _client(handler).list_files()
+    paths = {entry["path"] for entry in files}
+    assert paths == {"sub/nested.gcode", "top.gcode"}
+
+
+@pytest.mark.asyncio
+async def test_upload_to_subfolder_posts_path_field(tmp_path: Path) -> None:
+    seen: list[tuple[str, str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.content))
+        return httpx.Response(200, json={})
+
+    source = tmp_path / "cube.gcode"
+    source.write_text("G28\n")
+    client = _client(handler)
+    await client.upload(source, "sub/dir/cube.gcode")
+    assert ("POST", "/api/files/local") in {(m, p) for m, p, _ in seen}
+    body = next(content for method, path, content in seen if path == "/api/files/local")
+    assert b'name="path"' in body
+    assert b"sub/dir" in body
+
+
+@pytest.mark.asyncio
 async def test_file_operations_and_controls(tmp_path: Path) -> None:
     seen: list[tuple[str, str]] = []
 

@@ -96,8 +96,15 @@ class ElegooCentauriClient:
             raise
         except PrinterError as exc:
             raise ElegooCentauriError(str(exc)) from exc
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ElegooCentauriError(str(exc)) from exc
         finally:
-            await connection.close()
+            try:
+                await connection.close()
+            except Exception:
+                # ponytail: close() is best-effort cleanup; a network drop
+                # here shouldn't shadow the real error (or mask success).
+                pass
 
     async def info(self) -> dict[str, Any]:
         return {
@@ -203,5 +210,10 @@ class ElegooCentauriClient:
                     return
         except PrinterError as exc:
             raise ElegooCentauriError(str(exc)) from exc
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ElegooCentauriError(str(exc)) from exc
         finally:
-            await connection.close()
+            try:
+                await connection.close()
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                pass

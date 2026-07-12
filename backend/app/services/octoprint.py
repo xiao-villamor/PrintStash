@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path, PurePosixPath
 from typing import Any, Awaitable, Callable
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -168,17 +168,19 @@ class OctoPrintClient:
             },
         }
 
-    async def list_files(self) -> list[dict[str, Any]]:
-        body = await self._request("GET", "/api/files?recursive=true")
-        files = body.get("files", body if isinstance(body, list) else [])
-        if not isinstance(files, list):
-            return []
+    @classmethod
+    def _flatten_files(cls, items: list[Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
-        for item in files:
-            if not isinstance(item, dict) or item.get("type") not in (
-                None,
-                "machinecode",
-            ):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type == "folder":
+                children = item.get("children")
+                if isinstance(children, list):
+                    result.extend(cls._flatten_files(children))
+                continue
+            if item_type not in (None, "machinecode"):
                 continue
             result.append(
                 {
@@ -190,17 +192,32 @@ class OctoPrintClient:
             )
         return result
 
+    async def list_files(self) -> list[dict[str, Any]]:
+        body = await self._request("GET", "/api/files?recursive=true")
+        files = body.get("files", body if isinstance(body, list) else [])
+        if not isinstance(files, list):
+            return []
+        return self._flatten_files(files)
+
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
         *parent_parts, filename = target.split("/")
-        location = f"local/{'/'.join(parent_parts)}" if parent_parts else "local"
-        with local_path.open("rb") as source:
-            body = await self._request(
-                "POST",
-                f"/api/files/{location}",
-                files={"file": (filename, source, "application/octet-stream")},
-                data={"select": "false", "print": "false"},
-            )
+        # OctoPrint's upload endpoint is always POST /api/files/local; a
+        # subfolder target goes in the `path` form field, not the URL
+        # (`/api/files/local/sub/dir` is not a valid endpoint and 404s).
+        data = {"select": "false", "print": "false"}
+        if parent_parts:
+            data["path"] = "/".join(unquote(part) for part in parent_parts)
+        # ponytail: whole-file read off the loop via a thread; fine for
+        # typical gcode sizes. Chunked/streaming upload is the upgrade path
+        # if hundreds-of-MB files start pressuring RAM.
+        content = await asyncio.to_thread(local_path.read_bytes)
+        body = await self._request(
+            "POST",
+            "/api/files/local",
+            files={"file": (filename, content, "application/octet-stream")},
+            data=data,
+        )
         return body if isinstance(body, dict) else {"ok": True}
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]:

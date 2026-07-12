@@ -152,8 +152,9 @@ class PrusaLinkClient:
             progress = float(progress_value or 0)
         except (TypeError, ValueError):
             progress = 0.0
-        if progress > 1:
-            progress /= 100.0
+        # PrusaLink reports progress/completion on a 0-100 scale (both the
+        # v1 `progress` number and the legacy `completion` field), never 0-1.
+        progress /= 100.0
         telemetry = (
             printer.get("telemetry")
             if isinstance(printer.get("telemetry"), dict)
@@ -205,17 +206,20 @@ class PrusaLinkClient:
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
-        with local_path.open("rb") as source:
-            body = await self._request(
-                "PUT",
-                f"/api/v1/files/local/{target}",
-                content=source.read(),
-                headers={
-                    "Content-Type": "text/x.gcode",
-                    "Overwrite": "?1",
-                    "Print-After-Upload": "?0",
-                },
-            )
+        # ponytail: whole-file read off the loop via a thread; fine for
+        # typical gcode sizes. Chunked/streaming upload is the upgrade path
+        # if hundreds-of-MB files start pressuring RAM.
+        content = await asyncio.to_thread(local_path.read_bytes)
+        body = await self._request(
+            "PUT",
+            f"/api/v1/files/local/{target}",
+            content=content,
+            headers={
+                "Content-Type": "text/x.gcode",
+                "Overwrite": "?1",
+                "Print-After-Upload": "?0",
+            },
+        )
         return body if isinstance(body, dict) else {"ok": True}
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]:

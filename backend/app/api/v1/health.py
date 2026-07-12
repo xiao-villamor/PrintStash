@@ -95,6 +95,7 @@ def _provider_probe() -> dict:
         provider_diagnostic_summary(PrinterProvider.BAMBU_LAN),
         provider_diagnostic_summary(PrinterProvider.PRUSALINK),
         provider_diagnostic_summary(PrinterProvider.ELEGOO_CENTAURI),
+        provider_diagnostic_summary(PrinterProvider.OCTOPRINT),
     ]
     try:
         with get_session_factory().session() as session:
