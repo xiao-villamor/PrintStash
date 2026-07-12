@@ -51,6 +51,13 @@ export function useOverlayBehavior(
   onClose: () => void,
   panelRef: RefObject<HTMLElement | null>,
 ) {
+  // Callers pass an inline onClose, so a parent re-render would otherwise
+  // re-run this effect — stealing focus back to the panel mid-typing.
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
     const restoreTo = document.activeElement as HTMLElement | null;
@@ -61,7 +68,7 @@ export function useOverlayBehavior(
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        close.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -89,5 +96,5 @@ export function useOverlayBehavior(
       document.body.style.overflow = "";
       restoreTo?.focus();
     };
-  }, [open, onClose, panelRef]);
+  }, [open, panelRef]);
 }
