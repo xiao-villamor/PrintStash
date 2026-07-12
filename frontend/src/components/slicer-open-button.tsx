@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ExternalLink } from "lucide-react";
 
 import { getJson } from "@/lib/api/request";
 import { toast } from "@/lib/toast";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 
 type Slicer = {
   name: string;
@@ -52,18 +53,6 @@ export function SlicerOpenButton({
   size?: "sm" | "md";
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
   const chevronSize = size === "sm" ? "h-2.5 w-2.5" : "h-3 w-3";
@@ -90,32 +79,40 @@ export function SlicerOpenButton({
   }
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title="Open in slicer"
-        className="inline-flex items-center gap-0.5 text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
-      >
-        <ExternalLink className={iconSize} />
-        <ChevronDown className={chevronSize} />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded border border-[var(--outline-variant)] bg-[var(--surface)] shadow-lg">
-          <p className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] border-b border-[var(--outline-variant)]">
-            Open in slicer
-          </p>
-          {slicers.map(({ name, scheme }) => (
-            <button
-              key={scheme}
-              type="button"
-              onClick={() => openInSlicer(scheme)}
-              className="block w-full px-3 py-2 text-left font-mono text-xs text-[var(--on-surface)] hover:bg-[var(--surface-container-low)] transition-colors last:rounded-b"
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <DropdownMenu
+      open={open}
+      onOpenChange={setOpen}
+      align="end"
+      role="menu"
+      trigger={
+        <button
+          data-menu-trigger
+          onClick={() => setOpen((o) => !o)}
+          title="Open in slicer"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
+        >
+          <ExternalLink className={iconSize} />
+          <ChevronDown className={chevronSize} />
+        </button>
+      }
+      contentClassName="min-w-[10rem] rounded border border-outline-variant bg-surface shadow-lg"
+    >
+      <p className="px-3 py-1.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant border-b border-outline-variant">
+        Open in slicer
+      </p>
+      {slicers.map(({ name, scheme }) => (
+        <button
+          key={scheme}
+          type="button"
+          role="menuitem"
+          onClick={() => openInSlicer(scheme)}
+          className="block w-full px-3 py-2 text-left font-mono text-xs text-on-surface hover:bg-surface-container-low focus-visible:bg-surface-container-low outline-none transition-colors last:rounded-b"
+        >
+          {name}
+        </button>
+      ))}
+    </DropdownMenu>
   );
 }

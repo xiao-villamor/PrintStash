@@ -18,16 +18,16 @@ export function SettingsTab({
   return (
     <>
       {printSettingRows.length === 0 && (
-        <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+        <p className="font-mono text-xs text-on-surface-variant">
           No print settings recorded yet. Add a sliced G-code revision to capture them.
         </p>
       )}
       {printSettingRows.length > 0 && (
         <section>
-          <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
+          <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
             Print Settings
           </h2>
-          <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
+          <div className="bg-surface border border-outline-variant rounded flex flex-col">
             {printSettingRows.map((row, index) => (
               <SettingRow
                 key={row.label}
@@ -46,10 +46,10 @@ export function SettingsTab({
       {((preferences.mesh_volume && meta?.volume_mm3)
         || (preferences.mesh_triangles && meta?.triangle_count)) && (
         <section>
-          <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)]">
+          <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
             Mesh Geometry
           </h2>
-          <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
+          <div className="bg-surface border border-outline-variant rounded flex flex-col">
             {preferences.mesh_volume && meta?.volume_mm3 && (
               <SettingRow
                 label="VOLUME"
@@ -66,7 +66,7 @@ export function SettingsTab({
 
       {/* Slicer info */}
       {preferences.slicer_info && meta?.slicer_name && (
-        <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+        <p className="font-mono text-xs text-on-surface-variant">
           Sliced with {meta.slicer_name}
           {meta.slicer_version ? ` v${meta.slicer_version}` : ""}
         </p>

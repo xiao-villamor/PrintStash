@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
 import { Link } from "@/lib/navigation";
 import {
@@ -22,6 +22,7 @@ import { useAuth } from "@/lib/auth-context";
 import { lastVaultHref } from "@/lib/last-collection";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import {
   clearCompletedTasks,
   listTasks,
@@ -75,7 +76,7 @@ function TopBarSearch() {
           <Search className="h-5 w-5 text-muted-foreground" />
         </div>
         <input
-          className="block w-full pl-10 pr-10 sm:pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-orange-500 dark:border-orange-500/40 text-sm transition-colors"
+          className="block w-full pl-10 pr-10 sm:pr-14 py-2 border border-border rounded-lg leading-5 bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:bg-background focus:ring-1 focus:ring-ring focus:border-primary dark:border-primary-soft text-sm transition-colors"
           placeholder="Search PrintStash..."
           type="text"
           value={value}
@@ -106,8 +107,6 @@ export function TopBar() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const tasksRef = useRef<HTMLDivElement>(null);
-  const profileRef = useRef<HTMLDivElement>(null);
   // The logo returns to the model browser, restoring the last folder the user
   // was in rather than always resetting to "All Models". Recomputed whenever the
   // route changes (e.g. arriving on Settings) so it reflects the remembered
@@ -122,16 +121,6 @@ export function TopBar() {
     return subscribeTasks(() => setTasks(listTasks()));
   }, []);
 
-  useEffect(() => {
-    if (!tasksOpen && !profileOpen) return;
-    function onPointerDown(event: MouseEvent) {
-      if (!tasksRef.current?.contains(event.target as Node)) setTasksOpen(false);
-      if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false);
-    }
-    window.addEventListener("mousedown", onPointerDown);
-    return () => window.removeEventListener("mousedown", onPointerDown);
-  }, [tasksOpen, profileOpen]);
-
   function handleLogout() {
     logout();
     setProfileOpen(false);
@@ -142,7 +131,7 @@ export function TopBar() {
     <header className="h-16 bg-background border-b border-border flex items-center justify-between px-4 z-40 relative">
       {/* Logo */}
       <Link href={homeHref} className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
-        <div className="w-8 h-8 bg-blue-600 dark:bg-orange-600 rounded flex items-center justify-center flex-shrink-0">
+        <div className="w-8 h-8 bg-primary rounded flex items-center justify-center flex-shrink-0">
           <BrandMark className="h-6 w-6 text-white" />
         </div>
         <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">PrintStash</span>
@@ -163,44 +152,61 @@ export function TopBar() {
           Wiki
         </a>
         <ThemeToggle />
-        <div ref={tasksRef} className="relative hidden sm:flex">
-          <button
-            type="button"
-            onClick={() => setTasksOpen((v) => !v)}
-            className="relative text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
-            aria-label="Notifications"
-            title="Notifications"
-          >
-            <Bell className="h-4 w-4" />
-            {tasks.some((t) => t.status === "pending" || t.status === "running") && (
-              <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-blue-500 dark:bg-orange-500 ring-2 ring-background" />
-            )}
-          </button>
-          {tasksOpen && (
-            <TaskPopover
-              tasks={tasks}
-              onClear={() => {
-                clearCompletedTasks();
-                setTasks(listTasks());
-              }}
-            />
-          )}
-        </div>
+        <DropdownMenu
+          open={tasksOpen}
+          onOpenChange={setTasksOpen}
+          align="end"
+          role="dialog"
+          className="hidden sm:flex"
+          trigger={
+            <button
+              type="button"
+              data-menu-trigger
+              onClick={() => setTasksOpen((v) => !v)}
+              className="relative text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
+              aria-label="Notifications"
+              title="Notifications"
+              aria-haspopup="dialog"
+              aria-expanded={tasksOpen}
+            >
+              <Bell className="h-4 w-4" />
+              {tasks.some((t) => t.status === "pending" || t.status === "running") && (
+                <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-primary ring-2 ring-background" />
+              )}
+            </button>
+          }
+        >
+          <TaskPopover
+            tasks={tasks}
+            onClear={() => {
+              clearCompletedTasks();
+              setTasks(listTasks());
+            }}
+          />
+        </DropdownMenu>
         <div className="h-8 w-px bg-muted hidden sm:block" />
         {/* Profile — hidden on mobile, where the bottom nav's "More" sheet owns
             the account actions (the avatar menu only duplicated nav links). */}
-        <div ref={profileRef} className="relative hidden sm:block">
-          {!loading && !user ? (
+        {!loading && !user ? (
+          <div className="relative hidden sm:block">
             <Link
               href="/login"
-              className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors"
+              className="flex items-center px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover transition-colors"
             >
               Log In
             </Link>
-          ) : (
-            <>
+          </div>
+        ) : (
+          <DropdownMenu
+            open={profileOpen}
+            onOpenChange={setProfileOpen}
+            align="end"
+            role="menu"
+            className="hidden sm:block"
+            trigger={
               <button
                 type="button"
+                data-menu-trigger
                 onClick={() => setProfileOpen((v) => !v)}
                 className="flex items-center space-x-2 focus:outline-none group"
                 aria-haspopup="menu"
@@ -214,17 +220,16 @@ export function TopBar() {
                 </span>
                 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform group-hover:text-muted-foreground hidden sm:block ${profileOpen ? "rotate-180" : ""}`} />
               </button>
-              {profileOpen && (
-                <ProfileMenu
-                  pathname={pathname}
-                  isAdmin={!!user?.is_superuser}
-                  onNavigate={() => setProfileOpen(false)}
-                  onLogout={handleLogout}
-                />
-              )}
-            </>
-          )}
-        </div>
+            }
+          >
+            <ProfileMenu
+              pathname={pathname}
+              isAdmin={!!user?.is_superuser}
+              onNavigate={() => setProfileOpen(false)}
+              onLogout={handleLogout}
+            />
+          </DropdownMenu>
+        )}
       </div>
     </header>
   );
@@ -252,14 +257,13 @@ function ProfileMenu({
 
   return (
     <div
-      role="menu"
-      className="absolute right-0 top-full mt-3 w-48 overflow-hidden rounded border border-border bg-popover py-1 shadow-lg"
+      className="w-48 overflow-hidden rounded border border-border bg-popover py-1 shadow-lg"
     >
       {items.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const className = `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
           active
-            ? "bg-blue-50 dark:bg-orange-500/10 text-blue-700 dark:text-orange-400"
+            ? "bg-accent text-accent-foreground"
             : "text-foreground hover:bg-muted hover:text-foreground"
         } ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
         if (item.external) {
@@ -298,11 +302,11 @@ function TaskPopover({
   onClear: () => void;
 }) {
   return (
-    <div className="absolute right-0 top-full mt-2 w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg">
+    <div className="w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Tasks</span>
+        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">Tasks</span>
         {tasks.some((t) => t.status === "completed" || t.status === "failed") && (
-          <button onClick={onClear} className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground">
+          <button onClick={onClear} className="font-mono text-3xs uppercase tracking-wider text-muted-foreground hover:text-foreground">
             Clear done
           </button>
         )}
@@ -327,7 +331,7 @@ function TaskRow({ task }: { task: TaskItem }) {
       <div className="flex items-start gap-3">
         <div className="mt-0.5">
           {active ? (
-            <Loader2 className="h-4 w-4 animate-spin text-blue-600 dark:text-orange-500" />
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
           ) : task.status === "completed" ? (
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
           ) : (
@@ -337,15 +341,15 @@ function TaskRow({ task }: { task: TaskItem }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{task.title}</p>
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{task.status}</span>
+            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">{task.status}</span>
           </div>
           {task.detail && (
             <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{task.detail}</p>
           )}
           <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
             <div
-              className={`h-full transition-all duration-300 ${task.status === "failed" ? "bg-red-500" : "bg-blue-600 dark:bg-orange-600"}`}
-              style={{ width: `${task.progress}%` }}
+              className={`h-full w-full origin-left transition-transform duration-slow ease-linear ${task.status === "failed" ? "bg-red-500" : "bg-primary"}`}
+              style={{ transform: `scaleX(${Math.min(100, task.progress) / 100})` }}
             />
           </div>
         </div>

@@ -188,17 +188,17 @@ export function SendToButtons({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider">Klipper status</span>
-        <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded">
+        <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Klipper status</span>
+        <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
           {printersLoading ? (
             <>
-              <Loader2 className="h-3 w-3 animate-spin text-[var(--on-surface-variant)]" />
-              <span className="font-mono text-xs text-[var(--on-surface-variant)]">Checking…</span>
+              <Loader2 className="h-3 w-3 animate-spin text-on-surface-variant" />
+              <span className="font-mono text-xs text-on-surface-variant">Checking…</span>
             </>
           ) : printers.length === 0 ? (
             <>
-              <WifiOff className="h-3 w-3 text-[var(--on-surface-variant)]" />
-              <span className="font-mono text-xs text-[var(--on-surface-variant)]">No printers</span>
+              <WifiOff className="h-3 w-3 text-on-surface-variant" />
+              <span className="font-mono text-xs text-on-surface-variant">No printers</span>
             </>
           ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
             <>
@@ -218,7 +218,7 @@ export function SendToButtons({
         </div>
       </div>
       {displayError && !showSend && (
-        <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
+        <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
           {displayError}
         </div>
       )}
@@ -226,7 +226,7 @@ export function SendToButtons({
       {showSend ? (
         <div className="space-y-3">
           {printers.length > 0 && (
-            <div className="space-y-1.5 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-2">
+            <div className="space-y-1.5 rounded border border-outline-variant bg-surface-container-lowest p-2">
               {printers.map((printer) => {
                 const disabled = !printer.capabilities.can_upload;
                 return (
@@ -234,8 +234,8 @@ export function SendToButtons({
                     key={printer.id}
                     className={`flex items-center justify-between gap-3 rounded px-2 py-1.5 font-mono text-xs ${
                       disabled
-                        ? "text-[var(--on-surface-variant)]/60"
-                        : "text-[var(--on-surface)] hover:bg-[var(--surface-container-low)]"
+                        ? "text-on-surface-variant/60"
+                        : "text-on-surface hover:bg-surface-container-low"
                     }`}
                   >
                     <span className="flex min-w-0 items-center gap-2">
@@ -248,7 +248,7 @@ export function SendToButtons({
                       />
                       <span className="truncate">{printer.name}</span>
                     </span>
-                    <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <span className="shrink-0 text-3xs uppercase tracking-wider text-on-surface-variant">
                       {disabled ? "Unsupported" : printer.status}
                     </span>
                   </label>
@@ -257,14 +257,14 @@ export function SendToButtons({
             </div>
           )}
           {availablePrinters.length === 0 && (
-            <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-600 font-mono">
+            <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2 text-2xs text-amber-600 font-mono">
               No configured printer supports Vault upload/send.
             </div>
           )}
           <select
             value={selectedFile}
             onChange={(e) => setSelectedFile(Number(e.target.value))}
-            className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+            className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
           >
             {gcodeFiles.map((f) => (
               <option key={f.id} value={f.id}>
@@ -274,7 +274,7 @@ export function SendToButtons({
               </option>
             ))}
           </select>
-          <label className="flex items-center gap-2 text-xs font-mono text-[var(--on-surface-variant)]">
+          <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
             <input type="checkbox" checked={startPrint} onChange={(e) => setStartPrint(e.target.checked)} className="rounded" />
             Start print immediately
           </label>
@@ -282,7 +282,7 @@ export function SendToButtons({
             <select
               value={selectedSpoolId}
               onChange={(e) => setSelectedSpoolId(e.target.value ? Number(e.target.value) : "")}
-              className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
             >
               <option value="">No spool</option>
               {spools.map((s) => (
@@ -297,7 +297,7 @@ export function SendToButtons({
             </select>
           )}
           {selectedUploads.length > 0 && (
-            <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-2 text-[11px] text-emerald-600 font-mono break-words">
+            <div className="rounded border border-emerald-500/30 bg-emerald-500/10 p-2 text-2xs text-emerald-600 font-mono break-words">
               Already on{" "}
               {selectedUploads
                 .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
@@ -305,32 +305,32 @@ export function SendToButtons({
             </div>
           )}
           {displayError && (
-            <div className="rounded border border-[var(--error)]/30 bg-[var(--error-container)]/20 p-2 text-[11px] text-[var(--error)] font-mono break-words">
+            <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
               {displayError}
             </div>
           )}
           <div className="flex gap-2">
-            <button onClick={() => setShowSend(false)} disabled={sending} className="flex-1 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors disabled:opacity-50">Cancel</button>
-            <button onClick={send} disabled={sending || selectedPrinters.length === 0} className="flex-1 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
+            <button onClick={() => setShowSend(false)} disabled={sending} className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50">Cancel</button>
+            <button onClick={send} disabled={sending || selectedPrinters.length === 0} className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {sending ? "Sending…" : startPrint ? "Send & Print" : "Send"}
             </button>
           </div>
         </div>
       ) : printers.length === 0 ? (
-        <div className="space-y-2 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
+        <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
           <div className="flex items-center gap-2">
-            <WifiOff className="h-4 w-4 text-[var(--on-surface-variant)]" />
-            <span className="font-mono text-xs uppercase tracking-wider text-[var(--on-surface)]">
+            <WifiOff className="h-4 w-4 text-on-surface-variant" />
+            <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
               No printers configured
             </span>
           </div>
-          <p className="font-mono text-[11px] text-[var(--on-surface-variant)] leading-relaxed">
+          <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
             Connect Klipper / Moonraker to send files directly to a printer.
           </p>
           <Link
             href="/printers"
-            className="mt-1 w-full py-2 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+            className="mt-1 w-full py-2 bg-primary text-primary-foreground hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
           >
             <PrinterIcon className="h-4 w-4" /> Configure printer
           </Link>
@@ -343,7 +343,7 @@ export function SendToButtons({
               setShowSend(true);
             }}
             disabled={!auth.isAuthenticated}
-            className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-2.5 bg-primary text-primary-foreground hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {!auth.isAuthenticated ? (
               <><Send className="h-4 w-4" /> Sign in to send</>
@@ -351,7 +351,7 @@ export function SendToButtons({
               <><Send className="h-4 w-4" /> Send to printer</>
             )}
           </button>
-          <Link href="/printers" className="w-full py-2 border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors rounded font-mono text-xs uppercase tracking-wider text-center">
+          <Link href="/printers" className="w-full py-2 border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors rounded font-mono text-xs uppercase tracking-wider text-center">
             Manage printers
           </Link>
         </div>

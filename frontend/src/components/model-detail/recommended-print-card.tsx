@@ -61,43 +61,43 @@ export function RecommendedPrintCard({
 
   return (
     <section>
-      <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)] flex items-center gap-2">
-        <Star className="h-4 w-4 text-[var(--primary)]" /> Recommended Print
+      <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
+        <Star className="h-4 w-4 text-primary" /> Recommended Print
       </h2>
 
       {!file ? (
-        <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface)] p-4 space-y-3">
-          <p className="font-mono text-xs text-[var(--on-surface-variant)] leading-relaxed">
+        <div className="rounded border border-outline-variant bg-surface p-4 space-y-3">
+          <p className="font-mono text-xs text-on-surface-variant leading-relaxed">
             {hasGcode
               ? "No revision is marked as recommended yet. Mark a known-good G-code as recommended."
               : "No sliced G-code yet. Add a revision to capture the settings that worked."}
           </p>
           <button
             onClick={onAddRevision}
-            className="w-full py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+            className="w-full py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
           >
             <Plus className="h-4 w-4" /> Add G-code revision
           </button>
         </div>
       ) : (
-        <div className="rounded border border-[var(--primary)]/30 bg-[var(--primary-fixed)]/15 p-3 space-y-3">
+        <div className="rounded border border-primary/30 bg-primary-fixed/15 p-3 space-y-3">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[11px] text-[var(--primary)] font-bold uppercase tracking-wider">
+            <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
               Rev {file.gcode_revision_number ?? file.version}
             </span>
-            <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(file.revision_status)}`}>
+            <span className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(file.revision_status)}`}>
               {headerStatusLabel(file.revision_status)}
             </span>
             {file.is_recommended && (
-              <span className="inline-flex items-center gap-1 border border-[var(--primary)]/30 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+              <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
                 <Star className="h-3 w-3 fill-current" /> Recommended
               </span>
             )}
           </div>
-          <p className="text-sm text-[var(--on-surface)] font-medium truncate">
+          <p className="text-sm text-on-surface font-medium truncate">
             {file.original_filename}
           </p>
-          <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded flex flex-col">
+          <div className="bg-surface border border-outline-variant rounded flex flex-col">
             {rows.map((row, index) => (
               <SettingRow
                 key={row.label}
@@ -113,7 +113,7 @@ export function RecommendedPrintCard({
           {canSend && (
             <button
               onClick={() => onSend(file.id)}
-              className="w-full py-2.5 bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-primary text-primary-foreground hover:opacity-90 transition-opacity rounded font-mono text-xs uppercase tracking-wider shadow-sm flex items-center justify-center gap-2"
             >
               <Send className="h-4 w-4" /> Send to printer
             </button>
@@ -127,27 +127,27 @@ export function RecommendedPrintCard({
                   file.original_filename,
                 ).catch((e) => toast.error(e))
               }
-              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+              className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
             >
               <Download className="h-4 w-4" /> Download
             </button>
             <button
               onClick={onCompare}
-              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5"
+              className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5"
             >
               <GitCompare className="h-4 w-4" /> Compare
             </button>
             <button
               onClick={() => onMark(file, { revision_status: "failed" })}
               disabled={isSaving}
-              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               <XCircle className="h-4 w-4" /> Mark failed
             </button>
             <button
               onClick={() => onMark(file, { is_recommended: true, revision_status: "known_good" })}
               disabled={isSaving || file.is_recommended}
-              className="py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-[11px] uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-2xs uppercase tracking-wider hover:bg-surface-container-low transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />} Recommend
             </button>

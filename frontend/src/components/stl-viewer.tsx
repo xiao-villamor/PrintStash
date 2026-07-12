@@ -236,7 +236,7 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
     if (this.state.hasError) {
       return (
         this.props.fallback ?? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[var(--on-surface-variant)]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-on-surface-variant">
             <AlertTriangle className="h-8 w-8" />
             <span className="font-mono text-xs">Failed to load 3D preview</span>
           </div>
@@ -277,7 +277,7 @@ export function STLViewer({
             immediately, so without this the viewer is a blank void. */}
         {!meshLoaded && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
+            <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
           </div>
         )}
       </MeshErrorBoundary>

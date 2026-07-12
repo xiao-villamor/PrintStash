@@ -114,7 +114,7 @@ function Segmented<T extends string>({
           onClick={() => onChange(opt.id)}
           className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
             value === opt.id
-              ? "bg-blue-600 text-white dark:bg-orange-600"
+              ? "bg-primary text-primary-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -137,7 +137,7 @@ function MetricCard({
   return (
     <Card>
       <CardContent className="flex items-center gap-3 p-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-600 dark:bg-orange-500/10 dark:text-orange-400">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-primary">
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0">

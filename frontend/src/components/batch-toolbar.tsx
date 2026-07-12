@@ -5,6 +5,7 @@ import { FolderInput, Plus, Tag, Trash2, X } from "lucide-react";
 import { CollectionRead, TagRead } from "@/types";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useComboboxNav } from "@/lib/use-combobox-nav";
 
 /**
  * Floating action bar shown when one or more models are selected in the grid.
@@ -153,7 +154,7 @@ function MoveDialog({
           type="button"
           onClick={() => setTarget("")}
           className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-            target === "" ? "bg-blue-50 text-blue-700 dark:bg-orange-950/40 dark:text-orange-400" : "text-muted-foreground hover:bg-muted"
+            target === "" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"
           }`}
         >
           None (root)
@@ -164,7 +165,7 @@ function MoveDialog({
             type="button"
             onClick={() => setTarget(c.path)}
             className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-              target === c.path ? "bg-blue-50 text-blue-700 dark:bg-orange-950/40 dark:text-orange-400" : "text-muted-foreground hover:bg-muted"
+              target === c.path ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"
             }`}
           >
             {c.path} <span className="opacity-50">({c.model_count})</span>
@@ -184,7 +185,7 @@ function MoveDialog({
           type="button"
           onClick={() => target !== null && onConfirm(target)}
           disabled={busy || target === null}
-          className="flex-1 h-9 rounded bg-blue-600 dark:bg-orange-600 text-white text-sm font-mono uppercase tracking-wider hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Move here
         </button>
@@ -261,7 +262,7 @@ function TagDialog({
             reset();
           }}
           disabled={busy || (add.length === 0 && remove.length === 0)}
-          className="flex-1 h-9 rounded bg-blue-600 dark:bg-orange-600 text-white text-sm font-mono uppercase tracking-wider hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Apply
         </button>
@@ -302,39 +303,57 @@ function ChipEditor({
     setInput("");
   }
 
+  const items = [...filtered.map((t) => t.name), ...(canCreate ? [input.trim()] : [])];
+  const nav = useComboboxNav(input ? items.length : 0, {
+    onSelect: (i) => commit(items[i]),
+    onCommitInput: () => {
+      if (input.trim()) commit(input);
+    },
+  });
+
   const chipClasses =
     accent === "add"
-      ? "bg-blue-50 text-blue-700 dark:bg-orange-950/40 dark:text-orange-400"
+      ? "bg-accent text-accent-foreground"
       : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400";
 
   return (
     <div>
-      <label className="block font-mono text-[10px] text-muted-foreground tracking-wider uppercase mb-1.5">
+      <label className="block font-mono text-3xs text-muted-foreground tracking-wider uppercase mb-1.5">
         {label}
       </label>
       <div className="relative">
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            nav.setActiveIndex(-1);
+          }}
+          {...nav.inputProps}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && input.trim()) {
-              e.preventDefault();
-              commit(input);
-            } else if (e.key === "Backspace" && !input && values.length) {
+            nav.inputProps.onKeyDown(e);
+            if (e.defaultPrevented) return;
+            if (e.key === "Backspace" && !input && values.length) {
               onChange(values.slice(0, -1));
             }
           }}
           placeholder={accent === "add" ? "Search or create — press Enter" : "Search tags — press Enter"}
-          className="w-full h-10 bg-background text-foreground font-mono text-sm border border-border rounded px-3 focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
+          className="w-full h-10 bg-background text-foreground font-mono text-sm border border-border rounded px-3 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
         />
         {input && (filtered.length > 0 || canCreate) && (
-          <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-background border border-border rounded shadow-lg py-1 max-h-40 overflow-y-auto">
-            {filtered.map((t) => (
+          <div
+            id={nav.listboxId}
+            role="listbox"
+            className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-background border border-border rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+          >
+            {filtered.map((t, i) => (
               <button
                 key={t.id}
+                id={nav.optionId(i)}
+                role="option"
+                aria-selected={i === nav.activeIndex}
                 type="button"
                 onClick={() => commit(t.name)}
-                className="w-full text-left px-3 py-1.5 font-mono text-xs text-muted-foreground hover:bg-muted flex justify-between gap-2"
+                className={`w-full text-left px-3 py-1.5 font-mono text-xs text-muted-foreground hover:bg-muted flex justify-between gap-2 ${i === nav.activeIndex ? "bg-muted" : ""}`}
               >
                 <span className="truncate">{t.name}</span>
                 <span className="opacity-50">({t.model_count})</span>
@@ -343,8 +362,11 @@ function ChipEditor({
             {canCreate && (
               <button
                 type="button"
+                id={nav.optionId(filtered.length)}
+                role="option"
+                aria-selected={filtered.length === nav.activeIndex}
                 onClick={() => commit(input)}
-                className="w-full text-left px-3 py-1.5 font-mono text-xs text-blue-600 dark:text-orange-500 hover:bg-muted flex items-center gap-2"
+                className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-muted flex items-center gap-2 ${filtered.length === nav.activeIndex ? "bg-muted" : ""}`}
               >
                 <Plus className="h-3 w-3" /> Create &quot;{input.trim()}&quot;
               </button>
@@ -357,7 +379,7 @@ function ChipEditor({
           {values.map((name) => (
             <span
               key={name}
-              className={`inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider ${chipClasses}`}
+              className={`inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider ${chipClasses}`}
             >
               {name}
               <button

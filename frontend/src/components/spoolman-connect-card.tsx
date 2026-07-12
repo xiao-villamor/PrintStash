@@ -113,7 +113,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
           </p>
         </div>
         <span
-          className={`font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border flex-shrink-0 ${
+          className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border flex-shrink-0 ${
             enabled && connected
               ? "text-green-600 dark:text-green-400 border-green-600/40"
               : "text-muted-foreground border-border"
@@ -155,7 +155,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
               }}
             >
               <div>
-                <label className="block text-[11px] text-muted-foreground mb-1">
+                <label className="block text-2xs text-muted-foreground mb-1">
                   Base URL
                 </label>
                 <input
@@ -167,7 +167,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-muted-foreground mb-1">
+                <label className="block text-2xs text-muted-foreground mb-1">
                   API key <span className="opacity-60">(optional)</span>
                 </label>
                 <input
@@ -210,7 +210,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 <label className="flex items-center justify-between gap-3 cursor-pointer pt-3">
                   <span className="text-sm text-foreground">
                     Write consumption back to Spoolman
-                    <span className="block text-[11px] text-muted-foreground">
+                    <span className="block text-2xs text-muted-foreground">
                       Decrements the selected spool by measured filament when a
                       print completes (Moonraker-measured prints only).
                     </span>
@@ -224,7 +224,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                   />
                 </label>
                 {status?.native_hook_detected && (
-                  <div className="space-y-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+                  <div className="space-y-2 text-2xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
                       <span>
@@ -256,7 +256,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
             {/* Inventory */}
             {enabled && connected && spools && spools.length > 0 && (
               <div className="pt-1 border-t border-border">
-                <h4 className="text-[11px] uppercase tracking-wider text-muted-foreground pt-3 pb-2">
+                <h4 className="text-2xs uppercase tracking-wider text-muted-foreground pt-3 pb-2">
                   Inventory
                 </h4>
                 <ul className="space-y-1">

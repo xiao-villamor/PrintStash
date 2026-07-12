@@ -32,6 +32,9 @@ import { createTask, updateTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
+import { ModalShell } from "@/components/ui/modal";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { useComboboxNav } from "@/lib/use-combobox-nav";
 import {
   bulkTargetCollection,
   entriesFromDataTransfer,
@@ -206,19 +209,6 @@ function sortIntoSlots(files: File[]) {
     }
   }, [open, preloadFiles, preloadItems, initialMode]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        reset();
-        onClose();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   const filteredTags = useMemo(() => {
     const q = tagInput.toLowerCase().trim();
     return tags.filter(
@@ -234,7 +224,24 @@ function sortIntoSlots(files: File[]) {
       (t) => t.name.toLowerCase() === tagInput.trim().toLowerCase(),
     );
 
-  if (!open) return null;
+  const shownTags = filteredTags.slice(0, 6);
+  const tagItems = [...shownTags, ...(canCreateNewTag ? [tagInput.trim()] : [])];
+  const tagNav = useComboboxNav(tagInput ? tagItems.length : 0, {
+    onSelect: (i) => {
+      if (i < shownTags.length) {
+        toggleTag(shownTags[i].slug);
+      } else {
+        doCreateTag(tagInput);
+      }
+      setTagInput("");
+    },
+    onCommitInput: () => {
+      if (tagInput.trim()) {
+        doCreateTag(tagInput);
+        setTagInput("");
+      }
+    },
+  });
 
   function autoName(f: File) {
     if (!modelName) setModelName(stemName(f.name));
@@ -818,36 +825,29 @@ function sortIntoSlots(files: File[]) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={close}
-        aria-hidden
-      />
-      <div
-        className="relative bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="upload-modal-title"
-      >
+    <ModalShell
+      open={open}
+      onClose={close}
+      labelledBy="upload-modal-title"
+      className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
+    >
         <>
-            <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--outline-variant)]">
+            <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
               <div>
                 <h3
                   id="upload-modal-title"
-                  className="text-sm font-semibold text-[var(--on-surface)]"
+                  className="text-sm font-semibold text-on-surface"
                 >
                   Upload model
                 </h3>
-                <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+                <p className="text-xs text-on-surface-variant mt-0.5">
                   Drop a 3D model, a G-code, or both together
                 </p>
               </div>
               <button
                 onClick={close}
                 aria-label="Close"
-                className="h-7 w-7 -mt-1 rounded hover:bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)]"
+                className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -866,7 +866,7 @@ function sortIntoSlots(files: File[]) {
             <form onSubmit={doSubmit} className="p-6 space-y-5">
               {/* Mode tabs */}
               {!reviewing && (
-                <div className="flex gap-1 rounded border border-[var(--outline-variant)] p-1">
+                <div className="flex gap-1 rounded border border-outline-variant p-1">
                   {(
                     [
                       ["files", "Files", Upload],
@@ -879,10 +879,10 @@ function sortIntoSlots(files: File[]) {
                       key={m}
                       type="button"
                       onClick={() => setMode(m)}
-                      className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded px-2 py-1.5 font-mono text-2xs uppercase tracking-wider transition-colors ${
                         mode === m
-                          ? "bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
-                          : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                          ? "bg-secondary-container text-on-secondary-container"
+                          : "text-on-surface-variant hover:bg-surface-container-low"
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" /> {label}
@@ -975,17 +975,17 @@ function sortIntoSlots(files: File[]) {
                 />
               ) : mode === "url" ? (
                 <div>
-                  <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                  <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                     Source URL
                   </label>
                   <input
                     value={urlValue}
                     onChange={(e) => setUrlValue(e.target.value)}
-                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     placeholder="Model page, collection, or direct .stl/.zip link"
                   />
-                  <p className="mt-1.5 font-mono text-[10px] text-[var(--on-surface-variant)]/70">
-                    A model page, a <span className="text-[var(--on-surface)]">collection</span>{" "}
+                  <p className="mt-1.5 font-mono text-3xs text-on-surface-variant/70">
+                    A model page, a <span className="text-on-surface">collection</span>{" "}
                     (Printables / MakerWorld), or a direct file/.zip link —
                     fetched on the server.
                   </p>
@@ -994,9 +994,9 @@ function sortIntoSlots(files: File[]) {
                       type="checkbox"
                       checked={reviewCollection}
                       onChange={(e) => setReviewCollection(e.target.checked)}
-                      className="accent-[var(--primary)]"
+                      className="accent-primary"
                     />
-                    <span className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider">
+                    <span className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider">
                       Review collection items before importing
                     </span>
                   </label>
@@ -1016,13 +1016,13 @@ function sortIntoSlots(files: File[]) {
                   name from the downloaded file/page) */}
               {!reviewing && mode === "files" && (
                 <div>
-                  <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                  <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                     Model name
                   </label>
                   <input
                     value={modelName}
                     onChange={(e) => setModelName(e.target.value)}
-                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     placeholder="e.g. Bracket v2"
                   />
                 </div>
@@ -1030,81 +1030,86 @@ function sortIntoSlots(files: File[]) {
 
               {/* Collection */}
               <div>
-                <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                   Collection
                 </label>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setCatOpen((v) => !v)}
-                    className="w-full h-10 flex items-center justify-between bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
-                  >
-                    <span
-                      className={
-                        collectionPath
-                          ? ""
-                          : "text-[var(--on-surface-variant)]/60"
-                      }
+                <DropdownMenu
+                  open={catOpen}
+                  onOpenChange={setCatOpen}
+                  align="start"
+                  role="listbox"
+                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
+                  trigger={
+                    <button
+                      type="button"
+                      data-menu-trigger
+                      onClick={() => setCatOpen((v) => !v)}
+                      aria-haspopup="listbox"
+                      aria-expanded={catOpen}
+                      className="w-full h-10 flex items-center justify-between bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                     >
-                  {collectionPath || (user?.is_superuser ? "None" : "Choose collection")}
-                    </span>
-                    <ChevronDown className="h-4 w-4 text-[var(--on-surface-variant)]" />
-                  </button>
-                  {catOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-20"
-                        onClick={() => setCatOpen(false)}
-                      />
-                      <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 max-h-56 overflow-y-auto">
-                        {user?.is_superuser && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCollectionPath("");
-                              setCatOpen(false);
-                            }}
-                            className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
-                          >
-                            None
-                          </button>
-                        )}
-                        {writableCollections.length === 0 ? (
-                          <div className="px-3 py-2 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
-                            No editable collections.
-                          </div>
-                        ) : (
-                          writableCollections.map((c) => (
-                            <button
-                              key={c.id}
-                              type="button"
-                              onClick={() => {
-                                setCollectionPath(c.path);
-                                setCatOpen(false);
-                              }}
-                              className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                                collectionPath === c.path
-                                  ? "text-[var(--primary)] bg-[var(--secondary-container)]"
-                                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
-                              }`}
-                            >
-                              {c.path}{" "}
-                              <span className="opacity-50">
-                                ({c.model_count})
-                              </span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    </>
+                      <span
+                        className={
+                          collectionPath
+                            ? ""
+                            : "text-on-surface-variant/60"
+                        }
+                      >
+                    {collectionPath || (user?.is_superuser ? "None" : "Choose collection")}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-on-surface-variant" />
+                    </button>
+                  }
+                >
+                  {user?.is_superuser && (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={collectionPath === ""}
+                      onClick={() => {
+                        setCollectionPath("");
+                        setCatOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
+                    >
+                      None
+                    </button>
                   )}
-                </div>
+                  {writableCollections.length === 0 ? (
+                    <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
+                      No editable collections.
+                    </div>
+                  ) : (
+                    writableCollections.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="option"
+                        aria-selected={collectionPath === c.path}
+                        onClick={() => {
+                          setCollectionPath(c.path);
+                          setCatOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
+                          collectionPath === c.path
+                            ? "text-primary bg-secondary-container"
+                            : "text-on-surface-variant hover:bg-surface-container-low"
+                        }`}
+                      >
+                        {c.path}{" "}
+                        <span className="opacity-50">
+                          ({c.model_count})
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </DropdownMenu>
               </div>
 
               {/* Destination (NAS write-back) — only when mirroring is enabled */}
               {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
                 <div>
-                  <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                  <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                     Store in
                   </label>
                   <select
@@ -1114,7 +1119,7 @@ function sortIntoSlots(files: File[]) {
                         e.target.value === "" ? "" : Number(e.target.value),
                       )
                     }
-                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <option value="">Vault storage</option>
                     {libraries.map((lib) => (
@@ -1123,7 +1128,7 @@ function sortIntoSlots(files: File[]) {
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 font-mono text-[10px] text-[var(--on-surface-variant)]/70">
+                  <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
                     NAS libraries write the file into the folder; revisions to a
                     linked model always follow that model automatically.
                   </p>
@@ -1132,19 +1137,21 @@ function sortIntoSlots(files: File[]) {
 
               {/* Tags */}
               <div>
-                <label className="block font-mono text-xs text-[var(--on-surface-variant)] tracking-wider uppercase mb-2">
+                <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                   Tags
                 </label>
                 <div className="relative">
                   <input
                     value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
+                    onChange={(e) => {
+                      setTagInput(e.target.value);
+                      tagNav.setActiveIndex(-1);
+                    }}
+                    {...tagNav.inputProps}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && tagInput.trim()) {
-                        e.preventDefault();
-                        doCreateTag(tagInput);
-                        setTagInput("");
-                      } else if (
+                      tagNav.inputProps.onKeyDown(e);
+                      if (e.defaultPrevented) return;
+                      if (
                         e.key === "Backspace" &&
                         !tagInput &&
                         selectedTags.length
@@ -1153,20 +1160,27 @@ function sortIntoSlots(files: File[]) {
                       }
                     }}
                     placeholder="Search or create — press Enter"
-                    className="w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                    className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   />
                   {tagInput &&
                     (filteredTags.length > 0 || canCreateNewTag) && (
-                      <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded shadow-lg py-1 max-h-40 overflow-y-auto">
-                        {filteredTags.slice(0, 6).map((t) => (
+                      <div
+                        id={tagNav.listboxId}
+                        role="listbox"
+                        className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+                      >
+                        {shownTags.map((t, i) => (
                           <button
                             key={t.id}
+                            id={tagNav.optionId(i)}
+                            role="option"
+                            aria-selected={i === tagNav.activeIndex}
                             type="button"
                             onClick={() => {
                               toggleTag(t.slug);
                               setTagInput("");
                             }}
-                            className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] flex justify-between"
+                            className={`w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low flex justify-between ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                           >
                             <span>{t.name}</span>
                             <span className="opacity-50">
@@ -1177,11 +1191,14 @@ function sortIntoSlots(files: File[]) {
                         {canCreateNewTag && (
                           <button
                             type="button"
+                            id={tagNav.optionId(shownTags.length)}
+                            role="option"
+                            aria-selected={shownTags.length === tagNav.activeIndex}
                             onClick={() => {
                               doCreateTag(tagInput);
                               setTagInput("");
                             }}
-                            className="w-full text-left px-3 py-1.5 font-mono text-xs text-[var(--primary)] hover:bg-[var(--surface-container-low)] flex items-center gap-2"
+                            className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${shownTags.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
                           >
                             <Plus className="h-3 w-3" /> Create &quot;
                             {tagInput.trim()}&quot;
@@ -1197,14 +1214,14 @@ function sortIntoSlots(files: File[]) {
                       return (
                         <span
                           key={slug}
-                          className="inline-flex items-center gap-1 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] pl-2 pr-1 py-0.5 rounded font-mono text-[10px] uppercase tracking-wider"
+                          className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs uppercase tracking-wider"
                         >
                           {t?.name || slug}
                           <button
                             type="button"
                             onClick={() => toggleTag(slug)}
                             aria-label={`Remove ${t?.name || slug}`}
-                            className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-[var(--on-secondary-container)]/10"
+                            className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -1219,7 +1236,7 @@ function sortIntoSlots(files: File[]) {
                 <button
                   type="button"
                   onClick={close}
-                  className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors"
+                  className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors"
                 >
                   Cancel
                 </button>
@@ -1238,7 +1255,7 @@ function sortIntoSlots(files: File[]) {
                             ? !urlValue.trim()
                             : !zipFile)
                   }
-                  className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {submitting ? (
                     <>
@@ -1266,8 +1283,7 @@ function sortIntoSlots(files: File[]) {
               </div>
             </form>
         </>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -1292,7 +1308,7 @@ function FileSlot({
   const dragDepth = useRef(0);
   return (
     <div>
-      <span className="block font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase mb-1.5">
+      <span className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
         {label}
       </span>
       <div
@@ -1332,19 +1348,19 @@ function FileSlot({
         }}
         className={`flex items-center justify-between rounded border border-dashed px-3 py-2.5 transition-colors cursor-pointer ${
           file
-            ? "border-[var(--primary)] bg-[var(--primary)]/5"
+            ? "border-primary bg-primary/5"
             : dragActive
-              ? "border-[var(--primary)] bg-[var(--primary)]/10"
-              : "border-[var(--outline-variant)] hover:border-[var(--outline)]"
+              ? "border-primary bg-primary/10"
+              : "border-outline-variant hover:border-outline"
         }`}
       >
         {file ? (
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <FileIcon className="h-4 w-4 text-[var(--primary)] flex-shrink-0" />
-            <span className="text-xs font-medium text-[var(--on-surface)] truncate">
+            <FileIcon className="h-4 w-4 text-primary flex-shrink-0" />
+            <span className="text-xs font-medium text-on-surface truncate">
               {file.name}
             </span>
-            <span className="font-mono text-[10px] text-[var(--on-surface-variant)] flex-shrink-0">
+            <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
               {formatBytes(file.size)}
             </span>
             <button
@@ -1354,13 +1370,13 @@ function FileSlot({
                 setFile(null);
               }}
               aria-label={`Remove ${label}`}
-              className="h-5 w-5 rounded hover:bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0"
+              className="h-5 w-5 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
         ) : (
-          <span className="font-mono text-xs text-[var(--on-surface-variant)]/60">
+          <span className="font-mono text-xs text-on-surface-variant/60">
             {placeholder}
           </span>
         )}
@@ -1449,15 +1465,15 @@ export function BulkFiles({
         onDrop={handleDrop}
         className={`flex flex-col items-center justify-center gap-1.5 rounded border border-dashed px-3 py-6 text-center transition-colors cursor-pointer ${
           dragActive
-            ? "border-[var(--primary)] bg-[var(--primary)]/10"
-            : "border-[var(--outline-variant)] hover:border-[var(--outline)]"
+            ? "border-primary bg-primary/10"
+            : "border-outline-variant hover:border-outline"
         }`}
       >
-        <Layers className="h-5 w-5 text-[var(--on-surface-variant)]" />
-        <span className="text-xs text-[var(--on-surface)]">
+        <Layers className="h-5 w-5 text-on-surface-variant" />
+        <span className="text-xs text-on-surface">
           Drop 3D models or a folder here
         </span>
-        <span className="font-mono text-[10px] text-[var(--on-surface-variant)]/60">
+        <span className="font-mono text-3xs text-on-surface-variant/60">
           {MESH_ACCEPT} · subfolders become nested collections
         </span>
         <button
@@ -1466,7 +1482,7 @@ export function BulkFiles({
             e.stopPropagation();
             folderInputRef.current?.click();
           }}
-          className="mt-1 font-mono text-[10px] text-[var(--primary)] uppercase tracking-wider hover:underline"
+          className="mt-1 font-mono text-3xs text-primary uppercase tracking-wider hover:underline"
         >
           Or select a folder
         </button>
@@ -1497,7 +1513,7 @@ export function BulkFiles({
       {items.length > 0 && (
         <>
           <div className="flex items-center justify-between mt-2 mb-1.5">
-            <span className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase">
+            <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase">
               {items.length} file{items.length === 1 ? "" : "s"}
               {folderCount > 0
                 ? ` · ${folderCount} folder${folderCount === 1 ? "" : "s"}`
@@ -1507,34 +1523,34 @@ export function BulkFiles({
             <button
               type="button"
               onClick={onClear}
-              className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider hover:text-[var(--on-surface)]"
+              className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
             >
               Clear
             </button>
           </div>
-          <div className="rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)] max-h-56 overflow-y-auto">
+          <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
             {items.map((it, idx) => (
               <div
                 key={`${it.relPath}/${it.file.name}:${it.file.size}:${idx}`}
                 className="flex items-center gap-2 px-3 py-2"
               >
-                <FileIcon className="h-4 w-4 text-[var(--primary)] flex-shrink-0" />
-                <span className="min-w-0 flex-1 truncate text-xs text-[var(--on-surface)]">
+                <FileIcon className="h-4 w-4 text-primary flex-shrink-0" />
+                <span className="min-w-0 flex-1 truncate text-xs text-on-surface">
                   {it.relPath && (
-                    <span className="text-[var(--on-surface-variant)]/60">
+                    <span className="text-on-surface-variant/60">
                       {it.relPath}/
                     </span>
                   )}
                   {it.file.name}
                 </span>
-                <span className="font-mono text-[10px] text-[var(--on-surface-variant)] flex-shrink-0">
+                <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
                   {formatBytes(it.file.size)}
                 </span>
                 <button
                   type="button"
                   onClick={() => onRemove(idx)}
                   aria-label={`Remove ${it.file.name}`}
-                  className="h-5 w-5 rounded hover:bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)] flex-shrink-0"
+                  className="h-5 w-5 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant flex-shrink-0"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1562,41 +1578,41 @@ function ManifestList({
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase truncate">
+        <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase truncate">
           {manifest.archive_name} · {importable.length} importable
         </span>
         <button
           type="button"
           onClick={onBack}
-          className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider hover:text-[var(--on-surface)]"
+          className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface"
         >
           Back
         </button>
       </div>
-      <div className="rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)] max-h-56 overflow-y-auto">
+      <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
         {importable.length === 0 ? (
-          <div className="px-3 py-3 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
+          <div className="px-3 py-3 font-mono text-2xs text-on-surface-variant/70">
             No importable 3D files in this archive.
           </div>
         ) : (
           importable.map((e) => (
             <label
               key={e.name}
-              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--surface-container-low)]"
+              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-container-low"
             >
               <input
                 type="checkbox"
                 checked={selected.has(e.name)}
                 onChange={() => onToggle(e.name)}
-                className="accent-[var(--primary)]"
+                className="accent-primary"
               />
-              <span className="text-xs text-[var(--on-surface)] truncate flex-1">
+              <span className="text-xs text-on-surface truncate flex-1">
                 {e.name}
               </span>
-              <span className="font-mono text-[10px] uppercase text-[var(--on-surface-variant)] flex-shrink-0">
+              <span className="font-mono text-3xs uppercase text-on-surface-variant flex-shrink-0">
                 {e.file_type}
               </span>
-              <span className="font-mono text-[10px] text-[var(--on-surface-variant)] flex-shrink-0">
+              <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
                 {formatBytes(e.size_bytes)}
               </span>
             </label>
@@ -1634,44 +1650,44 @@ function SelectionList({
   return (
     <div>
       <div className="flex items-center justify-between mb-2 gap-2">
-        <span className="font-mono text-[10px] text-[var(--on-surface-variant)] tracking-wider uppercase truncate">
+        <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase truncate">
           {title} · {count}
         </span>
         <button
           type="button"
           onClick={onBack}
-          className="font-mono text-[10px] text-[var(--on-surface-variant)] uppercase tracking-wider hover:text-[var(--on-surface)] flex-shrink-0"
+          className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface flex-shrink-0"
         >
           Back
         </button>
       </div>
-      <div className="rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)] max-h-56 overflow-y-auto">
+      <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
         {items.length === 0 ? (
-          <div className="px-3 py-3 font-mono text-[11px] text-[var(--on-surface-variant)]/70">
+          <div className="px-3 py-3 font-mono text-2xs text-on-surface-variant/70">
             {emptyLabel}
           </div>
         ) : (
           items.map((it) => (
             <label
               key={it.id}
-              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-[var(--surface-container-low)]"
+              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-container-low"
             >
               <input
                 type="checkbox"
                 checked={selected.has(it.id)}
                 onChange={() => onToggle(it.id)}
-                className="accent-[var(--primary)]"
+                className="accent-primary"
               />
-              <span className="text-xs text-[var(--on-surface)] truncate flex-1">
+              <span className="text-xs text-on-surface truncate flex-1">
                 {it.label}
               </span>
               {it.badge && (
-                <span className="font-mono text-[10px] uppercase text-[var(--on-surface-variant)] flex-shrink-0">
+                <span className="font-mono text-3xs uppercase text-on-surface-variant flex-shrink-0">
                   {it.badge}
                 </span>
               )}
               {it.detail && (
-                <span className="font-mono text-[10px] text-[var(--on-surface-variant)] flex-shrink-0 max-w-[40%] truncate">
+                <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0 max-w-[40%] truncate">
                   {it.detail}
                 </span>
               )}

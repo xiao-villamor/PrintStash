@@ -98,15 +98,15 @@ export function RevisionsTab({
   return (
     <>
       <section>
-        <div className="mb-4 flex items-center justify-between gap-3 border-b border-[var(--outline-variant)] pb-1">
-          <h2 className="text-lg font-semibold text-[var(--on-surface)]">
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-outline-variant pb-1">
+          <h2 className="text-lg font-semibold text-on-surface">
             G-code Revisions
           </h2>
           <button
             onClick={onAddRevision}
             disabled={!auth.isAuthenticated}
             title={auth.blockReason ?? "Add G-code revision"}
-            className="inline-flex items-center gap-1.5 rounded border border-[var(--outline-variant)] px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] transition-colors hover:bg-[var(--surface-container-low)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
             Add
@@ -114,7 +114,7 @@ export function RevisionsTab({
         </div>
         <div className="space-y-3">
           {gcodeFiles.length === 0 && (
-            <p className="font-mono text-xs text-[var(--on-surface-variant)]">
+            <p className="font-mono text-xs text-on-surface-variant">
               No sliced G-code revisions yet.
             </p>
           )}
@@ -123,43 +123,43 @@ export function RevisionsTab({
             const fileMeta = f.metadata;
             const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
             return (
-              <div key={f.id} className="p-3 border border-[var(--primary)]/30 bg-[var(--primary-fixed)]/15 rounded space-y-3">
+              <div key={f.id} className="p-3 border border-primary/30 bg-primary-fixed/15 rounded space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                      <span className="font-mono text-[11px] text-[var(--primary)] font-bold uppercase tracking-wider">
+                      <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
                         Rev {f.gcode_revision_number ?? f.version}
                       </span>
                       {f.revision_label && (
-                        <span className="border border-[var(--outline-variant)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                        <span className="border border-outline-variant rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                           {f.revision_label}
                         </span>
                       )}
-                      <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(f.revision_status)}`}>
+                      <span className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(f.revision_status)}`}>
                         {revisionStatusLabel(f.revision_status)}
                       </span>
                       {f.is_recommended && (
-                        <span className="inline-flex items-center gap-1 border border-[var(--primary)]/30 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                        <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
                           <Star className="h-3 w-3 fill-current" /> Recommended
                         </span>
                       )}
                       {uploadedTo.map((row) => (
-                        <span key={`${row.printer_id}-${row.remote_filename}`} className="inline-flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                        <span key={`${row.printer_id}-${row.remote_filename}`} className="inline-flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
                           <Wifi className="h-3 w-3" /> {row.printer_name}
                         </span>
                       ))}
                     </div>
-                    <p className="text-sm text-[var(--on-surface)] font-medium truncate">
+                    <p className="text-sm text-on-surface font-medium truncate">
                       {f.original_filename}
                     </p>
-                    <p className="font-mono text-[11px] text-[var(--on-surface-variant)]">
+                    <p className="font-mono text-2xs text-on-surface-variant">
                       {formatBytes(f.size_bytes)} · {timeAgo(f.uploaded_at)}
                       {fileMeta?.layer_height_mm ? ` · ${fileMeta.layer_height_mm}mm` : ""}
                       {fileMeta?.material_type ? ` · ${fileMeta.material_type}` : ""}
                       {fileMeta?.estimated_time_s ? ` · ${formatDuration(fileMeta.estimated_time_s)}` : ""}
                     </p>
                     {f.revision_notes && !isEditingRevision && (
-                      <p className="mt-2 text-xs text-[var(--on-surface-variant)] leading-relaxed">
+                      <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
                         {f.revision_notes}
                       </p>
                     )}
@@ -169,7 +169,7 @@ export function RevisionsTab({
                       onClick={() => startRevisionEdit(f)}
                       disabled={!auth.isAuthenticated}
                       title={auth.blockReason ?? "Edit revision"}
-                      className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Pencil className="h-4 w-4" />
                     </button>
@@ -193,7 +193,7 @@ export function RevisionsTab({
                         ).catch((e) => toast.error(e))
                       }
                       title="Download"
-                      className="text-[var(--on-surface-variant)] hover:text-[var(--primary)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors"
+                      className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
                     >
                       <Download className="h-4 w-4" />
                     </button>
@@ -202,7 +202,7 @@ export function RevisionsTab({
                       onClick={() => deleteRevision(f)}
                       disabled={!auth.isAuthenticated || saving === f.id}
                       title={auth.blockReason ?? "Delete revision"}
-                      className="text-[var(--on-surface-variant)] hover:text-[var(--error)] p-2 rounded hover:bg-[var(--surface-container-high)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="text-on-surface-variant hover:text-error p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {saving === f.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -214,18 +214,18 @@ export function RevisionsTab({
                 </div>
 
                 {isEditingRevision && (
-                  <div className="space-y-2 border-t border-[var(--outline-variant)] pt-3">
+                  <div className="space-y-2 border-t border-outline-variant pt-3">
                     <input
                       value={revisionLabel}
                       onChange={(e) => setRevisionLabel(e.target.value)}
                       maxLength={128}
                       placeholder="Revision label"
-                      className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
                     />
                     <select
                       value={revisionStatus}
                       onChange={(e) => setRevisionStatus(e.target.value as FileRevisionStatus | "")}
-                      className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
                     >
                       <option value="">Unmarked</option>
                       <option value="known_good">Known good</option>
@@ -238,9 +238,9 @@ export function RevisionsTab({
                       onChange={(e) => setRevisionNotes(e.target.value)}
                       rows={2}
                       placeholder="Notes about print outcome, fit, filament, or what to try next"
-                      className="w-full bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded px-3 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-none"
+                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
                     />
-                    <label className="flex items-center gap-2 text-xs font-mono text-[var(--on-surface-variant)]">
+                    <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
                       <input
                         type="checkbox"
                         checked={revisionRecommended}
@@ -253,14 +253,14 @@ export function RevisionsTab({
                       <button
                         onClick={() => setEditingRevisionId(null)}
                         disabled={saving === f.id}
-                        className="flex-1 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container-low)] transition-colors disabled:opacity-50"
+                        className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50"
                       >
                         Cancel
                       </button>
                       <button
                         onClick={() => saveRevision(f)}
                         disabled={saving === f.id}
-                        className="flex-1 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5"
                       >
                         {saving === f.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                         {saving === f.id ? "Saving..." : "Save"}
@@ -276,7 +276,7 @@ export function RevisionsTab({
 
       {gcodeFiles.length >= 2 && compareLeft && compareRight && (
         <section>
-          <h2 className="text-lg font-semibold text-[var(--on-surface)] mb-4 pb-1 border-b border-[var(--outline-variant)] flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
             <GitCompare className="h-4 w-4" /> Compare Revisions
           </h2>
           <div className="space-y-3">
@@ -284,7 +284,7 @@ export function RevisionsTab({
               <select
                 value={compareLeft?.id ?? ""}
                 onChange={(e) => setCompareLeftId(Number(e.target.value))}
-                className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded px-2 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 {gcodeFiles.map((f) => (
                   <option key={f.id} value={f.id}>Rev {f.gcode_revision_number ?? f.version}</option>
@@ -293,7 +293,7 @@ export function RevisionsTab({
               <select
                 value={compareRight?.id ?? ""}
                 onChange={(e) => setCompareRightId(Number(e.target.value))}
-                className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded px-2 py-2 font-mono text-xs text-[var(--on-surface)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+                className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
               >
                 {gcodeFiles.map((f) => (
                   <option key={f.id} value={f.id}>Rev {f.gcode_revision_number ?? f.version}</option>

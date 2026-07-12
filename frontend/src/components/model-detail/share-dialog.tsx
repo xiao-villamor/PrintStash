@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/share";
 import { toast } from "@/lib/toast";
 import { FileRead, ShareLinkRead } from "@/types";
+import { ModalShell } from "@/components/ui/modal";
 
 function shareUrl(path: string): string {
   if (typeof window === "undefined") return path;
@@ -52,8 +53,6 @@ export function ShareDialog({
       .catch((e) => toast.error(e))
       .finally(() => setLoading(false));
   }, [open, modelId, gcodeFiles]);
-
-  if (!open) return null;
 
   async function doCreate() {
     setCreating(true);
@@ -103,23 +102,21 @@ export function ShareDialog({
     creating || (revisionScope === "selected" && selectedRevisionIds.length === 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} aria-hidden />
-      <div
-        className="relative bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-[var(--outline-variant)]">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
+    >
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
           <div>
-            <h3 className="text-sm font-semibold text-[var(--on-surface)] flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
               <Link2 className="h-4 w-4" /> Share model
             </h3>
-            <p className="text-xs text-[var(--on-surface-variant)] mt-0.5">
+            <p className="text-xs text-on-surface-variant mt-0.5">
               Public, expiring, read-only links. Anyone with the link can view this model only.
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="h-7 w-7 -mt-1 rounded hover:bg-[var(--surface-container)] flex items-center justify-center text-[var(--on-surface-variant)]">
+          <button onClick={onClose} aria-label="Close" className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -129,7 +126,7 @@ export function ShareDialog({
           <div className="space-y-3">
             <div className="flex items-end gap-3">
               <label className="block">
-                <span className="block font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">
+                <span className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
                   Expires (days)
                 </span>
                 <input
@@ -138,7 +135,7 @@ export function ShareDialog({
                   max={365}
                   value={expiresInDays}
                   onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                  className="w-28 h-9 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-sm border border-[var(--outline-variant)] rounded px-3"
+                  className="w-28 h-9 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3"
                 />
               </label>
               <label className="flex items-center gap-2 h-9">
@@ -146,24 +143,24 @@ export function ShareDialog({
                   type="checkbox"
                   checked={allowDownload}
                   onChange={(e) => setAllowDownload(e.target.checked)}
-                  className="accent-[var(--primary)]"
+                  className="accent-primary"
                 />
-                <span className="text-xs text-[var(--on-surface)]">Allow file download</span>
+                <span className="text-xs text-on-surface">Allow file download</span>
               </label>
             </div>
             {gcodeFiles.length > 0 && (
               <div className="space-y-2">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                   Revisions
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setRevisionScope("all")}
-                    className={`rounded border px-3 py-2 text-left font-mono text-[11px] ${
+                    className={`rounded border px-3 py-2 text-left font-mono text-2xs ${
                       revisionScope === "all"
-                        ? "border-[var(--primary)] bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
-                        : "border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                        ? "border-primary bg-secondary-container text-on-secondary-container"
+                        : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
                     }`}
                   >
                     Every revision
@@ -171,32 +168,32 @@ export function ShareDialog({
                   <button
                     type="button"
                     onClick={() => setRevisionScope("selected")}
-                    className={`rounded border px-3 py-2 text-left font-mono text-[11px] ${
+                    className={`rounded border px-3 py-2 text-left font-mono text-2xs ${
                       revisionScope === "selected"
-                        ? "border-[var(--primary)] bg-[var(--secondary-container)] text-[var(--on-secondary-container)]"
-                        : "border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)]"
+                        ? "border-primary bg-secondary-container text-on-secondary-container"
+                        : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
                     }`}
                   >
                     Selected revisions
                   </button>
                 </div>
                 {revisionScope === "selected" && (
-                  <div className="max-h-44 overflow-y-auto rounded border border-[var(--outline-variant)] divide-y divide-[var(--outline-variant)]">
+                  <div className="max-h-44 overflow-y-auto rounded border border-outline-variant divide-y divide-outline-variant">
                     {gcodeFiles.map((f) => (
-                      <label key={f.id} className="flex items-start gap-2 px-3 py-2 hover:bg-[var(--surface-container-low)]">
+                      <label key={f.id} className="flex items-start gap-2 px-3 py-2 hover:bg-surface-container-low">
                         <input
                           type="checkbox"
                           checked={selectedRevisionIds.includes(f.id)}
                           onChange={() => toggleRevision(f.id)}
-                          className="mt-0.5 accent-[var(--primary)]"
+                          className="mt-0.5 accent-primary"
                         />
                         <span className="min-w-0">
-                          <span className="block text-xs text-[var(--on-surface)] truncate">
+                          <span className="block text-xs text-on-surface truncate">
                             Rev {f.gcode_revision_number ?? f.version}
                             {f.revision_label ? ` · ${f.revision_label}` : ""}
                             {f.is_recommended ? " · Recommended" : ""}
                           </span>
-                          <span className="block font-mono text-[10px] text-[var(--on-surface-variant)] truncate">
+                          <span className="block font-mono text-3xs text-on-surface-variant truncate">
                             {f.original_filename}
                           </span>
                         </span>
@@ -210,7 +207,7 @@ export function ShareDialog({
               type="button"
               onClick={doCreate}
               disabled={createDisabled}
-              className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+              className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
             >
               {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
               Create link
@@ -218,17 +215,17 @@ export function ShareDialog({
           </div>
 
           {lastToken && (
-            <div className="rounded border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-1">
+            <div className="rounded border border-primary/40 bg-primary/5 p-3">
+              <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
                 New link (copy it now)
               </p>
               <div className="flex items-center gap-2">
                 <input
                   readOnly
                   value={lastToken}
-                  className="flex-1 h-8 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] font-mono text-[11px] border border-[var(--outline-variant)] rounded px-2"
+                  className="flex-1 h-8 bg-surface-container-lowest text-on-surface font-mono text-2xs border border-outline-variant rounded px-2"
                 />
-                <button onClick={copyLast} className="h-8 w-8 rounded border border-[var(--outline-variant)] flex items-center justify-center hover:bg-[var(--surface-container-low)]">
+                <button onClick={copyLast} className="h-8 w-8 rounded border border-outline-variant flex items-center justify-center hover:bg-surface-container-low">
                   {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
@@ -237,31 +234,31 @@ export function ShareDialog({
 
           {/* Existing */}
           <div>
-            <h4 className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)] mb-2">
+            <h4 className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-2">
               Active links
             </h4>
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--on-surface-variant)]" />
+              <Loader2 className="h-4 w-4 animate-spin text-on-surface-variant" />
             ) : links.length === 0 ? (
-              <p className="font-mono text-[11px] text-[var(--on-surface-variant)]/70">No share links yet.</p>
+              <p className="font-mono text-2xs text-on-surface-variant/70">No share links yet.</p>
             ) : (
               <div className="space-y-2">
                 {links.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between gap-2 rounded border border-[var(--outline-variant)] px-3 py-2">
+                  <div key={l.id} className="flex items-center justify-between gap-2 rounded border border-outline-variant px-3 py-2">
                     <div className="min-w-0">
-                      <p className="font-mono text-[11px] text-[var(--on-surface)]">
+                      <p className="font-mono text-2xs text-on-surface">
                         {l.is_active ? "Active" : l.revoked_at ? "Revoked" : "Expired"}
                         {l.allow_download ? " · downloadable" : " · view-only"}
                         {l.revision_file_ids?.length ? ` · ${l.revision_file_ids.length} revs` : " · all revs"}
                       </p>
-                      <p className="font-mono text-[10px] text-[var(--on-surface-variant)]">
+                      <p className="font-mono text-3xs text-on-surface-variant">
                         expires {new Date(l.expires_at).toLocaleDateString()} · {l.access_count} views
                       </p>
                     </div>
                     {l.is_active && (
                       <button
                         onClick={() => doRevoke(l.id)}
-                        className="font-mono text-[10px] uppercase tracking-wider text-[var(--error)] hover:underline shrink-0"
+                        className="font-mono text-3xs uppercase tracking-wider text-error hover:underline shrink-0"
                       >
                         Revoke
                       </button>
@@ -272,7 +269,6 @@ export function ShareDialog({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -26,14 +26,14 @@ export function SidebarNav() {
   return (
     <nav className="bg-card border-r border-border h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
       <div className="flex items-center gap-4 mb-10 px-1">
-        <div className="w-10 h-10 rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white flex-shrink-0">
+        <div className="w-10 h-10 rounded bg-primary flex items-center justify-center text-primary-foreground flex-shrink-0">
           <BrandMark className="h-7 w-7" />
         </div>
         <div>
           <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">
             PrintStash
           </h1>
-          <p className="text-[11px] text-muted-foreground font-mono">
+          <p className="text-2xs text-muted-foreground font-mono">
             Your prints, organized
           </p>
         </div>
@@ -45,9 +45,9 @@ export function SidebarNav() {
             item.href === "/"
               ? pathname === "/"
               : pathname.startsWith(item.href);
-          const className = `flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 ${
+          const className = `flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] ${
             isActive
-              ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+              ? "text-accent-foreground bg-accent"
               : "text-muted-foreground hover:bg-muted"
           }`;
           if (item.external) {
@@ -93,9 +93,9 @@ export function SidebarNav() {
         ) : (
           <Link
             href="/login"
-            className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 mb-1 ${
+            className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] mb-1 ${
               pathname.startsWith("/login")
-                ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+                ? "text-accent-foreground bg-accent"
                 : "text-muted-foreground hover:bg-muted"
             }`}
           >
@@ -110,9 +110,9 @@ export function SidebarNav() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-all active:scale-95 ${
+              className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] ${
                 isActive
-                  ? "text-blue-700 dark:text-orange-400 bg-blue-50"
+                  ? "text-accent-foreground bg-accent"
                   : "text-muted-foreground hover:bg-muted"
               }`}
             >

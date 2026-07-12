@@ -1,8 +1,61 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMountTransition, useOverlayBehavior } from "@/lib/overlay";
+
+/**
+ * Low-level dialog chrome: portal, animated backdrop + panel, focus trap,
+ * Escape, scroll lock. Use `Modal` for the standard titled dialog; use
+ * `ModalShell` directly when a dialog needs fully custom panel markup.
+ */
+export function ModalShell({
+  open = true,
+  onClose,
+  labelledBy,
+  className,
+  children,
+}: {
+  open?: boolean;
+  onClose: () => void;
+  labelledBy?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  const { mounted, state } = useMountTransition(open, 150);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useOverlayBehavior(open, onClose, panelRef);
+
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-overlay flex items-center justify-center p-4">
+      <div
+        data-state={state}
+        onClick={onClose}
+        aria-hidden
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-fast ease-out data-[state=closed]:opacity-0"
+      />
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        data-state={state}
+        className={cn(
+          "relative outline-none transition-[opacity,transform] duration-fast ease-out",
+          "data-[state=closed]:scale-[0.97] data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:scale-100",
+          className,
+        )}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 export function Modal({
   open,
@@ -17,51 +70,35 @@ export function Modal({
   children: ReactNode;
   className?: string;
 }) {
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
-  }, [open, onClose]);
-
-  if (!open) return null;
+  const titleId = useId();
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      labelledBy={title ? titleId : undefined}
+      className={cn(
+        "w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg",
+        className,
+      )}
     >
-      <div
-        className={cn(
-          "w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg",
-          className,
+      <div className="mb-4 flex items-center justify-between">
+        {title ? (
+          <h2 id={titleId} className="text-lg font-semibold">
+            {title}
+          </h2>
+        ) : (
+          <span />
         )}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          {title ? (
-            <h2 className="text-lg font-semibold">{title}</h2>
-          ) : (
-            <span />
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 hover:bg-accent"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        {children}
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md p-1 hover:bg-accent"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
-    </div>
+      {children}
+    </ModalShell>
   );
 }

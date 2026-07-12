@@ -31,6 +31,9 @@ import {
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
+import { buttonVariants } from "@/components/ui/button";
+import { TabBar } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -60,17 +63,18 @@ const PREHEAT_PRESETS: { name: string; hotend: number; bed: number }[] = [
 
 const STATUS_COLORS: Record<PrinterStatus, string> = {
   ready: "bg-emerald-500",
-  printing: "bg-blue-600 dark:bg-orange-600",
+  printing: "bg-primary",
   paused: "bg-amber-500",
   offline: "bg-slate-400",
   unknown: "bg-slate-400",
   error: "bg-red-600",
 };
 
-const BTN_SECONDARY =
-  "inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40";
-const BTN_DANGER =
-  "inline-flex items-center gap-1.5 rounded-md border border-red-300/50 bg-background px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/40";
+const BTN_SECONDARY = cn(buttonVariants({ variant: "outline", size: "xs" }), "hover:bg-muted");
+const BTN_DANGER = cn(
+  buttonVariants({ variant: "outline", size: "xs" }),
+  "border-red-300/50 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40",
+);
 const SECTION_CLASS = "overflow-hidden rounded-lg border border-border bg-background";
 const SECTION_HEADER_CLASS = "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
 
@@ -394,14 +398,14 @@ export function PrinterDetailPage({
           {wsConnected ? (
             <>
               <Wifi className="h-3 w-3 text-emerald-500" />
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-emerald-600">
+              <span className="font-mono text-3xs font-semibold uppercase tracking-wider text-emerald-600">
                 Live
               </span>
             </>
           ) : (
             <>
               <WifiOff className="h-3 w-3 text-amber-500" />
-              <span className="font-mono text-[10px] uppercase tracking-wider text-amber-500">
+              <span className="font-mono text-3xs uppercase tracking-wider text-amber-500">
                 Reconnecting…
               </span>
             </>
@@ -415,11 +419,11 @@ export function PrinterDetailPage({
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
             {printer.name}
           </h1>
-          <span className="rounded border border-border px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
             {providerLabel(printer.provider)}
           </span>
           {printer.capabilities.support_level === "beta" && (
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-amber-600">
+            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
               Beta
             </span>
           )}
@@ -427,7 +431,7 @@ export function PrinterDetailPage({
             <span
               className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
             />
-            <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
               {printer.status}
             </span>
           </span>
@@ -459,32 +463,29 @@ export function PrinterDetailPage({
       </div>
 
       <div className="border-b border-border">
-        <div className="flex gap-1 overflow-x-auto -mb-px">
-        <TabButton active={activeTab === "status"} onClick={() => setActiveTab("status")}>
-          Status
-        </TabButton>
-        <TabButton active={activeTab === "files"} onClick={() => setActiveTab("files")}>
-          Files
-        </TabButton>
-        <TabButton active={activeTab === "jobs"} onClick={() => setActiveTab("jobs")}>
-          Jobs
-        </TabButton>
-        {printer.provider === "moonraker" && (
-          <TabButton active={activeTab === "config"} onClick={() => {
-            setActiveTab("config");
-            if (!moonrakerConfig) loadMoonrakerConfig();
-          }}>
-            Config
-          </TabButton>
-        )}
-        <TabButton active={activeTab === "diagnostics"} onClick={() => setActiveTab("diagnostics")}>
-          Diagnostics
-        </TabButton>
-        </div>
+        <TabBar
+          tabs={[
+            { key: "status" as const, label: "Status" },
+            { key: "files" as const, label: "Files" },
+            { key: "jobs" as const, label: "Jobs" },
+            ...(printer.provider === "moonraker"
+              ? [{ key: "config" as const, label: "Config" }]
+              : []),
+            { key: "diagnostics" as const, label: "Diagnostics" },
+          ]}
+          active={activeTab}
+          onChange={(k) => {
+            setActiveTab(k);
+            if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
+          }}
+          className="gap-1 overflow-x-auto -mb-px"
+          tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
+          activeTabClassName="text-primary"
+        />
       </div>
 
       {activeTab === "status" && (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-panel-in">
         {/* Current print */}
         <section className={`${SECTION_CLASS} lg:col-span-2`}>
           <div className={SECTION_HEADER_CLASS}>
@@ -498,7 +499,7 @@ export function PrinterDetailPage({
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   Progress
                 </span>
                 <span className="font-mono text-xs text-foreground font-semibold">
@@ -507,8 +508,8 @@ export function PrinterDetailPage({
               </div>
               <div className="h-2 w-full overflow-hidden rounded bg-muted">
                 <div
-                  className="h-full bg-blue-600 transition-all duration-500 dark:bg-orange-600"
-                  style={{ width: `${Math.min(100, progress ?? 0)}%` }}
+                  className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
+                  style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
                 />
               </div>
             </div>
@@ -548,7 +549,7 @@ export function PrinterDetailPage({
                   destructive
                 />
               </div>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                 {auth.isAuthenticated
                   ? "Controls use your signed-in user session."
                   : "Sign in to control printers."}
@@ -574,7 +575,7 @@ export function PrinterDetailPage({
             {printer.capabilities.can_send_gcode && (
               <div className="border-t border-border pt-4 space-y-4">
                 <div className="space-y-2">
-                  <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                     Preheat
                   </span>
                   <div className="flex flex-wrap gap-2">
@@ -666,14 +667,14 @@ export function PrinterDetailPage({
       )}
 
       {activeTab === "files" && (
-      <section className={SECTION_CLASS}>
+      <section className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
             <FileText className="h-4 w-4 text-muted-foreground" />
             <h2 className="text-sm font-semibold text-foreground">
               Printer files
             </h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+            <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
               {printerFiles.length}
             </span>
           </div>
@@ -692,7 +693,7 @@ export function PrinterDetailPage({
           </button>
         </div>
         {printer.last_error && printer.status === "offline" && (
-          <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-[11px] text-red-600 break-words dark:bg-red-950/20">
+          <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-2xs text-red-600 break-words dark:bg-red-950/20">
             {printer.last_error}
           </div>
         )}
@@ -706,7 +707,7 @@ export function PrinterDetailPage({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   <th className="py-3 px-4 font-medium">Remote file</th>
                   <th className="py-3 px-4 font-medium">Vault match</th>
                   <th className="py-3 px-4 font-medium text-right">Size</th>
@@ -728,7 +729,7 @@ export function PrinterDetailPage({
                       {f.model_id ? (
                         <Link
                           href={`/models/${f.model_id}`}
-                          className="font-mono text-xs text-foreground hover:text-blue-600 hover:underline dark:hover:text-orange-500"
+                          className="font-mono text-xs text-foreground hover:text-primary hover:underline"
                         >
                           {f.model_name ?? f.original_filename}
                         </Link>
@@ -742,7 +743,7 @@ export function PrinterDetailPage({
                       {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
                     </td>
                     <td className="py-3 px-4">
-                      <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
+                      <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
                         {f.matched_by}
                       </span>
                     </td>
@@ -805,13 +806,13 @@ export function PrinterDetailPage({
 
       {/* History */}
       {activeTab === "jobs" && (
-      <section className={SECTION_CLASS}>
+      <section className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <h2 className="text-sm font-semibold text-foreground">
             Print history
           </h2>
           {jobs.length > 0 && (
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-[10px] font-semibold text-muted-foreground">
+            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs font-semibold text-muted-foreground">
               {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
             </span>
           )}
@@ -824,7 +825,7 @@ export function PrinterDetailPage({
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   <th className="py-3 px-4 font-medium">When</th>
                   <th className="py-3 px-4 font-medium">File</th>
                   <th className="py-3 px-4 font-medium">State</th>
@@ -845,14 +846,14 @@ export function PrinterDetailPage({
                     <td className="py-3 px-4 max-w-[260px] truncate">
                       <Link
                         href={`/models/${j.model_id}`}
-                        className="font-mono text-xs text-foreground hover:text-blue-600 hover:underline dark:hover:text-orange-500"
+                        className="font-mono text-xs text-foreground hover:text-primary hover:underline"
                         title={j.remote_filename}
                       >
                         {j.remote_filename}
                       </Link>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-foreground">
+                      <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">
                         {j.state}
                       </span>
                     </td>
@@ -879,7 +880,7 @@ export function PrinterDetailPage({
       )}
 
       {activeTab === "config" && printer.provider === "moonraker" && (
-      <section className={SECTION_CLASS}>
+      <section className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
@@ -918,7 +919,7 @@ export function PrinterDetailPage({
       )}
 
       {activeTab === "diagnostics" && (
-      <section className={SECTION_CLASS}>
+      <section className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
             <Info className="h-4 w-4 text-muted-foreground" />
@@ -998,7 +999,7 @@ export function PrinterDetailPage({
                           {checkLabel(check.name)}
                         </div>
                         {!check.ok && (
-                          <div className="mt-1 font-mono text-[11px] text-red-600 break-words">
+                          <div className="mt-1 font-mono text-2xs text-red-600 break-words">
                             {check.code ?? "provider_error"}
                             {check.detail ? `: ${check.detail}` : ""}
                           </div>
@@ -1018,7 +1019,7 @@ export function PrinterDetailPage({
                 <div className="grid grid-cols-2 gap-px bg-border">
                   {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
                     <div key={name} className="bg-background px-4 py-3">
-                      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                         {checkLabel(name.replace(/^can_/, ""))}
                       </div>
                       <div className={`mt-1 font-mono text-xs font-semibold ${
@@ -1034,14 +1035,14 @@ export function PrinterDetailPage({
 
             {diagnostics.unsupported_actions.length > 0 && (
               <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
-                <div className="font-mono text-[10px] uppercase tracking-wider text-amber-600 font-semibold">
+                <div className="font-mono text-3xs uppercase tracking-wider text-amber-600 font-semibold">
                   Unsupported in this provider
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {diagnostics.unsupported_actions.map((action) => (
                     <span
                       key={action}
-                      className="rounded border border-amber-500/40 px-2 py-1 font-mono text-[10px] uppercase tracking-wider text-amber-600"
+                      className="rounded border border-amber-500/40 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600"
                     >
                       {actionLabel(action)}
                     </span>
@@ -1081,7 +1082,7 @@ function ConfigSummary({
         ) : (
           rows.map(([key, value]) => (
             <div key={key} className="grid grid-cols-[minmax(120px,0.45fr)_1fr] gap-3 px-4 py-3">
-              <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground truncate">
+              <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground truncate">
                 {checkLabel(key)}
               </div>
               <div className="font-mono text-xs text-foreground break-words">
@@ -1107,34 +1108,10 @@ function ConfigBlock({
       <div className="border-b border-border px-4 py-3">
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       </div>
-      <pre className="max-h-[420px] overflow-auto bg-muted/40 p-4 font-mono text-[11px] leading-5 text-foreground">
+      <pre className="max-h-[420px] overflow-auto bg-muted/40 p-4 font-mono text-2xs leading-5 text-foreground">
         {JSON.stringify(data, null, 2)}
       </pre>
     </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`border-b-2 px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors ${
-        active
-          ? "border-blue-600 text-blue-600 dark:border-orange-500 dark:text-orange-500"
-          : "border-transparent text-muted-foreground hover:text-foreground"
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -1149,7 +1126,7 @@ function StatusMetric({
 }) {
   return (
     <div className="rounded border border-border bg-background p-3">
-      <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
         {label}
       </div>
       <div
@@ -1178,7 +1155,7 @@ function Row({
   if (stack) {
     return (
       <div className="space-y-1">
-        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
         <div className="font-mono text-sm text-foreground font-semibold">
@@ -1189,7 +1166,7 @@ function Row({
   }
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground flex-shrink-0">
+      <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground flex-shrink-0">
         {label}
       </span>
       <span
@@ -1254,7 +1231,7 @@ function SetTempInput({
   return (
     <div className="flex items-end gap-2">
       <label className="flex-1 space-y-1">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
         <input
@@ -1267,7 +1244,7 @@ function SetTempInput({
             if (e.key === "Enter" && !disabled) onApply();
           }}
           placeholder="°C"
-          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-blue-600 dark:focus:ring-orange-500"
+          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </label>
       <button
@@ -1297,7 +1274,7 @@ function TempRow({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
         <span className="font-mono text-xs text-foreground font-semibold">
@@ -1312,8 +1289,8 @@ function TempRow({
       {pct != null && (
         <div className="h-1 w-full overflow-hidden rounded bg-muted">
           <div
-            className="h-full bg-blue-500 dark:bg-orange-500 transition-all duration-500"
-            style={{ width: `${pct}%` }}
+            className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
+            style={{ transform: `scaleX(${pct / 100})` }}
           />
         </div>
       )}

@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { Drawer } from "@/components/ui/drawer";
 
 type NavItem = {
   href: string;
@@ -109,15 +110,14 @@ export function BottomNavBar() {
         </button>
       </nav>
 
-      {moreOpen && (
-        <MoreSheet
-          items={overflow}
-          pathname={pathname}
-          username={user?.username}
-          onLogout={user ? handleLogout : undefined}
-          onClose={() => setMoreOpen(false)}
-        />
-      )}
+      <MoreSheet
+        open={moreOpen}
+        items={overflow}
+        pathname={pathname}
+        username={user?.username}
+        onLogout={user ? handleLogout : undefined}
+        onClose={() => setMoreOpen(false)}
+      />
     </>
   );
 }
@@ -152,7 +152,7 @@ function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
     <span
       className={`flex h-7 w-[3.25rem] items-center justify-center rounded-full transition-colors ${
         active
-          ? "bg-blue-600/10 text-blue-600 dark:bg-orange-500/15 dark:text-orange-400"
+          ? "bg-accent text-primary"
           : "text-muted-foreground group-hover:bg-muted group-hover:text-foreground"
       }`}
     >
@@ -170,8 +170,8 @@ function TabLabel({
 }) {
   return (
     <span
-      className={`text-[10px] font-medium leading-none tracking-tight ${
-        active ? "text-blue-600 dark:text-orange-400" : "text-muted-foreground"
+      className={`text-3xs font-medium leading-none tracking-tight ${
+        active ? "text-primary" : "text-muted-foreground"
       }`}
     >
       {children}
@@ -180,12 +180,14 @@ function TabLabel({
 }
 
 function MoreSheet({
+  open,
   items,
   pathname,
   username,
   onLogout,
   onClose,
 }: {
+  open: boolean;
   items: NavItem[];
   pathname: string;
   username?: string;
@@ -193,12 +195,14 @@ function MoreSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="md:hidden fixed inset-0 z-50">
-      <div
-        className="fade-in absolute inset-0 bg-black/40 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="slide-up absolute inset-x-0 bottom-0 rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl">
+    <Drawer
+      open={open}
+      onClose={onClose}
+      side="bottom"
+      ariaLabel="More"
+      containerClassName="md:hidden"
+      className="rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl"
+    >
         <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/25" />
         <div className="mb-3 flex items-center justify-between">
           <span className="text-sm font-semibold text-foreground">More</span>
@@ -215,9 +219,9 @@ function MoreSheet({
           <div className="grid grid-cols-3 gap-2">
             {items.map((item) => {
               const active = isItemActive(item, pathname);
-              const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-colors active:scale-95 ${
+              const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
                 active
-                  ? "border-blue-600/40 bg-blue-600/10 text-blue-600 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-400"
+                  ? "border-primary-soft bg-accent text-primary"
                   : "border-border bg-background text-foreground hover:bg-muted"
               }`;
               const inner = (
@@ -260,7 +264,6 @@ function MoreSheet({
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </Drawer>
   );
 }

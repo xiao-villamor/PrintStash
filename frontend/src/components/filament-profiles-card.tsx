@@ -98,8 +98,8 @@ function printerDirty(profile: PrinterProfileRead, edit: PrinterEdit): boolean {
 
 const MATERIAL_COLORS: Record<string, string> = {
   pla: "bg-emerald-500",
-  petg: "bg-blue-500 dark:bg-orange-500",
-  abs: "bg-blue-500 dark:bg-orange-500",
+  petg: "bg-primary",
+  abs: "bg-primary",
   asa: "bg-teal-500",
   tpu: "bg-purple-500",
   flex: "bg-purple-400",
@@ -117,7 +117,7 @@ function materialColor(type: string): string {
 
 function ColLabel({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <span className={`text-[10px] font-semibold uppercase tracking-wider text-muted-foreground ${className ?? ""}`}>
+    <span className={`text-3xs font-semibold uppercase tracking-wider text-muted-foreground ${className ?? ""}`}>
       {children}
     </span>
   );
@@ -346,13 +346,13 @@ export function FilamentProfilesCard() {
         {/* header */}
         <div className="flex items-center justify-between border-b border-border bg-muted/40 px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-50 dark:bg-orange-950/40">
-              <Layers className="h-4 w-4 text-blue-600 dark:text-orange-500" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-accent">
+              <Layers className="h-4 w-4 text-primary" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-foreground">Filament presets</h3>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
                   {filaments.length}
                 </span>
               </div>
@@ -397,7 +397,7 @@ export function FilamentProfilesCard() {
             onSubmit={(e) => { e.preventDefault(); handleCreateFilament(); }}
             className="border-b border-border bg-accent/30 px-5 py-4"
           >
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New filament preset</p>
+            <p className="mb-3 text-3xs font-semibold uppercase tracking-wider text-muted-foreground">New filament preset</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_7rem_1fr_7rem_1fr_auto]">
               <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Preset name *" className={formInputClass} autoFocus />
               <input value={newType} onChange={(e) => setNewType(e.target.value)} placeholder="Type (PLA…)" className={formInputClass} />
@@ -408,7 +408,7 @@ export function FilamentProfilesCard() {
                 <button
                   type="submit"
                   disabled={!newName.trim()}
-                  className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-blue-600 dark:bg-orange-600 px-3 text-xs font-medium text-white transition-opacity hover:bg-blue-700 dark:hover:bg-orange-700 disabled:opacity-40 sm:flex-none sm:w-20"
+                  className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:bg-primary-hover disabled:opacity-40 sm:flex-none sm:w-20"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add
@@ -485,7 +485,7 @@ export function FilamentProfilesCard() {
                           )}
                         </div>
                         {profile.usage_count > 0 && (
-                          <p className="mt-1 truncate pl-5 text-[10px] text-muted-foreground">
+                          <p className="mt-1 truncate pl-5 text-3xs text-muted-foreground">
                             Used by {profile.usage_count} file{profile.usage_count === 1 ? "" : "s"}
                           </p>
                         )}
@@ -530,7 +530,7 @@ export function FilamentProfilesCard() {
                             onClick={() => handleDeleteFilament(profile.id)}
                             disabled={!auth.isAuthenticated}
                             title="Delete"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -556,7 +556,7 @@ export function FilamentProfilesCard() {
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-foreground">Printer presets</h3>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
                   {printers.length}
                 </span>
               </div>
@@ -583,7 +583,7 @@ export function FilamentProfilesCard() {
             onSubmit={(e) => { e.preventDefault(); handleCreatePrinter(); }}
             className="border-b border-border bg-accent/30 px-5 py-4"
           >
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New printer preset</p>
+            <p className="mb-3 text-3xs font-semibold uppercase tracking-wider text-muted-foreground">New printer preset</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1.4fr_1fr_1fr_6rem_auto]">
               <input value={newPrinterName} onChange={(e) => setNewPrinterName(e.target.value)} placeholder="Preset name *" className={formInputClass} autoFocus />
               <input value={newPrinterModel} onChange={(e) => setNewPrinterModel(e.target.value)} placeholder="Printer model" className={formInputClass} />
@@ -593,7 +593,7 @@ export function FilamentProfilesCard() {
                 <button
                   type="submit"
                   disabled={!newPrinterName.trim()}
-                  className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-blue-600 dark:bg-orange-600 px-3 text-xs font-medium text-white transition-opacity hover:bg-blue-700 dark:hover:bg-orange-700 disabled:opacity-40 sm:flex-none sm:w-20"
+                  className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:bg-primary-hover disabled:opacity-40 sm:flex-none sm:w-20"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   Add
@@ -653,7 +653,7 @@ export function FilamentProfilesCard() {
                           className={inputClass}
                         />
                         {(profile.slicer_name || profile.usage_count > 0) && (
-                          <p className="mt-1 truncate pl-0.5 text-[10px] text-muted-foreground">
+                          <p className="mt-1 truncate pl-0.5 text-3xs text-muted-foreground">
                             {[
                               profile.slicer_name ? `Detected from ${profile.slicer_name}` : null,
                               profile.usage_count > 0
@@ -694,7 +694,7 @@ export function FilamentProfilesCard() {
                           onClick={() => handleDeletePrinter(profile.id)}
                           disabled={!auth.isAuthenticated}
                           title="Delete"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-muted-foreground/50 opacity-0 transition-[opacity,color,background-color,border-color] hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-40 disabled:hover:border-transparent dark:hover:bg-red-950/40"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>

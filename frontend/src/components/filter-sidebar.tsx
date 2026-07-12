@@ -150,11 +150,11 @@ function CollectionTreeRow({
     <div style={isDragging ? { opacity: 0.3 } : undefined} className={isDragging ? "pointer-events-none" : undefined}>
       {confirming ? (
         <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
-          <p className="text-[11px] font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
+          <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
             Delete &ldquo;{node.cat.name}&rdquo;?
           </p>
           {hasContent && (
-            <p className="text-[10px] text-muted-foreground mb-1.5 leading-snug">
+            <p className="text-3xs text-muted-foreground mb-1.5 leading-snug">
               {descCount > 0 && <span>{descCount} subcollection{descCount !== 1 ? "s" : ""}</span>}
               {descCount > 0 && node.cat.model_count > 0 && " · "}
               {node.cat.model_count > 0 && <span>{node.cat.model_count} model{node.cat.model_count !== 1 ? "s" : ""} → recycle bin</span>}
@@ -162,12 +162,12 @@ function CollectionTreeRow({
           )}
           <div className="flex gap-1">
             <button type="button" onClick={() => setConfirming(false)}
-              className="flex-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted hover:bg-muted/70 text-muted-foreground transition-colors">
+              className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-muted hover:bg-muted/70 text-muted-foreground transition-colors">
               Cancel
             </button>
             <button type="button"
               onClick={() => { onDelete?.(node.cat.id, hasContent); setConfirming(false); }}
-              className="flex-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">
+              className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">
               Delete
             </button>
           </div>
@@ -177,9 +177,9 @@ function CollectionTreeRow({
           ref={rowRef}
           className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
             isOver && dragging !== null && canDrop
-              ? "z-10 bg-blue-100 dark:bg-orange-950/60 ring-1 ring-blue-400 dark:ring-orange-500"
+              ? "z-10 bg-accent ring-1 ring-primary"
               : isSelected
-              ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+              ? "text-accent-foreground bg-accent"
               : "text-foreground hover:bg-muted"
           }`}
         >
@@ -197,7 +197,7 @@ function CollectionTreeRow({
             className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
             title={node.cat.path} {...attributes}>
             {isOpen || isSelected
-              ? <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 dark:text-orange-500" />
+              ? <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
               : <Folder className="h-3.5 w-3.5 flex-shrink-0" />}
             <span className="truncate">{node.cat.name}</span>
           </button>
@@ -218,7 +218,7 @@ function CollectionTreeRow({
               <Trash2 className="h-2.5 w-2.5" />
             </button>
           )}
-          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-[11px] font-medium text-muted-foreground">
+          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
             {node.cat.model_count}
           </span>
         </div>
@@ -287,9 +287,9 @@ function DroppableAllModels({
         onClick={onClick}
         className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
           isOver && dragging !== null
-            ? "z-10 bg-blue-100 dark:bg-orange-950/60 ring-1 ring-blue-400 dark:ring-orange-500"
+            ? "z-10 bg-accent ring-1 ring-primary"
             : selected
-            ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+            ? "text-accent-foreground bg-accent"
             : "text-foreground hover:bg-muted"
         }`}
       >
@@ -303,9 +303,9 @@ function DroppableAllModels({
             <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
           </button>
         ) : (
-          <ChevronRight className={`h-4 w-4 mr-1 rotate-90 ${selected ? "text-blue-500 dark:text-orange-400" : "text-muted-foreground"}`} />
+          <ChevronRight className={`h-4 w-4 mr-1 rotate-90 ${selected ? "text-primary" : "text-muted-foreground"}`} />
         )}
-        <FolderOpen className="h-4 w-4 mr-2 text-blue-500 dark:text-orange-400" />
+        <FolderOpen className="h-4 w-4 mr-2 text-primary" />
         All Models
       </button>
       {isExpanded && displayModels.length > 0 && (
@@ -320,7 +320,7 @@ function DroppableAllModels({
             />
           ))}
           {displayModels.length > 8 && (
-            <div className="px-2 py-1 text-[10px] text-muted-foreground">
+            <div className="px-2 py-1 text-3xs text-muted-foreground">
               +{displayModels.length - 8} more
             </div>
           )}
@@ -541,7 +541,7 @@ export function FilterSidebarContent({
   }
 
   const statusColor = (s: string) =>
-    s === "printing" ? "bg-blue-500 dark:bg-orange-500" :
+    s === "printing" ? "bg-primary" :
     s === "ready" ? "bg-green-500" :
     s === "paused" ? "bg-amber-500" :
     s === "error" ? "bg-red-500" :
@@ -556,7 +556,7 @@ export function FilterSidebarContent({
     "Unknown";
 
   const statusTextColor = (s: string) =>
-    s === "printing" ? "text-blue-500 dark:text-orange-400" :
+    s === "printing" ? "text-primary" :
     s === "error" ? "text-red-500" :
     s === "ready" ? "text-green-500" :
     s === "paused" ? "text-amber-500" :
@@ -600,7 +600,7 @@ export function FilterSidebarContent({
             />
             <div className="ml-5 border-l border-border pl-4 min-w-0">
               {visibleRoots.length === 0 && treeFiltered && (visibleModelIds?.size ?? 0) === 0 ? (
-                <p className="py-2 text-[10px] text-muted-foreground font-mono">No results.</p>
+                <p className="py-2 text-3xs text-muted-foreground font-mono">No results.</p>
               ) : (
                 visibleRoots.map((node) => (
                   <CollectionTreeRow
@@ -635,11 +635,11 @@ export function FilterSidebarContent({
               onClick={() => { onPrinterChange(null); onPrinterPresenceChange(null); }}
               className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
                 selectedPrinterId === null && selectedPrinterPresence === null
-                  ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+                  ? "text-accent-foreground bg-accent"
                   : "text-foreground hover:bg-muted"
               }`}
             >
-              <svg className="h-4 w-4 mr-2 text-blue-500 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="h-4 w-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
               </svg>
               Any location
@@ -654,12 +654,12 @@ export function FilterSidebarContent({
                 }}
                 className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
                   selectedPrinterPresence === "any"
-                    ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+                    ? "text-accent-foreground bg-accent"
                     : "text-foreground hover:bg-muted"
                 }`}
               >
                 <ChevronRight className={`h-4 w-4 mr-1 text-muted-foreground transition-transform ${printerExpanded ? "rotate-90" : ""}`} />
-                <svg className="h-4 w-4 mr-2 text-blue-500 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="h-4 w-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
                 </svg>
                 <span className="font-medium">On a printer</span>
@@ -667,7 +667,7 @@ export function FilterSidebarContent({
               {printerExpanded && (
                 <div className="ml-4 border-l border-border">
                   {printers.length === 0 ? (
-                    <p className="pl-4 py-1 text-[11px] text-muted-foreground font-mono">No printers configured</p>
+                    <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">No printers configured</p>
                   ) : (
                     printers.map((printer) => (
                       <button
@@ -676,7 +676,7 @@ export function FilterSidebarContent({
                         onClick={() => { onPrinterChange(printer.id); onPrinterPresenceChange(null); }}
                         className={`w-full flex items-center justify-between px-2 py-1.5 text-sm transition-colors rounded group pl-4 ${
                           selectedPrinterId === printer.id
-                            ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+                            ? "text-accent-foreground bg-accent"
                             : "text-foreground hover:bg-muted"
                         }`}
                       >
@@ -684,7 +684,7 @@ export function FilterSidebarContent({
                           <span className={`w-1.5 h-1.5 rounded-full ${statusColor(printer.status)} mr-2`} />
                           {printer.name}
                         </span>
-                        <span className={`text-[10px] font-medium ${statusTextColor(printer.status)}`}>
+                        <span className={`text-3xs font-medium ${statusTextColor(printer.status)}`}>
                           {statusLabel(printer.status)}
                         </span>
                       </button>
@@ -698,11 +698,11 @@ export function FilterSidebarContent({
               onClick={() => { onPrinterChange(null); onPrinterPresenceChange("none"); }}
               className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
                 selectedPrinterPresence === "none"
-                  ? "text-blue-700 dark:text-orange-400 bg-blue-50 dark:bg-orange-950/50"
+                  ? "text-accent-foreground bg-accent"
                   : "text-foreground hover:bg-muted"
               }`}
             >
-              <Folder className="h-4 w-4 mr-2 text-blue-500 dark:text-orange-400" />
+              <Folder className="h-4 w-4 mr-2 text-primary" />
               Vault only
             </button>
           </div>
@@ -722,7 +722,7 @@ export function FilterSidebarContent({
                 placeholder="Filter tags..."
                 value={tagFilter}
                 onChange={(e) => { setTagFilter(e.target.value); setShowAllTags(false); }}
-                className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500 focus:border-blue-500 dark:focus:border-blue-500 dark:border-orange-500 transition-colors"
+                className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
               />
               {tagFilter && (
                 <button
@@ -735,7 +735,7 @@ export function FilterSidebarContent({
               )}
             </div>
             {filteredTags.length === 0 ? (
-              <p className="text-[10px] text-muted-foreground font-mono px-1 py-2">No matching tags.</p>
+              <p className="text-3xs text-muted-foreground font-mono px-1 py-2">No matching tags.</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {visibleTags.map((t) => {
@@ -745,9 +745,9 @@ export function FilterSidebarContent({
                       type="button"
                       key={t.id}
                       onClick={() => toggleTag(t.slug)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-[11px] tracking-wider uppercase border transition-colors ${
+                      className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-2xs tracking-wider uppercase border transition-colors ${
                         active
-                          ? "border-blue-500 dark:border-orange-500 bg-blue-50 dark:bg-orange-950/50 text-blue-700 dark:text-orange-400"
+                          ? "border-primary bg-accent text-accent-foreground"
                           : "border-border text-muted-foreground hover:border-border hover:bg-muted"
                       }`}
                     >
@@ -763,7 +763,7 @@ export function FilterSidebarContent({
               <button
                 type="button"
                 onClick={() => setShowAllTags(!showAllTags)}
-                className="mt-2 w-full text-center font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors py-1"
+                className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
               >
                 {showAllTags ? "Show fewer" : `Show all ${filteredTags.length} tags`}
               </button>
@@ -828,14 +828,14 @@ export function FilterSidebar(props: FilterSidebarProps) {
   }
 
   return (
-    <aside style={{ width: sidebarWidth }} className="bg-[var(--sidebar-bg)] border-r border-border flex flex-col shrink-0 hidden md:flex relative">
-      <div className="p-2 border-b border-border bg-[var(--sidebar-bg)]">
+    <aside style={{ width: sidebarWidth }} className="bg-sidebar border-r border-border flex flex-col shrink-0 hidden md:flex relative">
+      <div className="p-2 border-b border-border bg-sidebar">
         <div className="relative">
           <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
             <Search className="h-3.5 w-3.5" />
           </span>
           <input
-            className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-blue-500 dark:focus:ring-orange-500"
+            className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             placeholder="Filter outliner..."
             type="text"
             value={outlinerFilter}
@@ -856,7 +856,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
       {/* Resize handle */}
       <div
         onMouseDown={handleResizeStart}
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400/50 dark:hover:bg-orange-400/50 transition-colors z-50"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
       />
     </aside>
   );

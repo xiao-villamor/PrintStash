@@ -23,6 +23,7 @@ import {
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
+import { ModalShell } from "@/components/ui/modal";
 import {
   ChevronRight,
   Folder,
@@ -104,14 +105,14 @@ function CollectionTreeRow({
             <span className="w-4 flex-shrink-0" />
           )}
           {isOpen ? (
-            <FolderOpen className="h-4 w-4 flex-shrink-0 text-blue-600 dark:text-orange-500" />
+            <FolderOpen className="h-4 w-4 flex-shrink-0 text-primary" />
           ) : (
             <Folder className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           )}
           <span className="text-sm text-foreground truncate">
             {collection.name}
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground truncate hidden sm:inline">
+          <span className="font-mono text-3xs text-muted-foreground truncate hidden sm:inline">
             {collection.path}
           </span>
         </div>
@@ -120,7 +121,7 @@ function CollectionTreeRow({
             {collection.model_count} models
           </span>
           {collection.effective_role && (
-            <span className="font-mono text-[10px] uppercase text-muted-foreground">
+            <span className="font-mono text-3xs uppercase text-muted-foreground">
               {collection.effective_role}
             </span>
           )}
@@ -352,7 +353,7 @@ export function TaxonomyManager() {
           { label: "Top tag", value: topTags[0]?.name ?? "None", detail: `${topTags[0]?.model_count ?? 0} models` },
         ].map((item) => (
           <div key={item.label} className="bg-card p-4 sm:p-5 min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <p className="text-2xs font-bold uppercase tracking-wider text-muted-foreground">
               {item.label}
             </p>
             <p className="mt-2 text-xl font-semibold text-foreground truncate">
@@ -386,13 +387,13 @@ export function TaxonomyManager() {
               onChange={(e) => setNewCollection(e.target.value)}
               disabled={!auth.isAuthenticated}
               placeholder={auth.isAuthenticated ? "New collection..." : "Sign in to add"}
-              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
+              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
             />
             <select
               value={parentCollectionId ?? ""}
               onChange={(e) => setParentCollectionId(e.target.value ? Number(e.target.value) : null)}
               disabled={!auth.isAuthenticated}
-              className="max-w-44 bg-background text-foreground text-xs border border-border rounded px-2 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
+              className="max-w-44 bg-background text-foreground text-xs border border-border rounded px-2 py-[6px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
               title="Parent collection"
             >
               <option value="">Root</option>
@@ -405,7 +406,7 @@ export function TaxonomyManager() {
             <button
               type="submit"
               disabled={!newCollection.trim() || !auth.isAuthenticated}
-              className="p-1.5 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
+              className="p-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -469,12 +470,12 @@ export function TaxonomyManager() {
               onChange={(e) => setNewTag(e.target.value)}
               disabled={!auth.isAuthenticated}
               placeholder={auth.isAuthenticated ? "New tag..." : "Sign in to add"}
-              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent disabled:opacity-50"
+              className="flex-1 sm:flex-none sm:w-40 bg-background text-foreground text-xs border border-border rounded px-3 py-[6px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={!newTag.trim() || !auth.isAuthenticated}
-              className="p-1.5 rounded bg-blue-600 dark:bg-orange-600 text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
+              className="p-1.5 rounded bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 flex-shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
             </button>
@@ -496,7 +497,7 @@ export function TaxonomyManager() {
                   className="inline-flex items-center gap-1.5 bg-muted text-foreground pl-2.5 pr-1.5 py-1.5 rounded text-xs uppercase tracking-wider"
                 >
                   {t.name}
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-3xs text-muted-foreground">
                     ({t.model_count})
                   </span>
                   <button
@@ -564,7 +565,7 @@ export function TaxonomyManager() {
                     className="inline-flex items-center gap-1.5 bg-muted text-foreground px-2.5 py-1.5 rounded text-xs uppercase tracking-wider"
                   >
                     {tag.name}
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-3xs text-muted-foreground">
                       {tag.model_count}
                     </span>
                   </span>
@@ -609,15 +610,16 @@ function PermissionsModal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div className="relative w-full max-w-lg rounded bg-card border border-border shadow-xl">
+    <ModalShell
+      onClose={onClose}
+      className="w-full max-w-lg rounded bg-card border border-border shadow-xl"
+    >
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">
               Collection access
             </h3>
-            <p className="font-mono text-[11px] text-muted-foreground truncate">
+            <p className="font-mono text-2xs text-muted-foreground truncate">
               {collection.path}
             </p>
           </div>
@@ -658,7 +660,7 @@ function PermissionsModal({
               type="button"
               onClick={onSave}
               disabled={!selectedUserId}
-              className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50 dark:bg-orange-600"
+              className="rounded bg-primary px-3 py-2 text-xs font-medium text-primary-foreground disabled:opacity-50"
             >
               Save
             </button>
@@ -678,7 +680,7 @@ function PermissionsModal({
                     <p className="truncate text-sm text-foreground">
                       {row.username}
                     </p>
-                    <p className="font-mono text-[10px] uppercase text-muted-foreground">
+                    <p className="font-mono text-3xs uppercase text-muted-foreground">
                       {row.role}
                     </p>
                   </div>
@@ -696,7 +698,6 @@ function PermissionsModal({
             )}
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

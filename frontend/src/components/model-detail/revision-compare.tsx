@@ -109,20 +109,20 @@ export function RevisionCompare({ left, right }: { left: FileRead; right: FileRe
   ];
 
   return (
-    <div className="bg-[var(--surface)] border border-[var(--outline-variant)] rounded overflow-hidden">
-      <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-[var(--outline-variant)] bg-[var(--surface-container-low)]">
-        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">Field</span>
-        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">Rev {left.gcode_revision_number ?? left.version}</span>
-        <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface)]">Rev {right.gcode_revision_number ?? right.version}</span>
+    <div className="bg-surface border border-outline-variant rounded overflow-hidden">
+      <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
+        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">Field</span>
+        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">Rev {left.gcode_revision_number ?? left.version}</span>
+        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">Rev {right.gcode_revision_number ?? right.version}</span>
       </div>
       {rows.map(([label, leftValue, rightValue], index) => (
         <div
           key={label}
-          className={`grid grid-cols-[1fr_1fr_1fr] ${index === rows.length - 1 ? "" : "border-b border-[var(--surface-container-high)]"}`}
+          className={`grid grid-cols-[1fr_1fr_1fr] ${index === rows.length - 1 ? "" : "border-b border-surface-container-high"}`}
         >
-          <span className="px-2 py-2 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">{label}</span>
-          <span className="px-2 py-2 font-mono text-[11px] text-[var(--on-surface)] break-words">{leftValue}</span>
-          <span className={`px-2 py-2 font-mono text-[11px] break-words ${leftValue === rightValue ? "text-[var(--on-surface)]" : "text-[var(--primary)] font-semibold"}`}>
+          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">{label}</span>
+          <span className="px-2 py-2 font-mono text-2xs text-on-surface break-words">{leftValue}</span>
+          <span className={`px-2 py-2 font-mono text-2xs break-words ${leftValue === rightValue ? "text-on-surface" : "text-primary font-semibold"}`}>
             {rightValue}
           </span>
         </div>

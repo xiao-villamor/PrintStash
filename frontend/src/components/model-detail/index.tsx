@@ -49,6 +49,7 @@ import {
 } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { TabBar } from "@/components/ui/tabs";
 import { AddGcodeRevisionModal } from "./add-revision-modal";
 import { FilesTab } from "./files-tab";
 import { OverviewTab } from "./overview-tab";
@@ -76,7 +77,7 @@ const GcodeViewer = lazy(() =>
 );
 
 const ViewerFallback = (
-  <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
+  <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
 );
 
 const PRINTER_BED_SIZES: Record<string, { x: number; y: number }> = {
@@ -377,11 +378,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         onClose={() => setShareOpen(false)}
       />
       {/* Detail Header */}
-      <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] shrink-0">
+      <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
         <div className="flex items-center gap-4">
           <Link
             href="/"
-            className="w-10 h-10 flex items-center justify-center rounded hover:bg-[var(--surface-container-high)] text-[var(--on-surface-variant)] transition-colors"
+            className="w-10 h-10 flex items-center justify-center rounded hover:bg-surface-container-high text-on-surface-variant transition-colors"
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
@@ -390,37 +391,37 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               <input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                className="w-full bg-[var(--surface)] text-[var(--on-surface)] font-mono text-lg border border-[var(--outline-variant)] rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent"
+                className="w-full bg-surface text-on-surface font-mono text-lg border border-outline-variant rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                 placeholder="Model name"
               />
             ) : (
-              <h1 className="text-xl font-semibold text-[var(--on-surface)] leading-tight truncate">
+              <h1 className="text-xl font-semibold text-on-surface leading-tight truncate">
                 {model.name}
               </h1>
             )}
-            <span className="font-mono text-[13px] text-[var(--on-surface-variant)]">
+            <span className="font-mono text-[13px] text-on-surface-variant">
               {(meshFile ?? sourceFiles[0]) ? `${(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()} source · ` : ""}
               {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"} · Last updated {timeAgo(model.updated_at)}
             </span>
             {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
               <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                 {recommendedGcode && (
-                  <span className="inline-flex items-center gap-1 border border-[var(--primary)]/30 bg-[var(--secondary-container)] text-[var(--on-secondary-container)] rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+                  <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
                     <Star className="h-3 w-3 fill-current" /> Recommended Rev {recommendedGcode.gcode_revision_number ?? recommendedGcode.version}
                   </span>
                 )}
                 {recommendedGcode?.revision_status && (
-                  <span className={`border rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${revisionStatusClass(recommendedGcode.revision_status)}`}>
+                  <span className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(recommendedGcode.revision_status)}`}>
                     {headerStatusLabel(recommendedGcode.revision_status)}
                   </span>
                 )}
                 {meta?.material_type && (
-                  <span className="inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider">
+                  <span className="inline-flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 rounded px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-wider">
                     {meta.material_type}
                   </span>
                 )}
                 {meta?.printer_model && (
-                  <span className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 rounded px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider">
+                  <span className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 rounded px-2 py-0.5 font-mono text-2xs font-semibold uppercase tracking-wider">
                     <PrinterIcon className="h-3 w-3" /> {meta.printer_model}
                   </span>
                 )}
@@ -433,14 +434,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             <>
               <button
                 onClick={cancelEdit}
-                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider"
+                className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors font-mono text-xs uppercase tracking-wider"
               >
                 Cancel
               </button>
               <button
                 onClick={saveEdit}
                 disabled={saving}
-                className="px-4 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50"
+                className="px-4 py-2 rounded bg-primary text-primary-foreground hover:opacity-90 transition-opacity font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50"
               >
                 {saving ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
@@ -455,7 +456,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 onClick={auth.isAuthenticated && canEditModel ? () => setShareOpen(true) : auth.showAuthRequiredToast}
                 disabled={!auth.isAuthenticated || !canEditModel}
                 title={auth.blockReason ?? (canEditModel ? "Share model" : "Edit access required")}
-                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Link2 className="h-4 w-4" /> Share
               </button>
@@ -463,7 +464,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 onClick={auth.isAuthenticated && canEditModel ? enterEdit : auth.showAuthRequiredToast}
                 disabled={!auth.isAuthenticated || !canEditModel}
                 title={auth.blockReason ?? (canEditModel ? "Edit model" : "Edit access required")}
-                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Pencil className="h-4 w-4" /> {auth.isAuthenticated ? "Edit" : "Sign in to edit"}
               </button>
@@ -471,7 +472,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 onClick={auth.isAuthenticated && canEditModel ? () => setConfirmDeleteOpen(true) : auth.showAuthRequiredToast}
                 disabled={deleting || !auth.isAuthenticated || !canEditModel}
                 title={auth.blockReason ?? (canEditModel ? "Delete model" : "Edit access required")}
-                className="px-4 py-2 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-low)] transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 rounded border border-outline-variant text-on-surface-variant hover:bg-surface-container-low transition-colors font-mono text-xs uppercase tracking-wider flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {deleting ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</>
@@ -490,8 +491,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           scrolls; on desktop each pane keeps its own fixed height. */}
       <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden pb-24 md:pb-0">
         {/* Left: 3D Model Preview */}
-        <div className="flex-1 min-h-[250px] md:min-h-0 bg-[var(--surface-container-low)] relative border-b md:border-b-0 md:border-r border-[var(--outline-variant)] flex items-center justify-center m-2 md:m-4 rounded overflow-hidden"
-          style={{ boxShadow: "inset 0 0 0 1px var(--surface-variant)" }}>
+        <div className="flex-1 min-h-[250px] md:min-h-0 bg-surface-container-low relative border-b md:border-b-0 md:border-r border-outline-variant flex items-center justify-center m-2 md:m-4 rounded overflow-hidden"
+          style={{ boxShadow: "inset 0 0 0 1px var(--outline-variant)" }}>
           {viewerMode === "gcode" && hasGcode ? (
             <Suspense fallback={ViewerFallback}>
               <GcodeViewer
@@ -517,7 +518,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               className="max-w-full max-h-full object-contain"
             />
           ) : (
-            <div className="flex items-center justify-center text-[var(--on-surface-variant)]">
+            <div className="flex items-center justify-center text-on-surface-variant">
               <FileText className="h-20 w-20 opacity-20" />
             </div>
           )}
@@ -539,22 +540,22 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           {/* Viewing label (top-right) */}
           {(meshFile || (viewerMode === "gcode" && hasGcode)) && (
             <div className="absolute top-4 right-4 z-10 max-w-[60%]">
-              <div className="bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded px-2.5 py-1.5 text-right">
+              <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2.5 py-1.5 text-right">
                 {viewerMode === "gcode" ? (
                   <>
-                    <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+                    <p className="font-mono text-2xs text-on-surface truncate">
                       {(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])?.original_filename}
                     </p>
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                       G-code toolpath
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+                    <p className="font-mono text-2xs text-on-surface truncate">
                       Viewing: {meshFile?.original_filename}
                     </p>
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                    <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                       Source model
                       {recommendedGcode
                         ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
@@ -568,17 +569,17 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
           {/* 3D Viewer Controls */}
           <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
-            <div className="flex bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded overflow-hidden shadow-sm">
+            <div className="flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm">
               <button
                 onClick={() => viewerControls.current?.zoomIn()}
-                className="w-9 h-9 flex items-center justify-center text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)] transition-colors border-r border-[var(--outline-variant)]"
+                className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors border-r border-outline-variant"
                 title="Zoom in"
               >
                 <Plus className="h-4 w-4" />
               </button>
               <button
                 onClick={() => viewerControls.current?.zoomOut()}
-                className="w-9 h-9 flex items-center justify-center text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)] transition-colors"
+                className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
                 title="Zoom out"
               >
                 <Minus className="h-4 w-4" />
@@ -586,7 +587,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             </div>
             <button
               onClick={() => viewerControls.current?.resetView()}
-              className="h-9 px-3 bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded shadow-sm flex items-center justify-center text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)] transition-colors"
+              className="h-9 px-3 bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded shadow-sm flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
               title="Reset view"
             >
               <RotateCcw className="h-4 w-4" />
@@ -596,9 +597,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           {/* Dimensions overlay (bottom-left) */}
           {meta?.bbox_x_mm && meta?.bbox_y_mm && meta?.bbox_z_mm && (
             <div className="absolute bottom-4 left-4 z-10">
-              <div className="bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded px-2 py-1 flex items-center gap-2">
+              <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2 py-1 flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="font-mono text-[13px] text-[var(--on-surface)]">
+                <span className="font-mono text-[13px] text-on-surface">
                   {meta.bbox_x_mm}×{meta.bbox_y_mm}×{meta.bbox_z_mm} mm
                 </span>
               </div>
@@ -607,30 +608,28 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         </div>
 
         {/* Right: Settings & Files Panel */}
-        <div className="md:w-[480px] bg-[var(--surface-container-lowest)] border-l-0 md:border-l border-t md:border-t-0 border-[var(--outline-variant)] flex flex-col h-auto md:h-full shrink-0 min-h-0">
+        <div className="md:w-[480px] bg-surface-container-lowest border-l-0 md:border-l border-t md:border-t-0 border-outline-variant flex flex-col h-auto md:h-full shrink-0 min-h-0">
           {/* Segmented tab navigation */}
-          <nav className="flex shrink-0 border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            {visibleTabs.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`relative px-3 py-3 font-mono text-[11px] uppercase tracking-wider whitespace-nowrap transition-colors ${
-                  activeTab === tab.key
-                    ? "text-[var(--primary)]"
-                    : "text-[var(--on-surface-variant)] hover:text-[var(--on-surface)]"
-                }`}
-              >
-                {tab.label}
-                {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                  <span className="ml-1 opacity-60">{gcodeFiles.length}</span>
-                )}
-                {activeTab === tab.key && (
-                  <span className="absolute inset-x-2 -bottom-px h-0.5 bg-[var(--primary)] rounded-full" />
-                )}
-              </button>
-            ))}
-          </nav>
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 [scrollbar-width:thin] [scrollbar-color:var(--outline-variant)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[var(--outline-variant)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[var(--primary)]/50">
+          <TabBar
+            tabs={visibleTabs.map((tab) => ({
+              key: tab.key,
+              label: (
+                <>
+                  {tab.label}
+                  {tab.key === "revisions" && gcodeFiles.length > 0 && (
+                    <span className="ml-1 opacity-60">{gcodeFiles.length}</span>
+                  )}
+                </>
+              ),
+            }))}
+            active={activeTab}
+            onChange={setActiveTab}
+            indicatorInset={8}
+            className="shrink-0 border-b border-outline-variant bg-surface-container-lowest px-2 overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+            tabClassName="px-3 py-3 font-mono text-2xs uppercase tracking-wider whitespace-nowrap transition-colors text-on-surface-variant hover:text-on-surface"
+            activeTabClassName="text-primary"
+          />
+          <div key={activeTab} className="animate-panel-in flex-1 overflow-y-auto p-4 md:p-6 space-y-6 md:space-y-8 [scrollbar-width:thin] [scrollbar-color:var(--outline-variant)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-outline-variant [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-primary/50">
             {activeTab === "overview" && (
               <OverviewTab
                 model={model}
@@ -697,7 +696,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           </div>
 
           {/* Klipper Sync Panel */}
-          <div className="p-4 md:p-6 border-t border-[var(--outline-variant)] bg-[var(--surface-container-low)] shrink-0 space-y-3">
+          <div className="p-4 md:p-6 border-t border-outline-variant bg-surface-container-low shrink-0 space-y-3">
             {printableGcodeFiles.length > 0 && canViewPrinters && (
               <SendToButtons
                 gcodeFiles={printableGcodeFiles}
@@ -710,25 +709,25 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
             {!hasGcode && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider">
+                  <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">
                     Sync status
                   </span>
-                  <div className="flex items-center gap-1.5 px-2 py-1 bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded">
-                    <Wifi className="h-3 w-3 text-[var(--on-surface-variant)]" />
-                    <span className="font-mono text-xs text-[var(--on-surface-variant)]">
+                  <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
+                    <Wifi className="h-3 w-3 text-on-surface-variant" />
+                    <span className="font-mono text-xs text-on-surface-variant">
                       No G-code file
                     </span>
                   </div>
                 </div>
               </div>
             )}
-            <div className="flex items-center justify-between border-t border-[var(--surface-container-highest)] pt-3">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider">Files</span>
-              <span className="font-mono text-sm text-[var(--on-surface)] font-semibold">{model.files.length}</span>
+            <div className="flex items-center justify-between border-t border-surface-container-highest pt-3">
+              <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Files</span>
+              <span className="font-mono text-sm text-on-surface font-semibold">{model.files.length}</span>
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-mono text-xs text-[var(--on-surface-variant)] uppercase tracking-wider">Created</span>
-              <span className="font-mono text-xs text-[var(--on-surface)]">{new Date(model.created_at).toLocaleDateString()}</span>
+              <span className="font-mono text-xs text-on-surface-variant uppercase tracking-wider">Created</span>
+              <span className="font-mono text-xs text-on-surface">{new Date(model.created_at).toLocaleDateString()}</span>
             </div>
           </div>
         </div>

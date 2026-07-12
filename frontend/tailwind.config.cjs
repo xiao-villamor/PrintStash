@@ -76,15 +76,50 @@ const config = {
         "inverse-surface": "var(--inverse-surface)",
         "inverse-on-surface": "var(--inverse-on-surface)",
         "inverse-primary": "var(--inverse-primary)",
+        "primary-hover": "var(--primary-hover)",
+        "primary-soft": "var(--primary-soft)",
+        success: {
+          DEFAULT: "var(--success)",
+          foreground: "var(--success-foreground)",
+        },
+        warning: {
+          DEFAULT: "var(--warning)",
+          foreground: "var(--warning-foreground)",
+        },
+        // Mappings that existed as CSS vars but were never wired into Tailwind:
+        error: "var(--error)",
+        "on-error-container": "var(--on-error-container)",
+        "on-tertiary-container": "var(--on-tertiary-container)",
+        "on-secondary-container": "var(--on-secondary-container)",
+        sidebar: "var(--sidebar-bg)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
+        DEFAULT: "var(--radius)",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 0px)",
+        md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 0.125rem)",
+      },
+      fontSize: {
+        // The app's mono-label ramp, previously text-[11px]/text-[10px].
+        "2xs": "0.6875rem",
+        "3xs": "0.625rem",
+      },
+      zIndex: {
+        dropdown: "50",
+        overlay: "100",
+      },
+      transitionTimingFunction: {
+        out: "var(--ease-out)",
+        "in-out": "var(--ease-in-out)",
+      },
+      transitionDuration: {
+        press: "var(--duration-press)",
+        fast: "var(--duration-fast)",
+        slow: "var(--duration-slow)",
       },
       keyframes: {
         "accordion-down": {
@@ -97,8 +132,8 @@ const config = {
         },
       },
       animation: {
-        "accordion-down": "accordion-down 0.2s ease-out",
-        "accordion-up": "accordion-up 0.2s ease-out",
+        "accordion-down": "accordion-down 0.2s var(--ease-out)",
+        "accordion-up": "accordion-up 0.2s var(--ease-out)",
       },
     },
   },

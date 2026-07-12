@@ -46,14 +46,14 @@ export function ModelDetailClientView({
     const needsAuth = error.status === 401 || error.status === 403;
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-6">
-        <p className="text-lg font-semibold text-[var(--on-surface)]">
+        <p className="text-lg font-semibold text-on-surface">
           {notFound
             ? "Model not found"
             : needsAuth
               ? "Sign in to view this model"
               : "Couldn’t load this model"}
         </p>
-        <p className="text-sm text-[var(--on-surface-variant)]">
+        <p className="text-sm text-on-surface-variant">
           {notFound
             ? "This model doesn’t exist or has been deleted."
             : needsAuth
@@ -66,7 +66,7 @@ export function ModelDetailClientView({
 
   return (
     <div className="flex h-full items-center justify-center">
-      <Loader2 className="h-8 w-8 animate-spin text-[var(--on-surface-variant)]" />
+      <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
     </div>
   );
 }

@@ -220,17 +220,17 @@ export default function SetupPage() {
 
   if (bootError) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)] px-4">
-        <div className="max-w-md w-full bg-[var(--surface-container-low)] border border-[var(--outline-variant)] rounded p-6 space-y-3">
-          <h1 className="text-lg font-semibold text-[var(--on-surface)]">
+      <div className="min-h-screen flex items-center justify-center bg-surface-container-lowest px-4">
+        <div className="max-w-md w-full bg-surface-container-low border border-outline-variant rounded p-6 space-y-3">
+          <h1 className="text-lg font-semibold text-on-surface">
             Cannot reach the vault
           </h1>
-          <p className="text-sm text-[var(--on-surface-variant)] font-mono break-words">
+          <p className="text-sm text-on-surface-variant font-mono break-words">
             {bootError}
           </p>
           <button
             onClick={() => window.location.reload()}
-            className="h-9 px-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90"
+            className="h-9 px-4 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90"
           >
             Retry
           </button>
@@ -241,27 +241,27 @@ export default function SetupPage() {
 
   if (!status) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)]">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--on-surface-variant)]" />
+      <div className="min-h-screen flex items-center justify-center bg-surface-container-lowest">
+        <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--surface-container-lowest)] px-4 py-10 relative">
+    <div className="min-h-screen flex items-center justify-center bg-surface-container-lowest px-4 py-10 relative">
       <div className="absolute top-4 right-4">
         <ThemeToggle />
       </div>
       <div className="w-full max-w-lg mx-auto space-y-6">
         {/* Header */}
         <div className="text-center">
-          <div className="w-14 h-14 mx-auto rounded bg-blue-600 dark:bg-orange-600 flex items-center justify-center text-white mb-4">
+          <div className="w-14 h-14 mx-auto rounded bg-primary flex items-center justify-center text-primary-foreground mb-4">
             <BrandMark className="h-10 w-10" />
           </div>
-          <h1 className="text-2xl font-bold text-[var(--on-surface)]">
+          <h1 className="text-2xl font-bold text-on-surface">
             Welcome to PrintStash
           </h1>
-          <p className="text-sm text-[var(--on-surface-variant)] mt-1">
+          <p className="text-sm text-on-surface-variant mt-1">
             Let&apos;s get your self-hosted vault configured.
           </p>
         </div>
@@ -269,12 +269,12 @@ export default function SetupPage() {
         {/* Stepper */}
         <div className="flex items-center justify-center gap-3 text-xs font-mono uppercase tracking-wider">
           <StepIndicator active={step === 1} done={step > 1} label="Account" icon={UserPlus} />
-          <div className="h-px w-10 bg-[var(--outline-variant)]" />
+          <div className="h-px w-10 bg-outline-variant" />
           <StepIndicator active={step === 2} done={false} label="Storage" icon={HardDrive} />
         </div>
 
         {/* Card */}
-        <div className="bg-[var(--surface-container-low)] border border-[var(--outline-variant)] rounded p-6 space-y-4">
+        <div className="bg-surface-container-low border border-outline-variant rounded p-6 space-y-4">
           {step === 1 ? (
             <AccountStep
               username={username}
@@ -322,7 +322,7 @@ export default function SetupPage() {
           )}
 
           {error && (
-            <div className="text-xs text-[var(--error)] font-mono">{error}</div>
+            <div className="text-xs text-error font-mono">{error}</div>
           )}
 
           <div className="flex items-center justify-between gap-2 pt-2">
@@ -334,7 +334,7 @@ export default function SetupPage() {
                   setStep(1);
                 }}
                 disabled={busy}
-                className="h-10 px-4 rounded border border-[var(--outline-variant)] text-[var(--on-surface-variant)] font-mono text-xs uppercase tracking-wider hover:bg-[var(--surface-container)] disabled:opacity-50 flex items-center gap-1.5"
+                className="h-10 px-4 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container disabled:opacity-50 flex items-center gap-1.5"
               >
                 <ChevronLeft className="h-4 w-4" />
                 Back
@@ -347,7 +347,7 @@ export default function SetupPage() {
               <button
                 type="button"
                 onClick={handleNext}
-                className="h-10 px-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 flex items-center gap-1.5"
+                className="h-10 px-4 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 flex items-center gap-1.5"
               >
                 Next
                 <ChevronRight className="h-4 w-4" />
@@ -357,7 +357,7 @@ export default function SetupPage() {
                 type="button"
                 onClick={handleSubmit}
                 disabled={busy}
-                className="h-10 px-4 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                className="h-10 px-4 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -370,7 +370,7 @@ export default function SetupPage() {
           </div>
         </div>
 
-        <p className="text-center text-xs text-[var(--on-surface-variant)] font-mono">
+        <p className="text-center text-xs text-on-surface-variant font-mono">
           This wizard only runs once. Subsequent admins can be added later.
         </p>
       </div>
@@ -394,7 +394,7 @@ function AccountStep(props: {
 }) {
   return (
     <>
-      <p className="text-sm text-[var(--on-surface-variant)]">
+      <p className="text-sm text-on-surface-variant">
         Create the first administrator account. You can add more users later.
       </p>
       <Field
@@ -471,13 +471,13 @@ function StorageStep(props: {
 }) {
   return (
     <>
-      <p className="text-sm text-[var(--on-surface-variant)]">
+      <p className="text-sm text-on-surface-variant">
         Choose where the vault stores files and how long local backups should
         be retained.
       </p>
 
       <div>
-        <label className="block text-xs font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1.5">
+        <label className="block text-xs font-mono uppercase tracking-wider text-on-surface-variant mb-1.5">
           Storage backend
         </label>
         <div className="grid grid-cols-2 gap-2">
@@ -516,7 +516,7 @@ function StorageStep(props: {
             hint={`Default: ${props.defaultThumbDir}`}
             mono
           />
-          <div className="text-xs text-[var(--on-surface-variant)] font-mono bg-[var(--surface-container-lowest)] border border-[var(--outline-variant)] rounded p-3">
+          <div className="text-xs text-on-surface-variant font-mono bg-surface-container-lowest border border-outline-variant rounded p-3">
             The backend will create these directories and probe them for
             writability before completing setup.
           </div>
@@ -566,8 +566,8 @@ function StorageStep(props: {
         </div>
       )}
 
-      <div className="space-y-3 pt-2 border-t border-[var(--outline-variant)]">
-        <p className="text-xs font-mono uppercase tracking-wider text-[var(--on-surface-variant)] flex items-center gap-1.5">
+      <div className="space-y-3 pt-2 border-t border-outline-variant">
+        <p className="text-xs font-mono uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
           <RefreshCw className="h-3.5 w-3.5" />
           Backups
         </p>
@@ -603,7 +603,7 @@ function StorageStep(props: {
             onChange={props.setBackupS3Region}
             mono
           />
-          <div className="flex items-end text-[10px] text-[var(--on-surface-variant)] font-mono gap-1.5 pb-1">
+          <div className="flex items-end text-3xs text-on-surface-variant font-mono gap-1.5 pb-1">
             <Key className="h-3.5 w-3.5" />
             Credentials are optional when the runtime provides them.
           </div>
@@ -641,8 +641,8 @@ function ChoiceButton(props: {
       onClick={props.onClick}
       className={`h-10 rounded border px-3 text-sm flex items-center justify-center gap-2 transition-colors ${
         props.active
-          ? "bg-[var(--primary)]/10 border-[var(--primary)] text-[var(--primary)]"
-          : "border-[var(--outline-variant)] text-[var(--on-surface-variant)] hover:border-[var(--outline)]"
+          ? "bg-primary/10 border-primary text-primary"
+          : "border-outline-variant text-on-surface-variant hover:border-outline"
       }`}
     >
       <Icon className="h-4 w-4" />
@@ -667,7 +667,7 @@ function Field(props: {
     <div>
       <label
         htmlFor={props.id}
-        className="block text-xs font-mono uppercase tracking-wider text-[var(--on-surface-variant)] mb-1.5"
+        className="block text-xs font-mono uppercase tracking-wider text-on-surface-variant mb-1.5"
       >
         {props.label}
       </label>
@@ -679,12 +679,12 @@ function Field(props: {
         autoComplete={props.autoComplete}
         autoFocus={props.autoFocus}
         required={props.required}
-        className={`w-full h-10 bg-[var(--surface-container-lowest)] text-[var(--on-surface)] ${
+        className={`w-full h-10 bg-surface-container-lowest text-on-surface ${
           props.mono ? "font-mono" : ""
-        } text-sm border border-[var(--outline-variant)] rounded px-3 focus:outline-none focus:ring-2 focus:ring-[var(--primary)] focus:border-transparent`}
+        } text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent`}
       />
       {props.hint && (
-        <p className="text-[10px] text-[var(--on-surface-variant)] font-mono mt-1">
+        <p className="text-3xs text-on-surface-variant font-mono mt-1">
           {props.hint}
         </p>
       )}
@@ -700,10 +700,10 @@ function StepIndicator(props: {
 }) {
   const Icon = props.icon;
   const tone = props.done
-    ? "bg-[var(--primary)] text-[var(--primary-foreground)] border-transparent"
+    ? "bg-primary text-primary-foreground border-transparent"
     : props.active
-      ? "bg-[var(--primary-container)] text-[var(--on-primary-container)] border-[var(--primary)]"
-      : "bg-transparent text-[var(--on-surface-variant)] border-[var(--outline-variant)]";
+      ? "bg-primary-container text-on-primary-container border-primary"
+      : "bg-transparent text-on-surface-variant border-outline-variant";
   return (
     <div className={`flex items-center gap-1.5 px-2.5 h-7 rounded border ${tone}`}>
       <Icon className="h-3.5 w-3.5" />

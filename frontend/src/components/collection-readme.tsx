@@ -121,13 +121,13 @@ export function CollectionReadme({
           }}
           rows={8}
           placeholder="A short description of this collection. Markdown — paste or drop images."
-          className="w-full bg-[var(--surface)] text-[var(--on-surface)] font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-orange-500"
+          className="w-full bg-surface text-on-surface font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <div className="flex items-center gap-2 mt-2">
           <button
             onClick={save}
             disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
           >
             {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
             Save
@@ -169,7 +169,7 @@ export function CollectionReadme({
               )}
               <button
                 onClick={() => setExpanded((v) => !v)}
-                className="mt-1 text-xs font-medium text-blue-600 dark:text-orange-500 hover:underline"
+                className="mt-1 text-xs font-medium text-primary hover:underline"
               >
                 {expanded ? "Show less" : "Show more"}
               </button>

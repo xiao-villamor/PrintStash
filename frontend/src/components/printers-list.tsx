@@ -8,11 +8,14 @@ import { usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Button } from "@/components/ui/button";
+import { ModalShell } from "@/components/ui/modal";
 import { Plus, Trash2, RefreshCw, ArrowRight, Printer as PrinterIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
-  printing: "bg-blue-600 dark:bg-orange-600",
+  printing: "bg-primary",
   paused: "bg-amber-500",
   offline: "bg-slate-400",
   unknown: "bg-slate-400",
@@ -73,7 +76,7 @@ export function PrintersPage() {
               setAddOpen(true);
             }}
             disabled={!auth.isAuthenticated}
-            className="px-3 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs font-medium hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-2 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary-hover transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="h-3.5 w-3.5" />
             {auth.isAuthenticated ? "Add printer" : "Sign in to add"}
@@ -101,24 +104,24 @@ export function PrintersPage() {
           ))}
         </div>
       ) : printers.length === 0 ? (
-        <div className="bg-card border border-border rounded flex flex-col items-center gap-4 py-16 text-muted-foreground">
-          <PrinterIcon className="h-12 w-12 opacity-30" />
-          <p className="text-sm">No printers configured yet.</p>
-          <button
-            onClick={() => setAddOpen(true)}
-            className="px-4 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs font-medium hover:bg-blue-700 dark:hover:bg-orange-700 transition-colors flex items-center gap-2"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add your first printer
-          </button>
-        </div>
+        <EmptyState
+          icon={PrinterIcon}
+          title="No printers configured yet."
+          action={
+            <Button size="xs" onClick={() => setAddOpen(true)}>
+              <Plus className="h-3.5 w-3.5" />
+              Add your first printer
+            </Button>
+          }
+          className="bg-card border border-border rounded"
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {printers.map((p) => (
             <Link
               key={p.id}
               href={`/printers/${p.id}`}
-              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-blue-600 dark:hover:border-orange-500 transition-all duration-200 p-5 flex flex-col gap-3 group"
+              className="bg-card border border-border rounded hover:shadow-[0_4px_12px_rgba(0,0,0,0.05)] hover:border-primary transition-[box-shadow,border-color] duration-200 p-5 flex flex-col gap-3 group"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -140,7 +143,7 @@ export function PrintersPage() {
                   <span
                     className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-slate-400"}`}
                   />
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <span className="text-3xs text-muted-foreground uppercase tracking-wider">
                     {p.status}
                   </span>
                 </span>
@@ -156,7 +159,7 @@ export function PrintersPage() {
                 </div>
               )}
 
-              <div className="text-[11px] text-muted-foreground mt-auto">
+              <div className="text-2xs text-muted-foreground mt-auto">
                 {p.last_seen_at
                   ? `Last seen ${new Date(p.last_seen_at).toLocaleString()}`
                   : "Never connected"}
@@ -169,12 +172,12 @@ export function PrintersPage() {
                     handleDelete(p, e);
                   }}
                   disabled={!auth.isAuthenticated}
-                  className="px-2 py-1 rounded text-red-600 hover:bg-red-500/10 transition-colors text-[10px] uppercase tracking-wider flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-2 py-1 rounded text-red-600 hover:bg-red-500/10 transition-colors text-3xs uppercase tracking-wider flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="h-3 w-3" />
                   {auth.isAuthenticated ? "Remove" : "Sign in"}
                 </button>
-                <span className="px-2 py-1 rounded border border-border text-foreground text-[10px] uppercase tracking-wider flex items-center gap-1 group-hover:border-blue-600 group-hover:text-blue-600 dark:group-hover:border-orange-500 dark:group-hover:text-orange-500 transition-colors">
+                <span className="px-2 py-1 rounded border border-border text-foreground text-3xs uppercase tracking-wider flex items-center gap-1 group-hover:border-primary group-hover:text-primary transition-colors">
                   Open
                   <ArrowRight className="h-3 w-3" />
                 </span>
@@ -235,12 +238,10 @@ function AddPrinterModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative bg-card border border-border rounded w-full max-w-md p-6 shadow-lg">
+    <ModalShell
+      onClose={onClose}
+      className="bg-card border border-border rounded w-full max-w-md p-6 shadow-lg"
+    >
         <h3 className="text-lg font-semibold text-foreground mb-5">
           Add printer
         </h3>
@@ -252,7 +253,7 @@ function AddPrinterModal({
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               placeholder="Voron 2.4"
               required
             />
@@ -264,7 +265,7 @@ function AddPrinterModal({
             <input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               placeholder="http://voron.local:7125"
               required
             />
@@ -280,7 +281,7 @@ function AddPrinterModal({
               type="password"
               value={moonrakerKey}
               onChange={(e) => setMoonrakerKey(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               placeholder="Leave blank if auth is disabled"
             />
           </div>
@@ -291,7 +292,7 @@ function AddPrinterModal({
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-blue-600 dark:focus:ring-orange-500 focus:border-transparent"
+              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
               placeholder="Optional"
             />
           </div>
@@ -311,13 +312,12 @@ function AddPrinterModal({
             <button
               type="submit"
               disabled={submitting || !name || !url}
-              className="px-4 py-2 rounded bg-blue-600 dark:bg-orange-600 text-white text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded bg-primary text-primary-foreground text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? "Adding..." : "Add printer"}
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

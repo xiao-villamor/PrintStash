@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Modal } from "./modal";
+import { Button } from "./button";
 
 export function ConfirmModal({
   open,
@@ -33,23 +34,24 @@ export function ConfirmModal({
       </div>
 
       <div className="flex gap-3 mt-6">
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={onClose}
           disabled={busy}
-          className="flex-1 h-9 rounded border border-border text-sm font-mono uppercase tracking-wider text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          className="flex-1 h-9 font-mono uppercase tracking-wider text-muted-foreground"
         >
           Cancel
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="destructive"
           onClick={onConfirm}
-          disabled={busy}
-          className="flex-1 h-9 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-mono uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          loading={busy}
+          className="flex-1 h-9 font-mono uppercase tracking-wider"
         >
-          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
           {confirmLabel}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

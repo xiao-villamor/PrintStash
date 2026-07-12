@@ -122,7 +122,7 @@ export function StorageConfigCard() {
           </p>
         </div>
         {cfg && (
-          <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border text-muted-foreground border-border flex-shrink-0">
+          <span className="font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border text-muted-foreground border-border flex-shrink-0">
             {cfg.storage_backend === "s3" ? "S3/R2" : "Local"}
           </span>
         )}
@@ -160,7 +160,7 @@ export function StorageConfigCard() {
               S3 / R2
             </button>
           </div>
-          <p className="text-[10px] text-muted-foreground mt-1">
+          <p className="text-3xs text-muted-foreground mt-1">
             Changes to the storage backend require an application restart.
           </p>
         </div>
@@ -172,7 +172,7 @@ export function StorageConfigCard() {
               <HardDrive className="h-3 w-3" /> Local paths
             </p>
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-2xs text-muted-foreground mb-1">
                 Data directory
               </label>
               <input
@@ -185,7 +185,7 @@ export function StorageConfigCard() {
               />
             </div>
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-2xs text-muted-foreground mb-1">
                 Thumbnail directory
               </label>
               <input
@@ -208,7 +208,7 @@ export function StorageConfigCard() {
             </p>
 
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-2xs text-muted-foreground mb-1">
                 Bucket
               </label>
               <input
@@ -222,7 +222,7 @@ export function StorageConfigCard() {
             </div>
 
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-2xs text-muted-foreground mb-1">
                 Endpoint URL
               </label>
               <input
@@ -233,13 +233,13 @@ export function StorageConfigCard() {
                 placeholder="https://<id>.r2.cloudflarestorage.com"
                 className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
               />
-              <p className="text-[10px] text-muted-foreground mt-0.5">
+              <p className="text-3xs text-muted-foreground mt-0.5">
                 Leave empty for AWS S3. Required for Cloudflare R2, MinIO, etc.
               </p>
             </div>
 
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">
+              <label className="block text-2xs text-muted-foreground mb-1">
                 Region
               </label>
               <input
@@ -259,7 +259,7 @@ export function StorageConfigCard() {
 
               <div className="space-y-2">
                 <div>
-                  <label className="block text-[11px] text-muted-foreground mb-1">
+                  <label className="block text-2xs text-muted-foreground mb-1">
                     Access key
                   </label>
                   <input
@@ -272,7 +272,7 @@ export function StorageConfigCard() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-muted-foreground mb-1">
+                  <label className="block text-2xs text-muted-foreground mb-1">
                     Secret key
                   </label>
                   <input
@@ -285,7 +285,7 @@ export function StorageConfigCard() {
                   />
                 </div>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-1">
+              <p className="text-3xs text-muted-foreground mt-1">
                 Keys are stored in the vault database. Set via environment for production.
               </p>
             </div>
@@ -298,7 +298,7 @@ export function StorageConfigCard() {
             <RefreshCw className="h-3 w-3" /> Backup
           </p>
           <div>
-            <label className="block text-[11px] text-muted-foreground mb-1">
+            <label className="block text-2xs text-muted-foreground mb-1">
               Retention (days)
             </label>
             <input
@@ -310,7 +310,7 @@ export function StorageConfigCard() {
               onChange={(e) => setBackupDays(Number(e.target.value))}
               className="w-32 px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground disabled:opacity-50 font-mono"
             />
-            <p className="text-[10px] text-muted-foreground mt-0.5">
+            <p className="text-3xs text-muted-foreground mt-0.5">
               Set to 0 to keep backups forever. Old backups are purged after each new backup.
             </p>
           </div>
@@ -319,26 +319,26 @@ export function StorageConfigCard() {
             <p className="text-xs font-medium text-foreground flex items-center gap-1.5 mb-2">
               <Cloud className="h-3 w-3" /> Backup destination (optional)
             </p>
-            <p className="text-[10px] text-muted-foreground mb-3">
+            <p className="text-3xs text-muted-foreground mb-3">
               Backups are always stored locally first. If configured here, they are also uploaded to cloud storage for off-site durability.
             </p>
 
             <div className="space-y-2">
               <div>
-                <label className="block text-[11px] text-muted-foreground mb-1">Bucket</label>
+                <label className="block text-2xs text-muted-foreground mb-1">Bucket</label>
                 <input type="text" disabled={!canEdit} value={bkS3Bucket} onChange={(e) => setBkS3Bucket(e.target.value)}
                   placeholder="my-backup-bucket"
                   className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono" />
               </div>
               <div>
-                <label className="block text-[11px] text-muted-foreground mb-1">Endpoint URL</label>
+                <label className="block text-2xs text-muted-foreground mb-1">Endpoint URL</label>
                 <input type="text" disabled={!canEdit} value={bkS3Endpoint} onChange={(e) => setBkS3Endpoint(e.target.value)}
                   placeholder="https://&lt;id&gt;.r2.cloudflarestorage.com"
                   className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono" />
-                <p className="text-[10px] text-muted-foreground mt-0.5">Leave empty for AWS S3.</p>
+                <p className="text-3xs text-muted-foreground mt-0.5">Leave empty for AWS S3.</p>
               </div>
               <div>
-                <label className="block text-[11px] text-muted-foreground mb-1">Region</label>
+                <label className="block text-2xs text-muted-foreground mb-1">Region</label>
                 <input type="text" disabled={!canEdit} value={bkS3Region} onChange={(e) => setBkS3Region(e.target.value)}
                   placeholder="auto"
                   className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono" />
@@ -350,13 +350,13 @@ export function StorageConfigCard() {
                 </p>
                 <div className="space-y-2">
                   <div>
-                    <label className="block text-[11px] text-muted-foreground mb-1">Access key</label>
+                    <label className="block text-2xs text-muted-foreground mb-1">Access key</label>
                     <input type="text" disabled={!canEdit} value={bkS3AccessKey} onChange={(e) => setBkS3AccessKey(e.target.value)}
                       placeholder={cfg?.has_backup_s3_access_key ? "(stored)" : "backup-access-key"}
                       className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono" />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-muted-foreground mb-1">Secret key</label>
+                    <label className="block text-2xs text-muted-foreground mb-1">Secret key</label>
                     <input type="password" disabled={!canEdit} value={bkS3SecretKey} onChange={(e) => setBkS3SecretKey(e.target.value)}
                       placeholder={cfg?.has_backup_s3_secret_key ? "(stored)" : "backup-secret-key"}
                       className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono" />

@@ -143,7 +143,7 @@ export function MakerWorldConnectCard() {
           </p>
         </div>
         <span
-          className={`font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border flex-shrink-0 ${
+          className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border flex-shrink-0 ${
             connected
               ? "text-green-600 dark:text-green-400 border-green-600/40"
               : "text-muted-foreground border-border"
@@ -167,11 +167,11 @@ export function MakerWorldConnectCard() {
               <div>
                 <p>MakerWorld is connected.</p>
                 {status?.updated_at && (
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-2xs text-muted-foreground mt-0.5">
                     Session stored {new Date(status.updated_at).toLocaleString()}
                   </p>
                 )}
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-2xs text-muted-foreground mt-1">
                   Sessions expire periodically — if imports start failing with a login error, disconnect and connect again.
                 </p>
               </div>
@@ -195,7 +195,7 @@ export function MakerWorldConnectCard() {
             }}
           >
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">Session token</label>
+              <label className="block text-2xs text-muted-foreground mb-1">Session token</label>
               <textarea
                 rows={3}
                 value={token}
@@ -204,7 +204,7 @@ export function MakerWorldConnectCard() {
                 className={`${INPUT_CLASS} font-mono resize-y`}
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-3xs text-muted-foreground">
               Log in to makerworld.com in your browser (Google sign-in is fine), then copy the{" "}
               <span className="font-mono">token</span> cookie from DevTools → Application → Cookies. This is the way to connect a Google-linked account.
             </p>
@@ -239,7 +239,7 @@ export function MakerWorldConnectCard() {
             }}
           >
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">Email</label>
+              <label className="block text-2xs text-muted-foreground mb-1">Email</label>
               <input
                 type="email"
                 autoComplete="username"
@@ -250,7 +250,7 @@ export function MakerWorldConnectCard() {
               />
             </div>
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">Password</label>
+              <label className="block text-2xs text-muted-foreground mb-1">Password</label>
               <input
                 type="password"
                 autoComplete="current-password"
@@ -260,7 +260,7 @@ export function MakerWorldConnectCard() {
                 className={INPUT_CLASS}
               />
             </div>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-3xs text-muted-foreground">
               Your password is sent once to Bambu to obtain a session token and is never stored. MakerWorld usually emails a verification code next.
             </p>
             <div className="flex items-center gap-2">
@@ -302,7 +302,7 @@ export function MakerWorldConnectCard() {
               </span>
             </div>
             <div>
-              <label className="block text-[11px] text-muted-foreground mb-1">Verification code</label>
+              <label className="block text-2xs text-muted-foreground mb-1">Verification code</label>
               <input
                 type="text"
                 inputMode="numeric"

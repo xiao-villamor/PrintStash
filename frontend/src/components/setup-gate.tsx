@@ -67,8 +67,8 @@ export function SetupGate({ children }: Props) {
 
   if (!ready) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-[var(--surface-container-lowest)]">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--on-surface-variant)]" />
+      <div className="min-h-screen w-full flex items-center justify-center bg-surface-container-lowest">
+        <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
       </div>
     );
   }

@@ -206,7 +206,7 @@ export default function DocumentDetailPage() {
             <input
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              className="flex-1 bg-[var(--surface)] text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-orange-500"
+              className="flex-1 bg-surface text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring"
             />
           ) : (
             <h1 className="flex-1 text-xl font-bold text-foreground truncate">{doc.name}</h1>
@@ -231,7 +231,7 @@ export default function DocumentDetailPage() {
               <button
                 onClick={save}
                 disabled={saving}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-600 dark:bg-orange-600 rounded hover:bg-blue-700 dark:hover:bg-orange-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 Save
@@ -270,7 +270,7 @@ export default function DocumentDetailPage() {
                   }
                 }}
                 placeholder="# Document&#10;&#10;Write markdown. Paste or drop images to embed them."
-                className="w-full flex-1 min-h-0 resize-none bg-[var(--surface)] text-foreground font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-orange-500"
+                className="w-full flex-1 min-h-0 resize-none bg-surface text-foreground font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <div className="mt-1 text-xs text-muted-foreground">
                 {uploading ? (

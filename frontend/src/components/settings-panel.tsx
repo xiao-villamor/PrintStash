@@ -31,6 +31,10 @@ import {
   Users,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { buttonVariants } from "@/components/ui/button";
+import { TabBar } from "@/components/ui/tabs";
+import { inputClasses } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { ExternalLibrariesPanel } from "@/components/external-libraries-panel";
 import { StorageConfigCard } from "@/components/storage-config-card";
@@ -128,14 +132,13 @@ const SETTINGS_SECTIONS: {
 ];
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
-const BTN_PRIMARY =
-  "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed";
-const BTN_SECONDARY =
-  "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground hover:bg-muted transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed";
-const BTN_ICON =
-  "inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
-const INPUT =
-  "w-full px-3 py-2 bg-background border border-border rounded text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent disabled:opacity-50";
+const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "uppercase tracking-wider");
+const BTN_SECONDARY = cn(
+  buttonVariants({ variant: "outline", size: "xs" }),
+  "uppercase tracking-wider text-muted-foreground",
+);
+const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
+const INPUT = cn(inputClasses, "h-auto py-2 rounded");
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "...";
@@ -756,31 +759,29 @@ export function SettingsPanel() {
 
       {/* Section tabs — underline indicator, scrolls horizontally on small screens */}
       <div className="border-b border-border">
-        <div className="flex gap-1 overflow-x-auto -mb-px">
-          {SETTINGS_SECTIONS.map((section) => {
-            const Icon = section.icon;
-            const active = activeSection === section.id;
-            return (
-              <button
-                key={section.id}
-                type="button"
-                onClick={() => setActiveSection(section.id)}
-                className={`relative inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                  active
-                    ? "border-[var(--primary)] text-[var(--primary)]"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {section.label}
-              </button>
-            );
+        <TabBar
+          tabs={SETTINGS_SECTIONS.map((s) => {
+            const Icon = s.icon;
+            return {
+              key: s.id,
+              label: (
+                <>
+                  <Icon className="h-4 w-4" />
+                  {s.label}
+                </>
+              ),
+            };
           })}
-        </div>
+          active={activeSection}
+          onChange={setActiveSection}
+          className="flex gap-1 overflow-x-auto -mb-px"
+          tabClassName="relative inline-flex items-center gap-2 whitespace-nowrap px-3.5 py-2.5 text-sm font-medium transition-colors text-muted-foreground hover:text-foreground"
+          activeTabClassName="text-primary"
+        />
       </div>
 
       {activeSection === "overview" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           {/* KPI tiles */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {kpiItems.map((item) => {
@@ -788,7 +789,7 @@ export function SettingsPanel() {
               return (
                 <div key={item.label} className="bg-card border border-border rounded p-4 sm:p-5">
                   <div className="flex items-center justify-between">
-                    <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
                       {item.label}
                     </p>
                     <Icon className="h-4 w-4 text-muted-foreground/50" />
@@ -869,7 +870,7 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "access" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           {user?.is_superuser && (
             <SettingsCard
               icon={Users}
@@ -927,13 +928,13 @@ export function SettingsPanel() {
                                 {row.username}
                               </p>
                               {row.is_superuser && (
-                                <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">
+                                <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase text-muted-foreground">
                                   <ShieldCheck className="h-3 w-3" />
                                   Admin
                                 </span>
                               )}
                               {!row.is_active && (
-                                <span className="rounded bg-red-500/10 px-2 py-0.5 font-mono text-[10px] uppercase text-red-600">
+                                <span className="rounded bg-red-500/10 px-2 py-0.5 font-mono text-3xs uppercase text-red-600">
                                   Disabled
                                 </span>
                               )}
@@ -1065,7 +1066,7 @@ export function SettingsPanel() {
                 </div>
 
                 <div className="rounded border border-border overflow-hidden">
-                  <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                     <span>Collection</span>
                     <span>Role</span>
                     <span>Remove</span>
@@ -1095,7 +1096,7 @@ export function SettingsPanel() {
                               {collection?.model_count ?? 0} models
                             </p>
                           </div>
-                          <span className="rounded bg-muted px-2 py-1 font-mono text-[10px] uppercase text-muted-foreground">
+                          <span className="rounded bg-muted px-2 py-1 font-mono text-3xs uppercase text-muted-foreground">
                             {row.role}
                           </span>
                           <button
@@ -1147,7 +1148,7 @@ export function SettingsPanel() {
                   </div>
 
                   {newApiKey && (
-                    <div className="border border-[var(--primary)]/40 bg-[var(--primary)]/10 rounded p-3 space-y-2">
+                    <div className="border border-primary/40 bg-primary/10 rounded p-3 space-y-2">
                       <p className="text-xs text-muted-foreground">
                         Copy this key now. It will only be shown once.
                       </p>
@@ -1191,7 +1192,7 @@ export function SettingsPanel() {
                             <p className="truncate text-sm text-foreground">
                               {key.name}
                             </p>
-                            <p className="font-mono text-[11px] text-muted-foreground">
+                            <p className="font-mono text-2xs text-muted-foreground">
                               {key.prefix}... · {key.last_used_at ? "Used" : "Never used"}
                             </p>
                           </div>
@@ -1222,7 +1223,7 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "storage" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <StorageConfigCard />
           <SettingsCard
             icon={HardDrive}
@@ -1283,14 +1284,14 @@ export function SettingsPanel() {
                         <p className="truncate text-sm font-medium text-foreground">
                           {formatDate(backup.created_at)}
                         </p>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                        <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           {backup.location}
                         </span>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                        <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           v{backup.app_version}
                         </span>
                       </div>
-                      <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                      <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                         {backup.backup_id}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -1338,31 +1339,31 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "imports" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <MakerWorldConnectCard />
         </div>
       )}
 
       {activeSection === "libraries" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <ExternalLibrariesPanel canEdit={!!user?.is_superuser} />
         </div>
       )}
 
       {activeSection === "notifications" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <NotificationsPanel canEdit={!!user?.is_superuser} />
         </div>
       )}
 
       {activeSection === "spoolman" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <SpoolmanConnectCard canEdit={!!user?.is_superuser} />
         </div>
       )}
 
       {activeSection === "design" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           {/* Print tracking behaviour */}
           <SettingsCard
             icon={Printer}
@@ -1381,8 +1382,8 @@ export function SettingsPanel() {
                 onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
                 className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                   autoMarkKnownGood
-                    ? "bg-[var(--primary)]"
-                    : "bg-[var(--outline-variant)]"
+                    ? "bg-primary"
+                    : "bg-outline-variant"
                 }`}
               >
                 <span
@@ -1432,7 +1433,7 @@ export function SettingsPanel() {
             <div className="p-4 sm:p-5 grid gap-4 sm:grid-cols-3">
               {([0, 1, 2] as const).map((slot) => (
                 <div key={slot} className="space-y-2">
-                  <p className="text-[11px] font-mono uppercase tracking-wider text-[var(--primary)]">
+                  <p className="text-2xs font-mono uppercase tracking-wider text-primary">
                     Slot {slot + 1}
                   </p>
                   <div className="grid grid-cols-1 gap-1">
@@ -1451,16 +1452,16 @@ export function SettingsPanel() {
                           onClick={() => updateCardMetric(slot, opt.id as CardMetricId)}
                           className={`group flex items-center gap-2 px-3 py-2 rounded border text-sm transition-colors ${
                             isSelected
-                              ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm"
+                              ? "border-primary bg-primary text-primary-foreground shadow-sm"
                               : usedInOther
                               ? "border-dashed border-border bg-transparent text-muted-foreground/50 cursor-not-allowed"
-                              : "border-border bg-background text-foreground hover:border-[var(--primary)]/50 hover:bg-muted"
+                              : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-muted"
                           }`}
                         >
                           <span
                             className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${
                               isSelected
-                                ? "border-[var(--primary-foreground)] bg-[var(--primary-foreground)] text-[var(--primary)]"
+                                ? "border-primary-foreground bg-primary-foreground text-primary"
                                 : "border-border text-transparent"
                             }`}
                           >
@@ -1473,9 +1474,9 @@ export function SettingsPanel() {
                             </span>
                           ) : (
                             <span
-                              className={`font-mono text-[10px] uppercase tracking-wider ${
+                              className={`font-mono text-3xs uppercase tracking-wider ${
                                 isSelected
-                                  ? "text-[var(--primary-foreground)]/80"
+                                  ? "text-primary-foreground/80"
                                   : "text-muted-foreground"
                               }`}
                             >
@@ -1504,7 +1505,7 @@ export function SettingsPanel() {
           >
             <div className="p-4 sm:p-5 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                <p className="text-2xs font-mono uppercase tracking-wider text-muted-foreground">
                   {METADATA_FIELDS.filter((f) => metadataPrefs[f.id]).length} of{" "}
                   {METADATA_FIELDS.length} shown
                 </p>
@@ -1512,7 +1513,7 @@ export function SettingsPanel() {
                   <button
                     type="button"
                     onClick={() => setAllMetadataPreferences(true)}
-                    className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[var(--primary)] transition-colors"
+                    className="font-mono text-3xs uppercase tracking-wider text-muted-foreground hover:text-primary transition-colors"
                   >
                     Show all
                   </button>
@@ -1520,7 +1521,7 @@ export function SettingsPanel() {
                   <button
                     type="button"
                     onClick={() => setAllMetadataPreferences(false)}
-                    className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:text-[var(--primary)] transition-colors"
+                    className="font-mono text-3xs uppercase tracking-wider text-muted-foreground hover:text-primary transition-colors"
                   >
                     Hide all
                   </button>
@@ -1537,7 +1538,7 @@ export function SettingsPanel() {
                       onClick={() => updateMetadataPreference(field.id, !visible)}
                       className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${
                         visible
-                          ? "border-[var(--primary)]/40 bg-[var(--primary)]/10 text-[var(--primary)] hover:bg-[var(--primary)]/15"
+                          ? "border-primary/40 bg-primary/10 text-primary hover:bg-primary/15"
                           : "border-dashed border-border bg-transparent text-muted-foreground/60 hover:border-border hover:text-foreground"
                       }`}
                     >
@@ -1557,7 +1558,7 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "trash" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           <SettingsCard
             icon={Trash2}
             title="Trash retention"
@@ -1576,7 +1577,7 @@ export function SettingsPanel() {
           >
             <div className="p-4 sm:p-5 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
               <label className="block">
-                <span className="block text-[11px] text-muted-foreground mb-1">
+                <span className="block text-2xs text-muted-foreground mb-1">
                   Days
                 </span>
                 <input
@@ -1638,10 +1639,10 @@ export function SettingsPanel() {
                         <p className="truncate text-sm font-medium text-foreground">
                           {item.name}
                         </p>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                        <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           {item.file_count} files
                         </span>
-                        <span className="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                        <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
                           {formatBytes(item.size_bytes)}
                         </span>
                       </div>
@@ -1678,17 +1679,17 @@ export function SettingsPanel() {
       )}
 
       {activeSection === "about" && (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-panel-in">
           {/* App identity */}
           <div className="bg-card border border-border rounded">
             <div className="px-4 sm:px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
-              <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-[var(--primary)] text-white">
+              <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
                 <BrandMark className="h-10 w-10" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-bold text-foreground tracking-tight">PrintStash</h3>
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
                     v{health?.version ?? "0.2.0"}
                   </span>
                 </div>
@@ -1722,15 +1723,15 @@ export function SettingsPanel() {
               {latestRelease && (
                 <div className="px-4 sm:px-6 py-5 grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-3">
                   <div className="flex items-start gap-2">
-                    <span className="rounded bg-[var(--primary)]/10 px-2 py-0.5 text-xs font-semibold text-[var(--primary)]">
+                    <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                       v{latestRelease.version}
                     </span>
-                    <span className="text-[11px] text-muted-foreground pt-0.5">{latestRelease.date}</span>
+                    <span className="text-2xs text-muted-foreground pt-0.5">{latestRelease.date}</span>
                   </div>
                   <ul className="space-y-1.5">
                     {latestRelease.changes.map((change, i) => (
                       <li key={i} className="flex gap-2 text-xs text-muted-foreground">
-                        <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-[var(--primary)]" />
+                        <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-primary" />
                         <span>{change}</span>
                       </li>
                     ))}

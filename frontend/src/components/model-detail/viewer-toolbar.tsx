@@ -25,9 +25,9 @@ export function ViewerToolbar({
   hasGcode: boolean;
 }) {
   const cluster =
-    "flex bg-[var(--surface-container-lowest)]/90 backdrop-blur border border-[var(--outline-variant)] rounded overflow-hidden shadow-sm";
+    "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
   const iconBtn =
-    "w-9 h-9 flex items-center justify-center text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)] hover:text-[var(--primary)] transition-colors";
+    "w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors";
 
   return (
     <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
@@ -36,10 +36,10 @@ export function ViewerToolbar({
         <div className={cluster}>
           <button
             onClick={() => setViewerMode("model")}
-            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+            className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
               viewerMode === "model"
-                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                ? "bg-primary text-primary-foreground"
+                : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
             title="3D model view"
           >
@@ -47,10 +47,10 @@ export function ViewerToolbar({
           </button>
           <button
             onClick={() => setViewerMode("gcode")}
-            className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+            className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
               viewerMode === "gcode"
-                ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                ? "bg-primary text-primary-foreground"
+                : "text-on-surface-variant hover:bg-surface-container-high"
             }`}
             title="G-code toolpath preview"
           >
@@ -67,10 +67,10 @@ export function ViewerToolbar({
               <button
                 key={m}
                 onClick={() => setDisplayMode(m)}
-                className={`px-2.5 h-9 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors ${
                   displayMode === m
-                    ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                    : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-on-surface-variant hover:bg-surface-container-high"
                 }`}
               >
                 {m === "wireframe" ? "Wire" : m === "xray" ? "X-Ray" : "Solid"}
@@ -81,21 +81,21 @@ export function ViewerToolbar({
           <div className={cluster}>
             <button
               onClick={() => controls.current?.fit()}
-              className={`${iconBtn} border-r border-[var(--outline-variant)]`}
+              className={`${iconBtn} border-r border-outline-variant`}
               title="Fit to view"
             >
               <Maximize2 className="h-4 w-4" />
             </button>
             <button
               onClick={() => controls.current?.screenshot()}
-              className={`${iconBtn} border-r border-[var(--outline-variant)]`}
+              className={`${iconBtn} border-r border-outline-variant`}
               title="Screenshot"
             >
               <Camera className="h-4 w-4" />
             </button>
             <button
               onClick={() => setShowGrid(!showGrid)}
-              className={`${iconBtn} ${showGrid ? "text-[var(--primary)] bg-[var(--secondary-container)]" : ""}`}
+              className={`${iconBtn} ${showGrid ? "text-primary bg-secondary-container" : ""}`}
               title="Build plate grid"
             >
               <Grid3x3 className="h-4 w-4" />

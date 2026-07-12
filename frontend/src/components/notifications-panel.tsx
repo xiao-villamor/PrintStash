@@ -27,16 +27,19 @@ import type {
   PrinterRead,
 } from "@/types";
 import { toast } from "@/lib/toast";
+import { buttonVariants } from "@/components/ui/button";
+import { inputClasses } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 const CARD =
   "bg-card border border-border rounded overflow-hidden";
-const INPUT =
-  "w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50";
-const BTN_PRIMARY =
-  "inline-flex items-center gap-1.5 px-3 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity";
-const BTN_SECONDARY =
-  "inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground font-mono text-xs uppercase tracking-wider hover:bg-muted disabled:opacity-50 transition-colors";
-const LABEL = "block text-[11px] text-muted-foreground mb-1";
+const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
+const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "font-mono uppercase tracking-wider");
+const BTN_SECONDARY = cn(
+  buttonVariants({ variant: "outline", size: "xs" }),
+  "font-mono uppercase tracking-wider text-muted-foreground",
+);
+const LABEL = "block text-2xs text-muted-foreground mb-1";
 
 const TARGETS: { value: NotificationTarget; label: string }[] = [
   { value: "webhook", label: "Webhook" },
@@ -271,7 +274,7 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
             checked={enabled}
             disabled={!canEdit || busy === "switch"}
             onChange={(e) => toggleEnabled(e.target.checked)}
-            className="h-4 w-4 accent-[var(--primary)]"
+            className="h-4 w-4 accent-primary"
           />
           <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             {enabled ? "On" : "Off"}
@@ -303,24 +306,24 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
                       <span className="text-sm font-medium text-foreground truncate">
                         {ch.name}
                       </span>
-                      <span className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
+                      <span className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
                         {ch.target}
                       </span>
                       {!ch.enabled &&
                         (ch.consecutive_failures > 0 ? (
                           <span
-                            className="font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
+                            className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
                             title={ch.last_error ?? undefined}
                           >
                             Auto-disabled
                           </span>
                         ) : (
-                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                             disabled
                           </span>
                         ))}
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                    <p className="text-2xs text-muted-foreground mt-0.5 truncate">
                       {ch.events.map((e) => EVENTS.find((x) => x.value === e)?.label ?? e).join(", ")}
                       {ch.printer_ids
                         ? ` · ${ch.printer_ids.length} printer(s)`
@@ -329,7 +332,7 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
                   </div>
                   <div className="flex items-center gap-1.5 flex-shrink-0">
                     <span
-                      className={`font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border ${badge.cls}`}
+                      className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border ${badge.cls}`}
                       title={ch.last_error ?? undefined}
                     >
                       {badge.text}
@@ -416,7 +419,7 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
                       {d.created_at ? new Date(d.created_at).toLocaleString() : ""}
                     </span>
                     <span
-                      className={`font-mono text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
+                      className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
                       title={d.last_error ?? undefined}
                     >
                       {badge.text}
@@ -521,7 +524,7 @@ function ChannelForm({
                       : draft.events.filter((x) => x !== ev.value),
                   })
                 }
-                className="h-3.5 w-3.5 accent-[var(--primary)]"
+                className="h-3.5 w-3.5 accent-primary"
               />
               {ev.label}
             </label>
@@ -536,14 +539,14 @@ function ChannelForm({
             type="checkbox"
             checked={!scoped}
             onChange={(e) => setDraft({ ...draft, printerIds: e.target.checked ? null : [] })}
-            className="h-3.5 w-3.5 accent-[var(--primary)]"
+            className="h-3.5 w-3.5 accent-primary"
           />
           All printers
         </label>
         {scoped && (
           <div className="flex flex-wrap gap-3">
             {printers.length === 0 && (
-              <span className="text-[11px] text-muted-foreground italic">
+              <span className="text-2xs text-muted-foreground italic">
                 No printers configured.
               </span>
             )}
@@ -560,7 +563,7 @@ function ChannelForm({
                         : (draft.printerIds ?? []).filter((x) => x !== p.id),
                     })
                   }
-                  className="h-3.5 w-3.5 accent-[var(--primary)]"
+                  className="h-3.5 w-3.5 accent-primary"
                 />
                 {p.name}
               </label>
@@ -574,7 +577,7 @@ function ChannelForm({
           type="checkbox"
           checked={draft.enabled}
           onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
-          className="h-3.5 w-3.5 accent-[var(--primary)]"
+          className="h-3.5 w-3.5 accent-primary"
         />
         Enabled
       </label>

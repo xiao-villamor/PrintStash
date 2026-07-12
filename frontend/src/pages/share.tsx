@@ -87,17 +87,17 @@ export default function SharePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--surface)]">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--on-surface-variant)]" />
+      <div className="min-h-screen flex items-center justify-center bg-surface">
+        <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
       </div>
     );
   }
 
   if (error || !model) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-[var(--surface)] px-6 text-center">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
         <AlertTriangle className="h-8 w-8 text-amber-500" />
-        <p className="font-mono text-sm text-[var(--on-surface-variant)]">
+        <p className="font-mono text-sm text-on-surface-variant">
           {error ?? "Not found."}
         </p>
       </div>
@@ -105,29 +105,29 @@ export default function SharePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--surface)] text-[var(--on-surface)]">
-      <header className="border-b border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] px-6 py-4">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)]">
+    <div className="min-h-screen bg-surface text-on-surface">
+      <header className="border-b border-outline-variant bg-surface-container-lowest px-6 py-4">
+        <p className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
           Shared model · PrintStash
         </p>
         <div className="mt-0.5 flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-xl font-semibold leading-tight truncate">{model.name}</h1>
-            <p className="mt-1 font-mono text-[11px] text-[var(--on-surface-variant)]">
+            <p className="mt-1 font-mono text-2xs text-on-surface-variant">
               {meshFile ? `${meshFile.file_type.toUpperCase()} source · ` : ""}
               {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"}
               {selectedGcode ? ` · ${revisionTitle(selectedGcode)}` : ""}
             </p>
           </div>
-          <div className="flex rounded border border-[var(--outline-variant)] bg-[var(--surface-container-low)] overflow-hidden">
+          <div className="flex rounded border border-outline-variant bg-surface-container-low overflow-hidden">
             <button
               type="button"
               onClick={() => setViewerMode("model")}
               disabled={!canShowModel}
-              className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 activeViewerMode === "model"
-                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={canShowModel ? "3D model view" : "No mesh in this share"}
             >
@@ -137,10 +137,10 @@ export default function SharePage() {
               type="button"
               onClick={() => setViewerMode("gcode")}
               disabled={!canShowGcode}
-              className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`h-9 px-3 inline-flex items-center gap-1.5 font-mono text-2xs uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                 activeViewerMode === "gcode"
-                  ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                  : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-on-surface-variant hover:bg-surface-container-high"
               }`}
               title={canShowGcode ? "G-code toolpath preview" : "No G-code in this share"}
             >
@@ -149,19 +149,19 @@ export default function SharePage() {
           </div>
         </div>
         {model.description && (
-          <p className="text-sm text-[var(--on-surface-variant)] mt-1 max-w-2xl">
+          <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">
             {model.description}
           </p>
         )}
       </header>
 
       <main className="p-4 md:p-6 grid gap-4 md:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="relative rounded-md border border-[var(--outline-variant)] bg-[var(--surface-container-low)] overflow-hidden min-h-[62vh]">
+        <div className="relative rounded-md border border-outline-variant bg-surface-container-low overflow-hidden min-h-[62vh]">
           {activeViewerMode === "gcode" && selectedGcode ? (
             <Suspense
               fallback={
                 <div className="h-full min-h-[62vh] flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-[var(--on-surface-variant)]" />
+                  <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
                 </div>
               }
             >
@@ -174,7 +174,7 @@ export default function SharePage() {
             <Suspense
               fallback={
                 <div className="h-full min-h-[62vh] flex items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-[var(--on-surface-variant)]" />
+                  <Loader2 className="h-6 w-6 animate-spin text-on-surface-variant" />
                 </div>
               }
             >
@@ -187,7 +187,7 @@ export default function SharePage() {
               />
             </Suspense>
           ) : (
-            <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-2 text-[var(--on-surface-variant)]">
+            <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-2 text-on-surface-variant">
               <Box className="h-8 w-8" />
               <p className="font-mono text-xs">
                 No previewable mesh or G-code in this share.
@@ -197,16 +197,16 @@ export default function SharePage() {
 
           {activeViewerMode === "model" && meshFile && (
             <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
-              <div className="flex rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)]/90 backdrop-blur overflow-hidden shadow-sm">
+              <div className="flex rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur overflow-hidden shadow-sm">
                 {(["solid", "xray", "wireframe"] as ViewerDisplayMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
                     onClick={() => setDisplayMode(mode)}
-                    className={`h-9 px-2.5 font-mono text-[11px] uppercase tracking-wider transition-colors ${
+                    className={`h-9 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors ${
                       displayMode === mode
-                        ? "bg-[var(--primary)] text-[var(--primary-foreground)]"
-                        : "text-[var(--on-surface-variant)] hover:bg-[var(--surface-container-high)]"
+                        ? "bg-primary text-primary-foreground"
+                        : "text-on-surface-variant hover:bg-surface-container-high"
                     }`}
                   >
                     {mode === "wireframe" ? "Wire" : mode === "xray" ? "X-Ray" : "Solid"}
@@ -216,8 +216,8 @@ export default function SharePage() {
               <button
                 type="button"
                 onClick={() => setShowGrid((current) => !current)}
-                className={`h-9 px-2.5 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)]/90 backdrop-blur font-mono text-[11px] uppercase tracking-wider shadow-sm transition-colors ${
-                  showGrid ? "text-[var(--primary)]" : "text-[var(--on-surface-variant)]"
+                className={`h-9 px-2.5 rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur font-mono text-2xs uppercase tracking-wider shadow-sm transition-colors ${
+                  showGrid ? "text-primary" : "text-on-surface-variant"
                 }`}
               >
                 Grid
@@ -225,7 +225,7 @@ export default function SharePage() {
               <button
                 type="button"
                 onClick={() => viewerControls.current?.fit()}
-                className="h-9 px-2.5 rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)]/90 backdrop-blur font-mono text-[11px] uppercase tracking-wider text-[var(--on-surface-variant)] shadow-sm hover:bg-[var(--surface-container-high)]"
+                className="h-9 px-2.5 rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur font-mono text-2xs uppercase tracking-wider text-on-surface-variant shadow-sm hover:bg-surface-container-high"
               >
                 Fit
               </button>
@@ -234,13 +234,13 @@ export default function SharePage() {
 
           {(meshFile || selectedGcode) && (
             <div className="absolute top-4 right-4 z-10 max-w-[min(70%,360px)]">
-              <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)]/90 backdrop-blur px-2.5 py-1.5 text-right shadow-sm">
-                <p className="font-mono text-[11px] text-[var(--on-surface)] truncate">
+              <div className="rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur px-2.5 py-1.5 text-right shadow-sm">
+                <p className="font-mono text-2xs text-on-surface truncate">
                   {activeViewerMode === "gcode"
                     ? selectedGcode?.original_filename
                     : meshFile?.original_filename}
                 </p>
-                <p className="font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                   {activeViewerMode === "gcode" ? "G-code toolpath" : "Source model"}
                 </p>
               </div>
@@ -250,79 +250,79 @@ export default function SharePage() {
 
         <aside className="space-y-3">
           {selectedGcode && (
-            <div className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3">
+            <div className="rounded border border-outline-variant bg-surface-container-lowest p-3">
               <div className="flex items-center justify-between gap-2">
-                <h2 className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)]">
+                <h2 className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
                   Shared revision
                 </h2>
-                <span className="font-mono text-[10px] uppercase text-[var(--primary)]">
+                <span className="font-mono text-3xs uppercase text-primary">
                   G-code preview
                 </span>
               </div>
-              <p className="mt-2 text-sm font-medium text-[var(--on-surface)]">
+              <p className="mt-2 text-sm font-medium text-on-surface">
                 {revisionTitle(selectedGcode)}
               </p>
               {selectedGcode.revision_notes && (
-                <p className="mt-1 text-xs text-[var(--on-surface-variant)]">
+                <p className="mt-1 text-xs text-on-surface-variant">
                   {selectedGcode.revision_notes}
                 </p>
               )}
-              <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+              <div className="mt-3 grid grid-cols-2 gap-2 text-2xs">
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Status</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Status</span>
                   <span>{selectedGcode.revision_status?.replace("_", " ") ?? "—"}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Print time</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Print time</span>
                   <span>{formatDuration(selectedGcode.estimated_time_s)}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Layer</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Layer</span>
                   <span>{value(selectedGcode.layer_height_mm, " mm")}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Nozzle</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Nozzle</span>
                   <span>{value(selectedGcode.nozzle_diameter_mm, " mm")}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Material</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Material</span>
                   <span>{selectedGcode.material_type ?? "—"}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Filament</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Filament</span>
                   <span>{value(selectedGcode.filament_weight_g, " g")}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="block font-mono text-[10px] uppercase text-[var(--on-surface-variant)]">Printer</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Printer</span>
                   <span>{selectedGcode.printer_model ?? "—"}</span>
                 </div>
               </div>
             </div>
           )}
 
-          <h2 className="font-mono text-[10px] uppercase tracking-widest text-[var(--on-surface-variant)]">
+          <h2 className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
             Files ({model.files.length})
           </h2>
           {model.files.map((f) => (
             <div
               key={f.id}
-              className="rounded border border-[var(--outline-variant)] bg-[var(--surface-container-lowest)] p-3"
+              className="rounded border border-outline-variant bg-surface-container-lowest p-3"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs truncate">{f.original_filename}</span>
-                <span className="font-mono text-[10px] uppercase text-[var(--on-surface-variant)] shrink-0">
+                <span className="font-mono text-3xs uppercase text-on-surface-variant shrink-0">
                   {f.file_type}
                 </span>
               </div>
               {f.file_type === "gcode" && (
-                <div className="mt-1 flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-[var(--on-surface-variant)]">
+                <div className="mt-1 flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
                   <Layers className="h-3 w-3" />
                   {revisionTitle(f)}
                   {f.is_recommended ? " · Recommended" : ""}
                 </div>
               )}
               <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="font-mono text-[10px] text-[var(--on-surface-variant)]">
+                <span className="font-mono text-3xs text-on-surface-variant">
                   {formatBytes(f.size_bytes)}
                   {f.triangle_count
                     ? ` · ${f.triangle_count.toLocaleString()} tris`
@@ -331,7 +331,7 @@ export default function SharePage() {
                 {model.allow_download && (
                   <a
                     href={getAssetUrl(sharedDownloadUrl(token, f.id))}
-                    className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-[var(--primary)] hover:underline"
+                    className="inline-flex items-center gap-1 font-mono text-3xs uppercase tracking-wider text-primary hover:underline"
                   >
                     <Download className="h-3 w-3" /> Download
                   </a>
@@ -340,7 +340,7 @@ export default function SharePage() {
             </div>
           ))}
           {!model.allow_download && (
-            <p className="font-mono text-[10px] text-[var(--on-surface-variant)]/70">
+            <p className="font-mono text-3xs text-on-surface-variant/70">
               Downloads are disabled for this link — view only.
             </p>
           )}
