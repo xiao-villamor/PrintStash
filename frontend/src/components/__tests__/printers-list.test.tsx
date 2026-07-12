@@ -59,7 +59,7 @@ describe("printer setup", () => {
     await openForm();
     await userEvent.type(screen.getByLabelText("Name"), "Neptune 4 Max");
     await userEvent.selectOptions(screen.getByLabelText("Integration"), "elegoo_neptune4");
-    await userEvent.type(screen.getByLabelText("Moonraker URL"), "http://neptune.local:7125");
+    await userEvent.type(screen.getByLabelText("Printer URL"), "http://neptune.local:7125");
     await userEvent.click(screen.getAllByRole("button", { name: /^add printer$/i }).at(-1)!);
 
     await waitFor(() => expect(createPrinter).toHaveBeenCalledWith(expect.objectContaining({

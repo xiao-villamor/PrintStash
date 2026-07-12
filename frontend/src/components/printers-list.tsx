@@ -326,9 +326,11 @@ function AddPrinterModal({
             <label htmlFor="printer-address" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
               {setupKind === "prusalink"
                 ? "PrusaLink URL"
-                : setupKind === "moonraker" || setupKind === "elegoo_neptune4"
+                : setupKind === "moonraker"
                   ? "Moonraker URL"
-                  : "Printer host or IP"}
+                  : setupKind === "elegoo_neptune4"
+                    ? "Printer URL"
+                    : "Printer host or IP"}
             </label>
             <input
               id="printer-address"
@@ -347,7 +349,7 @@ function AddPrinterModal({
           </div>
           {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && <div>
             <label htmlFor="moonraker-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
-              Moonraker API key{" "}
+              {setupKind === "elegoo_neptune4" ? "API key" : "Moonraker API key"}{" "}
               <span className="font-normal normal-case tracking-normal opacity-60">
                 (optional)
               </span>
