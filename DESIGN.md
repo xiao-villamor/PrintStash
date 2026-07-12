@@ -58,6 +58,27 @@ stays orange in the light theme.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
   `z-overlay` (100) for modals and drawers. No arbitrary `z-[60]`.
 
+## Layout
+
+A page is either a **document** or a **surface**, and the choice is not a matter
+of taste.
+
+- **Documents** — a heading plus cards, forms, or charts: Printers, Statistics,
+  Profiles, Settings, Organize, printer detail. These compose
+  `PageContainer` (`components/ui/page-container.tsx`), which owns the scroll
+  container, the padding, the mobile bottom-nav clearance, and **one** content
+  width: `max-w-6xl`, centered. There is no second width to choose from, and no
+  page may hand-roll its own scroll container — that is exactly how Printers
+  ended up spanning a 2560px monitor while Statistics sat in a 1024px column.
+- **Surfaces** — the vault grid, model detail's split pane, the public share
+  page. These own the whole viewport and do not use `PageContainer`. A grid of
+  print models *should* use every pixel of a farm monitor.
+- **Prose** — long-form reading (document detail) uses
+  `<PageContainer width="prose">` (`max-w-4xl`), a reading measure.
+
+Adding a page means picking one of these three. If a new page seems to need a
+fourth width, it doesn't — pick the closest and move on.
+
 ## Motion
 
 ### Curves and durations — the only ones that exist
@@ -163,6 +184,7 @@ scroll lock, no exit animation).
 
 | Primitive | Gives you |
 | --- | --- |
+| `PageContainer` | The standard page frame: scroll container, padding, bottom-nav clearance, the one content width |
 | `Button` | All variants/sizes, press feedback, `loading` state. Style buttons *only* through `buttonVariants` |
 | `ModalShell` / `Modal` | Portal, focus trap + restore, Escape, scroll lock, symmetric enter/exit |
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |
@@ -180,6 +202,8 @@ Supporting hooks in `frontend/src/lib/`:
 
 ## Checklist for new UI
 
+0. A new page composes `PageContainer` unless it is a full-bleed surface. No
+   hand-rolled scroll container, no new content width.
 1. Semantic color tokens, paired with their `-foreground`. No `dark:` color
    hand-encoding, no arbitrary `[var(--…)]`.
 2. Durations and curves from the token scale. No raw `duration-200`, no

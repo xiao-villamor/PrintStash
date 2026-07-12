@@ -58,12 +58,25 @@
   upload-only printers selectable but disables **Send & Print** when any
   selected printer cannot start the uploaded file.
 
+- **Consistent page width.** Printers, Statistics, Profiles, Settings, Organize
+  and printer detail each defined their own scroll container and content width,
+  so navigating between them shifted the layout sideways. They now share one
+  `PageContainer` primitive with a single content width.
+- **The batch selection toolbar animates.** Selecting models popped the toolbar
+  into existence with no transition; it now rises and fades, and reverses
+  cleanly when a selection is toggled rapidly.
+
 ### Performance
 
 - **Live job database writes are bounded.** Unchanged progress updates are
   coalesced to a five-second interval. Three consecutive job-sync database
   failures open a per-printer circuit breaker with increasing retry delays,
   preventing a database outage from becoming a write storm.
+- **Theme switching no longer restyles the whole document.** The theme swap
+  applied a transition to every element and pseudo-element including
+  `box-shadow`; it is now limited to color properties on the standard timing
+  scale. Toasts and the tab indicator were also moved onto GPU-composited
+  properties and the shared motion tokens.
 
 ### Ops
 

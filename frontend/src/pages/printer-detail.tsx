@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 
 import { PrinterDetailPage } from "@/components/printer-detail";
+import { PageContainer } from "@/components/ui/page-container";
 import NotFound from "./not-found";
 
 export default function PrinterDetailRoute() {
@@ -8,8 +9,8 @@ export default function PrinterDetailRoute() {
   const printerId = Number(id);
   if (!id || Number.isNaN(printerId)) return <NotFound />;
   return (
-    <div className="h-full overflow-y-auto p-6 pb-24 md:pb-6">
+    <PageContainer>
       <PrinterDetailPage printerId={printerId} initialPrinter={undefined} />
-    </div>
+    </PageContainer>
   );
 }

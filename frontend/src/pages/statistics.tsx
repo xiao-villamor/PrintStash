@@ -16,6 +16,7 @@ import {
 import { BarChart3, Boxes, Clock, Coins, Layers, Weight } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageContainer } from "@/components/ui/page-container";
 import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -415,32 +416,30 @@ export default function StatisticsPage() {
   const currency = config?.currency ?? "USD";
 
   return (
-    <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
-      <div className="mx-auto w-full max-w-5xl space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight text-foreground">Statistics</h2>
-            <p className="text-sm text-muted-foreground">
-              Cost, filament and print activity from completed jobs
-            </p>
-          </div>
-          <Segmented options={PERIODS.map((p) => ({ id: p.value, label: p.label }))} value={period} onChange={setPeriod} />
+    <PageContainer>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-foreground">Statistics</h2>
+          <p className="text-sm text-muted-foreground">
+            Cost, filament and print activity from completed jobs
+          </p>
         </div>
-
-        {isLoading && (
-          <div className="py-16 text-center text-sm text-muted-foreground">
-            Loading statistics…
-          </div>
-        )}
-        {isError && (
-          <Card>
-            <CardContent className="py-12 text-center text-sm text-destructive">
-              Failed to load statistics.
-            </CardContent>
-          </Card>
-        )}
-        {data && <StatsContent stats={data} currency={currency} />}
+        <Segmented options={PERIODS.map((p) => ({ id: p.value, label: p.label }))} value={period} onChange={setPeriod} />
       </div>
-    </div>
+
+      {isLoading && (
+        <div className="py-16 text-center text-sm text-muted-foreground">
+          Loading statistics…
+        </div>
+      )}
+      {isError && (
+        <Card>
+          <CardContent className="py-12 text-center text-sm text-destructive">
+            Failed to load statistics.
+          </CardContent>
+        </Card>
+      )}
+      {data && <StatsContent stats={data} currency={currency} />}
+    </PageContainer>
   );
 }

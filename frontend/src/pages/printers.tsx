@@ -1,9 +1,10 @@
 import { PrintersPage } from "@/components/printers-list";
+import { PageContainer } from "@/components/ui/page-container";
 
 export default function PrintersRoute() {
   return (
-    <div className="h-full overflow-y-auto bg-background p-6 pb-24 md:pb-6">
+    <PageContainer>
       <PrintersPage />
-    </div>
+    </PageContainer>
   );
 }
