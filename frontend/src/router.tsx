@@ -4,19 +4,45 @@ import { Suspense, lazy } from "react";
 
 import RootLayout from "@/root-layout";
 
-const HomePage = lazy(() => import("@/pages/home"));
-const ModelDetailPage = lazy(() => import("@/pages/model-detail"));
-const DocumentDetailPage = lazy(() => import("@/pages/document-detail"));
-const LoginPage = lazy(() => import("@/pages/login"));
-const SetupPage = lazy(() => import("@/pages/setup"));
-const OrganizePage = lazy(() => import("@/pages/organize"));
-const ProfilesPage = lazy(() => import("@/pages/profiles"));
-const StatisticsPage = lazy(() => import("@/pages/statistics"));
-const SettingsPage = lazy(() => import("@/pages/settings"));
-const PrintersRoute = lazy(() => import("@/pages/printers"));
-const PrinterDetailRoute = lazy(() => import("@/pages/printer-detail"));
-const SharePage = lazy(() => import("@/pages/share"));
-const NotFound = lazy(() => import("@/pages/not-found"));
+// After a rebuild the browser may still hold an index.html referencing an
+// old chunk hash that no longer exists on disk, so the dynamic import 404s.
+// Reload once to pick up the fresh index.html/chunk map; a session flag
+// stops an infinite reload loop if the import keeps failing for another
+// reason.
+function lazyImport<T extends { default: React.ComponentType }>(
+  factory: () => Promise<T>,
+) {
+  const key = "chunk-reload";
+  return lazy(() =>
+    factory()
+      .then((mod) => {
+        sessionStorage.removeItem(key);
+        return mod;
+      })
+      .catch((err) => {
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, "1");
+          window.location.reload();
+          return new Promise<T>(() => {});
+        }
+        throw err;
+      }),
+  );
+}
+
+const HomePage = lazyImport(() => import("@/pages/home"));
+const ModelDetailPage = lazyImport(() => import("@/pages/model-detail"));
+const DocumentDetailPage = lazyImport(() => import("@/pages/document-detail"));
+const LoginPage = lazyImport(() => import("@/pages/login"));
+const SetupPage = lazyImport(() => import("@/pages/setup"));
+const OrganizePage = lazyImport(() => import("@/pages/organize"));
+const ProfilesPage = lazyImport(() => import("@/pages/profiles"));
+const StatisticsPage = lazyImport(() => import("@/pages/statistics"));
+const SettingsPage = lazyImport(() => import("@/pages/settings"));
+const PrintersRoute = lazyImport(() => import("@/pages/printers"));
+const PrinterDetailRoute = lazyImport(() => import("@/pages/printer-detail"));
+const SharePage = lazyImport(() => import("@/pages/share"));
+const NotFound = lazyImport(() => import("@/pages/not-found"));
 
 function RouteChunk({ children }: { children: React.ReactNode }) {
   return (
