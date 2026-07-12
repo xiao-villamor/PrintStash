@@ -214,10 +214,9 @@ describe("printer card", () => {
     render(<PrintersPage />);
 
     await userEvent.click(screen.getByText("Set model"));
-    const selector = screen.getByRole("combobox");
-    expect(selector.closest("a")).toBeNull();
-    await userEvent.selectOptions(selector, "Voron 2.4");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByRole("dialog", { name: "Select printer model" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Voron 2.4" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save model" }));
 
     await waitFor(() =>
       expect(updatePrinter).toHaveBeenCalledWith(1, { model_name: "Voron 2.4" }),
@@ -234,12 +233,11 @@ describe("printer card", () => {
     render(<PrintersPage />);
 
     await userEvent.click(screen.getByText("Set model"));
-    await userEvent.selectOptions(screen.getByRole("combobox"), "Other…");
     await userEvent.type(
-      screen.getByPlaceholderText("Custom model name"),
+      screen.getByPlaceholderText("Enter model name"),
       "Homebrew CoreXY",
     );
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save model" }));
 
     await waitFor(() =>
       expect(updatePrinter).toHaveBeenCalledWith(1, {

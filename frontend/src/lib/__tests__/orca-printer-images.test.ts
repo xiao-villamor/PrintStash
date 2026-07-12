@@ -3,8 +3,8 @@ import { printerArtwork } from "@/lib/orca-printer-images";
 import { PRINTER_MODEL_OPTIONS } from "@/lib/printer-providers";
 
 describe("printerArtwork", () => {
-  it("has artwork for every curated Creality model", () => {
-    for (const model of PRINTER_MODEL_OPTIONS.filter((name) => name.startsWith("Creality "))) {
+  it("has artwork for every curated model", () => {
+    for (const model of PRINTER_MODEL_OPTIONS) {
       expect(printerArtwork(model).source, model).toBe("orca");
     }
   });

@@ -19,12 +19,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ModalShell } from "@/components/ui/modal";
+import { Modal, ModalShell } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
 import { readPrinterCardImagePreference } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
-import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon, Network, Clock3 } from "lucide-react";
+import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon, Network, Clock3, Search, Check } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
   ready: "bg-emerald-500",
@@ -311,9 +311,7 @@ function PrinterModelBadge({
   );
   const [saving, setSaving] = useState(false);
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function save() {
     const modelName = selected === OTHER_MODEL_OPTION ? customValue.trim() : selected;
     setSaving(true);
     try {
@@ -328,47 +326,15 @@ function PrinterModelBadge({
 
   if (editing) {
     return (
-      <form
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={save}
-        className="flex items-center gap-1"
-      >
-        <select
-          autoFocus
-          value={selected}
-          onChange={(e) => setSelected(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              e.stopPropagation();
-              setEditing(false);
-            }
-          }}
-          className="rounded border border-border bg-background px-1.5 py-0.5 text-3xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-        >
-          <option value="">Select model</option>
-          {PRINTER_MODEL_OPTIONS.map((model) => (
-            <option key={model} value={model}>
-              {model}
-            </option>
-          ))}
-          <option value={OTHER_MODEL_OPTION}>Other…</option>
-        </select>
-        {selected === OTHER_MODEL_OPTION && (
-          <input
-            value={customValue}
-            onChange={(e) => setCustomValue(e.target.value)}
-            placeholder="Custom model name"
-            className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-3xs text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          />
-        )}
-        <button
-          type="submit"
-          disabled={saving || (selected === OTHER_MODEL_OPTION && !customValue.trim())}
-          className="rounded border border-border px-1.5 py-0.5 text-3xs uppercase tracking-wider text-foreground hover:bg-muted disabled:opacity-50"
-        >
-          Save
-        </button>
-      </form>
+      <PrinterModelPicker
+        selected={selected}
+        customValue={customValue}
+        saving={saving}
+        onSelectedChange={setSelected}
+        onCustomValueChange={setCustomValue}
+        onClose={() => setEditing(false)}
+        onSave={save}
+      />
     );
   }
 
@@ -387,6 +353,110 @@ function PrinterModelBadge({
       {displayModel || (canEdit ? "Set model" : "Model unknown")}
       {canEdit && <Pencil className="h-2.5 w-2.5 opacity-60" />}
     </button>
+  );
+}
+
+const MODEL_BRANDS = ["All", ...Array.from(new Set(PRINTER_MODEL_OPTIONS.map((model) => model.split(" ")[0])))];
+
+function PrinterModelPicker({
+  selected,
+  customValue,
+  saving,
+  onSelectedChange,
+  onCustomValueChange,
+  onClose,
+  onSave,
+}: {
+  selected: string;
+  customValue: string;
+  saving: boolean;
+  onSelectedChange: (model: string) => void;
+  onCustomValueChange: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [brand, setBrand] = useState("All");
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const models = PRINTER_MODEL_OPTIONS.filter((model) =>
+    (brand === "All" || model.startsWith(`${brand} `)) &&
+    (!normalizedQuery || model.toLocaleLowerCase().includes(normalizedQuery)),
+  );
+  const canSave = Boolean(selected && (selected !== OTHER_MODEL_OPTION || customValue.trim()));
+
+  return (
+    <Modal open onClose={onClose} title="Select printer model" className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden">
+      <div className="border-b border-border pb-4">
+        <label className="relative block">
+          <span className="sr-only">Search printer models</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search printer models"
+            className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <div className="mt-3 flex gap-1 overflow-x-auto pb-1" aria-label="Printer brands">
+          {MODEL_BRANDS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              aria-pressed={brand === item}
+              onClick={() => setBrand(item)}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-press ease-out active:scale-[0.98] ${brand === item ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-popover-foreground"}`}
+            >
+              {item}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-4">
+        {models.length ? (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {models.map((model) => {
+              const artwork = printerArtwork(model);
+              const active = selected === model;
+              return (
+                <button
+                  key={model}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => onSelectedChange(model)}
+                  className={`group relative flex min-h-44 flex-col rounded-lg border bg-card p-3 text-left shadow-sm outline-none transition-[background-color,border-color,transform] duration-press ease-out hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] ${active ? "border-primary ring-2 ring-primary-soft" : "border-border"}`}
+                >
+                  {active && <span className="absolute right-2 top-2 z-10 rounded-full bg-primary p-1 text-primary-foreground"><Check className="h-3 w-3" /></span>}
+                  <img src={artwork.imageUrl} alt="" className="mb-2 h-28 w-full object-contain" referrerPolicy="no-referrer" />
+                  <span className="mt-auto text-xs font-semibold leading-snug text-foreground">{model}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="flex min-h-52 items-center justify-center text-sm text-muted-foreground">No printer models match your search.</div>
+        )}
+      </div>
+
+      <div className="border-t border-border bg-background pt-4">
+        <label className="flex items-center gap-3">
+          <input type="radio" checked={selected === OTHER_MODEL_OPTION} onChange={() => onSelectedChange(OTHER_MODEL_OPTION)} className="h-4 w-4 accent-primary" />
+          <span className="shrink-0 text-sm font-medium text-foreground">Custom model</span>
+          <input
+            value={customValue}
+            onFocus={() => onSelectedChange(OTHER_MODEL_OPTION)}
+            onChange={(event) => { onSelectedChange(OTHER_MODEL_OPTION); onCustomValueChange(event.target.value); }}
+            placeholder="Enter model name"
+            className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </label>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+          <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>Save model</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

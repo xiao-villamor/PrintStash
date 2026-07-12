@@ -38,7 +38,7 @@ import { Input } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { cn } from "@/lib/utils";
-import { providerAddress, providerLabel } from "@/lib/printer-providers";
+import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -1255,8 +1255,20 @@ function PrinterSettings({
           <SettingsField label="Name">
             <Input value={name} onChange={(e) => setName(e.target.value)} required disabled={!canEdit} />
           </SettingsField>
-          <SettingsField label="Model" hint="Optional display override">
-            <Input value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder={printer.detected_model ?? "Auto-detected"} disabled={!canEdit} />
+          <SettingsField label="Model" hint="Pick a known model or type your own">
+            {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
+            <Input
+              list="printer-model-options"
+              value={modelName}
+              onChange={(e) => setModelName(e.target.value)}
+              placeholder={printer.detected_model ?? "Auto-detected"}
+              disabled={!canEdit}
+            />
+            <datalist id="printer-model-options">
+              {PRINTER_MODEL_OPTIONS.map((model) => (
+                <option key={model} value={model} />
+              ))}
+            </datalist>
           </SettingsField>
           <SettingsField label="Group" hint="Optional farm grouping">
             <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Workshop" disabled={!canEdit} />
