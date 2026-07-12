@@ -31,6 +31,7 @@ import {
   Users,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { PageHeader } from "@/components/ui/page-header";
 import { buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { inputClasses } from "@/components/ui/input";
@@ -752,10 +753,7 @@ export function SettingsPanel() {
         confirmLabel="Restore"
       />
 
-      <div>
-        <h2 className="text-2xl font-bold text-foreground tracking-tight">Settings</h2>
-        <p className="text-sm text-muted-foreground">Vault configuration and display preferences</p>
-      </div>
+      <PageHeader title="Settings" description="Vault configuration and display preferences" />
 
       {/* Section tabs — underline indicator, scrolls horizontally on small screens */}
       <div className="border-b border-border">

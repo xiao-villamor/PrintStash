@@ -79,6 +79,17 @@ of taste.
 Adding a page means picking one of these three. If a new page seems to need a
 fourth width, it doesn't — pick the closest and move on.
 
+A document page opens with `PageHeader` (`components/ui/page-header.tsx`):
+title, optional description, optional actions on the right. Do not hand-write
+that row.
+
+**Every page has exactly one `<h1>`, and it is the thing the page is about** —
+the collection name on the vault, the printer's name on printer detail, the
+page title elsewhere. `PageHeader` provides it. The two detail views whose
+title carries inline metadata (printer detail's provider/beta badges, model
+detail) render their own `<h1>` instead of composing `PageHeader`; that is the
+only sanctioned exception, and it does not license a third heading style.
+
 ## Motion
 
 ### Curves and durations — the only ones that exist
@@ -185,6 +196,7 @@ scroll lock, no exit animation).
 | Primitive | Gives you |
 | --- | --- |
 | `PageContainer` | The standard page frame: scroll container, padding, bottom-nav clearance, the one content width |
+| `PageHeader` | The page's heading row: the single `<h1>`, description, right-aligned actions. Stacks on mobile |
 | `Button` | All variants/sizes, press feedback, `loading` state. Style buttons *only* through `buttonVariants` |
 | `ModalShell` / `Modal` | Portal, focus trap + restore, Escape, scroll lock, symmetric enter/exit |
 | `Drawer` | The above, sliding from an edge, interruptible mid-flight |

@@ -557,9 +557,9 @@ async function onMainDrop(e: React.DragEvent) {
         <div className="px-4 sm:px-6 py-5 sm:py-8 bg-background border-b border-border">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-col space-y-1">
-              <h2 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight truncate">
+              <h1 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight truncate">
                 {selectedName ?? "All Models"}
-              </h2>
+              </h1>
               <p className="text-sm text-muted-foreground">
                 {loading ? "Loading..." : `${displayCount} model${displayCount !== 1 ? "s" : ""} total${selectedName ? ` in this collection` : ""}`}
                 {refreshing && <span className="ml-2 font-mono text-xs text-muted-foreground">Updating...</span>}

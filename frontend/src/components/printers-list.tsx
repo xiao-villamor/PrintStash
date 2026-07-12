@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { ModalShell } from "@/components/ui/modal";
+import { PageHeader } from "@/components/ui/page-header";
 import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon } from "lucide-react";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -55,32 +56,29 @@ export function PrintersPage() {
 
   return (
     <div className="flex w-full flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-foreground tracking-tight">Printers</h2>
-          <p className="text-sm text-muted-foreground">Connected printer endpoints</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => printersQuery.refetch()}
-            className="px-3 py-2 rounded border border-border bg-background text-xs font-medium text-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </button>
-          <button
-            onClick={() => {
-              if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
-              setAddOpen(true);
-            }}
-            disabled={!auth.isAuthenticated}
-            className="px-3 py-2 rounded bg-primary text-primary-foreground text-xs font-medium hover:bg-primary-hover transition-colors flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {auth.isAuthenticated ? "Add printer" : "Sign in to add"}
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Printers"
+        description="Connected printer endpoints"
+        actions={
+          <>
+            <Button variant="outline" size="xs" onClick={() => printersQuery.refetch()}>
+              <RefreshCw className="h-3.5 w-3.5" />
+              Refresh
+            </Button>
+            <Button
+              size="xs"
+              onClick={() => {
+                if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+                setAddOpen(true);
+              }}
+              disabled={!auth.isAuthenticated}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {auth.isAuthenticated ? "Add printer" : "Sign in to add"}
+            </Button>
+          </>
+        }
+      />
 
       {error && (
         <div className="rounded border border-red-300/50 bg-red-50/30 p-3 text-sm text-red-600">
