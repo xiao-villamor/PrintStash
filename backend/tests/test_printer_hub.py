@@ -99,6 +99,73 @@ class TestPrinterHubLifecycle:
         assert p.last_error is not None
 
 
+class TestPrinterHubChaosReconnect:
+    """Simulate the Wi-Fi-flap / dropped-socket / reboot-mid-print scenario:
+    the transport dies mid-print, the worker backs off and reconnects, and
+    the printer must recover to its live state without duplicating the job."""
+
+    def test_reconnect_after_socket_drop_mid_print_recovers_without_duplicate_job(
+        self, hub, db_session
+    ):
+        from unittest.mock import patch
+
+        p = Printer(name="Chaos", moonraker_url="http://10.0.0.5:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        stop = asyncio.Event()
+
+        printing_status = {
+            "print_stats": {"state": "printing", "filename": "chaos.gcode"},
+            "virtual_sdcard": {"progress": 0.3},
+        }
+        attempts = {"n": 0}
+
+        class FlakyClient:
+            async def query_status(self):
+                return {"result": {"status": printing_status}}
+
+            async def subscribe_status(self, on_status, *, stop_event=None):
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    # One good tick, then the socket dies mid-print (Wi-Fi
+                    # flap / reboot both surface here as a dead transport).
+                    await on_status(printing_status)
+                    raise ConnectionError("socket dropped mid-print")
+                # Reconnect succeeds; printer resumes reporting live state.
+                await on_status(printing_status)
+                stop.set()
+
+        sleep_calls: list[float] = []
+
+        async def _run():
+            async def _sleep(seconds: float) -> None:
+                sleep_calls.append(seconds)
+
+            with (
+                patch(
+                    "app.services.printer_hub.get_provider_client",
+                    return_value=FlakyClient(),
+                ),
+                patch("app.services.printer_hub.asyncio.sleep", side_effect=_sleep),
+            ):
+                await hub._run_printer(p.id, stop)
+
+        asyncio.run(_run())
+
+        db_session.refresh(p)
+        assert p.status == PrinterStatus.PRINTING, "must recover, not stay offline"
+        assert attempts["n"] == 2, "worker must reconnect after the dropped socket"
+        assert sleep_calls == [1.0], "backoff must fire once for the one drop"
+
+        from sqlmodel import select
+
+        jobs = db_session.exec(
+            select(PrintJob).where(PrintJob.remote_filename == "chaos.gcode")
+        ).all()
+        assert len(jobs) == 1, "reconnect after a mid-print drop must not duplicate the job"
+
+
 class TestPrinterHubMarkStatus:
     def test_mark_status_updates_db(self, hub, db_session):
         p = Printer(name="Test", moonraker_url="http://10.0.0.1:7125")

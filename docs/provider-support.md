@@ -99,6 +99,24 @@ advertised. Original Carbon file-list probes can terminate its printer daemon;
 Carbon 2's documented file-list request does not answer on validated firmware.
 PrintStash therefore never probes those operations.
 
+## Hardware Validation Log
+
+Automated tests cover protocol logic against mocked transports; they don't
+prove a given printer model/firmware combination actually behaves this way.
+Entries below are added only after someone runs the relevant smoke test (see
+per-provider sections above, and the Printers section of
+[`manual-testing.md`](./manual-testing.md)) against real hardware — this is
+not a checklist to pre-fill.
+
+| Provider | Model | Firmware | Date | Tester | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| _(none yet)_ | | | | | | |
+
+Before tagging a release that touches a provider, either add a row here from
+a real test or carry forward the "still needs real-world hardware
+validation" note in `docs/known-limitations.md` — don't leave it silently
+implied as done.
+
 ## Diagnostics
 
 Use:
