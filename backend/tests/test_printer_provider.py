@@ -199,6 +199,25 @@ class TestProviderFactory:
 
 
 class TestBambuLanProvider:
+    def test_mqtt_client_uses_bambu_ca_and_manual_serial_validation(self):
+        client = MagicMock()
+        provider = BambuLanProvider(
+            "192.168.1.50", "SN123", "acc", mqtt_client_factory=lambda: client
+        )
+
+        assert provider._mqtt_client() is client
+        client.tls_set_context.assert_called_once()
+        client.tls_insecure_set.assert_called_once_with(True)
+
+    def test_bambu_mqtt_rejects_certificate_for_another_printer(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = MagicMock()
+        client.socket.return_value.getpeercert.return_value = {
+            "subject": ((("commonName", "other-printer"),),)
+        }
+
+        with pytest.raises(ProviderError, match="certificate identity mismatch"):
+            provider._validate_mqtt_peer(client)
     def test_normalize_status_maps_expected_shape(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         out = provider._normalize_status(

@@ -146,12 +146,13 @@ async def oidc_callback(
                 user.id,
                 user.username,
                 scope=scope,
+                expires_delta=timedelta(days=settings.remember_me_days),
                 auth_version=user.auth_version,
             )
-            create_refresh_token(session, user_id=user.id)
             set_session_cookie(
                 response,
                 access_token,
+                max_age=int(timedelta(days=settings.remember_me_days).total_seconds()),
                 secure=bool(
                     settings.session_cookie_secure
                     or urlparse(redirect_uri).scheme == "https"

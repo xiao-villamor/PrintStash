@@ -79,8 +79,11 @@ class FakeMqttClient:
         self.username = username
         self.password = password
 
-    def tls_set(self, *args: Any, **kwargs: Any) -> None:
+    def tls_set_context(self, _context: Any) -> None:
         self.tls_configured = True
+
+    def tls_insecure_set(self, _value: bool) -> None:
+        return None
 
     def connect(self, host: str, port: int = 8883, keepalive: int = 30) -> None:
         reason_code = 0

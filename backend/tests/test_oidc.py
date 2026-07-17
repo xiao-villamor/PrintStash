@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
-from app.db.models import User
+from app.db.models import RefreshToken, User
 from app.services import oidc
 
 
@@ -188,8 +188,10 @@ def test_exchange_validates_signature_audience_issuer_and_nonce(monkeypatch) -> 
             "jwks_uri": "https://id.example.test/jwks",
         }
 
-    async def post_token(_url: str, payload: dict[str, str]) -> dict:
+    async def post_token(_url: str, payload: dict[str, str], **kwargs) -> dict:
         assert payload["code_verifier"] == "verifier"
+        assert "client_secret" not in payload
+        assert kwargs["basic_auth"] == ("printstash", "test-secret")
         return {"id_token": token}
 
     async def get_json(url: str) -> dict:
@@ -211,6 +213,57 @@ def test_exchange_validates_signature_audience_issuer_and_nonce(monkeypatch) -> 
         asyncio.run(
             oidc.exchange_code(
                 "code", "https://stash.example.test/callback", "verifier", "wrong-nonce"
+            )
+        )
+
+
+def test_exchange_rejects_multi_audience_token_for_another_authorized_party(
+    monkeypatch,
+) -> None:
+    _enable_oidc()
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
+    public_jwk["kid"] = "signing-key"
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "iss": _overlay["oidc_issuer_url"],
+            "sub": "signed-user",
+            "aud": ["printstash", "other-client"],
+            "azp": "other-client",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+            "nonce": "expected-nonce",
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "signing-key"},
+    )
+
+    async def discovery() -> dict:
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "https://id.example.test/authorize",
+            "token_endpoint": "https://id.example.test/token",
+            "jwks_uri": "https://id.example.test/jwks",
+        }
+
+    async def post_token(_url: str, _payload: dict, **_kwargs) -> dict:
+        return {"id_token": token}
+
+    async def get_json(_url: str) -> dict:
+        return {"keys": [public_jwk]}
+
+    monkeypatch.setattr(oidc, "_discovery", discovery)
+    monkeypatch.setattr(oidc, "_post_token", post_token)
+    monkeypatch.setattr(oidc, "_get_json", get_json)
+
+    with pytest.raises(oidc.OIDCError, match="oidc_invalid_authorized_party"):
+        asyncio.run(
+            oidc.exchange_code(
+                "code", "https://stash.example.test/callback", "verifier", "expected-nonce"
             )
         )
 
@@ -265,6 +318,8 @@ def test_oidc_callback_jit_provisions_admin_and_sets_session(
     assert user.oidc_managed is True
     assert user.is_superuser is True
     assert client.get("/api/v1/auth/me").json()["username"] == "julia"
+    assert db_session.exec(select(RefreshToken)).all() == []
+    assert "Max-Age=" in callback.headers["set-cookie"]
 
 
 def test_oidc_jit_does_not_link_colliding_local_username(
@@ -389,6 +444,38 @@ def test_discovery_rejects_document_missing_required_endpoints(monkeypatch) -> N
         asyncio.run(oidc._discovery())  # noqa: SLF001
 
 
+def test_discovery_rejects_insecure_endpoints(monkeypatch) -> None:
+    _enable_oidc()
+
+    async def get_json(_url: str) -> dict:
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "https://id.example.test/authorize",
+            "token_endpoint": "http://id.example.test/token",
+            "jwks_uri": "https://id.example.test/jwks",
+        }
+
+    monkeypatch.setattr(oidc, "_get_json", get_json)
+    with pytest.raises(oidc.OIDCError, match="oidc_invalid_discovery"):
+        asyncio.run(oidc._discovery())  # noqa: SLF001
+
+
+def test_discovery_allows_http_endpoints_only_in_explicit_insecure_mode(monkeypatch) -> None:
+    _enable_oidc()
+    _overlay["oidc_allow_insecure_http"] = True
+
+    async def get_json(_url: str) -> dict:
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "http://id.example.test/authorize",
+            "token_endpoint": "http://id.example.test/token",
+            "jwks_uri": "http://id.example.test/jwks",
+        }
+
+    monkeypatch.setattr(oidc, "_get_json", get_json)
+    assert asyncio.run(oidc._discovery())["token_endpoint"].startswith("http://")
+
+
 def test_get_json_raises_on_non_dict_response(monkeypatch) -> None:
     class _Resp:
         def raise_for_status(self) -> None:
@@ -416,7 +503,7 @@ def test_post_token_raises_on_non_dict_response(monkeypatch) -> None:
             return "not-a-dict"
 
     class _Client:
-        async def post(self, url: str, data: dict, timeout: float) -> _Resp:
+        async def post(self, url: str, data: dict, **_kwargs) -> _Resp:
             return _Resp()
 
     monkeypatch.setattr(oidc, "get_http_client", lambda: _Client())
@@ -472,7 +559,7 @@ def test_exchange_code_raises_when_id_token_missing(monkeypatch) -> None:
             "jwks_uri": "https://id.example.test/jwks",
         }
 
-    async def post_token(_url: str, _payload: dict) -> dict:
+    async def post_token(_url: str, _payload: dict, **_kwargs) -> dict:
         return {"access_token": "no-id-token-here"}
 
     monkeypatch.setattr(oidc, "_discovery", discovery)
@@ -510,7 +597,7 @@ def test_exchange_code_raises_on_expired_token(monkeypatch) -> None:
             "jwks_uri": "https://id.example.test/jwks",
         }
 
-    async def post_token(_url: str, _payload: dict) -> dict:
+    async def post_token(_url: str, _payload: dict, **_kwargs) -> dict:
         return {"id_token": expired_token}
 
     async def get_json(_url: str) -> dict:
@@ -543,7 +630,7 @@ def test_exchange_code_wraps_unexpected_failure(monkeypatch) -> None:
             "jwks_uri": "https://id.example.test/jwks",
         }
 
-    async def post_token(_url: str, _payload: dict) -> dict:
+    async def post_token(_url: str, _payload: dict, **_kwargs) -> dict:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(oidc, "_discovery", discovery)

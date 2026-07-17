@@ -27,7 +27,11 @@ from app.db.models import (
     PrintJobState,
 )
 from app.services import printer_jobs
-from app.services.printer_jobs import PrinterJobError, transfer_artifact
+from app.services.printer_jobs import (
+    DispatchOutcomeUnknownError,
+    PrinterJobError,
+    transfer_artifact,
+)
 from app.services.printer_provider import (
     ProviderCapabilities,
     ProviderError,
@@ -98,6 +102,44 @@ def test_transfer_artifact_raises_when_blob_missing() -> None:
     async def _run() -> None:
         with pytest.raises(PrinterJobError, match="file_blob_missing"):
             await transfer_artifact(backend, AsyncMock(), artifact, "gone.gcode", start_print=True)
+
+    asyncio.run(_run())
+
+
+def test_transfer_artifact_marks_provider_upload_timeout_as_outcome_unknown(
+    tmp_path: Path,
+) -> None:
+    class Backend:
+        def exists(self, _key: str) -> bool:
+            return True
+
+        def download_to_path(self, _key: str, target: Path) -> Path:
+            target.write_bytes(b"G28\n")
+            return target
+
+    artifact = File(
+        id=1,
+        model_id=1,
+        path="vault-data/x.gcode",
+        original_filename="x.gcode",
+        file_type=FileType.GCODE,
+        version=1,
+        size_bytes=1,
+        sha256="a" * 64,
+    )
+    provider = AsyncMock()
+    provider.upload.side_effect = ProviderError("timed out", code="provider_timeout")
+
+    async def _run() -> None:
+        with pytest.raises(DispatchOutcomeUnknownError):
+            await transfer_artifact(
+                provider=provider,
+                backend=Backend(),
+                artifact=artifact,
+                remote_filename="x.gcode",
+                start_print=True,
+                mark_outcome_unknown=True,
+            )
 
     asyncio.run(_run())
 

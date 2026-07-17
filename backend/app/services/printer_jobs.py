@@ -49,6 +49,13 @@ class PrinterJobError(Exception):
         self.code = code
 
 
+class DispatchOutcomeUnknownError(PrinterJobError):
+    """Provider I/O began, so retrying could duplicate a physical print."""
+
+    def __init__(self) -> None:
+        super().__init__("dispatch_outcome_unknown")
+
+
 async def transfer_artifact(
     backend,
     provider,
@@ -56,6 +63,7 @@ async def transfer_artifact(
     remote_filename: str,
     *,
     start_print: bool,
+    mark_outcome_unknown: bool = False,
 ) -> None:
     """Single storage-to-provider transfer seam for immediate and queued sends."""
     if not await asyncio.to_thread(backend.exists, artifact.path):
@@ -74,9 +82,17 @@ async def transfer_artifact(
             )
         except Exception as exc:
             raise PrinterJobError("storage_error") from exc
-        await provider.upload(local, remote_filename)
-        if start_print:
-            await provider.start(remote_filename)
+        try:
+            await provider.upload(local, remote_filename)
+            if start_print:
+                await provider.start(remote_filename)
+        except Exception as exc:
+            # Upload and start are non-transactional remote operations. A
+            # transport error can arrive after the printer accepted either
+            # request, therefore automatic replay is unsafe.
+            if mark_outcome_unknown:
+                raise DispatchOutcomeUnknownError() from exc
+            raise
     finally:
         target.unlink(missing_ok=True)
 
@@ -178,7 +194,7 @@ async def dispatch_next() -> int | None:
             if job is not None:
                 job.state = PrintJobState.FAILED
                 job.error = code
-                job.retryable = True
+                job.retryable = code != "dispatch_outcome_unknown"
                 job.finished_at = utcnow()
                 job.updated_at = utcnow()
                 session.add(job)
@@ -219,7 +235,12 @@ async def _dispatch_claimed(job_id: int) -> None:
             raise ProviderError("printer_not_ready", code="printer_not_ready")
 
     await transfer_artifact(
-        get_backend(), provider, artifact, remote_filename, start_print=True
+        get_backend(),
+        provider,
+        artifact,
+        remote_filename,
+        start_print=True,
+        mark_outcome_unknown=True,
     )
 
     with get_session_factory().scoped_session() as session:

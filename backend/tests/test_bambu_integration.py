@@ -71,6 +71,35 @@ def test_send_print_completes() -> None:
     assert built[0].tls_configured is True
 
 
+def test_status_subscription_uses_one_mqtt_session_and_one_bootstrap_pushall() -> None:
+    sim = PrintSim(total_mm=1000.0, total_seconds=10.0, print_seconds=5.0)
+    provider, built = _provider(sim)
+
+    async def _run() -> None:
+        stop = asyncio.Event()
+        received: list[dict] = []
+
+        async def on_status(status: dict) -> None:
+            received.append(status)
+            stop.set()
+
+        await provider.subscribe_status(on_status, stop_event=stop)
+        assert received[0]["print_stats"]["state"] == "standby"
+
+    asyncio.run(_run())
+    assert len(built) == 1
+    assert built[0].published == [
+        {
+            "pushing": {
+                "command": "pushall",
+                "push_target": 1,
+                "version": 1,
+                "sequence_id": built[0].published[0]["pushing"]["sequence_id"],
+            }
+        }
+    ]
+
+
 def test_pause_then_resume_runs_to_completion() -> None:
     sim = PrintSim(total_mm=1000.0, total_seconds=10.0, print_seconds=1.5)
     provider, _built = _provider(sim)

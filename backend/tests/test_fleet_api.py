@@ -382,6 +382,44 @@ def test_failed_dispatch_can_be_retried(
     assert retried.json()["retryable"] is False
 
 
+def test_ambiguous_live_dispatch_cannot_be_retried_automatically(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    db_session: Session,
+) -> None:
+    printer = Printer(
+        name="Ambiguous live dispatch",
+        moonraker_url="http://retry",
+        status=PrinterStatus.READY,
+    )
+    db_session.add(printer)
+    db_session.commit()
+    artifact = _gcode(db_session)
+    queued = client.post(
+        "/api/v1/fleet/queue",
+        headers=auth_headers,
+        json={"file_id": artifact.id, "strategy": "least_busy"},
+    ).json()
+    from app.services.printer_jobs import DispatchOutcomeUnknownError, dispatch_next
+
+    with patch(
+        "app.services.printer_jobs._dispatch_claimed",
+        AsyncMock(side_effect=DispatchOutcomeUnknownError()),
+    ):
+        assert asyncio.run(dispatch_next()) == queued["id"]
+
+    db_session.expire_all()
+    failed = db_session.get(PrintJob, queued["id"])
+    assert failed is not None
+    assert failed.error == "dispatch_outcome_unknown"
+    assert failed.retryable is False
+    retry = client.post(
+        f"/api/v1/fleet/queue/{queued['id']}/retry", headers=auth_headers
+    )
+    assert retry.status_code == 400
+    assert retry.json()["detail"] == "queue_job_not_retryable"
+
+
 def test_restart_reconciles_stranded_dispatch(db_session: Session) -> None:
     printer = Printer(
         name="Restart", moonraker_url="http://restart", status=PrinterStatus.READY

@@ -74,8 +74,15 @@ async def _get_json(url: str) -> dict[str, Any]:
     return value
 
 
-async def _post_token(url: str, payload: dict[str, str]) -> dict[str, Any]:
-    response = await get_http_client().post(url, data=payload, timeout=10.0)
+async def _post_token(
+    url: str,
+    payload: dict[str, str],
+    *,
+    basic_auth: tuple[str, str] | None = None,
+) -> dict[str, Any]:
+    response = await get_http_client().post(
+        url, data=payload, auth=basic_auth, timeout=10.0
+    )
     response.raise_for_status()
     value = response.json()
     if not isinstance(value, dict):
@@ -94,7 +101,13 @@ async def _discovery() -> dict[str, Any]:
     if document.get("issuer", "").rstrip("/") != issuer:
         raise OIDCError("oidc_issuer_mismatch")
     for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
-        if not isinstance(document.get(key), str):
+        endpoint = document.get(key)
+        parsed = urlparse(endpoint) if isinstance(endpoint, str) else None
+        allowed = parsed and (
+            parsed.scheme == "https"
+            or (settings.oidc_allow_insecure_http and parsed.scheme == "http")
+        )
+        if not allowed or not parsed.netloc:
             raise OIDCError("oidc_invalid_discovery")
     return document
 
@@ -163,10 +176,27 @@ async def exchange_code(
         "client_id": settings.oidc_client_id,
         "code_verifier": verifier,
     }
-    if settings.oidc_client_secret:
+    methods = document.get("token_endpoint_auth_methods_supported")
+    if methods is not None and (
+        not isinstance(methods, list) or not all(isinstance(value, str) for value in methods)
+    ):
+        raise OIDCError("oidc_invalid_discovery")
+    use_basic_auth = bool(
+        settings.oidc_client_secret
+        and (methods is None or "client_secret_basic" in methods)
+    )
+    if settings.oidc_client_secret and not use_basic_auth:
+        if methods is None or "client_secret_post" not in methods:
+            raise OIDCError("oidc_unsupported_token_auth_method")
         payload["client_secret"] = settings.oidc_client_secret
     try:
-        token_response = await _post_token(document["token_endpoint"], payload)
+        token_response = await _post_token(
+            document["token_endpoint"],
+            payload,
+            basic_auth=(settings.oidc_client_id, settings.oidc_client_secret)
+            if use_basic_auth
+            else None,
+        )
         id_token = token_response.get("id_token")
         if not isinstance(id_token, str):
             raise OIDCError("oidc_missing_id_token")
@@ -188,6 +218,17 @@ async def exchange_code(
         raise OIDCError("oidc_token_exchange_failed") from exc
     if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
         raise OIDCError("oidc_nonce_mismatch")
+    audiences = claims.get("aud")
+    authorized_party = claims.get("azp")
+    if (
+        isinstance(audiences, list)
+        and len(audiences) > 1
+        and not isinstance(authorized_party, str)
+    ) or (
+        authorized_party is not None
+        and not secrets.compare_digest(str(authorized_party), settings.oidc_client_id)
+    ):
+        raise OIDCError("oidc_invalid_authorized_party")
     return claims
 
 
