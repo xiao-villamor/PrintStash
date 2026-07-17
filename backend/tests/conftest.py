@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterator
 
@@ -12,13 +13,34 @@ from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.core.config import _overlay, settings
-from app.db.session import (
+# Settings() (app.core.config) reads VAULT_* env vars once at import time, so
+# these must land before that import. Local dev shells export their own
+# VAULT_DATA_DIR/VAULT_DB_URL (relative, resolve fine anywhere) — setdefault
+# leaves those alone. Without them (CI, a bare shell) the frozen defaults are
+# absolute container paths (/data/...), which a non-root process can't create,
+# breaking real-storage and real-lifespan tests. `_data/` and `*.sqlite` are
+# gitignored, so this needs no cleanup.
+_TEST_STORAGE_ROOT = Path(__file__).parent / "_data"
+for _var, _path in (
+    ("VAULT_DATA_DIR", _TEST_STORAGE_ROOT / "files"),
+    ("VAULT_THUMB_DIR", _TEST_STORAGE_ROOT / "thumbs"),
+    ("VAULT_STAGING_DIR", _TEST_STORAGE_ROOT / "staging"),
+    ("VAULT_BACKUP_DIR", _TEST_STORAGE_ROOT / "backups"),
+):
+    os.environ.setdefault(_var, str(_path))
+    _path.mkdir(parents=True, exist_ok=True)
+_db_dir = _TEST_STORAGE_ROOT / "db"
+_db_dir.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("VAULT_DB_URL", f"sqlite:///{_db_dir / 'printstash.sqlite'}")
+os.environ.setdefault("VAULT_SECRETS_KEY_FILE", str(_db_dir / ".printstash-secrets-key"))
+
+from app.core.config import _overlay, settings  # noqa: E402
+from app.db.session import (  # noqa: E402
     SQLiteSessionFactory,
     _set_sqlite_pragmas,
     override_session_factory,
 )
-from app.services.printer_hub import PrinterHub
+from app.services.printer_hub import PrinterHub  # noqa: E402
 
 # The dev shell exports a short VAULT_JWT_SECRET (e.g. "dev-jwt-secret", 14 bytes),
 # which PyJWT flags with InsecureKeyLengthWarning on every token encode/decode —
