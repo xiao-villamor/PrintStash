@@ -13,6 +13,12 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import _overlay, settings
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    override_session_factory,
+)
+from app.services.printer_hub import PrinterHub
 
 # The dev shell exports a short VAULT_JWT_SECRET (e.g. "dev-jwt-secret", 14 bytes),
 # which PyJWT flags with InsecureKeyLengthWarning on every token encode/decode —
@@ -21,12 +27,6 @@ from app.core.config import _overlay, settings
 # so the suite runs clean regardless of the ambient value. Individual JWT tests
 # still monkeypatch this per-case; they revert to this compliant baseline.
 settings._frozen.jwt_secret = "printstash-test-jwt-secret-0123456789abcdef"  # 43 bytes
-from app.db.session import (
-    SQLiteSessionFactory,
-    _set_sqlite_pragmas,
-    override_session_factory,
-)
-from app.services.printer_hub import PrinterHub
 
 TEST_DATA_DIR = Path(__file__).parent / "fixtures"
 TEST_DATA_DIR.mkdir(exist_ok=True)

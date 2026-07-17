@@ -60,21 +60,6 @@ jobs:
     defaults:
       run:
         working-directory: backend
-    services:
-      minio:
-        image: minio/minio:latest
-        ports:
-          - 9100:9000
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        # `minio server /data` is the container's default CMD; the healthcheck
-        # below is what actually gates readiness before tests run.
-        options: >-
-          --health-cmd "curl -fsS http://localhost:9000/minio/health/live"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -91,6 +76,21 @@ jobs:
 
       - name: Install backend dependencies
         run: uv sync --extra dev --frozen
+
+      # GitHub Actions `services:` containers can't override CMD, and
+      # minio/minio's image needs an explicit `server /data` command to run
+      # as a server (its default CMD just prints usage and exits) — so start
+      # it by hand instead of as a service container.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9100:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:9100/minio/health/live && break
+            sleep 1
+          done
 
       - name: Test S3 storage backend + backup destination against real MinIO
         env:
