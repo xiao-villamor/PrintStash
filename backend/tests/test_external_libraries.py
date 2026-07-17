@@ -330,9 +330,19 @@ def test_is_due_cron_logic() -> None:
     # Never scanned + valid schedule → due.
     assert external_library.is_due(hourly, None, now) is True
     # Last scan was last hour, a boundary (12:00) has passed → due.
-    assert external_library.is_due(hourly, datetime(2026, 6, 15, 11, 0, tzinfo=timezone.utc), now) is True
+    assert (
+        external_library.is_due(
+            hourly, datetime(2026, 6, 15, 11, 0, tzinfo=timezone.utc), now
+        )
+        is True
+    )
     # Last scan was 10 min ago, no new boundary since → not due.
-    assert external_library.is_due(hourly, datetime(2026, 6, 15, 12, 20, tzinfo=timezone.utc), now) is False
+    assert (
+        external_library.is_due(
+            hourly, datetime(2026, 6, 15, 12, 20, tzinfo=timezone.utc), now
+        )
+        is False
+    )
     # Empty schedule = manual only → never due.
     assert external_library.is_due("", None, now) is False
     # Invalid cron → never due (defensive).
@@ -411,3 +421,230 @@ def test_feature_disabled_keeps_uploads_in_vault(
     assert f is not None
     assert f.is_external is False
     assert f.path.startswith(str(_overlay["data_dir"]))
+
+
+def test_create_library_rejects_unreadable_root(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict, monkeypatch
+) -> None:
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    nas.mkdir(parents=True)
+
+    import app.api.v1.external_libraries as ext_api
+
+    monkeypatch.setattr(ext_api.os, "access", lambda *_a, **_k: False)
+    resp = client.post(
+        "/api/v1/libraries",
+        headers=auth_headers,
+        json={"name": "x", "root_path": str(nas)},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "root_path_unreadable"
+
+
+def test_create_library_schedules_watcher_refresh(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    nas.mkdir(parents=True)
+
+    class _FakeWatcher:
+        refreshed = False
+
+        def refresh(self) -> None:
+            _FakeWatcher.refreshed = True
+
+    client.app.state.library_watcher = _FakeWatcher()
+    try:
+        resp = client.post(
+            "/api/v1/libraries",
+            headers=auth_headers,
+            json={"name": "watched", "root_path": str(nas)},
+        )
+        assert resp.status_code == 201
+        assert _FakeWatcher.refreshed is True
+    finally:
+        client.app.state.library_watcher = None
+
+
+def test_to_read_handles_corrupt_scan_summary_json(
+    tmp_path: Path, db_session: Session
+) -> None:
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    lib = _make_library(db_session, nas)
+    lib.last_scan_summary = "{not valid json"
+    db_session.add(lib)
+    db_session.commit()
+
+    from app.api.v1.external_libraries import _to_read
+
+    read = _to_read(lib)
+    assert read.last_scan_summary is None
+
+
+def test_update_library_changes_root_path_and_recomputes_fs_kind(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    first_root = tmp_path / "first"
+    first_root.mkdir()
+    second_root = tmp_path / "second"
+    second_root.mkdir()
+    lib = _make_library(db_session, first_root)
+
+    resp = client.patch(
+        f"/api/v1/libraries/{lib.id}",
+        headers=auth_headers,
+        json={
+            "root_path": str(second_root),
+            "name": "renamed",
+            "scan_schedule": "0 0 * * *",
+            "watch_mode": "events",
+            "collection_mode": "single",
+            "target_collection_id": 42,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["root_path"] == str(second_root)
+    assert body["name"] == "renamed"
+    assert body["scan_schedule"] == "0 0 * * *"
+    assert body["watch_mode"] == "events"
+    assert body["collection_mode"] == "single"
+    assert body["target_collection_id"] == 42
+
+
+def test_update_library_rejects_invalid_schedule(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    lib = _make_library(db_session, nas)
+
+    resp = client.patch(
+        f"/api/v1/libraries/{lib.id}",
+        headers=auth_headers,
+        json={"scan_schedule": "not a cron"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid_cron_schedule"
+
+
+def test_update_library_unknown_id_404(
+    client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    resp = client.patch(
+        "/api/v1/libraries/999999",
+        headers=auth_headers,
+        json={"enabled": False},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "library_not_found"
+
+
+def test_delete_library_unknown_id_404(
+    client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    resp = client.delete("/api/v1/libraries/999999", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "library_not_found"
+
+
+def test_scan_now_queues_job(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _configure_storage(tmp_path)
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    _drop_gcode(nas, "a.gcode")
+    lib = _make_library(db_session, nas)
+
+    resp = client.post(f"/api/v1/libraries/{lib.id}/scan", headers=auth_headers)
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["job_id"]
+    job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
+    assert job.status_code == 200
+    assert job.json()["state"] == "completed", job.json()
+
+
+def test_scan_now_unknown_library_404(
+    client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    resp = client.post("/api/v1/libraries/999999/scan", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "library_not_found"
+
+
+def test_scan_path_queues_job_for_subfolder(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _configure_storage(tmp_path)
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    _drop_gcode(nas / "functional", "bracket.gcode")
+    lib = _make_library(db_session, nas)
+
+    resp = client.post(
+        f"/api/v1/libraries/{lib.id}/scan-path",
+        headers=auth_headers,
+        json={"path": "functional"},
+    )
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["job_id"]
+    job = client.get(f"/api/v1/ingest/jobs/{job_id}", headers=auth_headers)
+    assert job.status_code == 200
+    assert job.json()["state"] == "completed", job.json()
+
+
+def test_scan_path_unknown_library_404(
+    client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    resp = client.post(
+        "/api/v1/libraries/999999/scan-path",
+        headers=auth_headers,
+        json={"path": "x"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "library_not_found"
+
+
+def test_scan_path_rejects_traversal_outside_root(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    (tmp_path / "outside").mkdir()
+    lib = _make_library(db_session, nas)
+
+    resp = client.post(
+        f"/api/v1/libraries/{lib.id}/scan-path",
+        headers=auth_headers,
+        json={"path": "../outside"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "path_outside_library_root"
+
+
+def test_scan_path_rejects_missing_subfolder(
+    tmp_path: Path, client, db_session: Session, auth_headers: dict
+) -> None:
+    _enable_feature(db_session)
+    nas = tmp_path / "nas"
+    nas.mkdir()
+    lib = _make_library(db_session, nas)
+
+    resp = client.post(
+        f"/api/v1/libraries/{lib.id}/scan-path",
+        headers=auth_headers,
+        json={"path": "does-not-exist"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "path_missing_or_unreadable"

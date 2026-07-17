@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from app.services.moonraker import SUBSCRIPTIONS, MoonrakerClient, MoonrakerError
@@ -143,6 +144,139 @@ class TestMoonrakerClientHTTP:
             call_kwargs = mock_get_client.return_value.request.call_args
             headers = call_kwargs[1].get("headers", {})
             assert headers.get("X-Api-Key") == "secret123"
+
+    def test_request_transport_error_wraps_httpx_error(self):
+        client = MoonrakerClient("http://printer.local:7125")
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(
+                side_effect=httpx.ConnectError("connection refused")
+            )
+            with pytest.raises(MoonrakerError, match="transport error"):
+                asyncio.run(client.info())
+
+    def test_request_non_json_response_returns_raw(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("not json")
+        mock_resp.text = "plain text body"
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.info())
+            assert result == {"raw": "plain text body"}
+
+    def test_server_info(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": {"klippy_state": "ready"}}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.server_info())
+            url = mock_get_client.return_value.request.call_args[0][1]
+            assert url.endswith("/server/info")
+            assert result["result"]["klippy_state"] == "ready"
+
+    def test_server_config(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": {"server": {}}}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.server_config())
+            url = mock_get_client.return_value.request.call_args[0][1]
+            assert url.endswith("/server/config")
+            assert result["result"]["server"] == {}
+
+    def test_query_configfile(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": {"status": {"configfile": {}}}}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.query_configfile())
+            url = mock_get_client.return_value.request.call_args[0][1]
+            assert "configfile" in url
+            assert result["result"]["status"] == {"configfile": {}}
+
+    def test_delete_gcode_file_encodes_nested_path(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": "ok"}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.delete_gcode_file("folder/my part.gcode"))
+            assert result == {"result": "ok"}
+            call_args = mock_get_client.return_value.request.call_args
+            assert call_args[0][0] == "DELETE"
+            assert call_args[0][1].endswith(
+                "/server/files/gcodes/folder/my%20part.gcode"
+            )
+
+    def test_upload_gcode_transport_error(self, tmp_path: Path):
+        gcode_path = tmp_path / "test.gcode"
+        gcode_path.write_bytes(b"G28\n")
+        client = MoonrakerClient("http://printer.local:7125")
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.post = AsyncMock(
+                side_effect=httpx.ConnectError("refused")
+            )
+            with pytest.raises(MoonrakerError, match="upload transport error"):
+                asyncio.run(client.upload_gcode(gcode_path, "test.gcode"))
+
+    def test_run_gcode_builds_params(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": "ok"}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.run_gcode("G28"))
+            assert result == {"result": "ok"}
+            call_args = mock_get_client.return_value.request.call_args
+            assert call_args[0][1].endswith("/printer/gcode/script")
+            assert call_args[1]["params"] == {"script": "G28"}
+
+    def test_emergency_stop(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": "ok"}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.emergency_stop())
+            assert result == {"result": "ok"}
+            call_args = mock_get_client.return_value.request.call_args
+            assert call_args[0][1].endswith("/printer/emergency_stop")
+
+    def test_get_print_history_returns_jobs_list(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"result": {"jobs": [{"filename": "a.gcode"}]}}
+
+        with patch("app.services.moonraker.get_http_client") as mock_get_client:
+            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            result = asyncio.run(client.get_print_history(limit=5))
+            assert result == [{"filename": "a.gcode"}]
+            call_args = mock_get_client.return_value.request.call_args
+            assert call_args[1]["params"] == {"limit": 5}
+
+    def test_ws_url_falls_back_for_unknown_scheme(self):
+        client = MoonrakerClient("printer.local:7125")
+        assert client._ws_url() == "printer.local:7125/websocket"
 
 
 class TestMoonrakerWS:
@@ -304,6 +438,142 @@ class TestMoonrakerWS:
     def test_ws_url_strips_trailing_slash(self):
         client = MoonrakerClient("http://printer.local:7125/")
         assert client._ws_url() == "ws://printer.local:7125/websocket"
+
+    @pytest.mark.asyncio
+    async def test_subscribe_raises_on_identify_failure(self):
+        client = MoonrakerClient("http://printer.local:7125", api_key="badkey")
+
+        class MockWS:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def send(self, raw):
+                self.last_request = json.loads(raw)
+
+            async def recv(self):
+                return json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": self.last_request["id"],
+                        "error": {"message": "invalid api key"},
+                    }
+                )
+
+        with patch("websockets.connect", return_value=MockWS()):
+            with pytest.raises(MoonrakerError, match="authentication failed"):
+                await client.subscribe(lambda _status: asyncio.sleep(0))
+
+    @pytest.mark.asyncio
+    async def test_subscribe_skips_malformed_json_message(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        stop = asyncio.Event()
+        received: list = []
+
+        async def on_status(status):
+            received.append(status)
+
+        messages = iter(
+            [
+                "not valid json {{{",
+                json.dumps(
+                    {
+                        "jsonrpc": "2.0",
+                        "method": "notify_status_update",
+                        "params": [{"print_stats": {"state": "printing"}}],
+                    }
+                ),
+            ]
+        )
+
+        class MockWS:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def send(self, raw):
+                pass
+
+            async def recv(self):
+                try:
+                    return next(messages)
+                except StopIteration:
+                    stop.set()
+                    return await asyncio.sleep(10)
+
+        with patch("websockets.connect", return_value=MockWS()):
+            task = asyncio.create_task(client.subscribe(on_status, stop_event=stop))
+            await asyncio.wait_for(stop.wait(), timeout=2.0)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert received == [{"print_stats": {"state": "printing"}}]
+
+    @pytest.mark.asyncio
+    async def test_subscribe_pings_on_recv_timeout(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        stop = asyncio.Event()
+        pinged = asyncio.Event()
+
+        class MockWS:
+            def __init__(self):
+                self.calls = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def send(self, raw):
+                pass
+
+            async def recv(self):
+                self.calls += 1
+                if self.calls == 1:
+                    raise asyncio.TimeoutError
+                stop.set()
+                return await asyncio.sleep(10)
+
+            async def ping(self):
+                pinged.set()
+
+        with patch("websockets.connect", return_value=MockWS()):
+            task = asyncio.create_task(
+                client.subscribe(lambda _s: asyncio.sleep(0), stop_event=stop)
+            )
+            await asyncio.wait_for(pinged.wait(), timeout=2.0)
+            stop.set()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    @pytest.mark.asyncio
+    async def test_subscribe_backs_off_and_reconnects_after_os_error(self):
+        client = MoonrakerClient("http://printer.local:7125")
+        stop = asyncio.Event()
+
+        with patch(
+            "websockets.connect", side_effect=OSError("network unreachable")
+        ) as mock_connect:
+            task = asyncio.create_task(
+                client.subscribe(lambda _s: asyncio.sleep(0), stop_event=stop)
+            )
+            # Let the first connect attempt fail and enter the backoff wait.
+            await asyncio.sleep(0.05)
+            stop.set()
+            await asyncio.wait_for(task, timeout=2.0)
+
+        assert mock_connect.call_count >= 1
 
 
 class TestSubscriptions:

@@ -458,7 +458,9 @@ def test_gc_skips_during_restore(backup_env: BackupEnv):
         from app.core.time import utcnow
         from app.db.models import Tag
 
-        session.add(Tag(name="stale", slug="stale", deleted_at=utcnow() - timedelta(days=999)))
+        session.add(
+            Tag(name="stale", slug="stale", deleted_at=utcnow() - timedelta(days=999))
+        )
         session.commit()
 
     backup._restore_gate.set()
@@ -553,7 +555,9 @@ def test_list_backups_skips_archive_with_unreadable_manifest(
     _seed_model_with_blob(backup_env, name="Widget", content=b"x")
     good = backup.create_backup()
 
-    corrupt_path = backup_env.backup_dir / "printstash-backup-20200101-000000-deadbeefcafe.tar.gz"
+    corrupt_path = (
+        backup_env.backup_dir / "printstash-backup-20200101-000000-deadbeefcafe.tar.gz"
+    )
     corrupt_path.write_bytes(b"not a gzip file at all")
 
     listed = {m.id for m in backup.list_backups()}
@@ -580,6 +584,207 @@ def test_get_backup_archive_path_raises_for_unknown_id(backup_env: BackupEnv):
         backup.get_backup_archive_path("does-not-exist")
 
 
+def test_backup_sqlite_copy_raises_for_non_file_db(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(backup, "_db_path", lambda: None)
+    with pytest.raises(RuntimeError, match="not a file-based SQLite database"):
+        backup._backup_sqlite_copy()
+
+
+def test_restore_database_raises_for_non_file_db(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(backup, "_db_path", lambda: None)
+    with pytest.raises(RuntimeError, match="cannot restore to non-file database"):
+        backup._restore_database(b"irrelevant")
+
+
+def test_find_blobs_skips_unreadable_blob(
+    backup_env: BackupEnv, caplog: pytest.LogCaptureFixture
+):
+    _model_id, key = _seed_model_with_blob(
+        backup_env, name="Widget", content=b"solid widget\n"
+    )
+    Path(key).unlink()
+
+    with caplog.at_level("WARNING"):
+        found = backup._find_blobs()
+
+    assert found == []
+    assert any("skipping unreadable blob" in r.message for r in caplog.records)
+
+
+def test_create_backup_skips_blob_that_vanishes_mid_write(
+    backup_env: BackupEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """A blob present at stat-time but gone by the time it's streamed into the
+    tar stays listed in the manifest but is simply absent from the archive."""
+    _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
+
+    def _boom(*args, **kwargs):
+        raise OSError("vanished")
+
+    monkeypatch.setattr(backup, "_add_file_to_tar", _boom)
+
+    with caplog.at_level("WARNING"):
+        meta = backup.create_backup()
+
+    # The manifest still records the entry (built before streaming)...
+    assert meta.file_count == 1
+    assert any("skipped key" in r.message for r in caplog.records)
+
+    # ...but no files/ member actually made it into the archive.
+    import gzip
+    import tarfile
+
+    names = set()
+    with gzip.open(Path(meta.path), "rb") as gz:
+        with tarfile.open(fileobj=gz, mode="r|") as tar:
+            for member in tar:
+                names.add(member.name)
+    assert not any(n.startswith("files/") and n != "files/" for n in names)
+
+
+def test_list_local_backups_empty_when_dir_missing(backup_env: BackupEnv):
+    import shutil
+
+    shutil.rmtree(backup_env.backup_dir)
+    assert backup._list_local_backups() == []
+    assert backup.list_backups() == []
+
+
+def test_delete_backup_logs_but_survives_permission_error(
+    backup_env: BackupEnv, caplog: pytest.LogCaptureFixture
+):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+
+    # Removing a file requires write on its parent dir, not the file itself.
+    backup_env.backup_dir.chmod(0o500)
+    try:
+        with caplog.at_level("ERROR"):
+            result = backup.delete_backup(meta.id)
+    finally:
+        backup_env.backup_dir.chmod(0o700)
+
+    assert result is False
+    assert any("failed to delete local" in r.message for r in caplog.records)
+    assert Path(meta.path).exists()
+
+    # Cleanup so tmp_path teardown can remove the archive.
+    backup.delete_backup(meta.id)
+
+
+def test_download_backup_to_local_raises_when_local_file_missing(
+    backup_env: BackupEnv,
+):
+    meta = backup.BackupMeta(
+        id="ghost",
+        created_at="2024-01-01T00:00:00+00:00",
+        size_bytes=0,
+        storage_backend="local",
+        file_count=0,
+        app_version="0.0.0",
+        path=str(backup_env.backup_dir / "does-not-exist.tar.gz"),
+        location="local",
+    )
+    with pytest.raises(FileNotFoundError):
+        backup._download_backup_to_local(meta)
+
+
+def test_has_member_false_for_missing_entry(backup_env: BackupEnv):
+    import tarfile
+
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+
+    with tarfile.open(Path(meta.path), mode="r:gz") as tar:
+        assert backup._has_member(tar, "manifest.json") is True
+        assert backup._has_member(tar, "nonexistent.entry") is False
+
+
+def test_restore_key_map_empty_for_legacy_archive_without_manifest(tmp_path: Path):
+    import io
+    import tarfile
+
+    archive = tmp_path / "legacy.tar"
+    with tarfile.open(archive, mode="w") as tar:
+        data = b"not a real db"
+        info = tarfile.TarInfo(name="db.sqlite3")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    with tarfile.open(archive, mode="r") as tar:
+        assert backup._restore_key_map(tar) == {}
+
+
+def test_restore_key_map_empty_for_corrupt_manifest_json(tmp_path: Path):
+    import io
+    import tarfile
+
+    archive = tmp_path / "corrupt-manifest.tar"
+    with tarfile.open(archive, mode="w") as tar:
+        data = b"{not valid json"
+        info = tarfile.TarInfo(name="manifest.json")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    with tarfile.open(archive, mode="r") as tar:
+        assert backup._restore_key_map(tar) == {}
+
+
+def test_purge_old_backups_noop_when_retention_non_positive(backup_env: BackupEnv):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    backup.create_backup()
+    assert backup.purge_old_backups(retain_days=0) == 0
+    assert backup.purge_old_backups(retain_days=-5) == 0
+
+
+def test_purge_old_backups_skips_entry_with_invalid_created_at(
+    backup_env: BackupEnv,
+):
+    """A backup whose manifest has a non-ISO ``created_at`` (hand-crafted or
+    from some future format change) must be skipped, not crash the purge."""
+    import gzip
+    import io
+    import json
+    import tarfile
+
+    archive_path = (
+        backup_env.backup_dir / "printstash-backup-20200101-000000-badc0ffeeb00.tar.gz"
+    )
+    manifest = {
+        "version": backup.MANIFEST_VERSION,
+        "created_at": "not-a-real-timestamp",
+        "app_version": "0.0.0",
+        "storage_backend": "local",
+        "file_count": 0,
+        "total_size_bytes": 0,
+        "files": [],
+    }
+    manifest_bytes = json.dumps(manifest).encode("utf-8")
+    with gzip.open(archive_path, "wb") as gz:
+        with tarfile.open(fileobj=gz, mode="w") as tar:
+            info = tarfile.TarInfo(name="manifest.json")
+            info.size = len(manifest_bytes)
+            tar.addfile(info, io.BytesIO(manifest_bytes))
+            db_data = b"fake"
+            db_info = tarfile.TarInfo(name="db.sqlite3")
+            db_info.size = len(db_data)
+            tar.addfile(db_info, io.BytesIO(db_data))
+
+    listed = {m.id for m in backup.list_backups()}
+    assert "badc0ffeeb00" in listed
+
+    removed = backup.purge_old_backups(retain_days=30)
+
+    assert removed == 0
+    assert "badc0ffeeb00" in {m.id for m in backup.list_backups()}
+
+
 # ---------------------------------------------------------------------------
 # S3 backup destination (independent from vault storage) — needs MinIO
 # ---------------------------------------------------------------------------
@@ -600,8 +805,12 @@ def backup_s3_env(backup_env: BackupEnv) -> Iterator[BackupEnv]:
             "backup_s3_bucket": bucket,
             "backup_s3_endpoint_url": _S3_ENDPOINT,
             "backup_s3_region": "us-east-1",
-            "backup_s3_access_key": os.environ.get("PRINTSTASH_TEST_S3_ACCESS_KEY", "minioadmin"),
-            "backup_s3_secret_key": os.environ.get("PRINTSTASH_TEST_S3_SECRET_KEY", "minioadmin"),
+            "backup_s3_access_key": os.environ.get(
+                "PRINTSTASH_TEST_S3_ACCESS_KEY", "minioadmin"
+            ),
+            "backup_s3_secret_key": os.environ.get(
+                "PRINTSTASH_TEST_S3_SECRET_KEY", "minioadmin"
+            ),
         }
     )
     # First call to _get_backup_s3() lazily creates the bucket via boto3's
@@ -611,8 +820,10 @@ def backup_s3_env(backup_env: BackupEnv) -> Iterator[BackupEnv]:
     try:
         yield backup_env
     finally:
-        for key in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket).search(
-            "Contents[].Key"
+        for key in (
+            s3.get_paginator("list_objects_v2")
+            .paginate(Bucket=bucket)
+            .search("Contents[].Key")
         ):
             if key:
                 s3.delete_object(Bucket=bucket, Key=key)
@@ -665,6 +876,134 @@ def test_restore_downloads_s3_only_backup_before_restoring(backup_s3_env: Backup
     assert _read_model_names(backup_s3_env) == ["Widget"]
     # _download_backup_to_local must have pulled a fresh local copy.
     assert Path(meta.path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Router branches (404/409/500) — local backend, no MinIO
+# ---------------------------------------------------------------------------
+
+
+def test_list_backups_endpoint(client: TestClient, backup_env: BackupEnv):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+    headers = _auth_headers(backup_env)
+
+    resp = client.get("/api/v1/backups", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    ids = {row["backup_id"] for row in resp.json()}
+    assert meta.id in ids
+
+
+def test_get_backup_endpoint_returns_metadata(
+    client: TestClient, backup_env: BackupEnv
+):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+    headers = _auth_headers(backup_env)
+
+    resp = client.get(f"/api/v1/backups/{meta.id}", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["backup_id"] == meta.id
+    assert body["file_count"] == meta.file_count
+    assert body["location"] == "local"
+
+
+def test_get_backup_endpoint_not_found(client: TestClient, backup_env: BackupEnv):
+    headers = _auth_headers(backup_env)
+    resp = client.get("/api/v1/backups/does-not-exist", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "backup_not_found"
+
+
+def test_download_backup_endpoint_not_found(client: TestClient, backup_env: BackupEnv):
+    headers = _auth_headers(backup_env)
+    resp = client.get("/api/v1/backups/does-not-exist/download", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "backup_not_found"
+
+
+def test_download_backup_endpoint_500_on_unexpected_error(
+    client: TestClient, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    def _boom(_backup_id: str):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr(backup, "get_backup_archive_path", _boom)
+    headers = _auth_headers(backup_env)
+
+    resp = client.get("/api/v1/backups/whatever/download", headers=headers)
+
+    assert resp.status_code == 500
+    assert "disk on fire" in resp.json()["detail"]
+
+
+def test_delete_backup_endpoint_removes_archive(
+    client: TestClient, backup_env: BackupEnv
+):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+    headers = _auth_headers(backup_env)
+
+    resp = client.delete(f"/api/v1/backups/{meta.id}", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"backup_id": meta.id, "deleted": True}
+    assert not Path(meta.path).exists()
+
+
+def test_delete_backup_endpoint_not_found(client: TestClient, backup_env: BackupEnv):
+    headers = _auth_headers(backup_env)
+    resp = client.delete("/api/v1/backups/does-not-exist", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "backup_not_found"
+
+
+def test_restore_backup_endpoint_not_found(client: TestClient, backup_env: BackupEnv):
+    headers = _auth_headers(backup_env)
+    resp = client.post("/api/v1/backups/does-not-exist/restore", headers=headers)
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "backup_not_found"
+
+
+def test_restore_backup_endpoint_conflict_while_job_running(
+    client: TestClient, backup_env: BackupEnv
+):
+    from app.services.jobs import registry
+
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+    headers = _auth_headers(backup_env)
+
+    job_id = registry.create()
+    registry.update(job_id, state="running")
+    try:
+        resp = client.post(f"/api/v1/backups/{meta.id}/restore", headers=headers)
+    finally:
+        registry.update(job_id, state="completed")
+
+    assert resp.status_code == 409
+    assert "retry" in resp.json()["detail"]
+
+
+def test_restore_backup_endpoint_500_on_unexpected_error(
+    client: TestClient, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    meta = backup.create_backup()
+    headers = _auth_headers(backup_env)
+
+    def _boom(_backup_id: str):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(backup, "restore_backup", _boom)
+
+    resp = client.post(f"/api/v1/backups/{meta.id}/restore", headers=headers)
+
+    assert resp.status_code == 500
+    assert "kaboom" in resp.json()["detail"]
 
 
 @requires_s3

@@ -305,3 +305,90 @@ def test_detected_filament_profile_infers_cost_per_kg_and_preserves_manual_cost(
     assert updated is not None
     assert updated.id == created.id
     assert updated.cost_per_kg == 22
+
+
+def test_detected_filament_profile_brand_only_meta_creates_profile(
+    db_session: Session,
+) -> None:
+    """material_brand set with no material_type: name falls back to the brand and
+    the type-based lookup short-circuits (no material_type to match on)."""
+    created = upsert_detected_filament_profile(
+        db_session, {"material_brand": "OnlyBrand"}
+    )
+    assert created is not None
+    assert created.name == "OnlyBrand"
+    assert created.material_type is None
+
+
+def test_detected_filament_profile_type_only_meta_creates_profile(
+    db_session: Session,
+) -> None:
+    """material_type set with no brand: the fallback lookup runs the
+    material_brand IS NULL branch before creating a fresh profile."""
+    created = upsert_detected_filament_profile(db_session, {"material_type": "ABS"})
+    assert created is not None
+    assert created.name == "ABS"
+    assert created.material_brand is None
+
+
+def test_detected_filament_profile_backfills_missing_fields_on_existing(
+    db_session: Session,
+) -> None:
+    """An existing profile (matched by name) with empty type/cost/notes gets
+    those fields filled in from freshly parsed slicer metadata."""
+    existing = FilamentProfile(
+        name="Generic PLA",
+        material_type=None,
+        material_brand="Generic PLA",
+        cost_per_kg=None,
+        notes=None,
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    updated = upsert_detected_filament_profile(
+        db_session,
+        {
+            "material_type": "PLA",
+            "material_brand": "Generic PLA",
+            "filament_weight_g": 10,
+            "filament_cost": 0.5,
+        },
+    )
+    assert updated is not None
+    assert updated.id == existing.id
+    assert updated.material_type == "PLA"
+    assert updated.cost_per_kg == 50
+    assert updated.notes is not None
+
+
+def test_detected_filament_profile_backfills_missing_brand_on_existing(
+    db_session: Session,
+) -> None:
+    """A profile whose name is the brand but whose material_brand column is still
+    empty gets the brand backfilled from metadata."""
+    existing = FilamentProfile(
+        name="BrandX",
+        material_type="PLA",
+        material_brand=None,
+        cost_per_kg=12.0,
+        notes="kept",
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    updated = upsert_detected_filament_profile(
+        db_session, {"material_type": "PLA", "material_brand": "BrandX"}
+    )
+    assert updated is not None
+    assert updated.id == existing.id
+    assert updated.material_brand == "BrandX"
+    assert updated.cost_per_kg == 12.0
+
+
+def test_detected_filament_profile_returns_none_without_material(
+    db_session: Session,
+) -> None:
+    assert upsert_detected_filament_profile(db_session, {}) is None

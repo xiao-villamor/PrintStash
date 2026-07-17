@@ -128,9 +128,10 @@ def test_list_items_excludes_external_sentinel(
     # an absence.
     from sqlmodel import select
 
-    assert db_session.exec(
-        select(Model).where(Model.hash == SENTINEL_MODEL_HASH)
-    ).first() is not None
+    assert (
+        db_session.exec(select(Model).where(Model.hash == SENTINEL_MODEL_HASH)).first()
+        is not None
+    )
 
 
 def test_list_items_includes_daily_workflow_print_outcomes(
@@ -176,7 +177,11 @@ def test_list_items_includes_daily_workflow_print_outcomes(
     )
     db_session.commit()
 
-    item = next(row for row in mv.list_items(db_session, superuser, limit=100) if row.id == model.id)
+    item = next(
+        row
+        for row in mv.list_items(db_session, superuser, limit=100)
+        if row.id == model.id
+    )
 
     assert item.print_summary is not None
     assert item.print_summary.success_rate == 0.5

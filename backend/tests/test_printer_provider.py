@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -9,9 +10,12 @@ import pytest
 from app.db.models import Printer, PrinterProvider
 from app.services.printer_provider import (
     BambuLanProvider,
+    BaseProvider,
+    Capability,
     ElegooCentauriProvider,
     MoonrakerProvider,
     OctoPrintProvider,
+    ProviderCapabilities,
     ProviderError,
     PrusaLinkProvider,
     capabilities_for_provider,
@@ -198,6 +202,28 @@ class TestProviderFactory:
         assert exc.value.code == "provider_credentials_missing"
 
 
+def _fake_mqtt_client() -> MagicMock:
+    """MagicMock shaped like the real paho client but *without* a ``socket``
+    attribute, so ``_validate_mqtt_peer``'s "real paho has it" bypass applies
+    (mirrors tests/e2e/fakes/mock_bambu.FakeMqttClient, which is only wired
+    for the full print-flow integration tests, not raw MQTT error branches)."""
+    return MagicMock(
+        spec=[
+            "username_pw_set",
+            "tls_set_context",
+            "tls_insecure_set",
+            "connect",
+            "subscribe",
+            "loop_start",
+            "loop_stop",
+            "disconnect",
+            "publish",
+            "on_connect",
+            "on_message",
+        ]
+    )
+
+
 class TestBambuLanProvider:
     def test_mqtt_client_uses_bambu_ca_and_manual_serial_validation(self):
         client = MagicMock()
@@ -218,6 +244,7 @@ class TestBambuLanProvider:
 
         with pytest.raises(ProviderError, match="certificate identity mismatch"):
             provider._validate_mqtt_peer(client)
+
     def test_normalize_status_maps_expected_shape(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         out = provider._normalize_status(
@@ -337,3 +364,348 @@ class TestBambuLanProvider:
         ftp.size.assert_called_once_with(temp_path)
         ftp.rename.assert_called_once_with(temp_path, "cache/cube.gcode")
         ftp.quit.assert_called_once_with()
+
+    def test_ftps_upload_falls_back_to_close_when_quit_fails(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        ftp = MagicMock()
+        ftp.size.return_value = source.stat().st_size
+        ftp.quit.side_effect = OSError("connection reset")
+        with patch.object(provider, "_ftps_client", return_value=ftp):
+            provider._upload_via_ftps(source, "cube.gcode")
+        ftp.close.assert_called_once_with()
+
+    def test_ftps_upload_size_mismatch_raises(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        ftp = MagicMock()
+        ftp.size.return_value = source.stat().st_size + 1
+        with patch.object(provider, "_ftps_client", return_value=ftp):
+            with pytest.raises(ProviderError, match="bambu_upload_size_mismatch"):
+                provider._upload_via_ftps(source, "cube.gcode")
+
+    def test_upload_wraps_ftps_provider_error(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_text("G28\n")
+        with patch.object(
+            provider,
+            "_upload_via_ftps",
+            side_effect=ProviderError("bad", code="provider_error"),
+        ):
+            with pytest.raises(ProviderError, match="bad"):
+                asyncio.run(provider.upload(source, "cube.gcode"))
+
+    def test_upload_wraps_unexpected_exception(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_text("G28\n")
+        with patch.object(
+            provider, "_upload_via_ftps", side_effect=RuntimeError("disk full")
+        ):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider.upload(source, "cube.gcode"))
+        assert exc.value.code == "provider_transport_error"
+
+    def test_validate_mqtt_peer_raises_when_socket_unavailable(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = MagicMock()
+        client.socket.return_value = None
+        with pytest.raises(ProviderError, match="TLS socket unavailable"):
+            provider._validate_mqtt_peer(client)
+
+    def test_mqtt_request_connection_refused_raises_auth_error(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 5, None)
+
+        client.connect.side_effect = fake_connect
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                provider._mqtt_request(
+                    {"print": {}}, accepts=lambda _b: True, timeout=0.2
+                )
+        assert exc.value.code == "provider_authentication_failed"
+
+    def test_mqtt_request_connect_timeout(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+        # connect() never invokes on_connect, so `connected` is never set.
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                provider._mqtt_request(
+                    {"print": {}}, accepts=lambda _b: True, timeout=0.05
+                )
+        assert exc.value.code == "provider_timeout"
+        assert "connect_timeout" in exc.value.detail
+
+    def test_mqtt_request_not_published_raises(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        client.connect.side_effect = fake_connect
+        publish_info = MagicMock()
+        publish_info.is_published.return_value = False
+        client.publish.return_value = publish_info
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                provider._mqtt_request(
+                    {"print": {}}, accepts=lambda _b: True, timeout=0.2
+                )
+        assert "not_published" in exc.value.detail
+
+    def test_mqtt_request_response_timeout(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        client.connect.side_effect = fake_connect
+        publish_info = MagicMock()
+        publish_info.is_published.return_value = True
+        client.publish.return_value = publish_info
+        # on_message never fires, so `received` never fires either.
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                provider._mqtt_request(
+                    {"print": {}}, accepts=lambda _b: True, timeout=0.05
+                )
+        assert "response_timeout" in exc.value.detail
+
+    def test_mqtt_request_ignores_malformed_message_payload(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        def fake_publish(topic, payload, qos=1, retain=False):
+            # Malformed message first (should be silently ignored), then a
+            # well-formed one that satisfies `accepts`.
+            bad = MagicMock()
+            bad.payload = b"\xff\xfe not json"
+            client.on_message(client, None, bad)
+            good = MagicMock()
+            good.payload = json.dumps({"print": {"ok": True}}).encode()
+            client.on_message(client, None, good)
+            info = MagicMock()
+            info.is_published.return_value = True
+            return info
+
+        client.connect.side_effect = fake_connect
+        client.publish.side_effect = fake_publish
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            result = provider._mqtt_request(
+                {"print": {}}, accepts=lambda body: "print" in body, timeout=1.0
+            )
+        assert result == {"print": {"ok": True}}
+
+    def test_send_command_wraps_unexpected_exception(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        with patch.object(provider, "_mqtt_request", side_effect=RuntimeError("boom")):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider._send_command({"print": {"command": "pause"}}))
+        assert exc.value.code == "provider_transport_error"
+
+    def test_query_status_wraps_unexpected_exception(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        with patch.object(provider, "_mqtt_request", side_effect=RuntimeError("boom")):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider.query_status())
+        assert exc.value.code == "provider_transport_error"
+
+    def test_query_status_passes_through_provider_error_unwrapped(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        with patch.object(
+            provider,
+            "_mqtt_request",
+            side_effect=ProviderError(
+                "bambu_response_timeout", code="provider_timeout"
+            ),
+        ):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider.query_status())
+        assert exc.value.code == "provider_timeout"
+
+    def test_ftps_client_builds_implicit_tls_ftp(self):
+        client = BambuLanProvider._ftps_client()
+        assert client.__class__.__name__ == "_ImplicitFTP_TLS"
+
+    def test_ftps_upload_swallows_close_failure_after_quit_failure(
+        self, tmp_path: Path
+    ):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        source = tmp_path / "cube.gcode"
+        source.write_bytes(b"G28\n")
+        ftp = MagicMock()
+        ftp.size.return_value = source.stat().st_size
+        ftp.quit.side_effect = OSError("connection reset")
+        ftp.close.side_effect = OSError("already closed")
+        with patch.object(provider, "_ftps_client", return_value=ftp):
+            # Both cleanup calls fail; the upload itself must not raise.
+            provider._upload_via_ftps(source, "cube.gcode")
+
+    def test_start_rejects_nested_remote_filename(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        with pytest.raises(ProviderError, match="invalid_bambu_remote_filename"):
+            asyncio.run(provider.start("sub/dir/cube.gcode"))
+
+    def test_subscribe_status_returns_immediately_when_stop_already_set(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        stop = asyncio.Event()
+        stop.set()
+
+        async def on_status(_status):
+            pass
+
+        # Should return without ever building an MQTT client.
+        with patch.object(provider, "_mqtt_client") as mqtt_client:
+            asyncio.run(provider.subscribe_status(on_status, stop_event=stop))
+        mqtt_client.assert_not_called()
+
+    def test_subscribe_status_raises_on_connection_refused(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 5, None)
+
+        client.connect.side_effect = fake_connect
+
+        async def on_status(_status):
+            pass
+
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider.subscribe_status(on_status))
+        assert exc.value.code == "provider_authentication_failed"
+
+    def test_subscribe_status_raises_when_peer_cert_mismatches(self):
+        # Connection is accepted (reason_code=0) but the post-handshake
+        # identity check in on_connect fails — a different failure path than
+        # the connection-refused case above.
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = MagicMock()
+        client.socket.return_value.getpeercert.return_value = {
+            "subject": ((("commonName", "other-printer"),),)
+        }
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        client.connect.side_effect = fake_connect
+
+        async def on_status(_status):
+            pass
+
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            with pytest.raises(ProviderError) as exc:
+                asyncio.run(provider.subscribe_status(on_status))
+        assert exc.value.code == "provider_authentication_failed"
+        assert "certificate identity mismatch" in exc.value.detail
+
+    def test_subscribe_status_ignores_malformed_and_non_print_messages(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+        received: list = []
+
+        async def on_status(status):
+            received.append(status)
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        def fake_publish(topic, payload, qos=1, retain=False):
+            bad = MagicMock()
+            bad.payload = b"\xff\xfe not json"
+            client.on_message(client, None, bad)
+            no_print_key = MagicMock()
+            no_print_key.payload = json.dumps({"other": True}).encode()
+            client.on_message(client, None, no_print_key)
+            good = MagicMock()
+            good.payload = json.dumps({"print": {"gcode_state": "IDLE"}}).encode()
+            client.on_message(client, None, good)
+
+        client.connect.side_effect = fake_connect
+        client.publish.side_effect = fake_publish
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            asyncio.run(
+                asyncio.wait_for(provider.subscribe_status(on_status), timeout=3.0)
+            )
+        assert len(received) == 1
+        assert received[0]["print_stats"]["state"] == "standby"
+
+
+class TestMoonrakerProviderListFiles:
+    def test_list_files_returns_result_list(self):
+        provider = MoonrakerProvider("http://10.0.0.1:7125")
+        with patch.object(
+            provider.client,
+            "list_gcode_files",
+            new_callable=AsyncMock,
+            return_value={"result": [{"path": "a.gcode"}]},
+        ):
+            files = asyncio.run(provider.list_files())
+        assert files == [{"path": "a.gcode"}]
+
+    def test_list_files_tolerates_non_list_result(self):
+        provider = MoonrakerProvider("http://10.0.0.1:7125")
+        with patch.object(
+            provider.client,
+            "list_gcode_files",
+            new_callable=AsyncMock,
+            return_value={"result": {"unexpected": "shape"}},
+        ):
+            files = asyncio.run(provider.list_files())
+        assert files == []
+
+
+class TestBaseProviderDefaults:
+    """BaseProvider's per-method bodies are the fallback every registered
+    provider currently overrides. Exercised directly here to document (and
+    lock in) the abstract contract: capability-gated, then NotImplementedError."""
+
+    class _FullySupportedProvider(BaseProvider):
+        provider = PrinterProvider.MOONRAKER
+        capabilities = ProviderCapabilities(supported=frozenset(Capability))
+
+    def test_unimplemented_methods_raise_not_implemented(self):
+        provider = self._FullySupportedProvider()
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.info())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.server_info())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.server_config())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.printer_config())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.query_status())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.list_files())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.upload(Path("x"), "x.gcode"))
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.delete_file("x.gcode"))
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.start("x.gcode"))
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.pause())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.resume())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.cancel())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.run_gcode("G28"))
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.emergency_stop())
+        with pytest.raises(NotImplementedError):
+            asyncio.run(provider.subscribe_status(AsyncMock()))

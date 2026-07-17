@@ -89,7 +89,9 @@ def test_over_cap_3mf_still_gets_embedded_preview(tmp_path: Path, monkeypatch) -
     png = mesh_processing._PNG_MAGIC + b"preview-bytes"
     p = tmp_path / "dense.3mf"
     with zipfile.ZipFile(p, "w") as zf:
-        zf.writestr("3D/3dmodel.model", b"<triangle/>" * 100_000)  # ~157k tris, over cap
+        zf.writestr(
+            "3D/3dmodel.model", b"<triangle/>" * 100_000
+        )  # ~157k tris, over cap
         zf.writestr("Metadata/thumbnail.png", png)
 
     monkeypatch.setattr(
@@ -114,7 +116,9 @@ def test_post_load_backstop_skips_render_when_estimate_missed(
     p.write_text("# obj")
 
     monkeypatch.setattr(mesh_processing, "_estimate_triangle_count", lambda _p: None)
-    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=99))
+    monkeypatch.setattr(
+        mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=99)
+    )
     monkeypatch.setattr(
         mesh_processing.mesh_render,
         "render_mesh_thumbnail",
@@ -132,7 +136,9 @@ def test_under_cap_mesh_renders_normally(tmp_path: Path, monkeypatch) -> None:
     p = tmp_path / "ok.stl"
     _write_binary_stl(p, 500)
 
-    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=500))
+    monkeypatch.setattr(
+        mesh_processing, "_load_mesh", lambda _p: _fake_mesh(num_faces=500)
+    )
     monkeypatch.setattr(
         mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNGDATA"
     )
@@ -167,13 +173,17 @@ def test_ram_cap_scales_with_memory_and_format(monkeypatch) -> None:
     stl_cap = mesh_processing._ram_triangle_cap(".stl")
     mf_cap = mesh_processing._ram_triangle_cap(".3mf")
     # 2 GB budget / per-triangle cost.
-    assert stl_cap == int(2 * 1024**3 / mesh_processing._DEFAULT_PEAK_BYTES_PER_TRIANGLE)
+    assert stl_cap == int(
+        2 * 1024**3 / mesh_processing._DEFAULT_PEAK_BYTES_PER_TRIANGLE
+    )
     assert mf_cap == int(2 * 1024**3 / mesh_processing._PEAK_BYTES_PER_TRIANGLE[".3mf"])
     # 3MF is the heavier format, so its cap is the lower of the two.
     assert mf_cap < stl_cap
 
 
-def test_ram_cap_skips_mesh_a_big_host_would_render(tmp_path: Path, monkeypatch) -> None:
+def test_ram_cap_skips_mesh_a_big_host_would_render(
+    tmp_path: Path, monkeypatch
+) -> None:
     # Static ceiling is generous (5M), but a 2 GB host can't afford this mesh.
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 5_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
@@ -191,7 +201,9 @@ def test_ram_cap_skips_mesh_a_big_host_would_render(tmp_path: Path, monkeypatch)
     assert mesh_processing.extract_geometry(p)["triangle_count"] is None
 
 
-def test_static_cap_still_applies_on_a_huge_ram_host(tmp_path: Path, monkeypatch) -> None:
+def test_static_cap_still_applies_on_a_huge_ram_host(
+    tmp_path: Path, monkeypatch
+) -> None:
     # A 256 GB host: the RAM cap is enormous, so the static ceiling is what binds.
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
     monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
@@ -201,7 +213,9 @@ def test_static_cap_still_applies_on_a_huge_ram_host(tmp_path: Path, monkeypatch
     monkeypatch.setattr(
         mesh_processing,
         "_load_mesh",
-        lambda _p: (_ for _ in ()).throw(AssertionError("over static cap must not load")),
+        lambda _p: (_ for _ in ()).throw(
+            AssertionError("over static cap must not load")
+        ),
     )
     assert mesh_processing.extract_geometry(p)["triangle_count"] is None
 
@@ -224,7 +238,9 @@ def test_loaded_mesh_triggers_memory_reclaim(tmp_path: Path, monkeypatch) -> Non
         mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNG"
     )
     monkeypatch.setattr(
-        mesh_processing, "_reclaim_memory", lambda: calls.__setitem__("n", calls["n"] + 1)
+        mesh_processing,
+        "_reclaim_memory",
+        lambda: calls.__setitem__("n", calls["n"] + 1),
     )
 
     mesh_processing.analyze_mesh(p)
@@ -240,7 +256,9 @@ def test_skipped_mesh_does_not_reclaim(tmp_path: Path, monkeypatch) -> None:
 
     calls = {"n": 0}
     monkeypatch.setattr(
-        mesh_processing, "_reclaim_memory", lambda: calls.__setitem__("n", calls["n"] + 1)
+        mesh_processing,
+        "_reclaim_memory",
+        lambda: calls.__setitem__("n", calls["n"] + 1),
     )
     monkeypatch.setattr(
         mesh_processing,
@@ -442,8 +460,7 @@ def test_over_cap_ply_skips_load(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
     p = tmp_path / "dense.ply"
     p.write_bytes(
-        b"ply\nformat binary_little_endian 1.0\n"
-        b"element face 999999\nend_header\n"
+        b"ply\nformat binary_little_endian 1.0\nelement face 999999\nend_header\n"
     )
     monkeypatch.setattr(
         mesh_processing,
@@ -680,3 +697,405 @@ def test_over_cap_obj_skips_load(tmp_path: Path, monkeypatch) -> None:
     assert mesh_processing.extract_geometry(p)["triangle_count"] is None
     assert mesh_processing.render_thumbnail(p) is None
     assert mesh_processing.to_stl_bytes(p) is None
+
+
+# ---------------------------------------------------------------------------
+# Estimator: unsupported / corrupt formats.
+# ---------------------------------------------------------------------------
+
+
+def test_estimator_returns_none_for_unrecognised_suffix(tmp_path: Path) -> None:
+    p = tmp_path / "part.step"
+    p.write_bytes(b"not a real STEP file")
+    assert mesh_processing._estimate_triangle_count(p) is None
+
+
+def test_estimator_returns_none_for_corrupt_3mf(tmp_path: Path) -> None:
+    p = tmp_path / "corrupt.3mf"
+    p.write_bytes(b"not actually a zip")
+    assert mesh_processing._estimate_triangle_count(p) is None
+
+
+def test_ply_header_without_end_header_returns_none(tmp_path: Path) -> None:
+    p = tmp_path / "truncated.ply"
+    # File ends mid-header, before an "end_header" line is ever seen.
+    p.write_bytes(b"ply\nformat ascii 1.0\nelement vertex 3\n")
+    assert mesh_processing._estimate_triangle_count(p) is None
+
+
+def test_ply_face_count_non_integer_returns_none(tmp_path: Path) -> None:
+    p = tmp_path / "bad-count.ply"
+    p.write_bytes(b"ply\nformat ascii 1.0\nelement face notanumber\nend_header\n")
+    assert mesh_processing._estimate_triangle_count(p) is None
+
+
+# ---------------------------------------------------------------------------
+# Memory-limit detection: cgroup / meminfo read failures each degrade
+# gracefully rather than raising.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_memory_limit_survives_unreadable_sources(monkeypatch) -> None:
+    from pathlib import Path as _Path
+
+    real_read_text = _Path.read_text
+    unreadable = {
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+        "/proc/meminfo",
+    }
+
+    def fake_read_text(self, *a, **k):
+        if str(self) in unreadable:
+            raise OSError("no such file")
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(_Path, "read_text", fake_read_text)
+    assert mesh_processing._detect_memory_limit_bytes() is None
+
+
+def test_detect_memory_limit_reads_cgroup_v2_value(monkeypatch) -> None:
+    from pathlib import Path as _Path
+
+    real_read_text = _Path.read_text
+
+    def fake_read_text(self, *a, **k):
+        if str(self) == "/sys/fs/cgroup/memory.max":
+            return "2147483648\n"  # 2 GB
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(_Path, "read_text", fake_read_text)
+    limit = mesh_processing._detect_memory_limit_bytes()
+    assert limit is not None
+    assert limit <= 2147483648  # smallest of cgroup v2 and any other source
+
+
+def test_detect_memory_limit_reads_cgroup_v1_value(monkeypatch) -> None:
+    from pathlib import Path as _Path
+
+    real_read_text = _Path.read_text
+
+    def fake_read_text(self, *a, **k):
+        if str(self) == "/sys/fs/cgroup/memory.max":
+            raise OSError("cgroup v2 absent")
+        if str(self) == "/sys/fs/cgroup/memory/memory.limit_in_bytes":
+            return "1073741824\n"  # 1 GB
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(_Path, "read_text", fake_read_text)
+    limit = mesh_processing._detect_memory_limit_bytes()
+    assert limit is not None
+    assert limit <= 1073741824
+
+
+def test_detect_memory_limit_ignores_unlimited_cgroup_v2(monkeypatch) -> None:
+    from pathlib import Path as _Path
+
+    real_read_text = _Path.read_text
+
+    def fake_read_text(self, *a, **k):
+        if str(self) == "/sys/fs/cgroup/memory.max":
+            return "max\n"
+        if str(self) == "/sys/fs/cgroup/memory/memory.limit_in_bytes":
+            raise OSError("absent")
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(_Path, "read_text", fake_read_text)
+    # Falls through to /proc/meminfo (real, host-dependent) or None.
+    limit = mesh_processing._detect_memory_limit_bytes()
+    assert limit is None or limit > 0
+
+
+def test_ram_triangle_cap_uses_cached_memory_limit(monkeypatch) -> None:
+    # _MEMORY_LIMIT_BYTES already resolved (not None) -> _detect_memory_limit_bytes
+    # is never called again.
+    monkeypatch.setattr(mesh_processing, "_MEMORY_LIMIT_BYTES", 4 * 1024**3)
+    monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
+
+    def _boom():  # pragma: no cover - must never run
+        raise AssertionError("must reuse cached limit")
+
+    monkeypatch.setattr(mesh_processing, "_detect_memory_limit_bytes", _boom)
+    assert mesh_processing._ram_triangle_cap(".stl") is not None
+
+
+def test_ram_triangle_cap_none_when_detection_fails(monkeypatch) -> None:
+    monkeypatch.setattr(mesh_processing, "_MEMORY_LIMIT_BYTES", None)
+    monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
+    monkeypatch.setattr(mesh_processing, "_detect_memory_limit_bytes", lambda: None)
+    assert mesh_processing._ram_triangle_cap(".stl") is None
+
+
+def test_render_jobs_limit_falls_back_to_one_on_bad_config(monkeypatch) -> None:
+    monkeypatch.setitem(_overlay, "max_render_jobs", "not-a-number")
+    assert mesh_processing._render_jobs_limit() == 1
+
+
+def test_exceeds_cap_survives_stat_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setitem(_overlay, "mesh_max_load_mb", 1)
+    monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100_000_000)
+    p = tmp_path / "ghost.stl"
+    _write_binary_stl(p, 10)
+
+    def fake_stat(self):
+        raise OSError("gone")
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    # size_mb falls back to 0.0 on OSError, so the size cap can't trip; the
+    # (also-mocked-out) triangle estimate then decides. Real stat is restored
+    # by monkeypatch teardown.
+    assert mesh_processing._exceeds_cap(p) is False
+
+
+# ---------------------------------------------------------------------------
+# Real mesh loading + geometry/thumbnail entry points (no mocked _load_mesh).
+# ---------------------------------------------------------------------------
+
+
+def _real_binary_stl_cube(path: Path) -> None:
+    import trimesh
+
+    trimesh.creation.box(extents=[10.0, 10.0, 10.0]).export(path, file_type="stl")
+
+
+def test_load_mesh_returns_trimesh_for_real_stl(tmp_path: Path) -> None:
+    p = tmp_path / "cube.stl"
+    _real_binary_stl_cube(p)
+    mesh = mesh_processing._load_mesh(p)
+    assert mesh is not None
+    assert len(mesh.faces) > 0
+
+
+def test_load_mesh_returns_none_for_unrecognised_extension(tmp_path: Path) -> None:
+    # trimesh can't even pick a loader for an unknown extension, so this raises
+    # inside trimesh.load — exercising _load_mesh's broad except-and-log path.
+    p = tmp_path / "garbage.foobar"
+    p.write_bytes(b"this is not a mesh at all \x00\x01\x02")
+    assert mesh_processing._load_mesh(p) is None
+
+
+def test_load_mesh_flattens_scene_with_multiple_geometries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # trimesh.load(..., force="mesh") already concatenates a multi-geometry
+    # Scene into one Trimesh internally, so _load_mesh's own Scene-flattening
+    # branch is normally unreachable through that call. Stub trimesh.load to
+    # return a real Scene so this (still-real) fallback path is exercised —
+    # it's a legitimate defensive path for a future/edge-case trimesh return.
+    import trimesh
+
+    scene = trimesh.Scene()
+    scene.add_geometry(trimesh.creation.box(extents=[5, 5, 5]), node_name="a")
+    scene.add_geometry(
+        trimesh.creation.box(extents=[3, 3, 3]).apply_translation([10, 0, 0]),
+        node_name="b",
+    )
+    p = tmp_path / "scene.3mf"
+    scene.export(p, file_type="3mf")
+
+    monkeypatch.setattr(trimesh, "load", lambda *a, **k: scene)
+    mesh = mesh_processing._load_mesh(p)
+    assert mesh is not None
+    # Concatenated geometry from both boxes.
+    assert len(mesh.faces) == 24  # 12 triangles per box * 2
+
+
+def test_load_mesh_scene_with_no_trimesh_geometry_returns_none(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import trimesh
+
+    empty_scene = trimesh.Scene()  # no geometry at all
+    p = tmp_path / "empty.3mf"
+    p.write_bytes(b"placeholder")
+    monkeypatch.setattr(trimesh, "load", lambda *a, **k: empty_scene)
+    assert mesh_processing._load_mesh(p) is None
+
+
+def test_load_mesh_scene_with_single_geometry_returns_it_directly(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import trimesh
+
+    scene = trimesh.Scene()
+    box = trimesh.creation.box(extents=[5, 5, 5])
+    scene.add_geometry(box, node_name="a")
+    p = tmp_path / "single.3mf"
+    p.write_bytes(b"placeholder")
+    monkeypatch.setattr(trimesh, "load", lambda *a, **k: scene)
+    mesh = mesh_processing._load_mesh(p)
+    assert mesh is not None
+    assert len(mesh.faces) == 12
+
+
+def test_load_mesh_returns_none_for_unsupported_loaded_type(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import trimesh
+
+    p = tmp_path / "cloud.stl"
+    p.write_bytes(b"placeholder")
+    # trimesh.load can return a PointCloud (or other non-mesh geometry) for
+    # some inputs; _load_mesh must decline rather than mishandle it.
+    monkeypatch.setattr(
+        trimesh, "load", lambda *a, **k: trimesh.points.PointCloud([[0, 0, 0]])
+    )
+    assert mesh_processing._load_mesh(p) is None
+
+
+def test_geometry_from_mesh_handles_non_watertight_volume_error(monkeypatch) -> None:
+    class _BrokenVolume:
+        vertices = np.zeros((3, 3), dtype=np.float64)
+        bounds = np.array([[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]])
+        faces = np.zeros((1, 3), dtype=np.int64)
+
+        @property
+        def volume(self):
+            raise ValueError("non-watertight")
+
+    geometry = mesh_processing._geometry_from_mesh(_BrokenVolume())
+    assert geometry["volume_mm3"] is None
+    assert geometry["bbox_x_mm"] == 1.0
+
+
+def test_extract_embedded_3mf_thumbnail_no_candidates_returns_none(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "no-preview.3mf"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("3D/3dmodel.model", b"<mesh/>")
+    assert mesh_processing.extract_embedded_3mf_thumbnail(p) is None
+
+
+def test_extract_embedded_3mf_thumbnail_survives_corrupt_archive(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "corrupt.3mf"
+    p.write_bytes(b"not a zip archive")
+    assert mesh_processing.extract_embedded_3mf_thumbnail(p) is None
+
+
+def test_analyze_mesh_reports_progress_labels(tmp_path: Path) -> None:
+    p = tmp_path / "cube.stl"
+    _real_binary_stl_cube(p)
+    labels: list[str] = []
+    geometry, thumb = mesh_processing.analyze_mesh(p, report=labels.append)
+    assert labels == ["loading_mesh", "extracting_geometry", "rendering_thumbnail"]
+    assert geometry["triangle_count"] is not None
+    assert thumb is not None
+
+
+def test_extract_geometry_real_load_and_reclaim(tmp_path: Path, monkeypatch) -> None:
+    p = tmp_path / "cube.stl"
+    _real_binary_stl_cube(p)
+    calls = {"n": 0}
+    monkeypatch.setattr(
+        mesh_processing,
+        "_reclaim_memory",
+        lambda: calls.__setitem__("n", calls["n"] + 1),
+    )
+    geometry = mesh_processing.extract_geometry(p)
+    assert geometry["triangle_count"] is not None
+    assert calls["n"] == 1
+
+
+def test_render_thumbnail_real_mesh_renders_png(tmp_path: Path) -> None:
+    p = tmp_path / "cube.stl"
+    _real_binary_stl_cube(p)
+    thumb = mesh_processing.render_thumbnail(p)
+    assert thumb is not None
+    assert thumb.startswith(mesh_processing._PNG_MAGIC)
+
+
+def test_render_thumbnail_falls_back_to_embedded_when_render_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    png = mesh_processing._PNG_MAGIC + b"embedded"
+    p = tmp_path / "model.3mf"
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr("3D/3dmodel.model", b"<mesh/>")
+        zf.writestr("Metadata/thumbnail.png", png)
+
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(10))
+    monkeypatch.setattr(
+        mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: None
+    )
+    assert mesh_processing.render_thumbnail(p) == png
+
+
+def test_render_thumbnail_returns_none_when_render_fails_and_no_embedded(
+    tmp_path: Path, monkeypatch
+) -> None:
+    p = tmp_path / "cube.stl"
+    _write_binary_stl(p, 10)
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(10))
+    monkeypatch.setattr(
+        mesh_processing.mesh_render, "render_mesh_thumbnail", lambda *a, **k: None
+    )
+    assert mesh_processing.render_thumbnail(p) is None
+
+
+def test_render_thumbnail_over_cap_with_embedded_fallback_disabled_returns_none(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Over cap, and the large-file embedded-preview fallback explicitly off:
+    # nothing to fall back to, so the function must return None outright.
+    monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+    monkeypatch.setitem(_overlay, "use_embedded_3mf_preview_for_large_files", False)
+    p = tmp_path / "dense.obj"
+    _write_obj(p, tri_faces=5000)
+    monkeypatch.setattr(
+        mesh_processing,
+        "_load_mesh",
+        lambda _p: (_ for _ in ()).throw(AssertionError("over-cap must not load")),
+    )
+    assert mesh_processing.render_thumbnail(p) is None
+
+
+def test_to_stl_bytes_read_failure_returns_none(tmp_path: Path, monkeypatch) -> None:
+    p = tmp_path / "cube.stl"
+    _write_binary_stl(p, 10)
+
+    def fake_read_bytes(self):
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(Path, "read_bytes", fake_read_bytes)
+    assert mesh_processing.to_stl_bytes(p) is None
+
+
+def test_to_stl_bytes_converts_non_stl_mesh(tmp_path: Path) -> None:
+    import trimesh
+
+    p = tmp_path / "cube.obj"
+    trimesh.creation.box(extents=[4, 4, 4]).export(p, file_type="obj")
+    out = mesh_processing.to_stl_bytes(p)
+    assert out is not None
+    assert out[80:84] != b""  # binary STL triangle-count header present
+
+
+def test_to_stl_bytes_returns_none_when_mesh_fails_to_load(tmp_path: Path) -> None:
+    p = tmp_path / "garbage.foobar"
+    p.write_bytes(b"not a mesh file \x00\x01")
+    assert mesh_processing.to_stl_bytes(p) is None
+
+
+def test_to_stl_bytes_returns_none_on_export_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    p = tmp_path / "cube.stl"
+    _real_binary_stl_cube(p)
+    # Force the "already an STL" fast-path to miss by faking a different suffix
+    # so we exercise the load+export branch, then make export blow up.
+    obj_path = tmp_path / "cube.obj"
+    import trimesh
+
+    trimesh.creation.box(extents=[4, 4, 4]).export(obj_path, file_type="obj")
+
+    class _Boom:
+        faces = np.zeros((1, 3))
+
+        def export(self, *_a, **_k):
+            raise RuntimeError("export boom")
+
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _Boom())
+    assert mesh_processing.to_stl_bytes(obj_path) is None

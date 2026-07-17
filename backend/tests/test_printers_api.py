@@ -26,6 +26,8 @@ from app.db.models import (
     User,
 )
 from app.services.auth import create_access_token, hash_password
+from app.services.printer_jobs import PrinterJobError
+from app.services.printer_provider import ProviderError
 
 
 def _user_headers(
@@ -1914,3 +1916,929 @@ class TestGroupFilter:
         )
         assert resp.status_code == 200
         assert resp.json()["group"] == "workshop"
+
+
+class TestUpdateProviderValidation:
+    """PrinterUpdate has no cross-field validator (unlike PrinterCreate), so
+    switching provider on PATCH without the new provider's required fields is
+    the only way to reach _validate_provider_config's 400 branches."""
+
+    @pytest.mark.parametrize(
+        "payload,expected_detail",
+        [
+            ({"moonraker_url": ""}, "moonraker_url_required"),
+            ({"provider": "bambu_lan"}, "bambu_host_required"),
+            (
+                {"provider": "bambu_lan", "bambu_host": "h"},
+                "bambu_serial_required",
+            ),
+            (
+                {"provider": "bambu_lan", "bambu_host": "h", "bambu_serial": "s"},
+                "bambu_access_code_required",
+            ),
+            ({"provider": "prusalink"}, "prusalink_url_required"),
+            (
+                {"provider": "prusalink", "prusalink_url": "http://p"},
+                "prusalink_auth_mode_required",
+            ),
+            (
+                {
+                    "provider": "prusalink",
+                    "prusalink_url": "http://p",
+                    "prusalink_auth_mode": "digest",
+                    "prusalink_username": "u",
+                },
+                "prusalink_digest_credentials_required",
+            ),
+            (
+                {
+                    "provider": "prusalink",
+                    "prusalink_url": "http://p",
+                    "prusalink_auth_mode": "api_key",
+                },
+                "prusalink_api_key_required",
+            ),
+            ({"provider": "elegoo_centauri"}, "elegoo_centauri_model_required"),
+            (
+                {
+                    "provider": "elegoo_centauri",
+                    "provider_variant": "elegoo_centauri_carbon",
+                },
+                "elegoo_centauri_host_required",
+            ),
+            (
+                {
+                    "provider": "elegoo_centauri",
+                    "provider_variant": "elegoo_centauri_carbon_2",
+                    "elegoo_centauri_host": "h",
+                },
+                "elegoo_centauri_access_code_required",
+            ),
+            ({"provider": "octoprint"}, "octoprint_url_required"),
+            (
+                {"provider": "octoprint", "octoprint_url": "http://o"},
+                "octoprint_api_key_required",
+            ),
+        ],
+    )
+    def test_update_provider_validation_errors(
+        self,
+        client: TestClient,
+        auth_headers,
+        db_session: Session,
+        payload,
+        expected_detail,
+    ):
+        p = Printer(name="X", moonraker_url="http://x.local:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.patch(
+            f"/api/v1/printers/{p.id}", json=payload, headers=auth_headers
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == expected_detail
+
+    def test_update_sets_all_optional_fields(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="X", moonraker_url="http://x.local:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        payload = {
+            "provider": "moonraker",
+            "name": "Renamed",
+            "moonraker_url": "http://renamed.local:7125",
+            "api_key": "key1",
+            "provider_variant": "generic",
+            "bambu_host": "1.2.3.4",
+            "bambu_serial": "SN1",
+            "bambu_access_code": "code1",
+            "prusalink_url": "http://prusa.local",
+            "prusalink_auth_mode": "digest",
+            "prusalink_username": "user1",
+            "prusalink_password": "pass1",
+            "prusalink_api_key": "key2",
+            "elegoo_centauri_host": "5.6.7.8",
+            "elegoo_centauri_access_code": "code2",
+            "elegoo_centauri_mainboard_id": "board1",
+            "octoprint_url": "http://octo.local",
+            "octoprint_api_key": "key3",
+            "model_name": "Model X",
+            "notes": "some notes",
+            "group": "lab",
+        }
+        resp = client.patch(
+            f"/api/v1/printers/{p.id}", json=payload, headers=auth_headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "Renamed"
+        assert data["moonraker_url"] == "http://renamed.local:7125"
+        assert data["has_api_key"] is True
+        assert data["bambu_host"] == "1.2.3.4"
+        assert data["bambu_serial"] == "SN1"
+        assert data["prusalink_url"] == "http://prusa.local"
+        assert data["prusalink_username"] == "user1"
+        assert data["has_prusalink_password"] is True
+        assert data["has_prusalink_api_key"] is True
+        assert data["elegoo_centauri_host"] == "5.6.7.8"
+        assert data["elegoo_centauri_mainboard_id"] == "board1"
+        assert data["octoprint_url"] == "http://octo.local"
+        assert data["has_octoprint_api_key"] is True
+        assert data["model_name"] == "Model X"
+        assert data["notes"] == "some notes"
+        assert data["group"] == "lab"
+
+
+class TestPrinterDiagnosticsExtra:
+    def test_diagnostics_404_deleted_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.core.time import utcnow
+
+        p = Printer(name="Gone", moonraker_url="http://gone.local")
+        p.deleted_at = utcnow()
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.get(f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers)
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "printer_not_found"
+
+    def test_diagnostics_configuration_error(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        # Direct DB insert bypasses the API's own _validate_provider_config,
+        # simulating a row whose provider build() itself fails.
+        p = Printer(
+            name="Bad Elegoo",
+            provider="elegoo_centauri",
+            moonraker_url="",
+            provider_variant="generic",
+            elegoo_centauri_host="1.2.3.4",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.get(f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        config_check = next(c for c in body["checks"] if c["name"] == "configuration")
+        assert config_check["ok"] is False
+        assert config_check["code"] == "provider_credentials_missing"
+
+    def test_diagnostics_provider_error_check(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.info",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.get(
+                f"/api/v1/printers/{p.id}/diagnostics", headers=auth_headers
+            )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        info_check = next(c for c in body["checks"] if c["name"] == "provider_info")
+        assert info_check["ok"] is False
+        assert info_check["code"] == "printer_offline"
+
+
+class TestPrinterConfigExtra:
+    def test_config_404_deleted_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.core.time import utcnow
+
+        p = Printer(name="Gone", moonraker_url="http://gone.local")
+        p.deleted_at = utcnow()
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.get(f"/api/v1/printers/{p.id}/config", headers=auth_headers)
+        assert resp.status_code == 404
+
+    def test_config_provider_error_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.server_info",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.get(f"/api/v1/printers/{p.id}/config", headers=auth_headers)
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+
+
+class TestSendToPrinterExtraGates:
+    def _gcode_file(self, db_session: Session, suffix: str = ""):
+        from app.db.models import File, Model
+
+        m = Model(name=f"M{suffix}", slug=f"m{suffix}", hash=f"{suffix or '0'}" * 64)
+        db_session.add(m)
+        db_session.commit()
+        db_session.refresh(m)
+        f = File(
+            model_id=m.id,
+            path=f"/data/part{suffix}.gcode",
+            original_filename=f"part{suffix}.gcode",
+            file_type="gcode",
+            version=1,
+            size_bytes=10,
+            sha256=f"{suffix or '1'}" * 64,
+        )
+        db_session.add(f)
+        db_session.commit()
+        db_session.refresh(f)
+        return m, f
+
+    def test_send_rejected_when_provider_cannot_upload(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        _, f = self._gcode_file(db_session, "eleg")
+        p = Printer(
+            name="Centauri",
+            provider="elegoo_centauri",
+            moonraker_url="",
+            provider_variant="elegoo_centauri_carbon",
+            elegoo_centauri_host="192.168.1.60",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/send",
+            json={"file_id": f.id, "start_print": False},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+
+    def test_send_ready_check_provider_error_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        _, f = self._gcode_file(db_session, "rdy")
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+
+    def test_send_appends_gcode_extension_when_missing(
+        self, client: TestClient, auth_headers, db_session: Session, tmp_path
+    ):
+        _, f = self._gcode_file(db_session, "ext")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        local = tmp_path / "part.gcode"
+        local.write_text("G28\n")
+
+        class FakeBackend:
+            def exists(self, _path):
+                return True
+
+            def download_to_path(self, _path, _target):
+                return local
+
+        with (
+            patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
+            patch(
+                "app.services.moonraker.MoonrakerClient.upload_gcode",
+                new_callable=AsyncMock,
+                return_value={"result": "ok"},
+            ),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={
+                    "file_id": f.id,
+                    "start_print": False,
+                    "remote_filename": "no_extension",
+                },
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        assert resp.json()["remote_filename"] == "no_extension.gcode"
+
+    def test_send_file_blob_missing_returns_410(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        _, f = self._gcode_file(db_session, "blob")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        class FakeBackend:
+            def exists(self, _path):
+                return False
+
+        with patch("app.api.v1.printers.get_backend", return_value=FakeBackend()):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 410
+        assert resp.json()["detail"] == "file_blob_missing"
+
+    def test_send_file_role_404_when_model_deleted(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.core.time import utcnow
+
+        m, f = self._gcode_file(db_session, "del")
+        m.deleted_at = utcnow()
+        db_session.add(m)
+        db_session.commit()
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/send",
+            json={"file_id": f.id, "start_print": False},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "file_not_found"
+
+    def test_send_provider_error_marks_job_failed(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        _, f = self._gcode_file(db_session, "pe")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with (
+            patch(
+                "app.api.v1.printers.get_backend",
+                return_value=type(
+                    "FB", (), {"exists": staticmethod(lambda _p: True)}
+                )(),
+            ),
+            patch(
+                "app.api.v1.printers.transfer_artifact",
+                new_callable=AsyncMock,
+                side_effect=ProviderError("boom", code="printer_offline"),
+            ),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+        job = db_session.exec(select(PrintJob).where(PrintJob.printer_id == p.id)).one()
+        assert job.state == PrintJobState.FAILED
+        assert job.error == "printer_offline"
+
+    def test_send_printer_job_error_marks_job_failed(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        _, f = self._gcode_file(db_session, "pje")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with (
+            patch(
+                "app.api.v1.printers.get_backend",
+                return_value=type(
+                    "FB", (), {"exists": staticmethod(lambda _p: True)}
+                )(),
+            ),
+            patch(
+                "app.api.v1.printers.transfer_artifact",
+                new_callable=AsyncMock,
+                side_effect=PrinterJobError("dispatch_failed"),
+            ),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "dispatch_failed"
+        job = db_session.exec(select(PrintJob).where(PrintJob.printer_id == p.id)).one()
+        assert job.state == PrintJobState.FAILED
+        assert job.error == "dispatch_failed"
+
+    def test_send_http_exception_from_transfer_passes_through(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from fastapi import HTTPException
+
+        _, f = self._gcode_file(db_session, "http")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with (
+            patch(
+                "app.api.v1.printers.get_backend",
+                return_value=type(
+                    "FB", (), {"exists": staticmethod(lambda _p: True)}
+                )(),
+            ),
+            patch(
+                "app.api.v1.printers.transfer_artifact",
+                new_callable=AsyncMock,
+                side_effect=HTTPException(status_code=418, detail="teapot"),
+            ),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 418
+        assert resp.json()["detail"] == "teapot"
+
+
+class TestStartPrinterFileExtra:
+    def test_start_with_explicit_file_id_creates_vault_job(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.db.models import File, Model
+
+        m = Model(name="Explicit", slug="explicit-file", hash="e" * 64)
+        db_session.add(m)
+        db_session.commit()
+        db_session.refresh(m)
+        f = File(
+            model_id=m.id,
+            path="/data/explicit.gcode",
+            original_filename="explicit.gcode",
+            file_type="gcode",
+            version=1,
+            size_bytes=10,
+            sha256="f" * 64,
+        )
+        db_session.add(f)
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(f)
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.start",
+            new_callable=AsyncMock,
+            return_value={"result": "ok"},
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "explicit.gcode", "file_id": f.id},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "vault"
+        assert data["file_id"] == f.id
+
+    def test_start_with_explicit_file_id_rejects_non_gcode(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.db.models import File, Model
+
+        m = Model(name="NonGcode", slug="non-gcode-start", hash="g" * 64)
+        db_session.add(m)
+        db_session.commit()
+        db_session.refresh(m)
+        f = File(
+            model_id=m.id,
+            path="/data/model.stl",
+            original_filename="model.stl",
+            file_type="stl",
+            version=1,
+            size_bytes=10,
+            sha256="h" * 64,
+        )
+        db_session.add(f)
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(f)
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/start",
+            json={"remote_filename": "model.stl", "file_id": f.id},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "file_not_gcode"
+
+    def test_start_non_superuser_sentinel_403(
+        self, client: TestClient, db_session: Session
+    ):
+        headers = _user_headers(db_session, "start-editor")
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/start",
+            json={"remote_filename": "unmatched.gcode"},
+            headers=headers,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "admin_required"
+
+    def test_start_provider_error_marks_job_failed(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.start",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "unmatched.gcode"},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+        job = db_session.exec(select(PrintJob).where(PrintJob.printer_id == p.id)).one()
+        assert job.state == PrintJobState.FAILED
+
+    def test_start_generic_exception_marks_job_failed(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.start",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("secret stack"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/start",
+                json={"remote_filename": "unmatched.gcode"},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "provider_error"
+        assert "secret stack" not in resp.text
+
+
+class TestPrinterControlErrors:
+    def test_pause_provider_error_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.pause",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(f"/api/v1/printers/{p.id}/pause", headers=auth_headers)
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+
+    def test_resume_generic_exception_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.resume",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("secret stack"),
+        ):
+            resp = client.post(f"/api/v1/printers/{p.id}/resume", headers=auth_headers)
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "provider_error"
+        assert "secret stack" not in resp.text
+
+    def test_home_404_deleted_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.core.time import utcnow
+
+        p = Printer(name="Gone", moonraker_url="http://gone.local")
+        p.deleted_at = utcnow()
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(
+            f"/api/v1/printers/{p.id}/home", json={}, headers=auth_headers
+        )
+        assert resp.status_code == 404
+
+    def test_home_provider_error_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.run_gcode",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/home", json={}, headers=auth_headers
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+
+    def test_temperature_generic_exception_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.run_gcode",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("secret stack"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/temperature",
+                json={"heater": "bed", "target": 50},
+                headers=auth_headers,
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "provider_error"
+
+    def test_emergency_stop_provider_error_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.emergency_stop",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/emergency_stop", headers=auth_headers
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+
+    def test_emergency_stop_generic_exception_502(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.emergency_stop",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("secret stack"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/emergency_stop", headers=auth_headers
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "provider_error"
+
+
+class TestPrinterFilesExtra:
+    def test_sync_provider_error_sets_last_error(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.list_files",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/files/sync", headers=auth_headers
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+        db_session.refresh(p)
+        assert p.last_error == "boom"
+
+    def test_delete_file_unsupported_provider_409(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.delete(f"/api/v1/printers/{p.id}/files/1", headers=auth_headers)
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "operation_not_supported_for_provider"
+
+    def test_delete_file_404_unknown_printer_file(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.delete(
+            f"/api/v1/printers/{p.id}/files/99999", headers=auth_headers
+        )
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "printer_file_not_found"
+
+    def test_delete_file_provider_error_sets_last_error(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        row = PrinterFile(
+            printer_id=p.id, remote_filename="stuck.gcode", matched_by="external"
+        )
+        db_session.add(row)
+        db_session.commit()
+        db_session.refresh(row)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.delete_file",
+            new_callable=AsyncMock,
+            side_effect=ProviderError("boom", code="printer_offline"),
+        ):
+            resp = client.delete(
+                f"/api/v1/printers/{p.id}/files/{row.id}", headers=auth_headers
+            )
+        assert resp.status_code == 502
+        assert resp.json()["detail"] == "printer_offline"
+        db_session.refresh(p)
+        assert p.last_error == "boom"
+
+    def test_delete_file_falls_back_to_cached_list_when_resync_fails(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        p = Printer(name="Ender 3", moonraker_url="http://10.0.0.1:7125")
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        deleted = PrinterFile(
+            printer_id=p.id, remote_filename="deleted.gcode", matched_by="external"
+        )
+        kept = PrinterFile(
+            printer_id=p.id, remote_filename="kept.gcode", matched_by="external"
+        )
+        db_session.add_all([deleted, kept])
+        db_session.commit()
+        db_session.refresh(deleted)
+
+        with (
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.delete_file",
+                new_callable=AsyncMock,
+                return_value={"result": "ok"},
+            ),
+            patch(
+                "app.services.printer_provider.MoonrakerProvider.list_files",
+                new_callable=AsyncMock,
+                side_effect=ProviderError("boom", code="printer_offline"),
+            ),
+        ):
+            resp = client.delete(
+                f"/api/v1/printers/{p.id}/files/{deleted.id}", headers=auth_headers
+            )
+        assert resp.status_code == 200
+        assert [row["remote_filename"] for row in resp.json()] == ["kept.gcode"]
+
+
+class TestWsTicketExtra:
+    def test_ws_ticket_404_unknown_printer(self, client: TestClient, auth_headers):
+        resp = client.post("/api/v1/printers/99999/ws-ticket", headers=auth_headers)
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "printer_not_found"
+
+    def test_ws_ticket_404_deleted_printer(
+        self, client: TestClient, auth_headers, db_session: Session
+    ):
+        from app.core.time import utcnow
+
+        p = Printer(name="Gone", moonraker_url="http://gone.local")
+        p.deleted_at = utcnow()
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+
+        resp = client.post(f"/api/v1/printers/{p.id}/ws-ticket", headers=auth_headers)
+        assert resp.status_code == 404
+
+
+class TestPrinterWebSocketBearerToken:
+    def test_bearer_header_token_authenticates(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session
+    ):
+        printer = Printer(name="Bearer", moonraker_url="http://printer.local")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+
+        with client.websocket_connect(
+            f"/api/v1/printers/{printer.id}/ws", headers=auth_headers
+        ):
+            pass
+
+    def test_bearer_header_invalid_token_closes(
+        self, client: TestClient, db_session: Session
+    ):
+        printer = Printer(name="BadToken", moonraker_url="http://printer.local")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(
+                f"/api/v1/printers/{printer.id}/ws",
+                headers={"Authorization": "Bearer not-a-real-token"},
+            ):
+                pass

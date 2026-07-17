@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -186,3 +187,179 @@ async def test_remote_path_traversal_rejected(tmp_path: Path) -> None:
     with pytest.raises(PrusaLinkError) as exc:
         await client.upload(source, "../cube.gcode")
     assert exc.value.code == "provider_error"
+
+
+@pytest.mark.asyncio
+async def test_timeout_maps_to_provider_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = _client(handler)
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_timeout"
+
+
+@pytest.mark.asyncio
+async def test_transport_error_wraps_httpx_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = _client(handler)
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_transport_error"
+
+
+@pytest.mark.asyncio
+async def test_404_without_allow_not_found_raises() -> None:
+    client = _client(lambda request: httpx.Response(404))
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.delete_file("missing.gcode")
+    assert exc.value.code == "provider_endpoint_not_supported"
+
+
+@pytest.mark.asyncio
+async def test_generic_http_error_maps_to_transport_error() -> None:
+    client = _client(lambda request: httpx.Response(500))
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_transport_error"
+    assert "prusalink_http_500" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_response_raises() -> None:
+    client = _client(
+        lambda request: httpx.Response(
+            200, content=b"not json", headers={"content-length": "8"}
+        )
+    )
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_invalid_response"
+
+
+def test_normalize_status_unwraps_nested_job_key() -> None:
+    normalized = PrusaLinkClient._normalize_status(
+        {"printer": {"state": "PRINTING"}},
+        {"job": {"id": 5, "state": "PRINTING", "progress": 10}},
+    )
+    assert normalized["prusalink"]["job_id"] == 5
+    assert normalized["virtual_sdcard"]["progress"] == 0.1
+
+
+def test_normalize_status_reads_legacy_completion_field() -> None:
+    normalized = PrusaLinkClient._normalize_status(
+        {"printer": {"state": "PRINTING"}},
+        {"id": 1, "state": "PRINTING", "progress": {"completion": 40}},
+    )
+    assert normalized["virtual_sdcard"]["progress"] == 0.4
+
+
+def test_normalize_status_tolerates_unparseable_progress() -> None:
+    normalized = PrusaLinkClient._normalize_status(
+        {"printer": {"state": "PRINTING"}},
+        {"id": 1, "state": "PRINTING", "progress": "not-a-number"},
+    )
+    assert normalized["virtual_sdcard"]["progress"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_list_files_returns_empty_when_body_not_list() -> None:
+    client = _client(
+        lambda request: httpx.Response(200, json={"children": {"nope": True}})
+    )
+    assert await client.list_files() == []
+
+
+@pytest.mark.asyncio
+async def test_list_files_skips_non_dict_entries_and_recurses_folders() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "children": [
+                    "not-a-dict",
+                    {
+                        "name": "sub",
+                        "type": "FOLDER",
+                        "children": [
+                            {"name": "nested.gcode", "type": "PRINT_FILE", "size": 9}
+                        ],
+                    },
+                ]
+            },
+        )
+
+    files = await _client(handler).list_files()
+    assert [f["filename"] for f in files] == ["nested.gcode"]
+
+
+@pytest.mark.asyncio
+async def test_pause_without_active_job_raises() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/job":
+            return httpx.Response(200, json={"id": None})
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    with pytest.raises(PrusaLinkError) as exc:
+        await client.pause()
+    assert exc.value.code == "provider_no_active_job"
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_pushes_once_then_returns_without_stop_event() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/status":
+            return httpx.Response(200, json={"printer": {"state": "IDLE"}})
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    received: list = []
+
+    async def on_status(status):
+        received.append(status)
+
+    await asyncio.wait_for(client.subscribe_status(on_status), timeout=3.0)
+    assert len(received) == 1
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_returns_when_stop_event_set() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/status":
+            return httpx.Response(200, json={"printer": {"state": "IDLE"}})
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    stop = asyncio.Event()
+    stop.set()
+
+    async def on_status(status):
+        pass
+
+    await asyncio.wait_for(
+        client.subscribe_status(on_status, stop_event=stop), timeout=3.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_times_out_and_returns_when_stop_event_not_set_in_time() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/status":
+            return httpx.Response(200, json={"printer": {"state": "IDLE"}})
+        return httpx.Response(200, json={})
+
+    client = _client(handler)
+    stop = asyncio.Event()
+
+    async def on_status(status):
+        pass
+
+    await asyncio.wait_for(
+        client.subscribe_status(on_status, stop_event=stop), timeout=3.0
+    )

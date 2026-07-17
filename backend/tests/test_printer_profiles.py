@@ -120,3 +120,138 @@ def test_detected_printer_profile_keeps_user_renamed_profile(
     rows = db_session.exec(select(PrinterProfile)).all()
     assert len(rows) == 1
     assert rows[0].name == "My garage Ender"
+
+
+def test_detected_printer_profile_backfills_missing_fields_on_existing(
+    db_session: Session,
+) -> None:
+    """An existing profile matched by name with empty model/slicer/nozzle gets
+    those fields filled in from freshly parsed slicer metadata."""
+    existing = PrinterProfile(
+        name="Ender-3",
+        printer_model=None,
+        slicer_name=None,
+        nozzle_diameter_mm=None,
+    )
+    db_session.add(existing)
+    db_session.commit()
+    db_session.refresh(existing)
+
+    upsert_detected_printer_profile(
+        db_session,
+        {
+            "printer_model": "Ender-3",
+            "printer_preset_name": "Ender-3",
+            "slicer_name": "OrcaSlicer",
+            "nozzle_diameter_mm": 0.4,
+        },
+    )
+
+    db_session.refresh(existing)
+    assert existing.printer_model == "Ender-3"
+    assert existing.slicer_name == "OrcaSlicer"
+    assert existing.nozzle_diameter_mm == 0.4
+
+
+def test_detected_printer_profile_returns_none_without_model(
+    db_session: Session,
+) -> None:
+    assert upsert_detected_printer_profile(db_session, {}) is None
+
+
+def test_upsert_detected_profiles_creates_both(db_session: Session) -> None:
+    from app.services.profile_detection import upsert_detected_profiles
+
+    upsert_detected_profiles(
+        db_session,
+        {"material_type": "PETG", "printer_model": "Prusa MK4"},
+    )
+    assert (
+        db_session.exec(
+            select(PrinterProfile).where(PrinterProfile.printer_model == "Prusa MK4")
+        ).first()
+        is not None
+    )
+
+
+def test_printer_profile_create_duplicate_name_conflict(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    payload = {"name": "Dup Printer", "printer_model": "Ender-3"}
+    first = client.post(
+        "/api/v1/printer-profiles", headers=auth_headers, json=payload
+    )
+    assert first.status_code == 201
+    second = client.post(
+        "/api/v1/printer-profiles", headers=auth_headers, json=payload
+    )
+    assert second.status_code == 409
+    assert second.json()["detail"] == "printer_profile_already_exists"
+
+
+def test_printer_profile_update_not_found(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    resp = client.patch(
+        "/api/v1/printer-profiles/999",
+        headers=auth_headers,
+        json={"notes": "x"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "printer_profile_not_found"
+
+
+def test_printer_profile_update_rename_conflict_and_field_edits(
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
+) -> None:
+    a = PrinterProfile(name="Printer A", printer_model="A")
+    b = PrinterProfile(name="Printer B", printer_model="B")
+    db_session.add(a)
+    db_session.add(b)
+    db_session.commit()
+    db_session.refresh(a)
+    db_session.refresh(b)
+
+    conflict = client.patch(
+        f"/api/v1/printer-profiles/{b.id}",
+        headers=auth_headers,
+        json={"name": "Printer A"},
+    )
+    assert conflict.status_code == 409
+
+    ok = client.patch(
+        f"/api/v1/printer-profiles/{b.id}",
+        headers=auth_headers,
+        json={
+            "name": "Printer B Renamed",
+            "printer_model": "  Prusa MK4  ",
+            "slicer_name": "  PrusaSlicer  ",
+        },
+    )
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["name"] == "Printer B Renamed"
+    assert body["printer_model"] == "Prusa MK4"
+    assert body["slicer_name"] == "PrusaSlicer"
+
+
+def test_printer_profile_delete_success_and_not_found(
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
+) -> None:
+    profile = PrinterProfile(name="Deletable Printer", printer_model="Ender-3")
+    db_session.add(profile)
+    db_session.commit()
+    db_session.refresh(profile)
+    profile_id = profile.id
+
+    resp = client.delete(
+        f"/api/v1/printer-profiles/{profile_id}", headers=auth_headers
+    )
+    assert resp.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(PrinterProfile, profile_id) is None
+
+    missing = client.delete(
+        f"/api/v1/printer-profiles/{profile_id}", headers=auth_headers
+    )
+    assert missing.status_code == 404

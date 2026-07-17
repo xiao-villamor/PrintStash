@@ -32,8 +32,16 @@ from app.services.runtime_config import set_notifications_enabled
 # --------------------------------------------------------------------------- #
 
 
-def _channel(session, *, events, target=NotificationTarget.WEBHOOK, config=None,
-             printer_ids=None, enabled=True, name="ch"):
+def _channel(
+    session,
+    *,
+    events,
+    target=NotificationTarget.WEBHOOK,
+    config=None,
+    printer_ids=None,
+    enabled=True,
+    name="ch",
+):
     ch = NotificationChannel(
         name=name,
         target=target,
@@ -78,7 +86,10 @@ def _allow_public_urls():
     Tests that exercise the SSRF guard itself override this with their own patch.
     """
     target = PinnedTarget(
-        url="https://hooks.example/x", host="hooks.example", port=443, ip="93.184.216.34"
+        url="https://hooks.example/x",
+        host="hooks.example",
+        port=443,
+        ip="93.184.216.34",
     )
     with patch.object(notifications, "resolve_public_target", return_value=target):
         yield
@@ -90,7 +101,12 @@ def _allow_public_urls():
 
 
 def test_backoff_schedule_then_exhaustion():
-    assert [notifications.next_retry_delay(a) for a in (1, 2, 3, 4)] == [30, 120, 600, 1800]
+    assert [notifications.next_retry_delay(a) for a in (1, 2, 3, 4)] == [
+        30,
+        120,
+        600,
+        1800,
+    ]
     assert notifications.next_retry_delay(5) is None
 
 
@@ -183,7 +199,9 @@ async def test_dispatch_success_marks_sent_and_channel_status(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "_client_for", new=_client_factory(_http_returning(204))):
+    with patch.object(
+        notifications, "_client_for", new=_client_factory(_http_returning(204))
+    ):
         attempted = await notifications.dispatch_due()
     assert attempted == 1
 
@@ -205,7 +223,9 @@ async def test_dispatch_http_error_retries_with_backoff(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "_client_for", new=_client_factory(_http_returning(500, "boom"))):
+    with patch.object(
+        notifications, "_client_for", new=_client_factory(_http_returning(500, "boom"))
+    ):
         await notifications.dispatch_due()
 
     db_session.expire_all()
@@ -232,7 +252,9 @@ async def test_dispatch_marks_failed_after_exhausting_retries(db_session):
     db_session.add(delivery)
     db_session.commit()
 
-    with patch.object(notifications, "_client_for", new=_client_factory(_http_returning(500))):
+    with patch.object(
+        notifications, "_client_for", new=_client_factory(_http_returning(500))
+    ):
         await notifications.dispatch_due()
 
     db_session.expire_all()
@@ -276,8 +298,13 @@ async def test_dispatch_blocks_non_public_url(db_session):
 
     client = _http_returning(204)
     # Override the autouse allow-fixture: this URL is "not public".
-    with patch.object(notifications, "_client_for", new=_client_factory(client)), patch.object(
-        notifications, "resolve_public_target", side_effect=UnsafeUrlError("url_target_not_public")
+    with (
+        patch.object(notifications, "_client_for", new=_client_factory(client)),
+        patch.object(
+            notifications,
+            "resolve_public_target",
+            side_effect=UnsafeUrlError("url_target_not_public"),
+        ),
     ):
         await notifications.dispatch_due()
     client.request.assert_not_called()  # never left the process
@@ -367,7 +394,9 @@ async def test_success_resets_consecutive_failures(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "_client_for", new=_client_factory(_http_returning(204))):
+    with patch.object(
+        notifications, "_client_for", new=_client_factory(_http_returning(204))
+    ):
         await notifications.dispatch_due()
 
     db_session.refresh(ch)
@@ -395,7 +424,9 @@ async def test_stuck_sending_is_reclaimed(db_session):
     db_session.add(d)
     db_session.commit()
 
-    with patch.object(notifications, "_client_for", new=_client_factory(_http_returning(204))):
+    with patch.object(
+        notifications, "_client_for", new=_client_factory(_http_returning(204))
+    ):
         attempted = await notifications.dispatch_due()
 
     assert attempted == 1  # reclaimed and delivered
@@ -453,15 +484,21 @@ async def test_run_dispatcher_loop_delivers_then_cancels(db_session):
     )
     db_session.commit()
 
-    with patch.object(notifications, "_POLL_INTERVAL_S", 0.01), patch.object(
-        notifications, "_client_for", new=_client_factory(_http_returning(204))
+    with (
+        patch.object(notifications, "_POLL_INTERVAL_S", 0.01),
+        patch.object(
+            notifications, "_client_for", new=_client_factory(_http_returning(204))
+        ),
     ):
         task = asyncio.create_task(notifications.run_dispatcher_loop())
         # Poll until the delivery is sent, then cancel the loop.
         for _ in range(200):
             await asyncio.sleep(0.01)
             db_session.expire_all()
-            if _deliveries(db_session, ch.id)[0].status == NotificationDeliveryStatus.SENT:
+            if (
+                _deliveries(db_session, ch.id)[0].status
+                == NotificationDeliveryStatus.SENT
+            ):
                 break
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -486,8 +523,9 @@ async def test_run_dispatcher_loop_survives_tick_error(db_session):
             two_ticks.set()
         raise RuntimeError("tick boom")
 
-    with patch.object(notifications, "_POLL_INTERVAL_S", 0.01), patch.object(
-        notifications, "dispatch_due", side_effect=_boom
+    with (
+        patch.object(notifications, "_POLL_INTERVAL_S", 0.01),
+        patch.object(notifications, "dispatch_due", side_effect=_boom),
     ):
         task = asyncio.create_task(notifications.run_dispatcher_loop())
         await asyncio.wait_for(two_ticks.wait(), timeout=5.0)
@@ -555,6 +593,349 @@ def test_cancelled_emits_distinct_event(db_session):
     PrinterHub()._sync_active_job_db(p.id, "cancelled", "y.gcode", 0.4, stats)
     db_session.expire_all()
     assert _deliveries(db_session) == []
+
+
+# --------------------------------------------------------------------------- #
+# _client_for, _channel_subscribes, _claim_due_deliveries, _record_result,
+# _parse_retry_after — corrupt-JSON and edge-case branches
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_client_for_returns_real_async_client():
+    import httpx
+
+    target = PinnedTarget(
+        url="https://hooks.example/x",
+        host="hooks.example",
+        port=443,
+        ip="93.184.216.34",
+    )
+    client = notifications._client_for(target)
+    try:
+        assert isinstance(client, httpx.AsyncClient)
+    finally:
+        await client.aclose()
+
+
+def test_channel_subscribes_handles_corrupt_events_json():
+    ch = NotificationChannel(
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config_json="{}",
+        events_json="not json",
+        printer_ids_json=None,
+    )
+    assert (
+        notifications._channel_subscribes(
+            ch, NotificationEventType.PRINTER_OFFLINE, None
+        )
+        is False
+    )
+
+
+def test_channel_subscribes_handles_corrupt_printer_ids_json():
+    ch = NotificationChannel(
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config_json="{}",
+        events_json=json.dumps([NotificationEventType.PRINTER_OFFLINE.value]),
+        printer_ids_json="not json",
+    )
+    # Corrupt scope parses to None (falsy) -> treated as unscoped, matches.
+    assert (
+        notifications._channel_subscribes(ch, NotificationEventType.PRINTER_OFFLINE, 42)
+        is True
+    )
+
+
+def test_claim_due_deliveries_handles_corrupt_config_and_context_json(db_session):
+    set_notifications_enabled(db_session, True)
+    ch = _channel(db_session, events=[NotificationEventType.PRINTER_OFFLINE])
+    ch.config_json = "not json"
+    db_session.add(ch)
+    delivery = NotificationDelivery(
+        channel_id=ch.id,
+        event_type=NotificationEventType.PRINTER_OFFLINE,
+        status=NotificationDeliveryStatus.PENDING,
+        context_json="not json either",
+    )
+    db_session.add(delivery)
+    db_session.commit()
+
+    items = notifications._claim_due_deliveries()
+
+    assert len(items) == 1
+    assert items[0]["config"] == {}
+    assert items[0]["context"] == {}
+
+
+def test_record_result_noop_when_delivery_missing():
+    # Must not raise even though the delivery id doesn't exist.
+    notifications._record_result(999_999_999, 1, success=True, error=None)
+
+
+def test_parse_retry_after_variants():
+    assert notifications._parse_retry_after(None) is None
+    assert notifications._parse_retry_after("") is None
+    assert notifications._parse_retry_after("120") == 120
+    assert notifications._parse_retry_after("not a date") is None
+    from email.utils import format_datetime
+
+    from app.core.time import utcnow
+
+    future = utcnow() + __import__("datetime").timedelta(seconds=90)
+    parsed = notifications._parse_retry_after(format_datetime(future))
+    assert parsed is not None and parsed > 0
+
+    # A timezone-less HTTP-date parses to a naive datetime, which must be
+    # treated as UTC rather than raising.
+    naive_future = (utcnow() + __import__("datetime").timedelta(seconds=90)).strftime(
+        "%a, %d %b %Y %H:%M:%S"
+    )
+    assert notifications._parse_retry_after(naive_future) is not None
+
+
+@pytest.mark.asyncio
+async def test_send_one_records_network_exception(db_session):
+    set_notifications_enabled(db_session, True)
+    ch = _channel(db_session, events=[NotificationEventType.PRINTER_OFFLINE])
+    notifications.enqueue_for_event(
+        db_session, NotificationEventType.PRINTER_OFFLINE, printer_id=1
+    )
+    db_session.commit()
+
+    client = MagicMock()
+    client.request = AsyncMock(side_effect=RuntimeError("connection reset"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch.object(notifications, "_client_for", new=_client_factory(client)):
+        await notifications.dispatch_due()
+
+    db_session.expire_all()
+    d = _deliveries(db_session, ch.id)[0]
+    assert d.status == NotificationDeliveryStatus.PENDING  # will retry
+    assert "connection reset" in (d.last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_dispatch_due_returns_zero_when_nothing_claimed(db_session):
+    assert await notifications.dispatch_due() == 0
+
+
+@pytest.mark.asyncio
+async def test_run_dispatcher_loop_reraises_cancelled_error_from_tick():
+    with (
+        patch.object(notifications, "_POLL_INTERVAL_S", 0.01),
+        patch.object(notifications, "dispatch_due", side_effect=asyncio.CancelledError),
+    ):
+        task = asyncio.create_task(notifications.run_dispatcher_loop())
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2.0)
+
+
+# --------------------------------------------------------------------------- #
+# serialize_channel / update_channel — corrupt-JSON and non-secret branches
+# --------------------------------------------------------------------------- #
+
+
+def test_serialize_channel_handles_all_corrupt_json_fields():
+    ch = NotificationChannel(
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config_json="not json",
+        events_json="not json",
+        printer_ids_json="not json",
+    )
+    out = notifications.serialize_channel(ch)
+    assert out["config"] == {}
+    assert out["events"] == []
+    assert out["printer_ids"] is None
+
+
+def test_serialize_channel_returns_nonsecret_config_plainly():
+    ch = NotificationChannel(
+        name="x",
+        target=NotificationTarget.NTFY,
+        config_json=json.dumps({"topic": "my-topic", "token": "secret-tok"}),
+        events_json=json.dumps([NotificationEventType.PRINTER_OFFLINE.value]),
+    )
+    out = notifications.serialize_channel(ch)
+    assert out["config"]["topic"] == "my-topic"  # non-secret: passed through
+    assert out["config"]["token"] == "********"  # secret: masked
+    assert out["config_flags"]["has_token"] is True
+
+
+def test_update_channel_recovers_from_corrupt_stored_events_json(db_session):
+    from app.services.notifications import update_channel
+
+    ch = notifications.create_channel(
+        db_session,
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config={"url": "https://example.com/hook"},
+        events=["print_completed"],
+    )
+    ch.events_json = "not json"
+    db_session.add(ch)
+    db_session.commit()
+
+    # Corrupt events_json decodes to an empty list (the except branch), which
+    # then fails validation the same as a genuinely-empty selection.
+    with pytest.raises(notifications.NotificationConfigError):
+        update_channel(db_session, ch, name="renamed")
+
+
+def test_update_channel_recovers_from_corrupt_stored_config_json_no_config_arg(
+    db_session,
+):
+    from app.services.notifications import update_channel
+
+    ch = notifications.create_channel(
+        db_session,
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config={"url": "https://example.com/hook"},
+        events=["print_completed"],
+    )
+    ch.config_json = "not json"
+    db_session.add(ch)
+    db_session.commit()
+
+    # config=None -> hits the "merged = json.loads(...)" except branch, then
+    # validate_channel fails (no url) — this exercises the corrupt-read path.
+    with pytest.raises(notifications.NotificationConfigError):
+        update_channel(db_session, ch, name="renamed")
+
+
+def test_update_channel_recovers_from_corrupt_stored_config_json_with_config_arg(
+    db_session,
+):
+    from app.services.notifications import update_channel
+
+    ch = notifications.create_channel(
+        db_session,
+        name="x",
+        target=NotificationTarget.WEBHOOK,
+        config={"url": "https://example.com/hook"},
+        events=["print_completed"],
+    )
+    ch.config_json = "not json"
+    db_session.add(ch)
+    db_session.commit()
+
+    updated = update_channel(
+        db_session, ch, config={"url": "https://example.com/new-hook"}
+    )
+    assert json.loads(updated.config_json)["url"] == "https://example.com/new-hook"
+
+
+def test_update_channel_overwrites_nonsecret_config_key(db_session):
+    from app.services.notifications import update_channel
+
+    ch = notifications.create_channel(
+        db_session,
+        name="x",
+        target=NotificationTarget.NTFY,
+        config={"topic": "old-topic"},
+        events=["print_completed"],
+    )
+    updated = update_channel(db_session, ch, config={"topic": "new-topic"})
+    assert json.loads(updated.config_json)["topic"] == "new-topic"
+
+
+def test_list_recent_deliveries_returns_serialized_rows(db_session):
+    set_notifications_enabled(db_session, True)
+    ch = _channel(db_session, events=[NotificationEventType.PRINTER_OFFLINE])
+    notifications.enqueue_for_event(
+        db_session, NotificationEventType.PRINTER_OFFLINE, printer_id=1
+    )
+    db_session.commit()
+
+    rows = notifications.list_recent_deliveries(db_session)
+
+    assert len(rows) == 1
+    assert rows[0]["channel_id"] == ch.id
+    assert rows[0]["status"] == NotificationDeliveryStatus.PENDING.value
+
+
+# --------------------------------------------------------------------------- #
+# send_test — error branches (channel-not-found, corrupt config, render error,
+# blocked host, non-2xx response, network exception)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_send_test_channel_not_found():
+    result = await notifications.send_test(999_999_999)
+    assert result == {"ok": False, "error": "channel not found"}
+
+
+@pytest.mark.asyncio
+async def test_send_test_recovers_from_corrupt_config_json(db_session):
+    ch = _channel(db_session, events=[NotificationEventType.PRINT_COMPLETED])
+    ch.config_json = "not json"
+    db_session.add(ch)
+    db_session.commit()
+
+    # Corrupt config loads as {}, then webhook rendering fails for lack of a url.
+    result = await notifications.send_test(ch.id)
+    assert result["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_send_test_render_error_missing_required_config(db_session):
+    ch = _channel(
+        db_session,
+        events=[NotificationEventType.PRINT_COMPLETED],
+        target=NotificationTarget.TELEGRAM,
+        config={"bot_token": "t"},  # missing chat_id
+    )
+    result = await notifications.send_test(ch.id)
+    assert result["ok"] is False
+    assert result["error"]
+
+
+@pytest.mark.asyncio
+async def test_send_test_blocked_non_public_host(db_session):
+    ch = _channel(db_session, events=[NotificationEventType.PRINT_COMPLETED])
+    with patch.object(
+        notifications,
+        "resolve_public_target",
+        side_effect=UnsafeUrlError("url_target_not_public"),
+    ):
+        result = await notifications.send_test(ch.id)
+    assert result["ok"] is False
+    assert "not a public host" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_send_test_http_error_response(db_session):
+    ch = _channel(db_session, events=[NotificationEventType.PRINT_COMPLETED])
+    client = _http_returning(500, "server exploded")
+    with patch.object(notifications, "_client_for", new=_client_factory(client)):
+        result = await notifications.send_test(ch.id)
+    assert result["ok"] is False
+    assert "HTTP 500" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_send_test_network_exception(db_session):
+    ch = _channel(db_session, events=[NotificationEventType.PRINT_COMPLETED])
+    client = MagicMock()
+    client.request = AsyncMock(side_effect=RuntimeError("dns failure"))
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    with patch.object(notifications, "_client_for", new=_client_factory(client)):
+        result = await notifications.send_test(ch.id)
+    assert result["ok"] is False
+    assert "dns failure" in result["error"]
+
+
+def test_record_channel_test_noop_when_channel_missing():
+    # Must not raise even though the channel id doesn't exist.
+    notifications._record_channel_test(999_999_999, True, None)
 
 
 def test_offline_not_fired_from_unknown(db_session):

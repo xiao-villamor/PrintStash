@@ -18,7 +18,13 @@ if config.get_main_option("sqlalchemy.url") == default_url:
     config.set_main_option("sqlalchemy.url", settings.db_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would set .disabled on
+    # every app.* logger not named in alembic.ini — silently muting application
+    # logging for the rest of the process (and breaking caplog in any test that
+    # runs a migration before asserting on app logs). Migrations configure only
+    # their own logging; they must never hijack the app's. Matches the intent in
+    # app/db/migrate.py, which sidesteps fileConfig entirely for the same reason.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = SQLModel.metadata
 

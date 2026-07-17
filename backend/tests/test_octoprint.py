@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -144,7 +145,12 @@ async def test_file_operations_and_controls(tmp_path: Path) -> None:
                 200,
                 json={
                     "files": [
-                        {"name": "cube.gcode", "path": "cube.gcode", "size": 5, "type": "machinecode"}
+                        {
+                            "name": "cube.gcode",
+                            "path": "cube.gcode",
+                            "size": 5,
+                            "type": "machinecode",
+                        }
                     ]
                 },
             )
@@ -190,3 +196,181 @@ async def test_remote_path_traversal_rejected(tmp_path: Path) -> None:
     with pytest.raises(OctoPrintError) as exc:
         await client.upload(source, "../cube.gcode")
     assert exc.value.code == "provider_error"
+
+
+@pytest.mark.asyncio
+async def test_timeout_maps_to_provider_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    client = _client(handler)
+    with pytest.raises(OctoPrintError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_timeout"
+
+
+@pytest.mark.asyncio
+async def test_transport_error_wraps_httpx_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    client = _client(handler)
+    with pytest.raises(OctoPrintError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_transport_error"
+
+
+@pytest.mark.asyncio
+async def test_404_with_allow_not_found_returns_empty_dict() -> None:
+    client = _client(lambda request: httpx.Response(404))
+    status = await client.query_status()
+    # Both /api/printer and /api/job 404 (allow_not_found=True) -> {} -> standby.
+    assert status["result"]["status"]["print_stats"]["state"] == "standby"
+
+
+@pytest.mark.asyncio
+async def test_404_without_allow_not_found_raises() -> None:
+    client = _client(lambda request: httpx.Response(404))
+    with pytest.raises(OctoPrintError) as exc:
+        await client.delete_file("missing.gcode")
+    assert exc.value.code == "provider_endpoint_not_supported"
+
+
+@pytest.mark.asyncio
+async def test_generic_http_error_maps_to_transport_error() -> None:
+    client = _client(lambda request: httpx.Response(500))
+    with pytest.raises(OctoPrintError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_transport_error"
+    assert "octoprint_http_500" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_no_content_response_returns_ok_true() -> None:
+    client = _client(lambda request: httpx.Response(204))
+    result = await client.cancel()
+    assert result == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_response_raises() -> None:
+    client = _client(
+        lambda request: httpx.Response(
+            200, content=b"not json", headers={"content-length": "8"}
+        )
+    )
+    with pytest.raises(OctoPrintError) as exc:
+        await client.info()
+    assert exc.value.code == "provider_invalid_response"
+
+
+@pytest.mark.asyncio
+async def test_paused_cancelling_and_error_states() -> None:
+    def make_client(flags: dict) -> OctoPrintClient:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/api/printer":
+                return httpx.Response(200, json={"state": {"flags": flags}})
+            return httpx.Response(200, json={"job": {}, "progress": {}})
+
+        return _client(handler)
+
+    paused = await make_client({"paused": True}).query_status()
+    assert paused["result"]["status"]["print_stats"]["state"] == "paused"
+
+    cancelling = await make_client({"cancelling": True}).query_status()
+    assert cancelling["result"]["status"]["print_stats"]["state"] == "cancelled"
+
+    errored = await make_client({"error": True}).query_status()
+    assert errored["result"]["status"]["print_stats"]["state"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_flatten_files_skips_non_dict_and_unknown_type_entries() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "files": [
+                    "not-a-dict",
+                    {"name": "readme.txt", "path": "readme.txt", "type": "machine"},
+                    {"name": "cube.gcode", "path": "cube.gcode", "type": "machinecode"},
+                ]
+            },
+        )
+
+    files = await _client(handler).list_files()
+    assert [f["path"] for f in files] == ["cube.gcode"]
+
+
+@pytest.mark.asyncio
+async def test_list_files_returns_empty_when_body_not_list() -> None:
+    client = _client(
+        lambda request: httpx.Response(200, json={"files": {"nope": True}})
+    )
+    assert await client.list_files() == []
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_pushes_once_then_returns_without_stop_event() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/printer":
+            return httpx.Response(200, json={"state": {"flags": {}}})
+        return httpx.Response(200, json={"job": {}, "progress": {}})
+
+    client = _client(handler)
+    received: list = []
+
+    async def on_status(status):
+        received.append(status)
+
+    await asyncio.wait_for(client.subscribe_status(on_status), timeout=3.0)
+    assert len(received) == 1
+
+
+@pytest.mark.asyncio
+async def test_info_returns_provider_and_version() -> None:
+    client = _client(lambda request: httpx.Response(200, json={"server": "1.9.0"}))
+    result = await client.info()
+    assert result["result"]["provider"] == "octoprint"
+    assert result["result"]["version"] == {"server": "1.9.0"}
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_times_out_and_returns_when_stop_event_not_set_in_time() -> (
+    None
+):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/printer":
+            return httpx.Response(200, json={"state": {"flags": {}}})
+        return httpx.Response(200, json={"job": {}, "progress": {}})
+
+    client = _client(handler)
+    stop = asyncio.Event()
+
+    async def on_status(status):
+        pass
+
+    # Never set `stop`, so the internal wait_for(..., timeout=2.0) times out
+    # and subscribe_status returns via the TimeoutError branch.
+    await asyncio.wait_for(
+        client.subscribe_status(on_status, stop_event=stop), timeout=3.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_subscribe_status_returns_when_stop_event_set() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/printer":
+            return httpx.Response(200, json={"state": {"flags": {}}})
+        return httpx.Response(200, json={"job": {}, "progress": {}})
+
+    client = _client(handler)
+    stop = asyncio.Event()
+    stop.set()
+
+    async def on_status(status):
+        pass
+
+    await asyncio.wait_for(
+        client.subscribe_status(on_status, stop_event=stop), timeout=3.0
+    )
