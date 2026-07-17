@@ -52,7 +52,7 @@ jobs:
         run: uv run ruff check app/ tests/
 
       - name: Test backend
-        run: uv run pytest tests -v --cov=app --cov-report=term-missing --cov-fail-under=85
+        run: uv run pytest tests -v --cov=app --cov-report=term-missing --cov-fail-under=95
 
   storage-s3:
     name: Storage backend (S3/MinIO)
