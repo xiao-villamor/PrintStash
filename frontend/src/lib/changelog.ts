@@ -22,8 +22,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.11.0",
+    date: "Jul 2026",
+    changes: [
+      "Fleet queue and routing: queue Vault G-code across your printers with manual, default-printer, or least-busy routing, then reorder, reroute, cancel, and retry eligible failed dispatches",
+      "Maintenance-aware scheduling: put a printer in soft-drain mode, book one-off maintenance windows, and keep a simple maintenance log without interrupting active prints",
+      "New Fleet, Queue, and Maintenance views in printer management, and Model send dialogs can now add G-code to the fleet queue",
+      "Import and scan jobs now survive an app restart; interrupted work that can't be replayed is marked failed and retryable instead of vanishing or hanging",
+      "Optional OIDC / SSO login for Authentik, Authelia, and similar providers — discovery, PKCE, validated ID tokens, just-in-time users, admin-group mapping, and local-login fallback, configured under Settings → SSO",
+      "PrintStash is now installable as a PWA with an offline shell that reopens cached pages when the server is briefly unreachable",
+      "Localization foundation: a persisted language switch with English and Spanish catalogs across login, desktop, mobile, profile, and Settings navigation",
+      "Fixed provider protocol handling for Moonraker authenticated WebSocket connections, Bambu LAN MQTT command confirmation and status reads, and PrusaLink v1 file/job/start; cancelling a printer job now also cancels its PrintStash job row",
+    ],
+  },
+  {
     version: "0.10.0",
-    date: "Unreleased — development branch",
+    date: "Jul 2026",
     changes: [
       "Settings now checks the official GitHub release feed and warns administrators when a newer stable PrintStash version is available",
       "Bulk-select Models to move collections, update tags, move to trash, and label several G-code revisions atomically",

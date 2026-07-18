@@ -21,7 +21,12 @@ manufacturing platform.
   Carbon 2 have beta local status/control support, but no upload or inventory.
   Neptune 2/3, OrangeStorm, and SLA models are not covered.
 - Provider behavior still needs more real-world hardware validation across
-  printers, firmware versions, networks, and auth setups.
+  printers, firmware versions, networks, and auth setups. In particular, the
+  0.11.0 protocol corrections — the Moonraker `server.connection.identify`
+  handshake, Bambu LAN MQTT report-confirmed commands and status reads, and the
+  PrusaLink v1 file/job/start alignment — are verified against mocked transports
+  and emulators only; no real-hardware Validation Log rows exist yet (see
+  `docs/provider-support.md`).
 
 ## Deployment
 
