@@ -445,6 +445,16 @@ export interface ListModelsParams {
   printer_id?: number;
   printer_presence?: "any" | "none";
   favorites?: boolean;
+  file_type?: ArtifactFileType[];
+  material_type?: string[];
+  slicer_name?: string[];
+  printer_model?: string[];
+  revision_status?: FileRevisionStatus[];
+  printed?: boolean;
+  print_outcome?: PrintJobState[];
+  storage?: ("vault" | "external")[];
+  uploaded_after?: string;
+  uploaded_before?: string;
   limit?: number;
   offset?: number;
 }
@@ -457,6 +467,34 @@ export interface SavedViewFilters {
   printer_id?: number | null;
   printer_presence?: "any" | "none" | null;
   favorites: boolean;
+  file_type?: ArtifactFileType[];
+  material_type?: string[];
+  slicer_name?: string[];
+  printer_model?: string[];
+  revision_status?: FileRevisionStatus[];
+  printed?: boolean | null;
+  print_outcome?: PrintJobState[];
+  storage?: ("vault" | "external")[];
+  uploaded_after?: string | null;
+  uploaded_before?: string | null;
+}
+
+export type ArtifactFileType = "stl" | "3mf" | "gcode" | "obj" | "step";
+
+export interface FacetValueRead {
+  value: string;
+  count: number;
+}
+
+export interface ModelFacetsRead {
+  file_type: FacetValueRead[];
+  material_type: FacetValueRead[];
+  slicer_name: FacetValueRead[];
+  printer_model: FacetValueRead[];
+  revision_status: FacetValueRead[];
+  print_outcome: FacetValueRead[];
+  storage: FacetValueRead[];
+  printed: FacetValueRead[];
 }
 
 export interface SavedViewRead {

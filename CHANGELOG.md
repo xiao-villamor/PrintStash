@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.1 (unreleased)
+
+**This patch-version release is an explicit exception to normal 0.x patch policy: it adds features and append-only database migrations. Back up before upgrading.**
+
+### Added
+
+- **Vault Maintenance.** Superusers can run persisted Quick or Full audits, inspect severity-grouped findings, cancel hashing between objects, repair eligible thumbnail/Metadata/Revision findings, and verify backup archive structure and manifest membership.
+- **Pending Imports and Quick Capture.** URL captures persist across restarts with owner-scoped review, retry, Collection/tag assignment, archive/file selection, and a minimal Manifest V3 browser helper that sends only current page URL/title.
+- **Structured Model filters.** Artifact type, material, slicer, printer model, Revision status, print history/outcome, storage location, and upload date extend canonical URLs, facet counts, and Saved Views.
+
+### Changed
+
+- Backup creation now fails if a database-owned blob is unreadable, missing, changes size, or vanishes while streaming instead of silently producing a smaller archive.
+
+### Security
+
+- Pending Import URLs strip secret-shaped query parameters and reject embedded URL credentials; persisted manifests and API responses omit staging paths, cookies, and resolved download credentials.
+- Maintenance endpoints are superuser-only, Pending Imports are owner-scoped, and facet counts use the same Collection RBAC scope as Model browsing.
+
 ## 0.11.0
 
 ### Added

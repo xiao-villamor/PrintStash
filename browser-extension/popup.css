@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; font: 14px system-ui, sans-serif; }
+body { margin: 0; min-width: 330px; background: Canvas; color: CanvasText; }
+main { display: grid; gap: 12px; padding: 16px; }
+h1 { margin: 0; font-size: 18px; }
+p { margin: 0; }
+.muted { color: GrayText; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; }
+input { box-sizing: border-box; width: 100%; border: 1px solid GrayText; border-radius: 6px; padding: 8px; background: Canvas; color: CanvasText; }
+.actions { display: flex; justify-content: flex-end; gap: 8px; }
+button { border: 0; border-radius: 6px; padding: 8px 10px; background: #2563eb; color: white; font-weight: 600; cursor: pointer; }
+button.secondary { border: 1px solid GrayText; background: transparent; color: CanvasText; }
+button:disabled { cursor: wait; opacity: .6; }
+#status[data-kind="error"] { color: #dc2626; }
+#status[data-kind="success"] { color: #16a34a; }

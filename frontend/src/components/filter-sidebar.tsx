@@ -359,6 +359,7 @@ export function FilterSidebarContent({
   loading,
   outlinerFilter,
   canViewPrinters = true,
+  structuredFilters,
 }: FilterSidebarProps) {
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
@@ -720,6 +721,9 @@ export function FilterSidebarContent({
         )}
 
         {/* Tags */}
+        {structuredFilters}
+
+        {/* Tags */}
         {tags.length > 0 && (
           <section>
             <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
@@ -807,6 +811,7 @@ export interface FilterSidebarProps {
   canViewPrinters?: boolean;
   loading?: boolean;
   outlinerFilter?: string;
+  structuredFilters?: React.ReactNode;
 }
 
 export function FilterSidebar(props: FilterSidebarProps) {

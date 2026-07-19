@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
-import { CollectionRead, ModelBatchResult, ModelListItem, PrinterRead, SavedViewRead, TagRead } from "@/types";
+import { ArtifactFileType, CollectionRead, FileRevisionStatus, ModelBatchResult, ModelListItem, PrinterRead, SavedViewRead, TagRead } from "@/types";
 import { ModelCard, MODEL_DND_MIME } from "@/components/model-card";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,6 +11,7 @@ import { CollectionReadme } from "@/components/collection-readme";
 import { DocumentBrowser } from "@/components/document-browser";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
+import { StructuredFilters } from "@/components/structured-filters";
 import { UploadModal, UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -39,7 +40,7 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
-import { createCollection, updateModel, moveCollection, renameCollection, deleteCollection, batchMoveModels, batchTagModels, batchDeleteModels, createSavedView, updateSavedView, deleteSavedView, listSavedViews, listModels, restoreModel } from "@/lib/api";
+import { createCollection, updateModel, moveCollection, renameCollection, deleteCollection, batchMoveModels, batchTagModels, batchDeleteModels, createSavedView, updateSavedView, deleteSavedView, getModelFacets, listSavedViews, listModels, restoreModel } from "@/lib/api";
 import { isMeshFile, isGcodeFile, extensionOf, walkEntries, entriesFromDataTransfer, BulkItem } from "@/lib/bulk-upload";
 import { useCollections, useModelList, useOutlinerModels, usePrinters, useTags, useVaultStats, type ModelListFilters, } from "@/lib/queries";
 import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
@@ -352,6 +353,24 @@ async function onMainDrop(e: React.DragEvent) {
   const searchQuery = query.trim() || undefined;
   const canViewPrinters = !!user?.is_superuser;
   const queryClient = useQueryClient();
+  const structured = {
+    file_type: searchParams.getAll("file_type"),
+    material_type: searchParams.getAll("material_type"),
+    slicer_name: searchParams.getAll("slicer_name"),
+    printer_model: searchParams.getAll("printer_model"),
+    revision_status: searchParams.getAll("revision_status"),
+    print_outcome: searchParams.getAll("print_outcome"),
+    storage: searchParams.getAll("storage"),
+    printed: searchParams.getAll("printed"),
+  };
+
+  function setStructuredFilter(key: keyof typeof structured, values: string[]) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete(key);
+    values.forEach((value) => params.append(key, value));
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
 
   // Filters shared by the grid + outliner queries; only the search query and
   // pagination differ between them.
@@ -363,7 +382,26 @@ async function onMainDrop(e: React.DragEvent) {
         ? selectedPrinterPresence ?? undefined
         : undefined,
     favorites: favoritesOnly || undefined,
+    file_type: structured.file_type as ArtifactFileType[],
+    material_type: structured.material_type,
+    slicer_name: structured.slicer_name,
+    printer_model: structured.printer_model,
+    revision_status: structured.revision_status as FileRevisionStatus[],
+    print_outcome: structured.print_outcome as ModelListFilters["print_outcome"],
+    storage: structured.storage as ModelListFilters["storage"],
+    printed: structured.printed[0] ? structured.printed[0] === "yes" : undefined,
+    uploaded_after: searchParams.get("uploaded_after") || undefined,
+    uploaded_before: searchParams.get("uploaded_before") || undefined,
   };
+  const facetQuery = useQuery({
+    queryKey: [...queryKeys.models, "facets", baseFilters, selectedCollection, searchQuery],
+    queryFn: () => getModelFacets({
+      ...baseFilters,
+      collection: selectedCollection ?? undefined,
+      direct: !searchQuery,
+      q: searchQuery,
+    }),
+  });
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
     const params = new URLSearchParams();
@@ -373,6 +411,12 @@ async function onMainDrop(e: React.DragEvent) {
     if (filters.printer_id) params.set("printer_id", String(filters.printer_id));
     if (filters.printer_presence) params.set("printer_presence", filters.printer_presence);
     if (filters.favorites) params.set("favorites", "true");
+    for (const key of ["file_type", "material_type", "slicer_name", "printer_model", "revision_status", "print_outcome", "storage"] as const) {
+      for (const value of filters[key] ?? []) params.append(key, value);
+    }
+    if (filters.printed != null) params.set("printed", filters.printed ? "yes" : "no");
+    if (filters.uploaded_after) params.set("uploaded_after", filters.uploaded_after);
+    if (filters.uploaded_before) params.set("uploaded_before", filters.uploaded_before);
     router.replace(params.size ? `/?${params}` : "/", { scroll: false });
   }
 
@@ -401,7 +445,25 @@ async function onMainDrop(e: React.DragEvent) {
   }
 
   function currentViewFilters(): SavedViewRead["filters"] {
-    return { collection: selectedCollection, direct: !searchQuery, tag: selectedTags, q: searchQuery ?? null, printer_id: selectedPrinterId, printer_presence: selectedPrinterPresence, favorites: favoritesOnly };
+    return {
+      collection: selectedCollection,
+      direct: !searchQuery,
+      tag: selectedTags,
+      q: searchQuery ?? null,
+      printer_id: selectedPrinterId,
+      printer_presence: selectedPrinterPresence,
+      favorites: favoritesOnly,
+      file_type: structured.file_type as ArtifactFileType[],
+      material_type: structured.material_type,
+      slicer_name: structured.slicer_name,
+      printer_model: structured.printer_model,
+      revision_status: structured.revision_status as FileRevisionStatus[],
+      print_outcome: structured.print_outcome as SavedViewRead["filters"]["print_outcome"],
+      storage: structured.storage as SavedViewRead["filters"]["storage"],
+      printed: structured.printed[0] ? structured.printed[0] === "yes" : null,
+      uploaded_after: searchParams.get("uploaded_after"),
+      uploaded_before: searchParams.get("uploaded_before"),
+    };
   }
 
   const activeSavedView = savedViews.find((view) => view.id === activeSavedViewId) ?? null;
@@ -672,7 +734,10 @@ async function onMainDrop(e: React.DragEvent) {
     selectedTags.length > 0 ||
     selectedPrinterId !== null ||
     selectedPrinterPresence !== null ||
-    !!query.trim();
+    !!query.trim() ||
+    Object.values(structured).some((values) => values.length > 0) ||
+    searchParams.has("uploaded_after") ||
+    searchParams.has("uploaded_before");
   const totalLibraryCount = vaultStatsQuery.data?.model_count ?? null;
   const showLibraryTotal =
     !selectedCollection && !hasActiveFilters && totalLibraryCount !== null;
@@ -801,6 +866,7 @@ async function onMainDrop(e: React.DragEvent) {
     params.delete("printer_id");
     params.delete("printer_presence");
     params.delete("favorites");
+    for (const key of ["file_type", "material_type", "slicer_name", "printer_model", "revision_status", "print_outcome", "storage", "printed", "uploaded_after", "uploaded_before"]) params.delete(key);
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
@@ -828,6 +894,25 @@ async function onMainDrop(e: React.DragEvent) {
       items.push({
         label: selectedPrinterPresence === "none" ? "Vault only" : "On a printer",
         onRemove: () => setSelectedPrinterPresence(null),
+      });
+    }
+    for (const [key, values] of Object.entries(structured)) {
+      for (const value of values) {
+        items.push({
+          label: `${key.replaceAll("_", " ")}: ${value.replaceAll("_", " ")}`,
+          onRemove: () => setStructuredFilter(key as keyof typeof structured, values.filter((item) => item !== value)),
+        });
+      }
+    }
+    for (const key of ["uploaded_after", "uploaded_before"] as const) {
+      const value = searchParams.get(key);
+      if (value) items.push({
+        label: `${key === "uploaded_after" ? "Uploaded after" : "Uploaded before"}: ${value}`,
+        onRemove: () => {
+          const params = new URLSearchParams(searchParams.toString());
+          params.delete(key);
+          router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+        },
       });
     }
     return items;
@@ -884,7 +969,8 @@ async function onMainDrop(e: React.DragEvent) {
         onPrinterChange={setSelectedPrinterId} onPrinterPresenceChange={setSelectedPrinterPresence}
         onCreateCollection={handleOpenCreateCollection}
         canViewPrinters={canViewPrinters}
-        loading={facetsLoading}
+        loading={facetsLoading || facetQuery.isLoading}
+        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} />}
       />
 
       {/* Stitch layout: filter sidebar + main content */}
@@ -899,7 +985,8 @@ async function onMainDrop(e: React.DragEvent) {
         onMoveCollection={handleMoveCollection}
         onDeleteCollection={handleDeleteCollection}
         canViewPrinters={canViewPrinters}
-        loading={facetsLoading}
+        loading={facetsLoading || facetQuery.isLoading}
+        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} />}
       />
 
       <main

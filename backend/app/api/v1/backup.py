@@ -83,6 +83,26 @@ def get_backup(backup_id: str) -> dict:
     }
 
 
+@router.post(
+    "/{backup_id}/verify",
+    dependencies=[Depends(require_superuser)],
+    summary="Verify a backup archive",
+)
+def verify_backup(backup_id: str) -> dict:
+    try:
+        result = backup.verify_backup(backup_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="backup_not_found") from exc
+    return {
+        "backup_id": result.backup_id,
+        "valid": result.valid,
+        "app_compatible": result.app_compatible,
+        "manifest_version": result.manifest_version,
+        "checked_members": result.checked_members,
+        "findings": result.findings,
+    }
+
+
 @router.get(
     "/{backup_id}/download",
     dependencies=[Depends(require_superuser)],

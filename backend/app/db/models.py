@@ -80,6 +80,48 @@ class PrintJobState(str, Enum):
     FAILED = "failed"
 
 
+class VaultAuditMode(str, Enum):
+    QUICK = "quick"
+    FULL = "full"
+
+
+class VaultAuditRunState(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+class VaultAuditSeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class VaultAuditFindingState(str, Enum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    IGNORED = "ignored"
+
+
+class InboxSourceKind(str, Enum):
+    URL = "url"
+    BROWSER = "browser"
+    UPLOAD = "upload"
+    EXTERNAL = "external"
+
+
+class InboxItemState(str, Enum):
+    CAPTURED = "captured"
+    RESOLVING = "resolving"
+    REVIEW = "review"
+    IMPORTING = "importing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DISMISSED = "dismissed"
+
+
 class RoutingStrategy(str, Enum):
     MANUAL = "manual"
     DEFAULT = "default"
@@ -904,6 +946,76 @@ class BackgroundJob(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
     finished_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class VaultAuditRun(SQLModel, table=True):
+    __tablename__ = "vault_audit_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    requested_by: int = Field(foreign_key="users.id", index=True)
+    mode: VaultAuditMode = Field(index=True)
+    state: VaultAuditRunState = Field(default=VaultAuditRunState.PENDING, index=True)
+    info_count: int = Field(default=0)
+    warning_count: int = Field(default=0)
+    critical_count: int = Field(default=0)
+    progress: float = Field(default=0.0)
+    current_phase: Optional[str] = Field(default=None, max_length=64)
+    cancel_requested: bool = Field(default=False)
+    error_code: Optional[str] = Field(default=None, max_length=128)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class VaultAuditFinding(SQLModel, table=True):
+    __tablename__ = "vault_audit_findings"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="vault_audit_runs.id", index=True)
+    code: str = Field(max_length=64, index=True)
+    severity: VaultAuditSeverity = Field(index=True)
+    resource_type: str = Field(max_length=64, index=True)
+    resource_identifier: str = Field(max_length=255)
+    repair_action: Optional[str] = Field(default=None, max_length=64)
+    state: VaultAuditFindingState = Field(
+        default=VaultAuditFindingState.OPEN, index=True
+    )
+    details_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[int] = Field(default=None, foreign_key="users.id")
+
+
+class InboxItem(SQLModel, table=True):
+    """Durable capture request; API/UI calls these Pending Imports."""
+
+    __tablename__ = "inbox_items"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    owner_user_id: int = Field(foreign_key="users.id", index=True)
+    source_kind: InboxSourceKind = Field(default=InboxSourceKind.URL, index=True)
+    source_url: Optional[str] = Field(default=None, max_length=2048)
+    display_title: Optional[str] = Field(default=None, max_length=255)
+    source_hostname: Optional[str] = Field(default=None, max_length=255)
+    state: InboxItemState = Field(default=InboxItemState.CAPTURED, index=True)
+    manifest_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    staging_key: Optional[str] = Field(default=None, max_length=1024)
+    target_collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", index=True
+    )
+    requested_tags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    background_job_id: Optional[str] = Field(
+        default=None, foreign_key="background_jobs.id", index=True
+    )
+    resulting_model_id: Optional[int] = Field(
+        default=None, foreign_key="models.id", index=True
+    )
+    error_code: Optional[str] = Field(default=None, max_length=128)
+    retryable: bool = Field(default=False, index=True)
+    attempt_count: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+    completed_at: Optional[datetime] = None
 
 
 class PrinterFile(SQLModel, table=True):

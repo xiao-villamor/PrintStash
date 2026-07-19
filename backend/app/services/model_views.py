@@ -45,9 +45,12 @@ from app.db.models import (
 from app.db.scopes import live, trashed
 from app.schemas.models import (
     CollectionStatRead,
+    FacetValueRead,
     FilamentStatRead,
     FileRead,
     MetadataRead,
+    ModelFacetsRead,
+    ModelFilters,
     ModelListItem,
     ModelPrinterPresenceRead,
     ModelRead,
@@ -371,32 +374,103 @@ def _file_reads_with_revisions(
 # ---------------------------------------------------------------------------
 
 
-def list_items(
-    session: Session,
-    user: User,
-    *,
-    collection: Optional[str] = None,
-    direct: bool = False,
-    tags: Optional[List[str]] = None,
-    q: Optional[str] = None,
-    printer_id: Optional[int] = None,
-    printer_presence: Optional[Literal["any", "none"]] = None,
-    favorites: bool = False,
-    limit: int = 50,
-    offset: int = 0,
-) -> List[ModelListItem]:
-    """Filtered, paginated library browse with batched per-model facets."""
-    # Exclude the external-job sentinel model — it's internal bookkeeping for
-    # print jobs that don't map to a real vault model and must never surface in
-    # the library grid (vault_stats/export already exclude it, which is why the
-    # header count and the grid would otherwise disagree).
+def _apply_structured_filters(stmt, filters: ModelFilters):
+    artifact_filters = any(
+        (
+            filters.file_type,
+            filters.material_type,
+            filters.slicer_name,
+            filters.printer_model,
+            filters.revision_status,
+            filters.storage,
+            filters.uploaded_after,
+            filters.uploaded_before,
+        )
+    )
+    if artifact_filters:
+        artifact_ids = select(File.model_id).where(live(File))
+        metadata_filters = any(
+            (filters.material_type, filters.slicer_name, filters.printer_model)
+        )
+        if metadata_filters:
+            artifact_ids = artifact_ids.join(Metadata, Metadata.file_id == File.id)
+        if filters.file_type:
+            artifact_ids = artifact_ids.where(File.file_type.in_(filters.file_type))  # type: ignore[union-attr]
+        if filters.revision_status:
+            artifact_ids = artifact_ids.where(
+                File.revision_status.in_(filters.revision_status)  # type: ignore[union-attr]
+            )
+        if len(set(filters.storage)) == 1:
+            artifact_ids = artifact_ids.where(
+                File.is_external == (filters.storage[0] == "external")
+            )
+        if filters.uploaded_after:
+            artifact_ids = artifact_ids.where(File.uploaded_at >= filters.uploaded_after)
+        if filters.uploaded_before:
+            artifact_ids = artifact_ids.where(File.uploaded_at <= filters.uploaded_before)
+        if filters.material_type:
+            artifact_ids = artifact_ids.where(
+                func.lower(Metadata.material_type).in_(value.lower() for value in filters.material_type)
+            )
+        if filters.slicer_name:
+            artifact_ids = artifact_ids.where(
+                func.lower(Metadata.slicer_name).in_(value.lower() for value in filters.slicer_name)
+            )
+        if filters.printer_model:
+            artifact_ids = artifact_ids.where(
+                func.lower(Metadata.printer_model).in_(value.lower() for value in filters.printer_model)
+            )
+        stmt = stmt.where(Model.id.in_(artifact_ids))  # type: ignore[union-attr]
+
+    live_jobs = select(PrintJob.model_id).where(live(PrintJob))
+    if filters.printed is True:
+        stmt = stmt.where(Model.id.in_(live_jobs))  # type: ignore[union-attr]
+    elif filters.printed is False:
+        stmt = stmt.where(Model.id.not_in(live_jobs))  # type: ignore[attr-defined]
+    if filters.print_outcome:
+        matching_jobs = select(PrintJob.model_id).where(
+            live(PrintJob), PrintJob.state.in_(filters.print_outcome)  # type: ignore[union-attr]
+        )
+        stmt = stmt.where(Model.id.in_(matching_jobs))  # type: ignore[union-attr]
+    return stmt
+
+
+def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
     stmt = select(Model).where(live(Model), Model.hash != SENTINEL_MODEL_HASH)
     stmt = _apply_model_access(stmt, session, user)
-
-    starred_model_ids = select(ModelStar.model_id).where(ModelStar.user_id == user.id)
-    if favorites:
-        stmt = stmt.where(Model.id.in_(starred_model_ids))  # type: ignore[union-attr]
-
+    if filters.favorites:
+        stmt = stmt.where(
+            Model.id.in_(  # type: ignore[union-attr]
+                select(ModelStar.model_id).where(ModelStar.user_id == user.id)
+            )
+        )
+    if filters.direct:
+        if filters.collection:
+            cat_path = filters.collection.strip().strip("/").lower()
+            stmt = stmt.where(
+                Model.collection_id.in_(  # type: ignore[union-attr]
+                    select(Collection.id).where(Collection.path == cat_path)
+                )
+            )
+        else:
+            stmt = stmt.where(Model.collection_id.is_(None))  # type: ignore[union-attr]
+    elif filters.collection:
+        cat_path = filters.collection.strip().strip("/").lower()
+        matching = select(Collection.id).where(
+            (Collection.path == cat_path) | (Collection.path.startswith(cat_path + "/"))
+        )
+        stmt = stmt.where(Model.collection_id.in_(matching))  # type: ignore[union-attr]
+    if filters.q:
+        stmt = stmt.where(Model.name.ilike(f"%{filters.q}%"))  # type: ignore[attr-defined]
+    for slug in (tag.strip().lower() for tag in filters.tag if tag.strip()):
+        stmt = stmt.where(
+            Model.id.in_(  # type: ignore[union-attr]
+                select(ModelTagLink.model_id)
+                .join(Tag, Tag.id == ModelTagLink.tag_id)
+                .where(Tag.slug == slug)
+            )
+        )
+    stmt = _apply_structured_filters(stmt, filters)
     present_model_ids = (
         select(File.model_id)
         .join(PrinterFile, PrinterFile.file_id == File.id)
@@ -408,48 +482,117 @@ def list_items(
             PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
         )
     )
-
-    if direct:
-        # Show only direct children: root→NULL, collection→exact path match.
-        if collection:
-            cat_path = collection.strip().strip("/").lower()
-            matching_cat_ids = select(Collection.id).where(Collection.path == cat_path)
-            stmt = stmt.where(Model.collection_id.in_(matching_cat_ids))  # type: ignore[union-attr]
-        else:
-            stmt = stmt.where(Model.collection_id.is_(None))  # type: ignore[union-attr]
-    elif collection:
-        cat_path = collection.strip().strip("/").lower()
-        # Match the collection path or any descendant via FK join on Collections.
-        matching_cat_ids = select(Collection.id).where(
-            (Collection.path == cat_path) | (Collection.path.startswith(cat_path + "/"))
-        )
-        stmt = stmt.where(Model.collection_id.in_(matching_cat_ids))  # type: ignore[union-attr]
-
-    if q:
-        # ilike, not contains/LIKE: LIKE is case-sensitive on PostgreSQL (only
-        # SQLite folds case), so plain contains() would make library search
-        # behave differently per backend. ilike is case-insensitive on both.
-        stmt = stmt.where(Model.name.ilike(f"%{q}%"))  # type: ignore[attr-defined]
-
-    if tags:
-        for slug in (t.strip().lower() for t in tags if t.strip()):
-            # Each tag adds an EXISTS clause => AND semantics across tags.
-            stmt = stmt.where(
-                Model.id.in_(  # type: ignore[union-attr]
-                    select(ModelTagLink.model_id)
-                    .join(Tag, Tag.id == ModelTagLink.tag_id)
-                    .where(Tag.slug == slug)
-                )
-            )
-
-    if printer_id is not None:
+    if filters.printer_id is not None:
         stmt = stmt.where(
-            Model.id.in_(present_model_ids.where(PrinterFile.printer_id == printer_id))  # type: ignore[union-attr]
+            Model.id.in_(present_model_ids.where(PrinterFile.printer_id == filters.printer_id))  # type: ignore[union-attr]
         )
-    elif printer_presence == "any":
+    elif filters.printer_presence == "any":
         stmt = stmt.where(Model.id.in_(present_model_ids))  # type: ignore[union-attr]
-    elif printer_presence == "none":
+    elif filters.printer_presence == "none":
         stmt = stmt.where(Model.id.not_in(present_model_ids))  # type: ignore[attr-defined]
+    return stmt
+
+
+def facets(session: Session, user: User, filters: ModelFilters) -> ModelFacetsRead:
+    """Accessible live facet values for current filtered Model scope."""
+    filtered = _filtered_stmt(session, user, filters).with_only_columns(Model.id).subquery()
+
+    def values(column, *, metadata: bool = False) -> list[FacetValueRead]:
+        stmt = (
+            select(column, func.count(func.distinct(File.model_id)))
+            .select_from(File)
+            .join(filtered, filtered.c.id == File.model_id)
+            .where(live(File), column.is_not(None))
+        )
+        if metadata:
+            stmt = stmt.join(Metadata, Metadata.file_id == File.id)
+        rows = session.exec(stmt.group_by(column).order_by(column.asc())).all()  # type: ignore[attr-defined]
+        return [
+            FacetValueRead(
+                value=value.value if hasattr(value, "value") else str(value),
+                count=int(count),
+            )
+            for value, count in rows
+            if value not in (None, "")
+        ]
+
+    storage_rows = session.exec(
+        select(File.is_external, func.count(func.distinct(File.model_id)))
+        .join(filtered, filtered.c.id == File.model_id)
+        .where(live(File))
+        .group_by(File.is_external)
+    ).all()
+    total = int(session.exec(select(func.count()).select_from(filtered)).one())
+    printed_count = int(
+        session.exec(
+            select(func.count(func.distinct(PrintJob.model_id)))
+            .join(filtered, filtered.c.id == PrintJob.model_id)
+            .where(live(PrintJob))
+        ).one()
+    )
+    outcome_rows = session.exec(
+        select(PrintJob.state, func.count(func.distinct(PrintJob.model_id)))
+        .join(filtered, filtered.c.id == PrintJob.model_id)
+        .where(
+            live(PrintJob),
+            PrintJob.state.in_(
+                [PrintJobState.COMPLETED, PrintJobState.FAILED, PrintJobState.CANCELLED]
+            ),
+        )
+        .group_by(PrintJob.state)
+        .order_by(PrintJob.state.asc())  # type: ignore[attr-defined]
+    ).all()
+    return ModelFacetsRead(
+        file_type=values(File.file_type),
+        material_type=values(Metadata.material_type, metadata=True),
+        slicer_name=values(Metadata.slicer_name, metadata=True),
+        printer_model=values(Metadata.printer_model, metadata=True),
+        revision_status=values(File.revision_status),
+        print_outcome=[
+            FacetValueRead(value=state.value, count=int(count))
+            for state, count in outcome_rows
+        ],
+        storage=[
+            FacetValueRead(value="external" if external else "vault", count=int(count))
+            for external, count in storage_rows
+        ],
+        printed=[
+            FacetValueRead(value="yes", count=printed_count),
+            FacetValueRead(value="no", count=max(0, total - printed_count)),
+        ],
+    )
+
+
+def list_items(
+    session: Session,
+    user: User,
+    *,
+    collection: Optional[str] = None,
+    direct: bool = False,
+    tags: Optional[List[str]] = None,
+    q: Optional[str] = None,
+    printer_id: Optional[int] = None,
+    printer_presence: Optional[Literal["any", "none"]] = None,
+    favorites: bool = False,
+    filters: ModelFilters | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[ModelListItem]:
+    """Filtered, paginated library browse with batched per-model facets."""
+    # Exclude the external-job sentinel model — it's internal bookkeeping for
+    # print jobs that don't map to a real vault model and must never surface in
+    # the library grid (vault_stats/export already exclude it, which is why the
+    # header count and the grid would otherwise disagree).
+    filters = filters or ModelFilters(
+        collection=collection,
+        direct=direct,
+        tag=tags or [],
+        q=q,
+        printer_id=printer_id,
+        printer_presence=printer_presence,
+        favorites=favorites,
+    )
+    stmt = _filtered_stmt(session, user, filters)
 
     # Model.id is the stable tiebreaker: without it, models sharing an
     # updated_at (e.g. a batch ZIP import) sort non-deterministically, so

@@ -24,7 +24,7 @@ from app.db.models import CollectionRole, File, FileType, Model, User
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestResponse
-from app.services import auth, rbac, thumbnail
+from app.services import auth, rbac
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
 
@@ -327,7 +327,7 @@ def _run_thumbnail_rebuild(
     job_id: str, force: bool, session_factory: SessionFactory
 ) -> None:
     """Walk models and re-render thumbnails. Runs as a background task."""
-    from app.services import mesh_processing
+    from app.services.thumbnail_repair import regenerate_model_thumbnail
 
     registry.update(job_id, state="running", label="scanning_models")
     try:
@@ -341,7 +341,6 @@ def _run_thumbnail_rebuild(
             skipped: list[int] = []
             failed: list[int] = []
 
-            backend = get_backend()
             for index, m in enumerate(models):
                 assert m.id is not None
                 registry.update(
@@ -351,7 +350,6 @@ def _run_thumbnail_rebuild(
                     label=f"rendering model {m.id}",
                     progress=index / len(models) * 100,
                 )
-                # Newest mesh file wins.
                 mesh_file = session.exec(
                     select(File)
                     .where(File.model_id == m.id, File.file_type.in_(_MESH_TYPES))  # type: ignore[attr-defined]
@@ -361,33 +359,17 @@ def _run_thumbnail_rebuild(
                     skipped.append(m.id)
                     continue
 
-                if not backend.exists(mesh_file.path):
-                    skipped.append(m.id)
-                    continue
-
                 try:
-                    with backend.local_path(mesh_file.path) as path:
-                        thumb_bytes = mesh_processing.render_thumbnail(path)
+                    regenerated = regenerate_model_thumbnail(session, m.id)
                 except Exception:  # noqa: BLE001 — defensive, log and continue
                     logger.exception(
-                        "rebuild: render_thumbnail crashed for model %s", m.id
+                        "rebuild: thumbnail regeneration crashed for model %s", m.id
                     )
-                    thumb_bytes = None
+                    regenerated = False
 
-                if not thumb_bytes:
+                if not regenerated:
                     failed.append(m.id)
                     continue
-
-                assert mesh_file.id is not None
-                thumb_key = backend.thumbnail_key(mesh_file.id)
-                backend.write_bytes(thumbnail.to_webp(thumb_bytes), thumb_key)
-                # Rebuilt thumbnails are WebP; drop the stale PNG variant so
-                # the serving fallback never picks it up again.
-                backend.delete(backend.legacy_thumbnail_key(mesh_file.id))
-                m.thumbnail_path = thumb_key
-                m.thumbnail_file_id = mesh_file.id
-                session.add(m)
-                session.commit()
                 rebuilt.append(m.id)
                 logger.info(
                     "rebuild: thumbnail regenerated for model %s file %s",

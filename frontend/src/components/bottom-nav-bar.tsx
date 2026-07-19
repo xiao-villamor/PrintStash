@@ -11,6 +11,7 @@ import {
   SlidersHorizontal,
   LogOut,
   MoreHorizontal,
+  Inbox,
   Printer,
   Settings,
   User,
@@ -27,6 +28,7 @@ import {
   subscribeTasks,
   type TaskItem,
 } from "@/lib/task-center";
+import { listPendingImports } from "@/lib/api";
 
 type NavItem = {
   href: string;
@@ -41,6 +43,7 @@ type NavItem = {
 // away from the avatar menu in the top bar.
 const NAV_ITEMS: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
+  { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
   { href: "/statistics", labelKey: "nav.stats", icon: BarChart3, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
@@ -70,6 +73,7 @@ export function BottomNavBar() {
   const { user, logout } = useAuth();
   const [moreOpen, setMoreOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [pendingImports, setPendingImports] = useState(0);
 
   const visibleItems = NAV_ITEMS.filter(
     (item) => !item.adminOnly || user?.is_superuser,
@@ -84,6 +88,16 @@ export function BottomNavBar() {
     setTasks(listTasks());
     return subscribeTasks(() => setTasks(listTasks()));
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => listPendingImports(false)
+      .then((rows) => { if (active) setPendingImports(rows.filter((row) => row.state !== "dismissed").length); })
+      .catch(() => {});
+    void refresh();
+    const timer = window.setInterval(refresh, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [pathname]);
 
   const tabs = visibleItems.slice(0, MAX_TABS);
   const overflow = visibleItems.slice(MAX_TABS);
@@ -103,6 +117,7 @@ export function BottomNavBar() {
             key={item.href}
             item={item}
             active={isItemActive(item, pathname)}
+            badge={item.href === "/inbox" ? pendingImports : 0}
           />
         ))}
         <button
@@ -135,13 +150,16 @@ export function BottomNavBar() {
   );
 }
 
-function NavTab({ item, active }: { item: NavItem; active: boolean }) {
+function NavTab({ item, active, badge = 0 }: { item: NavItem; active: boolean; badge?: number }) {
   const { t } = useI18n();
   const className =
     "group flex flex-1 flex-col items-center justify-center gap-1 pt-2 pb-1.5 active:scale-95 transition-transform duration-press";
   const content = (
     <>
-      <TabIcon icon={item.icon} active={active} />
+      <span className="relative">
+        <TabIcon icon={item.icon} active={active} />
+        {badge > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-destructive px-1 text-center text-3xs font-bold text-destructive-foreground">{badge > 99 ? "99+" : badge}</span>}
+      </span>
       <TabLabel active={active}>{t(item.labelKey)}</TabLabel>
     </>
   );

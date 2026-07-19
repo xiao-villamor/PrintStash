@@ -197,6 +197,51 @@ def test_create_backup_archive_contents(backup_env: BackupEnv):
     assert sum(1 for n in names if n.startswith("files/") and n != "files/") == 2
 
 
+def test_verify_backup_checks_manifest_members_and_sizes(backup_env: BackupEnv):
+    _seed_model_with_blob(backup_env, name="Verified", content=b"solid verified\n")
+    meta = backup.create_backup()
+
+    result = backup.verify_backup(meta.id)
+
+    assert result.valid is True
+    assert result.app_compatible is True
+    assert result.checked_members == 3
+
+
+def test_create_backup_fails_when_owned_blob_is_missing(backup_env: BackupEnv):
+    _, key = _seed_model_with_blob(backup_env, name="Missing", content=b"gone")
+    get_backend().delete(key)
+
+    with pytest.raises(FileNotFoundError):
+        backup.create_backup()
+
+
+def test_backup_excludes_user_owned_external_artifacts(backup_env: BackupEnv):
+    external = backup_env.root / "nas" / "linked.stl"
+    external.parent.mkdir()
+    external.write_bytes(b"user-owned")
+    with backup_env.new_session() as session:
+        model = Model(name="Linked", slug="linked", hash="c" * 64)
+        session.add(model)
+        session.commit()
+        session.add(
+            File(
+                model_id=model.id,
+                path=str(external),
+                original_filename=external.name,
+                file_type=FileType.STL,
+                is_external=True,
+                size_bytes=external.stat().st_size,
+                sha256="d" * 64,
+            )
+        )
+        session.commit()
+
+    meta = backup.create_backup()
+
+    assert meta.file_count == 0
+
+
 def test_manifest_is_first_archive_member(backup_env: BackupEnv):
     """The manifest must be the first entry so listing (a streaming read) can
     stop after one small member instead of pulling the whole archive."""
@@ -600,28 +645,22 @@ def test_restore_database_raises_for_non_file_db(
         backup._restore_database(b"irrelevant")
 
 
-def test_find_blobs_skips_unreadable_blob(
-    backup_env: BackupEnv, caplog: pytest.LogCaptureFixture
-):
+def test_find_blobs_fails_for_unreadable_owned_blob(backup_env: BackupEnv):
     _model_id, key = _seed_model_with_blob(
         backup_env, name="Widget", content=b"solid widget\n"
     )
     Path(key).unlink()
 
-    with caplog.at_level("WARNING"):
-        found = backup._find_blobs()
-
-    assert found == []
-    assert any("skipping unreadable blob" in r.message for r in caplog.records)
+    with pytest.raises(FileNotFoundError):
+        backup._find_blobs()
 
 
-def test_create_backup_skips_blob_that_vanishes_mid_write(
+def test_create_backup_fails_if_blob_vanishes_mid_write(
     backup_env: BackupEnv,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ):
-    """A blob present at stat-time but gone by the time it's streamed into the
-    tar stays listed in the manifest but is simply absent from the archive."""
+    """A backup never reports success after a censused blob vanishes."""
     _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
 
     def _boom(*args, **kwargs):
@@ -629,23 +668,11 @@ def test_create_backup_skips_blob_that_vanishes_mid_write(
 
     monkeypatch.setattr(backup, "_add_file_to_tar", _boom)
 
-    with caplog.at_level("WARNING"):
-        meta = backup.create_backup()
+    with caplog.at_level("ERROR"), pytest.raises(OSError, match="vanished"):
+        backup.create_backup()
 
-    # The manifest still records the entry (built before streaming)...
-    assert meta.file_count == 1
-    assert any("skipped key" in r.message for r in caplog.records)
-
-    # ...but no files/ member actually made it into the archive.
-    import gzip
-    import tarfile
-
-    names = set()
-    with gzip.open(Path(meta.path), "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r|") as tar:
-            for member in tar:
-                names.add(member.name)
-    assert not any(n.startswith("files/") and n != "files/" for n in names)
+    assert any("failed while streaming owned blobs" in r.message for r in caplog.records)
+    assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
 
 def test_list_local_backups_empty_when_dir_missing(backup_env: BackupEnv):

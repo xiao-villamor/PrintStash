@@ -19,7 +19,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -29,7 +29,7 @@ from app.db.session import get_engine, get_session_factory
 from app.services import audit
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
-from app.services.storage_utils import all_owned_blob_keys
+from app.services.storage_utils import ownership_snapshot
 
 logger = get_logger(__name__)
 
@@ -64,6 +64,16 @@ class BackupMeta:
     app_version: str
     path: str  # local path to the tar.gz, or S3 key if cloud-only
     location: str = "local"  # "local" | "s3"
+
+
+@dataclass
+class BackupVerification:
+    backup_id: str
+    valid: bool
+    app_compatible: bool
+    manifest_version: str | None
+    checked_members: int
+    findings: list[dict[str, str | int]]
 
 
 # ---------------------------------------------------------------------------
@@ -134,23 +144,24 @@ def _backup_sqlite_copy() -> bytes:
 
 
 def _find_blobs() -> list[tuple[str, int]]:
-    """Return ``(key, size_bytes)`` for every distinct, still-present blob.
+    """Return ``(key, size_bytes)`` for every vault-owned primary blob.
 
     One ``stat_size`` per key doubles as the existence check (it raises when the
     key is gone), and surfacing the size lets ``create_backup`` build the
-    manifest *before* streaming the file bodies.
+    manifest *before* streaming the file bodies. Linked external Artifacts are
+    indexed by the vault but user-owned, so their paths must never be read into
+    a backup archive.
     """
     with get_session_factory().session() as session:
-        keys = sorted(all_owned_blob_keys(session))
+        keys = sorted(
+            {blob.key for blob in ownership_snapshot(session, discover=False).primary}
+        )
     backend = get_backend()
     out: list[tuple[str, int]] = []
     for key in keys:
-        try:
-            out.append((key, backend.stat_size(key)))
-        except Exception:
-            # Missing/unreadable blob — skip it (matches the previous exists()
-            # filter), the DB row stays and restore simply won't have its bytes.
-            logger.warning("backup: skipping unreadable blob %s", key, exc_info=True)
+        # A backup cannot be called complete if a DB-owned blob is absent or
+        # unreadable. Surface failure instead of silently shrinking archive.
+        out.append((key, backend.stat_size(key)))
     return out
 
 
@@ -190,9 +201,13 @@ def create_backup() -> BackupMeta:
     # absolute paths (local backend) or prefixed object keys (S3), neither of
     # which survives the tar arcname transform below — so restore relies on this
     # map instead of trying to reverse it.
-    file_entries: list[dict[str, str]] = [
-        {"arc": f"files/{key.replace('vault-data/', '').lstrip('/')}", "key": key}
-        for key, _size in blobs
+    file_entries: list[dict[str, str | int]] = [
+        {
+            "arc": f"files/{key.replace('vault-data/', '').lstrip('/')}",
+            "key": key,
+            "size": size,
+        }
+        for key, size in blobs
     ]
     total_size = len(db_sql) + sum(size for _key, size in blobs)
 
@@ -212,26 +227,29 @@ def create_backup() -> BackupMeta:
     manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
 
     written_files = 0
-    with gzip.open(archive_path, "wb") as gz:
-        with tarfile.open(fileobj=gz, mode="w|") as tar:
-            man_info = tarfile.TarInfo(name="manifest.json")
-            man_info.size = len(manifest_bytes)
-            tar.addfile(man_info, io.BytesIO(manifest_bytes))
+    try:
+        with gzip.open(archive_path, "wb") as gz:
+            with tarfile.open(fileobj=gz, mode="w|") as tar:
+                man_info = tarfile.TarInfo(name="manifest.json")
+                man_info.size = len(manifest_bytes)
+                tar.addfile(man_info, io.BytesIO(manifest_bytes))
 
-            db_info = tarfile.TarInfo(name="db.sqlite3")
-            db_info.size = len(db_sql)
-            tar.addfile(db_info, io.BytesIO(db_sql))
+                db_info = tarfile.TarInfo(name="db.sqlite3")
+                db_info.size = len(db_sql)
+                tar.addfile(db_info, io.BytesIO(db_sql))
 
-            for entry in file_entries:
-                try:
-                    _add_file_to_tar(tar, entry["key"], entry["arc"])
+                for entry in file_entries:
+                    key = str(entry["key"])
+                    arc = str(entry["arc"])
+                    written = _add_file_to_tar(tar, key, arc)
+                    expected = int(entry["size"])
+                    if written != expected:
+                        raise RuntimeError("backup_blob_size_changed")
                     written_files += 1
-                except Exception:
-                    # A blob that vanished between stat and stream stays listed
-                    # in the manifest but is simply absent from the archive;
-                    # restore iterates real members, so it degrades cleanly.
-                    logger.warning("backup: skipped key %s", entry["key"], exc_info=True)
-                    continue
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        logger.exception("backup %s failed while streaming owned blobs", backup_id)
+        raise
 
     final_size = archive_path.stat().st_size
 
@@ -426,6 +444,98 @@ def get_backup_archive_path(backup_id: str) -> Path:
     if meta is None:
         raise FileNotFoundError(f"backup {backup_id} not found")
     return _download_backup_to_local(meta)
+
+
+def _unsafe_member_name(name: str) -> bool:
+    path = PurePosixPath(name)
+    return path.is_absolute() or ".." in path.parts or not name or "\\" in name
+
+
+def verify_backup(backup_id: str) -> BackupVerification:
+    """Validate archive structure, manifest membership, sizes, and safe paths."""
+    archive = get_backup_archive_path(backup_id)
+    findings: list[dict[str, str | int]] = []
+    manifest: dict | None = None
+    members: list[tarfile.TarInfo] = []
+    try:
+        with tarfile.open(archive, mode="r:gz") as tar:
+            members = tar.getmembers()
+            for member in members:
+                if _unsafe_member_name(member.name) or member.issym() or member.islnk():
+                    findings.append(
+                        {"code": "backup_manifest_invalid", "member": member.name[:255]}
+                    )
+            manifests = [member for member in members if member.name == "manifest.json"]
+            if len(manifests) != 1:
+                findings.append({"code": "backup_manifest_invalid", "member": "manifest.json"})
+            else:
+                stream = tar.extractfile(manifests[0])
+                try:
+                    parsed = json.loads(stream.read().decode("utf-8")) if stream else None
+                except (ValueError, UnicodeDecodeError):
+                    parsed = None
+                if isinstance(parsed, dict):
+                    manifest = parsed
+                else:
+                    findings.append(
+                        {"code": "backup_manifest_invalid", "member": "manifest.json"}
+                    )
+            if sum(member.name == "db.sqlite3" for member in members) != 1:
+                findings.append({"code": "backup_member_missing", "member": "db.sqlite3"})
+            if manifest is not None:
+                expected_entries = manifest.get("files")
+                if not isinstance(expected_entries, list):
+                    findings.append(
+                        {"code": "backup_manifest_invalid", "member": "files"}
+                    )
+                else:
+                    by_name: dict[str, list[tarfile.TarInfo]] = {}
+                    for member in members:
+                        by_name.setdefault(member.name, []).append(member)
+                    for entry in expected_entries:
+                        if not isinstance(entry, dict) or not isinstance(entry.get("arc"), str):
+                            findings.append(
+                                {"code": "backup_manifest_invalid", "member": "files"}
+                            )
+                            continue
+                        arc = entry["arc"]
+                        matches = by_name.get(arc, [])
+                        if len(matches) != 1:
+                            findings.append({"code": "backup_member_missing", "member": arc[:255]})
+                            continue
+                        expected_size = entry.get("size")
+                        if isinstance(expected_size, int) and matches[0].size != expected_size:
+                            findings.append(
+                                {
+                                    "code": "backup_member_size_mismatch",
+                                    "member": arc[:255],
+                                    "expected_size": expected_size,
+                                    "actual_size": matches[0].size,
+                                }
+                            )
+    except (tarfile.TarError, OSError, EOFError):
+        findings.append({"code": "backup_manifest_invalid", "member": "archive"})
+
+    manifest_version = str(manifest.get("version")) if manifest else None
+    app_compatible = manifest_version == MANIFEST_VERSION
+    if manifest is not None and not app_compatible:
+        findings.append({"code": "backup_manifest_invalid", "member": "version"})
+    result = BackupVerification(
+        backup_id=backup_id,
+        valid=not findings,
+        app_compatible=app_compatible,
+        manifest_version=manifest_version,
+        checked_members=len(members),
+        findings=findings,
+    )
+    with get_session_factory().session() as session:
+        audit.record(
+            session,
+            action="backup.verify",
+            resource_type="backup",
+            diff={"backup_id": backup_id, "valid": result.valid, "findings": len(findings)},
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------

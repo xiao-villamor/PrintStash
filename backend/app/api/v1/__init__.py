@@ -13,7 +13,9 @@ from app.api.v1 import (
     files,
     fleet,
     health,
+    inbox,
     ingest,
+    maintenance,
     models,
     notifications,
     printer_profiles,
@@ -31,6 +33,8 @@ api_router.include_router(setup.router)
 api_router.include_router(auth.router)
 api_router.include_router(admin.router)
 api_router.include_router(ingest.router)
+api_router.include_router(inbox.router)
+api_router.include_router(maintenance.router)
 api_router.include_router(models.router)
 api_router.include_router(saved_views.router)
 api_router.include_router(files.router)

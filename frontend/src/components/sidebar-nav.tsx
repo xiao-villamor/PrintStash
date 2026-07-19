@@ -1,13 +1,16 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Link } from "@/lib/navigation";
 import { usePathname } from "@/lib/navigation";
-import { BookOpen, Box, SlidersHorizontal, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
+import { BookOpen, Box, Inbox, SlidersHorizontal, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
+import { listPendingImports } from "@/lib/api";
 
 const mainItems = [
   { href: "/", label: "Vault", icon: Box },
+  { href: "/inbox", label: "Pending Imports", icon: Inbox },
   { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
   { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
   { href: "https://xiao-villamor.github.io/PrintStash/", label: "Wiki", icon: BookOpen, external: true },
@@ -20,6 +23,11 @@ const bottomItems = [
 export function SidebarNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const [pendingCount, setPendingCount] = useState(0);
+  useEffect(() => {
+    if (!user) { setPendingCount(0); return; }
+    listPendingImports(false).then((items) => setPendingCount(items.filter((item) => item.state !== "dismissed").length)).catch(() => setPendingCount(0));
+  }, [pathname, user]);
   const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (
@@ -65,6 +73,7 @@ export function SidebarNav() {
               <span className="font-mono text-xs tracking-wider uppercase">
                 {item.label}
               </span>
+              {item.href === "/inbox" && pendingCount > 0 && <span className="ml-auto rounded-full bg-accent px-2 py-0.5 font-mono text-3xs text-accent-foreground">{pendingCount}</span>}
             </Link>
           );
         })}

@@ -16,6 +16,7 @@ import {
   Coins,
   FolderTree,
   HardDrive,
+  HeartPulse,
   Info,
   KeyRound,
   Copy,
@@ -46,6 +47,7 @@ import { MakerWorldConnectCard } from "@/components/makerworld-connect-card";
 import { NotificationsPanel } from "@/components/notifications-panel";
 import { SpoolmanConnectCard } from "@/components/spoolman-connect-card";
 import { OidcSettingsCard } from "@/components/oidc-settings-card";
+import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
   createApiKey,
@@ -121,6 +123,7 @@ type SettingsSection =
   | "access"
   | "storage"
   | "imports"
+  | "maintenance"
   | "libraries"
   | "notifications"
   | "sso"
@@ -138,6 +141,7 @@ const SETTINGS_SECTIONS: {
   { id: "access", labelKey: "settings.access", icon: Users },
   { id: "storage", labelKey: "settings.storage", icon: HardDrive },
   { id: "imports", labelKey: "settings.imports", icon: Download },
+  { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
   { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
   { id: "notifications", labelKey: "settings.notifications", icon: Bell },
   { id: "sso", labelKey: "settings.sso", icon: ShieldCheck },
@@ -277,7 +281,7 @@ export function SettingsPanel() {
   const [showPrinterCardImage, setShowPrinterCardImage] = useState(false);
   const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
-    (section) => section.id !== "sso" || user?.is_superuser,
+    (section) => !["sso", "maintenance"].includes(section.id) || user?.is_superuser,
   );
 
   useEffect(() => {
@@ -1549,6 +1553,8 @@ export function SettingsPanel() {
           <MakerWorldConnectCard />
         </div>
       )}
+
+      {activeSection === "maintenance" && user?.is_superuser && <MaintenancePanel />}
 
       {activeSection === "libraries" && (
         <div className="space-y-6 animate-panel-in">

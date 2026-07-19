@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "PrintStash Quick Capture",
+  "version": "0.11.1",
+  "description": "Save current page to a self-hosted PrintStash Pending Imports queue.",
+  "permissions": ["activeTab", "storage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "action": {
+    "default_title": "Save to PrintStash",
+    "default_popup": "popup.html"
+  }
+}

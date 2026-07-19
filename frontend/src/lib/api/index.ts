@@ -13,6 +13,8 @@ export * from "@/lib/api/documents";
 export * from "@/lib/api/filaments";
 export * from "@/lib/api/fleet";
 export * from "@/lib/api/libraries";
+export * from "@/lib/api/inbox";
+export * from "@/lib/api/maintenance";
 export * from "@/lib/api/models";
 export * from "@/lib/api/saved-views";
 export * from "@/lib/api/notifications";

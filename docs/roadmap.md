@@ -8,7 +8,7 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current Release: 0.10.0 — Library Workflow Polish
+## Current Release: 0.11.0 — Fleet, Scheduling, Auth, and Platform
 
 Production hardening is in place. The app is useful for local-first 3D print
 library workflows, installable through Docker Compose (the default compose pulls
@@ -153,7 +153,7 @@ Goal: make the vault better as a daily-use 3D print library.
 - Reprint analytics for success, duration, filament, and cost
 - Versioned full-library archive migration and configured-root folder import
 
-## 0.11 — Fleet and Scheduling (in development on 0.11.0)
+## 0.11 — Fleet and Scheduling (delivered in 0.11.0)
 
 Goal: help small printer farms without turning PrintStash into a full slicer or
 queue manager.
@@ -161,6 +161,17 @@ queue manager.
 - Queue visibility with a provider-normalized job model
 - Optional routing strategies: manual, default printer, least busy
 - Printer maintenance windows, soft-drain mode, and a simple maintenance log
+
+## 0.11.1 — Vault Confidence and Capture (in development)
+
+- Read-only Quick/Full Vault audits with persisted safe findings, progress,
+  cancellation, and narrow audited repairs
+- Backup archive verification and fail-closed creation when owned blobs cannot
+  be included
+- Durable Pending Imports for URL/browser capture, review, retry, Collection/tag
+  assignment, and normal ingestion-pipeline persistence
+- Structured Artifact, Metadata, Revision, print-history, storage, and upload-date
+  filters with RBAC-scoped facets, canonical URLs, and Saved Views
 
 ## Auth and Platform (folded into 0.11.0)
 

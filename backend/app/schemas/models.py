@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -167,6 +167,46 @@ class ModelListItem(BaseModel):
     recommended_revision_status: Optional[FileRevisionStatus] = None
     recommended_revision_label: Optional[str] = None
     starred: bool = False
+
+
+class ModelFilters(BaseModel):
+    """Canonical additive filter contract shared by browse, facets, and views."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    collection: Optional[str] = Field(default=None, max_length=512)
+    direct: bool = False
+    tag: list[str] = Field(default_factory=list, max_length=64)
+    q: Optional[str] = Field(default=None, max_length=255)
+    printer_id: Optional[int] = Field(default=None, gt=0)
+    printer_presence: Optional[Literal["any", "none"]] = None
+    favorites: bool = False
+    file_type: list[FileType] = Field(default_factory=list)
+    material_type: list[str] = Field(default_factory=list, max_length=64)
+    slicer_name: list[str] = Field(default_factory=list, max_length=64)
+    printer_model: list[str] = Field(default_factory=list, max_length=64)
+    revision_status: list[FileRevisionStatus] = Field(default_factory=list)
+    printed: Optional[bool] = None
+    print_outcome: list[PrintJobState] = Field(default_factory=list)
+    storage: list[Literal["vault", "external"]] = Field(default_factory=list)
+    uploaded_after: Optional[datetime] = None
+    uploaded_before: Optional[datetime] = None
+
+
+class FacetValueRead(BaseModel):
+    value: str
+    count: int
+
+
+class ModelFacetsRead(BaseModel):
+    file_type: list[FacetValueRead] = []
+    material_type: list[FacetValueRead] = []
+    slicer_name: list[FacetValueRead] = []
+    printer_model: list[FacetValueRead] = []
+    revision_status: list[FacetValueRead] = []
+    print_outcome: list[FacetValueRead] = []
+    storage: list[FacetValueRead] = []
+    printed: list[FacetValueRead] = []
 
 
 class TrashedModelRead(BaseModel):

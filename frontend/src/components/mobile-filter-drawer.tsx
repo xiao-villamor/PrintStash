@@ -22,6 +22,7 @@ interface MobileFilterDrawerProps {
   onCreateCollection: () => void;
   canViewPrinters?: boolean;
   loading?: boolean;
+  structuredFilters?: React.ReactNode;
 }
 
 export function MobileFilterDrawer({

@@ -42,6 +42,9 @@ export type {
   ShareLinkCreated,
   ShareLinkCreate,
   ListModelsParams,
+  ArtifactFileType,
+  FacetValueRead,
+  ModelFacetsRead,
   SavedViewFilters,
   SavedViewRead,
   ModelStarRead,
@@ -136,3 +139,6 @@ export type {
   SpoolmanTestResult,
   SpoolRead,
 } from "./spoolman";
+
+export type { VaultAuditFinding, VaultAuditMode, VaultAuditRun, BackupVerification } from "./maintenance";
+export type { InboxItem, InboxItemState } from "./inbox";

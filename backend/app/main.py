@@ -81,6 +81,16 @@ async def lifespan(app: FastAPI):
     interrupted_jobs = reconcile_interrupted_jobs()
     if interrupted_jobs:
         logger.warning("reconciled %d interrupted background job(s)", interrupted_jobs)
+    from app.services.vault_audit import reconcile_interrupted_runs
+
+    interrupted_audits = reconcile_interrupted_runs()
+    if interrupted_audits:
+        logger.warning("reconciled %d interrupted vault audit(s)", interrupted_audits)
+    from app.services.inbox import reconcile_interrupted_items
+
+    interrupted_imports = reconcile_interrupted_items()
+    if interrupted_imports:
+        logger.warning("reconciled %d interrupted pending import(s)", interrupted_imports)
     stranded_dispatches = reconcile_stranded_dispatches()
     if stranded_dispatches:
         logger.warning("reconciled %d stranded fleet dispatch(es)", stranded_dispatches)
@@ -145,6 +155,12 @@ async def _gc_loop() -> None:
             await asyncio.to_thread(prune_deliveries)
         except Exception:
             logger.exception("notification delivery pruning failed")
+        try:
+            from app.services.inbox import prune_history
+
+            await asyncio.to_thread(prune_history)
+        except Exception:
+            logger.exception("pending import history pruning failed")
         await asyncio.sleep(3600)
 
 

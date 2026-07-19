@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PrintStash Quick Capture</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>PrintStash</h1>
+      <p id="page" class="muted">Reading current page…</p>
+      <label>Vault URL<input id="vault" type="url" placeholder="https://prints.example.com" /></label>
+      <label>Username<input id="username" type="text" autocomplete="username" placeholder="your username" /></label>
+      <label>Named API key<input id="key" type="password" autocomplete="off" placeholder="psk_…" /></label>
+      <div class="actions"><button id="save-config" class="secondary">Save settings</button><button id="capture">Save current page</button></div>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
