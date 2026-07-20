@@ -22,6 +22,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.11.1",
+    date: "Jul 2026",
+    changes: [
+      "Vault Maintenance: superusers can run persisted Quick or Full audits, inspect severity-grouped findings, cancel between objects, repair eligible thumbnail/Metadata/Revision findings, and verify backup archive structure",
+      "Pending Imports and Quick Capture: URL captures persist across restarts with owner-scoped review, retry, Collection/tag assignment, archive/file selection, and a minimal browser helper",
+      "Structured Model filters for Artifact type, material, slicer, printer model, Revision status, print outcome, storage location, and upload date, with canonical URLs, facet counts, and Saved Views",
+      "Per-printer access control: grant view, print, control, or admin roles independently for each printer, enforced across live status, files, fleet, queue, routing, and maintenance",
+      "Backup creation now fails instead of silently shrinking the archive if a database-owned blob is unreadable, missing, changes size, or vanishes while streaming",
+      "Clearing all Structured Model filters now removes every active filter and date range from the URL in one step",
+      "Completed Spanish translations across the Model detail print-settings panel, card-metric and metadata-field pickers, and remaining Settings surfaces",
+    ],
+  },
+  {
     version: "0.11.0",
     date: "Jul 2026",
     changes: [
