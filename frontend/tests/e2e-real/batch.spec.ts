@@ -157,12 +157,13 @@ test("a batch delete from a viewer-role user is rejected by the backend prefligh
   await expect(page.getByRole("paragraph").filter({ hasText: viewer })).toBeVisible();
 
   await page.goto("/settings?section=access");
-  await page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Select user" }) }).selectOption({ label: viewer });
-  await page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Select collection" }) }).selectOption({ label: col });
-  await page.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Admin", exact: true }) }).selectOption({ label: "View" });
+  const accessCard = page.getByRole("group", { name: "Collection access" });
+  await accessCard.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Select user" }) }).selectOption({ label: viewer });
+  await accessCard.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Select collection" }) }).selectOption({ label: col });
+  await accessCard.getByRole("combobox").filter({ has: page.getByRole("option", { name: "Admin", exact: true }) }).selectOption({ label: "View" });
   await Promise.all([
     page.waitForResponse((r) => /\/collections\/\d+\/permissions\/\d+/.test(r.url()) && r.request().method() === "PUT"),
-    page.getByRole("button", { name: "Grant" }).click(),
+    accessCard.getByRole("button", { name: "Grant" }).click(),
   ]);
 
   const bundle = await authBundleFor(viewer, password);

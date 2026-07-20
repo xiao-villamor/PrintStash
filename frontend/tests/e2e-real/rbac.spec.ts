@@ -11,21 +11,22 @@ async function grant(
   roleLabel: "View" | "Edit",
 ) {
   await page.goto("/settings?section=access");
-  await expect(page.getByText("Collection access", { exact: true })).toBeVisible();
-  await page.getByRole("combobox")
+  const card = page.getByRole("group", { name: "Collection access" });
+  await expect(card).toBeVisible();
+  await card.getByRole("combobox")
     .filter({ has: page.getByRole("option", { name: "Select user" }) })
     .selectOption({ label: username });
-  await page.getByRole("combobox")
+  await card.getByRole("combobox")
     .filter({ has: page.getByRole("option", { name: "Select collection" }) })
     .selectOption({ label: colName });
-  await page.getByRole("combobox")
+  await card.getByRole("combobox")
     .filter({ has: page.getByRole("option", { name: "Admin", exact: true }) })
     .selectOption({ label: roleLabel });
   await Promise.all([
     page.waitForResponse(
       (r) => /\/collections\/\d+\/permissions\/\d+/.test(r.url()) && r.request().method() === "PUT",
     ),
-    page.getByRole("button", { name: "Grant" }).click(),
+    card.getByRole("button", { name: "Grant" }).click(),
   ]);
 }
 

@@ -212,7 +212,7 @@ function SettingsCard({
   className?: string;
 }) {
   return (
-    <div className={cn("overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)}>
+    <div role="group" aria-label={title} className={cn("overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm", className)}>
       <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
         <div className="flex items-start gap-3 min-w-0">
           {Icon && (
