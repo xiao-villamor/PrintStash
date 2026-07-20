@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import ts from "typescript";
 import { expect, it } from "vitest";
@@ -39,10 +39,16 @@ function uiLiterals(file: string): string[] {
   return [...values];
 }
 
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) ? [path] : [];
+  });
+}
+
 it("covers every translatable JSX literal with a Spanish catalog entry", () => {
-  const files = execFileSync("rg", ["--files", "src", "--glob", "*.tsx", "--glob", "*.ts"], { encoding: "utf8" })
-    .trim()
-    .split("\n")
+  const files = sourceFiles("src")
     .filter((file) => !file.includes("/__tests__/") && !file.endsWith("localized.tsx") && !file.endsWith("i18n.tsx"));
   const missing = files.flatMap((file) => uiLiterals(file)
     .filter((value) => !NON_TRANSLATABLE_LITERALS.has(value) && !hasUiTranslation("es", value))
