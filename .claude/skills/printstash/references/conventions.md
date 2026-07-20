@@ -82,6 +82,14 @@ The version lives in a triple that must always match:
 Plus the git tag `vX.Y.Z`. Bump all three in one `chore(release): bump to
 X.Y.Z` commit; never bump outside a release.
 
+**Fourth thing, easy to forget:** `frontend/src/lib/changelog.ts` — its
+`CHANGELOG[0]` entry is the in-app "Settings → About" changelog, and
+`changelog.test.ts` asserts `CHANGELOG[0].version === package.json`'s version.
+Bumping the triple without adding a matching `CHANGELOG[0]` entry here passes
+everything locally except this one frontend test, and fails CI on that alone.
+Add the entry (prose bullets, no markdown, same content as the `CHANGELOG.md`
+entry condensed) in the same commit as the version bump.
+
 ## Handling breaking changes
 
 Avoid them while self-hosters auto-upgrade. If unavoidable:

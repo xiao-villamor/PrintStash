@@ -7,8 +7,10 @@ sweep). This file is the ordered checklist that ties it together.
 ## Prepare (on the version branch)
 
 - [ ] Bump the triple (`backend/pyproject.toml`, `backend/app/core/config.py`
-      `app_version`, `frontend/package.json`) — one commit:
-      `chore(release): bump to X.Y.Z`.
+      `app_version`, `frontend/package.json`) **and** add a matching
+      `CHANGELOG[0]` entry to `frontend/src/lib/changelog.ts` (its own test,
+      `changelog.test.ts`, checks this against `package.json` and fails CI on
+      its own if skipped) — one commit: `chore(release): bump to X.Y.Z`.
 - [ ] Write the `CHANGELOG.md` entry (format in
       [conventions.md](conventions.md)).
 - [ ] Backend: `cd backend && uv run pytest tests -v && uv run ruff check app/ tests/`
