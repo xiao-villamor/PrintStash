@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.11.1 (unreleased)
+## 0.11.1
 
 **This patch-version release is an explicit exception to normal 0.x patch policy: it adds features and append-only database migrations. Back up before upgrading.**
 

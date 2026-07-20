@@ -190,7 +190,7 @@ class Settings(BaseSettings):
     backup_s3_secret_key: str = ""
 
     app_name: str = "PrintStash"
-    app_version: str = "0.11.0"
+    app_version: str = "0.11.1"
 
     @property
     def incoming_dir(self) -> Path:
