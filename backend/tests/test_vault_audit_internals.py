@@ -266,7 +266,9 @@ def test_check_database_flags_metadata_missing(db_session: Session) -> None:
     assert any(f.code == "metadata_missing" for f in findings)
 
 
-def test_check_database_flags_missing_thumbnail(db_session: Session) -> None:
+def test_check_database_flags_missing_thumbnail(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     user = _make_user(db_session, "db-owner4")
     run = _make_run(db_session, user)
     model = _make_model(db_session, "no-thumb")
@@ -274,6 +276,12 @@ def test_check_database_flags_missing_thumbnail(db_session: Session) -> None:
     model.thumbnail_file_id = file_row.id
     db_session.add(model)
     db_session.commit()
+
+    # `settings.thumb_dir` is a real, shared absolute path across the whole
+    # suite (not per-test tmp_path), so don't rely on it happening to be
+    # empty — pin `exists()` so this test can't collide with a leftover
+    # thumbnail file another test wrote for the same file id.
+    monkeypatch.setattr(get_backend(), "exists", lambda _key: False)
 
     vault_audit._check_database(db_session, run)
 

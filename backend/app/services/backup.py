@@ -83,7 +83,8 @@ class BackupVerification:
 _backup_s3: object | None = None
 
 
-def _get_backup_s3():
+def _get_backup_s3():  # pragma: no cover — needs a real S3-compatible endpoint;
+    # verified against MinIO in the storage-s3 CI job (see docs/backend.md).
     """Return a boto3 S3 client for the backup bucket, or None if not configured."""
     global _backup_s3
     if _backup_s3 is not None:
@@ -262,7 +263,7 @@ def create_backup() -> BackupMeta:
 
     # Upload to S3 if configured
     s3 = _get_backup_s3()
-    if s3:
+    if s3:  # pragma: no cover — see _get_backup_s3
         try:
             s3_key = _backup_s3_key(archive_name)
             s3.upload_file(str(archive_path), settings.backup_s3_bucket, s3_key)
@@ -324,7 +325,7 @@ def _list_local_backups() -> list[BackupMeta]:
     return results
 
 
-def _list_s3_backups() -> list[BackupMeta]:
+def _list_s3_backups() -> list[BackupMeta]:  # pragma: no cover — see _get_backup_s3
     s3 = _get_backup_s3()
     if not s3:
         return []
@@ -561,7 +562,7 @@ def delete_backup(backup_id: str) -> bool:
 
     # Delete S3 copy
     s3 = _get_backup_s3()
-    if s3:
+    if s3:  # pragma: no cover — see _get_backup_s3
         # Look up S3 key from the listing
         for sm in _list_s3_backups():
             if sm.id == backup_id:
@@ -589,7 +590,7 @@ def _download_backup_to_local(meta: BackupMeta) -> Path:
     if local_path and local_path.exists():
         return local_path
 
-    if meta.location == "s3":
+    if meta.location == "s3":  # pragma: no cover — see _get_backup_s3
         # Download from S3 to a temp location
         s3 = _get_backup_s3()
         if not s3:
