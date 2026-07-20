@@ -13,9 +13,13 @@ from pathlib import Path
 import pytest
 
 from app.services import backup
-from tests.test_backup_restore import BackupEnv, _seed_model_with_blob
+from tests.test_backup_restore import (  # noqa: F811 — fixture reuse, not a real redefinition
+    BackupEnv,
+    _seed_model_with_blob,
+    backup_env,
+)
 
-pytest_plugins = ["tests.test_backup_restore"]
+__all__ = ["backup_env"]
 
 
 def _verify_direct(archive: Path, monkeypatch: pytest.MonkeyPatch) -> "backup.BackupVerification":
