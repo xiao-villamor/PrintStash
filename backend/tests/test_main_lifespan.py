@@ -354,9 +354,21 @@ async def test_gc_loop_logs_and_continues_past_each_task_failure(
 
     with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
         task = asyncio.create_task(app_main._gc_loop())
-        # One pass runs immediately (no initial sleep); give it a beat to
-        # execute all three try/except blocks before it reaches sleep(3600).
-        await asyncio.sleep(0.05)
+        # One pass runs immediately (no initial sleep). Each step is a real
+        # asyncio.to_thread() round-trip, so a fixed short sleep is flaky
+        # under CI load — poll for all three log lines instead, bounded by
+        # a generous timeout, before cancelling ahead of sleep(3600).
+        deadline = asyncio.get_event_loop().time() + 5
+        expected = {
+            "scheduled GC failed",
+            "notification delivery pruning failed",
+            "pending import history pruning failed",
+        }
+        while asyncio.get_event_loop().time() < deadline:
+            messages = [r.getMessage() for r in caplog.records]
+            if all(any(exp in m for m in messages) for exp in expected):
+                break
+            await asyncio.sleep(0.01)
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
