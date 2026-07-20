@@ -89,6 +89,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   // Printers
   printer_not_found: "This printer no longer exists.",
   printer_offline: "The printer is offline.",
+  printer_permission_denied: "Your role does not allow this printer action.",
   // Ingest
   unsupported_file_type: "Unsupported file type.",
   file_too_large: "File exceeds the upload size limit.",

@@ -134,6 +134,15 @@ class CollectionRole(str, Enum):
     ADMIN = "admin"
 
 
+class PrinterRole(str, Enum):
+    """Ordered access levels for one physical printer."""
+
+    VIEW = "view"
+    PRINT = "print"
+    CONTROL = "control"
+    ADMIN = "admin"
+
+
 class NotificationEventType(str, Enum):
     """Lifecycle events users can subscribe to.
 
@@ -546,6 +555,24 @@ class Printer(SQLModel, table=True):
     deleted_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class PrinterPermission(SQLModel, table=True):
+    __tablename__ = "printer_permissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "printer_id",
+            name="uq_printer_permissions_user_printer",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    printer_id: int = Field(foreign_key="printers.id", index=True)
+    role: PrinterRole = Field(index=True)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -1003,7 +1030,9 @@ class InboxItem(SQLModel, table=True):
     target_collection_id: Optional[int] = Field(
         default=None, foreign_key="collections.id", index=True
     )
-    requested_tags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    requested_tags_json: str = Field(
+        default="[]", sa_column=Column(Text, nullable=False)
+    )
     background_job_id: Optional[str] = Field(
         default=None, foreign_key="background_jobs.id", index=True
     )

@@ -20,7 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.http import get_or_404
 from app.core.logging import get_logger
-from app.core.security import require_superuser
+from app.core.security import require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
@@ -29,7 +29,9 @@ from app.db.models import (
     Model,
     Printer,
     PrinterFile,
+    PrinterPermission,
     PrinterProvider,
+    PrinterRole,
     PrintJob,
     PrintJobState,
     User,
@@ -42,6 +44,8 @@ from app.schemas.printers import (
     PrinterCapabilities,
     PrinterCreate,
     PrinterFileRead,
+    PrinterPermissionRead,
+    PrinterPermissionUpdate,
     PrinterRead,
     PrinterUpdate,
     PrintJobRead,
@@ -49,7 +53,7 @@ from app.schemas.printers import (
     SetTemperature,
     StartPrinterFile,
 )
-from app.services import rbac, ws_tickets
+from app.services import printer_rbac, rbac, ws_tickets
 from app.services.auth import get_user_by_id, verify_access_token
 from app.services.printer_files import (
     build_traceable_remote_filename,
@@ -131,31 +135,41 @@ def _validate_provider_config(p: Printer) -> None:
             raise HTTPException(status_code=400, detail="octoprint_api_key_required")
 
 
-def _to_read(p: Printer) -> PrinterRead:
+def _to_read(p: Printer, role: PrinterRole = PrinterRole.ADMIN) -> PrinterRead:
     caps = capabilities_for_provider(p.provider)
+    can_admin = printer_rbac.role_allows(role, PrinterRole.ADMIN)
     return PrinterRead(
         id=p.id,  # type: ignore[arg-type]
         name=p.name,
         provider=p.provider,
-        moonraker_url=p.moonraker_url,
-        has_api_key=bool(p.api_key),
+        moonraker_url=p.moonraker_url if can_admin else "",
+        has_api_key=bool(p.api_key) if can_admin else False,
         provider_variant=p.provider_variant,
-        bambu_host=p.bambu_host,
+        bambu_host=p.bambu_host if can_admin else None,
         bambu_serial=p.bambu_serial,
-        has_bambu_access_code=bool(p.bambu_access_code),
-        prusalink_url=p.prusalink_url,
+        has_bambu_access_code=bool(p.bambu_access_code) if can_admin else False,
+        prusalink_url=p.prusalink_url if can_admin else None,
         prusalink_auth_mode=p.prusalink_auth_mode,
-        prusalink_username=p.prusalink_username,
-        has_prusalink_password=bool(p.prusalink_password),
-        has_prusalink_api_key=bool(p.prusalink_api_key),
-        elegoo_centauri_host=p.elegoo_centauri_host,
+        prusalink_username=p.prusalink_username if can_admin else None,
+        has_prusalink_password=bool(p.prusalink_password) if can_admin else False,
+        has_prusalink_api_key=bool(p.prusalink_api_key) if can_admin else False,
+        elegoo_centauri_host=p.elegoo_centauri_host if can_admin else None,
         elegoo_centauri_mainboard_id=p.elegoo_centauri_mainboard_id,
-        has_elegoo_centauri_access_code=bool(p.elegoo_centauri_access_code),
-        octoprint_url=p.octoprint_url,
-        has_octoprint_api_key=bool(p.octoprint_api_key),
+        has_elegoo_centauri_access_code=(
+            bool(p.elegoo_centauri_access_code) if can_admin else False
+        ),
+        octoprint_url=p.octoprint_url if can_admin else None,
+        has_octoprint_api_key=bool(p.octoprint_api_key) if can_admin else False,
         model_name=p.model_name,
         detected_model=p.detected_model,
         capabilities=PrinterCapabilities(**caps.as_api_dict()),
+        access={
+            "role": role,
+            "can_view": True,
+            "can_print": printer_rbac.role_allows(role, PrinterRole.PRINT),
+            "can_control": printer_rbac.role_allows(role, PrinterRole.CONTROL),
+            "can_admin": can_admin,
+        },
         notes=p.notes,
         group=p.group,
         is_default=p.is_default,
@@ -198,7 +212,11 @@ def _to_printer_file_read(
 
 
 def _printer_file_reads(
-    session: Session, rows: list[PrinterFile], *, printer_name: str
+    session: Session,
+    rows: list[PrinterFile],
+    *,
+    printer_name: str,
+    user: User | None = None,
 ) -> list[PrinterFileRead]:
     """Compose PrinterFileReads with one batched File/Model lookup."""
     file_ids = {row.file_id for row in rows if row.file_id is not None}
@@ -213,6 +231,8 @@ def _printer_file_reads(
     out: list[PrinterFileRead] = []
     for row in rows:
         file_row, model_row = files_by_id.get(row.file_id or 0, (None, None))
+        if user is not None and not _can_view_file(session, user, file_row):
+            file_row, model_row = None, None
         out.append(
             _to_printer_file_read(
                 row,
@@ -304,14 +324,22 @@ async def _diagnostic_check(
 @router.get("", response_model=List[PrinterRead], summary="List printers")
 def list_printers(
     group: Optional[str] = Query(default=None, description="Filter by printer group"),
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterRead]:
     stmt = select(Printer).order_by(Printer.name)
     stmt = stmt.where(live(Printer))  # type: ignore[union-attr]
     if group is not None:
         stmt = stmt.where(Printer.group == group)
-    return [_to_read(p) for p in session.exec(stmt).all()]
+    printers = list(session.exec(stmt).all())
+    roles = printer_rbac.effective_roles_for_printers(
+        session, current_user, [int(p.id) for p in printers]
+    )
+    return [
+        _to_read(p, role)
+        for p in printers
+        if (role := roles.get(int(p.id))) is not None
+    ]
 
 
 @router.get(
@@ -323,10 +351,17 @@ def list_printers(
     ),
 )
 def farm_dashboard(
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
-    printers = session.exec(select(Printer)).all()
+    visible_ids = printer_rbac.accessible_printer_ids(session, current_user)
+    printers = (
+        session.exec(
+            select(Printer).where(Printer.id.in_(visible_ids), live(Printer))  # type: ignore[union-attr]
+        ).all()
+        if visible_ids
+        else []
+    )
     status_counts: dict[str, int] = {}
     group_counts: dict[str, dict[str, int]] = {}
 
@@ -340,6 +375,7 @@ def farm_dashboard(
 
     active_jobs = session.exec(
         select(PrintJob).where(
+            PrintJob.printer_id.in_(visible_ids),  # type: ignore[union-attr]
             PrintJob.state.in_(
                 [
                     PrintJobState.QUEUED,
@@ -348,7 +384,7 @@ def farm_dashboard(
                     PrintJobState.PAUSED,
                     PrintJobState.UPLOADING,
                 ]
-            )
+            ),
         )
     ).all()
 
@@ -375,9 +411,12 @@ def farm_dashboard(
 )
 async def printer_diagnostics(
     printer_id: int,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     if p.deleted_at is not None:
         raise HTTPException(status_code=404, detail="printer_not_found")
@@ -430,9 +469,12 @@ async def printer_diagnostics(
 )
 async def printer_config(
     printer_id: int,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> MoonrakerConfigRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     if p.deleted_at is not None:
         raise HTTPException(status_code=404, detail="printer_not_found")
@@ -465,13 +507,16 @@ async def printer_config(
 @router.get("/{printer_id}", response_model=PrinterRead, summary="Get a printer")
 def get_printer(
     printer_id: int,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> PrinterRead:
+    role = printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     if p.deleted_at is not None:
         raise HTTPException(status_code=404, detail="printer_not_found")
-    return _to_read(p)
+    return _to_read(p, role)
 
 
 @router.post(
@@ -522,15 +567,18 @@ async def create_printer(
 @router.patch(
     "/{printer_id}",
     response_model=PrinterRead,
-    dependencies=[Depends(require_superuser)],
     summary="Update a printer",
 )
 async def update_printer(
     printer_id: int,
     payload: PrinterUpdate,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
     hub: PrinterHub = Depends(get_hub),
 ) -> PrinterRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     if payload.provider is not None:
         p.provider = payload.provider
@@ -590,19 +638,128 @@ async def update_printer(
     "/{printer_id}",
     status_code=204,
     response_class=Response,
-    dependencies=[Depends(require_superuser)],
     summary="Remove a printer",
 )
 async def delete_printer(
     printer_id: int,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
     hub: PrinterHub = Depends(get_hub),
 ) -> Response:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     p.deleted_at = utcnow()
     session.add(p)
     session.commit()
     await hub.remove_printer(printer_id)
+    return Response(status_code=204)
+
+
+@router.get(
+    "/{printer_id}/permissions",
+    response_model=List[PrinterPermissionRead],
+    summary="List direct permissions for a printer",
+)
+def list_printer_permissions(
+    printer_id: int,
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> List[PrinterPermissionRead]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
+    rows = session.exec(
+        select(PrinterPermission, User)
+        .join(User, User.id == PrinterPermission.user_id)
+        .where(PrinterPermission.printer_id == printer_id)
+        .order_by(User.username)
+    ).all()
+    return [
+        PrinterPermissionRead(
+            id=permission.id,  # type: ignore[arg-type]
+            user_id=permission.user_id,
+            username=user.username,
+            printer_id=permission.printer_id,
+            role=permission.role,
+            created_at=permission.created_at,
+            updated_at=permission.updated_at,
+        )
+        for permission, user in rows
+    ]
+
+
+@router.put(
+    "/{printer_id}/permissions/{user_id}",
+    response_model=PrinterPermissionRead,
+    summary="Grant or update a printer permission",
+)
+def upsert_printer_permission(
+    printer_id: int,
+    user_id: int,
+    payload: PrinterPermissionUpdate,
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> PrinterPermissionRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
+    target = session.get(User, user_id)
+    if target is None or target.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    permission = session.exec(
+        select(PrinterPermission).where(
+            PrinterPermission.printer_id == printer_id,
+            PrinterPermission.user_id == user_id,
+        )
+    ).first()
+    if permission is None:
+        permission = PrinterPermission(
+            printer_id=printer_id, user_id=user_id, role=payload.role
+        )
+    else:
+        permission.role = payload.role
+        permission.updated_at = utcnow()
+    session.add(permission)
+    session.commit()
+    session.refresh(permission)
+    return PrinterPermissionRead(
+        id=permission.id,  # type: ignore[arg-type]
+        user_id=permission.user_id,
+        username=target.username,
+        printer_id=permission.printer_id,
+        role=permission.role,
+        created_at=permission.created_at,
+        updated_at=permission.updated_at,
+    )
+
+
+@router.delete(
+    "/{printer_id}/permissions/{user_id}",
+    status_code=204,
+    response_class=Response,
+    summary="Remove a printer permission",
+)
+def delete_printer_permission(
+    printer_id: int,
+    user_id: int,
+    current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> Response:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
+    permission = session.exec(
+        select(PrinterPermission).where(
+            PrinterPermission.printer_id == printer_id,
+            PrinterPermission.user_id == user_id,
+        )
+    ).first()
+    if permission is None:
+        raise HTTPException(status_code=404, detail="permission_not_found")
+    session.delete(permission)
+    session.commit()
     return Response(status_code=204)
 
 
@@ -624,9 +781,12 @@ async def delete_printer(
 async def send_to_printer(
     printer_id: int,
     payload: SendToPrinter,
-    current_user: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> PrintJobRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.PRINT
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = get_provider_client(p)
     if not provider.capabilities.can_upload:
@@ -747,9 +907,12 @@ async def send_to_printer(
 async def start_printer_file(
     printer_id: int,
     payload: StartPrinterFile,
-    current_user: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> PrintJobRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.PRINT
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = get_provider_client(p)
     if not provider.capabilities.can_start:
@@ -788,8 +951,6 @@ async def start_printer_file(
         file_id = int(file_row.id)
         model_id = file_row.model_id
     else:
-        if not current_user.is_superuser:
-            raise HTTPException(status_code=403, detail="admin_required")
         file_id, model_id = _get_sentinel_ids(session)
 
     job = PrintJob(
@@ -875,34 +1036,46 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
 
 @router.post(
     "/{printer_id}/pause",
-    dependencies=[Depends(require_superuser)],
     summary="Pause the current print",
 )
 async def pause_printer(
-    printer_id: int, session: Session = Depends(get_session)
+    printer_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     return await _printer_control(printer_id, session, "pause")
 
 
 @router.post(
     "/{printer_id}/resume",
-    dependencies=[Depends(require_superuser)],
     summary="Resume the paused print",
 )
 async def resume_printer(
-    printer_id: int, session: Session = Depends(get_session)
+    printer_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     return await _printer_control(printer_id, session, "resume")
 
 
 @router.post(
     "/{printer_id}/cancel",
-    dependencies=[Depends(require_superuser)],
     summary="Cancel the current print",
 )
 async def cancel_printer(
-    printer_id: int, session: Session = Depends(get_session)
+    printer_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     return await _printer_control(printer_id, session, "cancel")
 
 
@@ -931,14 +1104,17 @@ async def _run_gcode(provider, script: str) -> dict:
 
 @router.post(
     "/{printer_id}/temperature",
-    dependencies=[Depends(require_superuser)],
     summary="Set a heater target temperature",
 )
 async def set_printer_temperature(
     printer_id: int,
     payload: SetTemperature,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     provider = _require_gcode_provider(session, printer_id)
     code = "M104" if payload.heater == "extruder" else "M140"
     return await _run_gcode(provider, f"{code} S{payload.target:g}")
@@ -946,14 +1122,17 @@ async def set_printer_temperature(
 
 @router.post(
     "/{printer_id}/home",
-    dependencies=[Depends(require_superuser)],
     summary="Home the toolhead (all axes, or a subset)",
 )
 async def home_printer(
     printer_id: int,
     payload: HomeAxes,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     provider = _require_gcode_provider(session, printer_id)
     script = "G28" if not payload.axes else "G28 " + " ".join(payload.axes.upper())
     return await _run_gcode(provider, script)
@@ -961,13 +1140,16 @@ async def home_printer(
 
 @router.post(
     "/{printer_id}/emergency_stop",
-    dependencies=[Depends(require_superuser)],
     summary="Immediately halt the printer (Klipper emergency stop)",
 )
 async def emergency_stop_printer(
     printer_id: int,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.CONTROL
+    )
     provider = _require_gcode_provider(session, printer_id)
     try:
         await provider.emergency_stop()
@@ -990,13 +1172,16 @@ async def emergency_stop_printer(
 )
 def printer_status(
     printer_id: int,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
     hub: PrinterHub = Depends(get_hub),
 ) -> dict:
+    role = printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     return {
-        "printer": _to_read(p).model_dump(mode="json"),
+        "printer": _to_read(p, role).model_dump(mode="json"),
         "snapshot": hub.snapshots.get(printer_id, {}),
     }
 
@@ -1008,24 +1193,30 @@ def printer_status(
 )
 def list_files_on_printer(
     printer_id: int,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     rows = list(list_printer_files(session, printer_id=printer_id))
-    return _printer_file_reads(session, rows, printer_name=p.name)
+    return _printer_file_reads(session, rows, printer_name=p.name, user=current_user)
 
 
 @router.post(
     "/{printer_id}/files/sync",
     response_model=List[PrinterFileRead],
-    dependencies=[Depends(require_superuser)],
     summary="Sync the printer's remote G-code file inventory",
 )
 async def sync_files_on_printer(
     printer_id: int,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = get_provider_client(p)
     if not provider.capabilities.can_list_files:
@@ -1043,20 +1234,25 @@ async def sync_files_on_printer(
         raise HTTPException(status_code=502, detail=exc.code) from exc
 
     rows = sync_printer_files(session, printer_id=printer_id, remote_files=remote_files)
-    return _printer_file_reads(session, list(rows), printer_name=p.name)
+    return _printer_file_reads(
+        session, list(rows), printer_name=p.name, user=current_user
+    )
 
 
 @router.delete(
     "/{printer_id}/files/{printer_file_id}",
     response_model=List[PrinterFileRead],
-    dependencies=[Depends(require_superuser)],
     summary="Delete a remote G-code file from the printer",
 )
 async def delete_file_on_printer(
     printer_id: int,
     printer_file_id: int,
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.ADMIN
+    )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     provider = get_provider_client(p)
     if not provider.capabilities.can_list_files:
@@ -1094,7 +1290,9 @@ async def delete_file_on_printer(
         rows = sync_printer_files(
             session, printer_id=printer_id, remote_files=remote_files
         )
-    return _printer_file_reads(session, list(rows), printer_name=p.name)
+    return _printer_file_reads(
+        session, list(rows), printer_name=p.name, user=current_user
+    )
 
 
 @router.get(
@@ -1105,9 +1303,12 @@ async def delete_file_on_printer(
 def list_jobs(
     printer_id: int,
     limit: int = 50,
-    _: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrintJobRead]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
     stmt = select(PrintJob).where(PrintJob.printer_id == printer_id)
     rows = session.exec(
         stmt.order_by(PrintJob.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
@@ -1118,9 +1319,12 @@ def list_jobs(
 @router.post("/{printer_id}/ws-ticket")
 def create_ws_ticket(
     printer_id: int,
-    current_user: User = Depends(require_superuser),
+    current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict[str, str | int]:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
     printer = session.get(Printer, printer_id)
     if printer is None or printer.deleted_at is not None:
         raise HTTPException(status_code=404, detail="printer_not_found")
@@ -1162,7 +1366,10 @@ async def printer_ws(
     if (
         user is None
         or not user.is_active
-        or not user.is_superuser
+        or not printer_rbac.role_allows(
+            printer_rbac.effective_printer_role(session, user, printer_id),
+            PrinterRole.VIEW,
+        )
         or (payload is not None and payload.get("auth_version") != user.auth_version)
         or p is None
         or p.deleted_at is not None

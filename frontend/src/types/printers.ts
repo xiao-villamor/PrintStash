@@ -29,6 +29,25 @@ export type PrintJobState =
   | "cancelled"
   | "failed";
 export type RoutingStrategy = "manual" | "default" | "least_busy";
+export type PrinterRole = "view" | "print" | "control" | "admin";
+
+export interface PrinterAccess {
+  role: PrinterRole;
+  can_view: boolean;
+  can_print: boolean;
+  can_control: boolean;
+  can_admin: boolean;
+}
+
+export interface PrinterPermissionRead {
+  id: number;
+  user_id: number;
+  username: string;
+  printer_id: number;
+  role: PrinterRole;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface PrinterRead {
   id: number;
@@ -53,6 +72,7 @@ export interface PrinterRead {
   model_name?: string | null;
   detected_model?: string | null;
   capabilities: PrinterCapabilities;
+  access: PrinterAccess;
   notes: string | null;
   group: string | null;
   is_default: boolean;

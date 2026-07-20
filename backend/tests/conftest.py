@@ -86,6 +86,7 @@ _TRUNCATE_TABLES_ORDER = [
     "notification_deliveries",
     "notification_channels",
     "printer_files",
+    "printer_permissions",
     "printer_maintenance_logs",
     "printer_maintenance_windows",
     "print_jobs",

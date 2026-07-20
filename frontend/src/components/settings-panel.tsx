@@ -55,6 +55,7 @@ import {
   createBackup,
   deactivateAdminUser,
   deleteCollectionPermission,
+  deletePrinterPermission,
   downloadBackup,
   downloadModelExport,
   downloadLibraryArchive,
@@ -65,6 +66,8 @@ import {
   listBackups,
   listCollectionPermissions,
   listCollections,
+  listPrinterPermissions,
+  listPrinters,
   listApiKeys,
   listAdminUsers,
   listTrash,
@@ -75,6 +78,7 @@ import {
   restoreModel,
   revokeApiKey,
   updateCollectionPermission,
+  updatePrinterPermission,
   updateAdminUser,
   updateVaultConfig,
 } from "@/lib/api";
@@ -108,6 +112,9 @@ import type {
   CollectionPermissionRead,
   CollectionRead,
   CollectionRole,
+  PrinterPermissionRead,
+  PrinterRead,
+  PrinterRole,
   TrashedModelRead,
   UserRead,
 } from "@/types";
@@ -255,6 +262,12 @@ export function SettingsPanel() {
   const [accessCollectionId, setAccessCollectionId] = useState<number | "">("");
   const [accessRole, setAccessRole] = useState<CollectionRole>("view");
   const [accessBusy, setAccessBusy] = useState<"load" | "save" | string | null>(null);
+  const [accessPrinters, setAccessPrinters] = useState<PrinterRead[]>([]);
+  const [printerPermissions, setPrinterPermissions] = useState<PrinterPermissionRead[]>([]);
+  const [printerAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
+  const [accessPrinterId, setAccessPrinterId] = useState<number | "">("");
+  const [printerAccessRole, setPrinterAccessRole] = useState<PrinterRole>("view");
+  const [printerAccessBusy, setPrinterAccessBusy] = useState<"load" | "save" | string | null>(null);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("Programmatic access");
   const [keyBusy, setKeyBusy] = useState(false);
@@ -319,6 +332,23 @@ export function SettingsPanel() {
     }
   }, [user]);
 
+  const refreshPrinterAccess = useCallback(async () => {
+    if (!user?.is_superuser) return;
+    setPrinterAccessBusy("load");
+    try {
+      const printers = await listPrinters(undefined, { fresh: true });
+      const permissionGroups = await Promise.all(
+        printers.map((printer) => listPrinterPermissions(printer.id)),
+      );
+      setAccessPrinters(printers);
+      setPrinterPermissions(permissionGroups.flat());
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setPrinterAccessBusy(null);
+    }
+  }, [user]);
+
   useEffect(() => {
     setMetadataPrefs(readMetadataPreferences());
     setCardMetrics(readCardMetrics());
@@ -358,8 +388,9 @@ export function SettingsPanel() {
     if (user.is_superuser) {
       refreshUsers().catch(() => {});
       refreshCollectionAccess().catch(() => {});
+      refreshPrinterAccess().catch(() => {});
     }
-  }, [user, refreshUsers, refreshCollectionAccess]);
+  }, [user, refreshUsers, refreshCollectionAccess, refreshPrinterAccess]);
 
   const loadTrash = useCallback(async () => {
     if (!user) {
@@ -605,6 +636,41 @@ export function SettingsPanel() {
     }
   }
 
+  async function savePrinterAccess() {
+    if (!printerAccessUserId || !accessPrinterId) return;
+    setPrinterAccessBusy("save");
+    try {
+      await updatePrinterPermission(
+        Number(accessPrinterId),
+        Number(printerAccessUserId),
+        printerAccessRole,
+      );
+      await refreshPrinterAccess();
+      toast.success("Printer access saved.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setPrinterAccessBusy(null);
+    }
+  }
+
+  async function removePrinterAccess(printerId: number, userId: number) {
+    setPrinterAccessBusy(`${printerId}:${userId}`);
+    try {
+      await deletePrinterPermission(printerId, userId);
+      setPrinterPermissions((current) =>
+        current.filter(
+          (row) => row.printer_id !== printerId || row.user_id !== userId,
+        ),
+      );
+      toast.success("Printer access removed.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setPrinterAccessBusy(null);
+    }
+  }
+
   async function createUser() {
     const username = newUsername.trim();
     const password = newUserPassword.trim();
@@ -821,6 +887,15 @@ export function SettingsPanel() {
   const grantableCollections = accessCollections.filter(
     (row) => !selectedUserGrantedCollectionIds.has(row.id),
   );
+  const selectedPrinterPermissions = printerAccessUserId
+    ? printerPermissions.filter(
+        (row) => row.user_id === Number(printerAccessUserId),
+      )
+    : [];
+  const printerById = new Map(accessPrinters.map((row) => [row.id, row]));
+  const activePrinterAccessUser = printerAccessUserId
+    ? users.find((row) => row.id === Number(printerAccessUserId))
+    : null;
 
   return (
     <Localized>
@@ -1313,6 +1388,138 @@ export function SettingsPanel() {
                             title="Remove collection access"
                           >
                             {accessBusy === busyKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </SettingsCard>
+          )}
+
+          {user?.is_superuser && (
+            <SettingsCard
+              icon={Printer}
+              title="Printer access"
+              description="Grant access per printer. Roles build from view to print, machine control, and administration."
+              action={
+                <button
+                  type="button"
+                  onClick={refreshPrinterAccess}
+                  disabled={printerAccessBusy === "load"}
+                  className={BTN_ICON}
+                  title="Refresh printer access"
+                >
+                  <RefreshCw className={`h-4 w-4 ${printerAccessBusy === "load" ? "animate-spin" : ""}`} />
+                </button>
+              }
+            >
+              <div className="space-y-4 p-4 sm:p-5">
+                <div className="grid gap-2 lg:grid-cols-[1fr_1.4fr_auto_auto]">
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">User</span>
+                    <select
+                      value={printerAccessUserId}
+                      onChange={(event) => {
+                        setPrinterAccessUserId(event.target.value ? Number(event.target.value) : "");
+                        setAccessPrinterId("");
+                      }}
+                      className={INPUT}
+                      disabled={printerAccessBusy === "load"}
+                    >
+                      <option value="">Select user</option>
+                      {nonSuperUsers.map((row) => (
+                        <option key={row.id} value={row.id}>{row.username}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Printer</span>
+                    <select
+                      value={accessPrinterId}
+                      onChange={(event) => {
+                        const printerId = event.target.value ? Number(event.target.value) : "";
+                        setAccessPrinterId(printerId);
+                        const existing = printerPermissions.find(
+                          (row) =>
+                            row.printer_id === printerId &&
+                            row.user_id === Number(printerAccessUserId),
+                        );
+                        setPrinterAccessRole(existing?.role ?? "view");
+                      }}
+                      className={INPUT}
+                      disabled={!printerAccessUserId || printerAccessBusy === "load"}
+                    >
+                      <option value="">Select printer</option>
+                      {accessPrinters.map((row) => (
+                        <option key={row.id} value={row.id}>{row.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">Role</span>
+                    <select
+                      value={printerAccessRole}
+                      onChange={(event) => setPrinterAccessRole(event.target.value as PrinterRole)}
+                      className={INPUT}
+                      disabled={!printerAccessUserId || !accessPrinterId || printerAccessBusy === "load"}
+                    >
+                      <option value="view">View</option>
+                      <option value="print">Print</option>
+                      <option value="control">Control</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={savePrinterAccess}
+                    disabled={!printerAccessUserId || !accessPrinterId || printerAccessBusy === "save"}
+                    className={`${BTN_PRIMARY} self-end`}
+                  >
+                    {printerAccessBusy === "save" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                    Save
+                  </button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  View: status and history · Print: send and start jobs · Control: pause, cancel, temperatures, homing, emergency stop · Admin: settings, files, routing, and maintenance
+                </p>
+
+                <div className="overflow-hidden rounded border border-border">
+                  <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                    <span>Printer</span>
+                    <span>Role</span>
+                    <span>Remove</span>
+                  </div>
+                  {!printerAccessUserId ? (
+                    <p className="px-3 py-4 text-sm text-muted-foreground">Select a user to review printer grants.</p>
+                  ) : selectedPrinterPermissions.length === 0 ? (
+                    <p className="px-3 py-4 text-sm text-muted-foreground">
+                      {activePrinterAccessUser?.username ?? "User"} has no direct printer access.
+                    </p>
+                  ) : (
+                    selectedPrinterPermissions.map((row) => {
+                      const printer = printerById.get(row.printer_id);
+                      const busyKey = `${row.printer_id}:${row.user_id}`;
+                      return (
+                        <div
+                          key={busyKey}
+                          className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-foreground">{printer?.name ?? `Printer #${row.printer_id}`}</p>
+                            <p className="text-xs text-muted-foreground">{printer?.group || "Ungrouped"}</p>
+                          </div>
+                          <span className="rounded bg-muted px-2 py-1 font-mono text-3xs uppercase text-muted-foreground">{row.role}</span>
+                          <button
+                            type="button"
+                            onClick={() => removePrinterAccess(row.printer_id, row.user_id)}
+                            disabled={printerAccessBusy === busyKey}
+                            className="rounded p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                            title="Remove printer access"
+                          >
+                            {printerAccessBusy === busyKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                           </button>
                         </div>
                       );

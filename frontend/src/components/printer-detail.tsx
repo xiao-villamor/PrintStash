@@ -226,8 +226,6 @@ export function PrinterDetailPage({
   useEffect(() => {
     // Server-rendered pages pass the printer down; WS keeps it live after that.
     if (!initialPrinter || initialPrinter.id !== printerId) loadPrinter();
-    loadDiagnostics();
-    if (initialPrinter?.provider === "moonraker") loadMoonrakerConfig();
     loadJobs();
     loadPrinterFiles();
     connect();
@@ -237,6 +235,13 @@ export function PrinterDetailPage({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printerId]);
+
+  useEffect(() => {
+    if (!printer?.access.can_admin) return;
+    void loadDiagnostics();
+    if (printer.provider === "moonraker") void loadMoonrakerConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printer?.id, printer?.access.can_admin]);
 
   async function control(
     action: "pause" | "resume" | "cancel",
@@ -466,7 +471,7 @@ export function PrinterDetailPage({
           </span>
         </div>
         <p className="font-mono text-xs text-muted-foreground break-all">
-          {providerAddress(printer)}
+          {printer.access.can_admin ? providerAddress(printer) : `${printer.access.role} access`}
         </p>
       </div>
 
@@ -495,17 +500,24 @@ export function PrinterDetailPage({
             { key: "status" as const, label: "Status" },
             { key: "files" as const, label: "Files" },
             { key: "jobs" as const, label: "Jobs" },
-            { key: "maintenance" as const, label: "Maintenance" },
-            ...(printer.provider === "moonraker"
+            ...(printer.access.can_admin
+              ? [{ key: "maintenance" as const, label: "Maintenance" }]
+              : []),
+            ...(printer.provider === "moonraker" && printer.access.can_admin
               ? [{ key: "config" as const, label: "Config" }]
               : []),
-            { key: "diagnostics" as const, label: "Diagnostics" },
-            { key: "settings" as const, label: "Settings" },
+            ...(printer.access.can_admin
+              ? [
+                  { key: "diagnostics" as const, label: "Diagnostics" },
+                  { key: "settings" as const, label: "Settings" },
+                ]
+              : []),
           ]}
           active={activeTab}
           onChange={(k) => {
             setActiveTab(k);
             if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
+            if (k === "diagnostics" && !diagnostics) loadDiagnostics();
           }}
           className="gap-1 overflow-x-auto -mb-px"
           tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
@@ -553,36 +565,36 @@ export function PrinterDetailPage({
               <div className="flex flex-wrap gap-2">
                 <ControlButton
                   onClick={() => control("pause", () => pausePrinter(printerId))}
-                  disabled={!auth.isAuthenticated || !printer.capabilities.can_pause || ps.state !== "printing" || busy !== null}
+                  disabled={!printer.access.can_control || !printer.capabilities.can_pause || ps.state !== "printing" || busy !== null}
                   busy={busy === "pause"}
                   icon={Pause}
-                  label={auth.isAuthenticated ? "Pause" : "Sign in"}
+                  label={printer.access.can_control ? "Pause" : "No access"}
                 />
                 <ControlButton
                   onClick={() => control("resume", () => resumePrinter(printerId))}
-                  disabled={!auth.isAuthenticated || !printer.capabilities.can_resume || ps.state !== "paused" || busy !== null}
+                  disabled={!printer.access.can_control || !printer.capabilities.can_resume || ps.state !== "paused" || busy !== null}
                   busy={busy === "resume"}
                   icon={Play}
-                  label={auth.isAuthenticated ? "Resume" : "Sign in"}
+                  label={printer.access.can_control ? "Resume" : "No access"}
                 />
                 <ControlButton
                   onClick={() => control("cancel", () => cancelPrinter(printerId))}
                   disabled={
-                    !auth.isAuthenticated ||
+                    !printer.access.can_control ||
                     !printer.capabilities.can_cancel ||
                     (ps.state !== "printing" && ps.state !== "paused") ||
                     busy !== null
                   }
                   busy={busy === "cancel"}
                   icon={Square}
-                  label={auth.isAuthenticated ? "Cancel" : "Sign in"}
+                  label={printer.access.can_control ? "Cancel" : "No access"}
                   destructive
                 />
               </div>
               <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                {auth.isAuthenticated
-                  ? "Controls use your signed-in user session."
-                  : "Sign in to control printers."}
+                {printer.access.can_control
+                  ? "Controls permitted by your printer role."
+                  : "Control role required."}
               </p>
             </div>
           </div>
@@ -638,7 +650,7 @@ export function PrinterDetailPage({
                       <button
                         key={p.name}
                         onClick={() => preheat(p)}
-                        disabled={!auth.isAuthenticated || machineBusy !== null}
+                        disabled={!printer.access.can_control || machineBusy !== null}
                         title={`Hotend ${p.hotend}°C · Bed ${p.bed}°C`}
                         className={BTN_SECONDARY}
                       >
@@ -650,7 +662,7 @@ export function PrinterDetailPage({
                     ))}
                     <button
                       onClick={cooldown}
-                      disabled={!auth.isAuthenticated || machineBusy !== null}
+                      disabled={!printer.access.can_control || machineBusy !== null}
                       className={BTN_SECONDARY}
                     >
                       {machineBusy === "cooldown" && (
@@ -669,7 +681,7 @@ export function PrinterDetailPage({
                     applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
                   }
                   busy={machineBusy === "set-extruder"}
-                  disabled={!auth.isAuthenticated || machineBusy !== null}
+                  disabled={!printer.access.can_control || machineBusy !== null}
                 />
                 <SetTempInput
                   label="Bed target"
@@ -679,7 +691,7 @@ export function PrinterDetailPage({
                     applyTemp("bed", bedTarget, () => setBedTarget(""))
                   }
                   busy={machineBusy === "set-bed"}
-                  disabled={!auth.isAuthenticated || machineBusy !== null}
+                  disabled={!printer.access.can_control || machineBusy !== null}
                 />
 
                 <div className="border-t border-border pt-4 flex flex-wrap gap-2">
@@ -691,7 +703,7 @@ export function PrinterDetailPage({
                         "Homing all axes",
                       )
                     }
-                    disabled={!auth.isAuthenticated || machineBusy !== null}
+                    disabled={!printer.access.can_control || machineBusy !== null}
                     className={BTN_SECONDARY}
                   >
                     {machineBusy === "home" ? (
@@ -703,7 +715,7 @@ export function PrinterDetailPage({
                   </button>
                   <button
                     onClick={emergencyStop}
-                    disabled={!auth.isAuthenticated || machineBusy !== null}
+                    disabled={!printer.access.can_control || machineBusy !== null}
                     className={BTN_DANGER}
                   >
                     {machineBusy === "estop" ? (
@@ -735,7 +747,7 @@ export function PrinterDetailPage({
           </div>
           <button
             onClick={syncFiles}
-            disabled={syncingFiles || !auth.isAuthenticated || !printer.capabilities.can_list_files}
+            disabled={syncingFiles || !printer.access.can_admin || !printer.capabilities.can_list_files}
             title={auth.blockReason ?? "Sync printer files"}
             className={BTN_SECONDARY}
           >
@@ -810,7 +822,7 @@ export function PrinterDetailPage({
                       <button
                         onClick={() => startRemoteFile(f)}
                         disabled={
-                          !auth.isAuthenticated ||
+                          !printer.access.can_print ||
                           !printer.capabilities.can_start ||
                           startingFileId !== null ||
                           deletingFileId !== null
@@ -828,7 +840,7 @@ export function PrinterDetailPage({
                       <button
                         onClick={() => deleteRemoteFile(f)}
                         disabled={
-                          !auth.isAuthenticated ||
+                          !printer.access.can_admin ||
                           printer.provider !== "moonraker" ||
                           deletingFileId !== null ||
                           startingFileId !== null ||
@@ -862,7 +874,7 @@ export function PrinterDetailPage({
       {activeTab === "settings" && (
         <PrinterSettings
           printer={printer}
-          canEdit={auth.isAuthenticated}
+          canEdit={printer.access.can_admin}
           onSaved={(updated) => setPrinter(updated)}
         />
       )}

@@ -6,7 +6,7 @@ import { PrinterRead } from "@/types";
 import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
 import { usePrinterDashboard, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
-import { useRequireAuth } from "@/lib/use-require-auth";
+import { useAuth } from "@/lib/auth-context";
 import {
   PRINTER_MODEL_OPTIONS,
   PRINTER_SETUP_OPTIONS,
@@ -47,7 +47,7 @@ const STATUS_PRIORITY: Record<string, number> = {
 };
 
 export function PrintersPage() {
-  const auth = useRequireAuth();
+  const { user } = useAuth();
   // Shared printers cache: mutations through the api layer invalidate
   // queryKeys.printers, so this list refetches itself after add/delete.
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
@@ -134,20 +134,28 @@ export function PrintersPage() {
             <Button
               size="xs"
               onClick={() => {
-                if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+                if (!user?.is_superuser) return;
                 setAddOpen(true);
               }}
-              disabled={!auth.isAuthenticated}
+              disabled={!user?.is_superuser}
             >
               <Plus className="h-3.5 w-3.5" />
-              {auth.isAuthenticated ? "Add printer" : "Sign in to add"}
+              {user?.is_superuser ? "Add printer" : "Admin required"}
             </Button>
           </>
         }
       />
 
       <TabBar
-        tabs={[{ key: "fleet", label: "Fleet" }, { key: "queue", label: "Queue" }, { key: "maintenance", label: "Maintenance" }]}
+        tabs={[
+          { key: "fleet", label: "Fleet" },
+          ...(user?.is_superuser || printers.some((printer) => printer.access.can_print)
+            ? [{ key: "queue" as const, label: "Queue" }]
+            : []),
+          ...(user?.is_superuser || printers.some((printer) => printer.access.can_admin)
+            ? [{ key: "maintenance" as const, label: "Maintenance" }]
+            : []),
+        ]}
         active={activeView}
         onChange={setActiveView}
         className="border-b border-border"
@@ -213,12 +221,12 @@ export function PrintersPage() {
         <EmptyState
           icon={PrinterIcon}
           title="No printers configured yet."
-          action={
+          action={user?.is_superuser ? (
             <Button size="xs" onClick={() => setAddOpen(true)}>
               <Plus className="h-3.5 w-3.5" />
               Add your first printer
             </Button>
-          }
+          ) : undefined}
           className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
         />
       ) : (
@@ -251,6 +259,9 @@ export function PrintersPage() {
                         Beta
                       </span>
                     )}
+                    <Badge variant="outline" className="h-5 px-2 font-mono text-3xs uppercase tracking-wider">
+                      {p.access.role}
+                    </Badge>
                   </div>
                 </div>
                 <span className="flex items-center gap-1.5 flex-shrink-0">
@@ -270,15 +281,15 @@ export function PrintersPage() {
                       <PrinterIcon className="h-3.5 w-3.5" /> Model
                     </dt>
                     <dd className="min-w-0">
-                      <PrinterModelBadge printer={p} canEdit={auth.isAuthenticated} />
+                      <PrinterModelBadge printer={p} canEdit={p.access.can_admin} />
                     </dd>
                   </div>
                   <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
                     <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       <Network className="h-3.5 w-3.5" /> Endpoint
                     </dt>
-                    <dd className="truncate font-mono text-xs text-foreground" title={providerAddress(p)}>
-                      {providerAddress(p)}
+                    <dd className="truncate font-mono text-xs text-foreground" title={p.access.can_admin ? providerAddress(p) : "Restricted"}>
+                      {p.access.can_admin ? providerAddress(p) : "Restricted"}
                     </dd>
                   </div>
                   <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
@@ -310,14 +321,14 @@ export function PrintersPage() {
               <div className="flex items-center justify-between border-t border-border bg-muted/20 px-4 py-3">
                 <button
                   onClick={(e) => {
-                    if (!auth.isAuthenticated) { e.preventDefault(); e.stopPropagation(); auth.showAuthRequiredToast(); return; }
+                    if (!p.access.can_admin) { e.preventDefault(); e.stopPropagation(); return; }
                     handleDelete(p, e);
                   }}
-                  disabled={!auth.isAuthenticated}
-                  className="px-2 py-1 rounded text-red-600 hover:bg-red-500/10 transition-colors text-3xs uppercase tracking-wider flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!p.access.can_admin}
+                  className="flex items-center gap-1 rounded px-2 py-1 text-3xs uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Trash2 className="h-3 w-3" />
-                  {auth.isAuthenticated ? "Remove" : "Sign in"}
+                  {p.access.can_admin ? "Remove" : "Restricted"}
                 </button>
                 <Link href={`/printers/${p.id}`} className="flex items-center gap-1 rounded border border-border px-2.5 py-1.5 text-3xs uppercase tracking-wider text-foreground transition-colors hover:border-primary hover:text-primary">
                   Open
@@ -331,10 +342,10 @@ export function PrintersPage() {
 
       </>}
 
-      {activeView === "queue" && <FleetQueuePanel printers={printers} />}
-      {activeView === "maintenance" && <FleetMaintenancePanel printers={printers} onPrintersChanged={() => { void printersQuery.refetch(); }} />}
+      {activeView === "queue" && <FleetQueuePanel printers={printers.filter((printer) => printer.access.can_print)} />}
+      {activeView === "maintenance" && <FleetMaintenancePanel printers={printers.filter((printer) => printer.access.can_admin)} onPrintersChanged={() => { void printersQuery.refetch(); }} />}
 
-      {addOpen && (
+      {addOpen && user?.is_superuser && (
         <AddPrinterModal
           onClose={() => setAddOpen(false)}
           onCreated={() => {

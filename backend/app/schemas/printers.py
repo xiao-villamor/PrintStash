@@ -5,7 +5,13 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.db.models import PrinterProvider, PrinterStatus, PrintJobState, RoutingStrategy
+from app.db.models import (
+    PrinterProvider,
+    PrinterRole,
+    PrinterStatus,
+    PrintJobState,
+    RoutingStrategy,
+)
 
 
 def validate_remote_filename_value(value: Optional[str]) -> Optional[str]:
@@ -35,6 +41,30 @@ class PrinterCapabilities(BaseModel):
     support_level: str = "stable"
     support_notes: list[str] = Field(default_factory=list)
     unsupported_actions: list[str] = Field(default_factory=list)
+
+
+class PrinterAccess(BaseModel):
+    role: PrinterRole
+    can_view: bool = True
+    can_print: bool = False
+    can_control: bool = False
+    can_admin: bool = False
+
+
+class PrinterPermissionUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: PrinterRole
+
+
+class PrinterPermissionRead(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    printer_id: int
+    role: PrinterRole
+    created_at: datetime
+    updated_at: datetime
 
 
 class PrinterCreate(BaseModel):
@@ -168,6 +198,7 @@ class PrinterRead(BaseModel):
     model_name: Optional[str] = None
     detected_model: Optional[str] = None
     capabilities: PrinterCapabilities
+    access: PrinterAccess
     notes: Optional[str] = None
     group: Optional[str] = None
     is_default: bool = False

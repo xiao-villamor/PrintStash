@@ -22,6 +22,12 @@ vi.mock("@/lib/queries", () => ({
 vi.mock("@/lib/use-require-auth", () => ({
   useRequireAuth: () => ({ isAuthenticated: true, showAuthRequiredToast: vi.fn() }),
 }));
+vi.mock("@/lib/auth-context", () => ({
+  useAuth: () => ({
+    user: { id: 1, username: "admin", email: null, is_superuser: true },
+    loading: false,
+  }),
+}));
 vi.mock("@/lib/task-center", () => ({ createTask: vi.fn(), updateTask: vi.fn() }));
 vi.mock("@/lib/navigation", () => ({
   Link: ({ children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>,
@@ -36,6 +42,7 @@ const printer: PrinterRead = {
   provider: "moonraker",
   moonraker_url: "http://farm",
   has_api_key: false,
+  access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
   capabilities: {
     can_start: true,
     can_pause: true,

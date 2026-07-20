@@ -22,9 +22,13 @@ from app.db.models import (
     FileType,
     Model,
     Printer,
+    PrinterPermission,
+    PrinterRole,
     PrinterStatus,
     PrintJob,
     PrintJobState,
+    RoutingStrategy,
+    User,
 )
 from app.services import printer_jobs
 from app.services.printer_jobs import (
@@ -63,10 +67,14 @@ def _gcode(session: Session, slug: str = "dispatch-cube") -> File:
 # ---------------------------------------------------------------------------
 
 
-def test_transfer_artifact_wraps_download_failure_as_storage_error(tmp_path: Path) -> None:
+def test_transfer_artifact_wraps_download_failure_as_storage_error(
+    tmp_path: Path,
+) -> None:
     backend = AsyncMock()
     backend.exists = lambda _key: True
-    backend.download_to_path = lambda *_a, **_kw: (_ for _ in ()).throw(OSError("disk full"))
+    backend.download_to_path = lambda *_a, **_kw: (_ for _ in ()).throw(
+        OSError("disk full")
+    )
     artifact = File(
         id=1,
         model_id=1,
@@ -80,7 +88,9 @@ def test_transfer_artifact_wraps_download_failure_as_storage_error(tmp_path: Pat
 
     async def _run() -> None:
         with pytest.raises(PrinterJobError, match="storage_error"):
-            await transfer_artifact(backend, AsyncMock(), artifact, "x.gcode", start_print=True)
+            await transfer_artifact(
+                backend, AsyncMock(), artifact, "x.gcode", start_print=True
+            )
 
     asyncio.run(_run())
 
@@ -101,7 +111,9 @@ def test_transfer_artifact_raises_when_blob_missing() -> None:
 
     async def _run() -> None:
         with pytest.raises(PrinterJobError, match="file_blob_missing"):
-            await transfer_artifact(backend, AsyncMock(), artifact, "gone.gcode", start_print=True)
+            await transfer_artifact(
+                backend, AsyncMock(), artifact, "gone.gcode", start_print=True
+            )
 
     asyncio.run(_run())
 
@@ -150,7 +162,9 @@ def test_transfer_artifact_marks_provider_upload_timeout_as_outcome_unknown(
 
 
 def test_dispatch_claimed_raises_when_printer_missing(db_session: Session) -> None:
-    printer = Printer(name="Vanishing", moonraker_url="http://vanish", status=PrinterStatus.READY)
+    printer = Printer(
+        name="Vanishing", moonraker_url="http://vanish", status=PrinterStatus.READY
+    )
     db_session.add(printer)
     db_session.commit()
     db_session.refresh(printer)
@@ -191,7 +205,9 @@ def test_dispatch_claimed_raises_when_job_has_no_printer(db_session: Session) ->
 
 
 def _seeded_upload_job(db_session: Session) -> tuple[Printer, PrintJob]:
-    printer = Printer(name="Capabilities", moonraker_url="http://caps", status=PrinterStatus.READY)
+    printer = Printer(
+        name="Capabilities", moonraker_url="http://caps", status=PrinterStatus.READY
+    )
     db_session.add(printer)
     db_session.commit()
     db_session.refresh(printer)
@@ -209,12 +225,50 @@ def _seeded_upload_job(db_session: Session) -> tuple[Printer, PrintJob]:
     return printer, job
 
 
+def test_dispatch_rechecks_printer_grant_after_enqueue(db_session: Session) -> None:
+    printer = Printer(
+        name="Revoked", moonraker_url="http://revoked", status=PrinterStatus.READY
+    )
+    user = User(username="revoked-user", hashed_password="unused", is_active=True)
+    db_session.add_all([printer, user])
+    db_session.commit()
+    db_session.refresh(printer)
+    db_session.refresh(user)
+    artifact = _gcode(db_session, "revoked-cube")
+    permission = PrinterPermission(
+        printer_id=printer.id, user_id=user.id, role=PrinterRole.PRINT
+    )
+    db_session.add(permission)
+    db_session.commit()
+    job = PrintJob(
+        printer_id=printer.id,
+        file_id=artifact.id,
+        model_id=artifact.model_id,
+        remote_filename="revoked.gcode",
+        state=PrintJobState.QUEUED,
+        routing_strategy=RoutingStrategy.MANUAL,
+        requested_by=user.id,
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+    db_session.delete(permission)
+    db_session.commit()
+
+    assert asyncio.run(printer_jobs.dispatch_next()) is None
+    db_session.refresh(job)
+    assert job.state == PrintJobState.QUEUED
+    assert job.blocked_reason == "printer_access_revoked"
+
+
 def test_dispatch_claimed_raises_when_provider_cannot_upload_or_start(
     db_session: Session,
 ) -> None:
     _printer, job = _seeded_upload_job(db_session)
     provider = AsyncMock()
-    provider.capabilities = ProviderCapabilities(supported=frozenset())  # no START/UPLOAD
+    provider.capabilities = ProviderCapabilities(
+        supported=frozenset()
+    )  # no START/UPLOAD
 
     with patch("app.services.printer_jobs.get_provider_client", return_value=provider):
         with pytest.raises(ProviderError, match="operation_not_supported_for_provider"):

@@ -123,8 +123,10 @@ manufacturing platform.
 
 ## Fleet Scheduling
 
-- Fleet scheduling is administrator-managed and limited to Vault-backed
-  plain-text G-code. It does not slice, modify, or validate G-code.
+- Fleet scheduling is limited to Vault-backed plain-text G-code. Users with a
+  printer's `print` role can manually queue work to that printer; automatic
+  default/least-busy routing remains administrator-managed because it can select
+  another printer. PrintStash does not slice, modify, or validate G-code.
 - Automatic dispatch requires a provider that advertises both upload and start
   capabilities. Status/control-only integrations remain visible but are not
   eligible routing targets.
@@ -145,6 +147,11 @@ manufacturing platform.
   exposed through authenticated health details and Prometheus metrics.
 
 ## Auth And Platform
+
+- Printer roles are ordered: `view`, `print`, `control`, and `admin`. Grants are
+  per user and printer; group-wide grants, custom capability sets, time-limited
+  grants, and OIDC group-to-printer mapping are not implemented. API keys use
+  their owning user's current grants.
 
 - OIDC is optional and configured under Settings → SSO or with environment
   variables. Saved client secrets are encrypted at rest. Local login remains

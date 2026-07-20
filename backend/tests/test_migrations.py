@@ -317,6 +317,7 @@ def test_upgrade_from_pre_0_8_0_release_preserves_data(tmp_path: Path) -> None:
     try:
         inspector = inspect(engine)
         assert "documents" in inspector.get_table_names()  # new 0.8.0 table
+        assert "printer_permissions" in inspector.get_table_names()
         assert "readme" in {c["name"] for c in inspector.get_columns("collections")}
         printer_columns = {c["name"] for c in inspector.get_columns("printers")}
         assert {

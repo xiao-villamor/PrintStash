@@ -172,6 +172,8 @@ queue manager.
   assignment, and normal ingestion-pipeline persistence
 - Structured Artifact, Metadata, Revision, print-history, storage, and upload-date
   filters with RBAC-scoped facets, canonical URLs, and Saved Views
+- Per-user, per-printer access roles for view-only status, printing, machine
+  control, and administration across live status, files, fleet, and maintenance
 
 ## Auth and Platform (folded into 0.11.0)
 

@@ -494,15 +494,25 @@ def delete_maintenance_log(
     session.commit()
 
 
-def fleet_summary(session: Session) -> dict[str, int]:
-    printers = list(session.exec(select(Printer).where(live(Printer))).all())
-    jobs = list(session.exec(select(PrintJob).where(live(PrintJob))).all())
+def fleet_summary(
+    session: Session, printer_ids: set[int] | None = None
+) -> dict[str, int]:
+    printer_stmt = select(Printer).where(live(Printer))
+    job_stmt = select(PrintJob).where(live(PrintJob))
+    window_stmt = select(PrinterMaintenanceWindow).where(live(PrinterMaintenanceWindow))
+    if printer_ids is not None:
+        printer_stmt = printer_stmt.where(Printer.id.in_(printer_ids))  # type: ignore[union-attr]
+        job_stmt = job_stmt.where(PrintJob.printer_id.in_(printer_ids))  # type: ignore[union-attr]
+        window_stmt = window_stmt.where(
+            PrinterMaintenanceWindow.printer_id.in_(printer_ids)  # type: ignore[union-attr]
+        )
+    printers = list(session.exec(printer_stmt).all()) if printer_ids != set() else []
+    jobs = list(session.exec(job_stmt).all()) if printer_ids != set() else []
     now = utcnow()
     maintenance_printers = {
         row.printer_id
         for row in session.exec(
-            select(PrinterMaintenanceWindow).where(
-                live(PrinterMaintenanceWindow),
+            window_stmt.where(
                 PrinterMaintenanceWindow.starts_at <= now,
                 PrinterMaintenanceWindow.ends_at > now,
             )

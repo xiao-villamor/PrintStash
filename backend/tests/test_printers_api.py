@@ -19,7 +19,9 @@ from app.db.models import (
     Model,
     Printer,
     PrinterFile,
+    PrinterPermission,
     PrinterProvider,
+    PrinterRole,
     PrinterStatus,
     PrintJob,
     PrintJobState,
@@ -48,6 +50,146 @@ def _user_headers(
     db_session.refresh(user)
     token = create_access_token(user.id, user.username, scope=scope)
     return {"Authorization": f"Bearer {token}"}
+
+
+def _grant_printer(
+    db_session: Session, username: str, printer: Printer, role: PrinterRole
+) -> None:
+    user = db_session.exec(select(User).where(User.username == username)).one()
+    db_session.add(PrinterPermission(user_id=user.id, printer_id=printer.id, role=role))
+    db_session.commit()
+
+
+class TestPrinterRbac:
+    def test_user_only_lists_granted_printers_and_connection_is_redacted(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        visible = Printer(
+            name="Shared",
+            moonraker_url="http://shared.local:7125",
+            api_key="secret",
+        )
+        hidden = Printer(name="Private", moonraker_url="http://private.local:7125")
+        db_session.add_all([visible, hidden])
+        db_session.commit()
+        db_session.refresh(visible)
+        headers = _user_headers(db_session, "viewer")
+        _grant_printer(db_session, "viewer", visible, PrinterRole.VIEW)
+
+        response = client.get("/api/v1/printers", headers=headers)
+
+        assert response.status_code == 200
+        assert [row["name"] for row in response.json()] == ["Shared"]
+        assert response.json()[0]["moonraker_url"] == ""
+        assert response.json()[0]["has_api_key"] is False
+        assert response.json()[0]["access"] == {
+            "role": "view",
+            "can_view": True,
+            "can_print": False,
+            "can_control": False,
+            "can_admin": False,
+        }
+        hidden_response = client.get(f"/api/v1/printers/{hidden.id}", headers=headers)
+        assert hidden_response.status_code == 403
+
+    def test_role_change_and_revocation_take_effect_immediately(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        printer = Printer(name="Shared", moonraker_url="http://shared.local:7125")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+        user_headers = _user_headers(db_session, "operator")
+        user = db_session.exec(select(User).where(User.username == "operator")).one()
+
+        granted = client.put(
+            f"/api/v1/printers/{printer.id}/permissions/{user.id}",
+            json={"role": "control"},
+            headers=auth_headers,
+        )
+        assert granted.status_code == 200
+        assert granted.json()["role"] == "control"
+        assert (
+            client.get(f"/api/v1/printers/{printer.id}", headers=user_headers).json()[
+                "access"
+            ]["can_control"]
+            is True
+        )
+
+        revoked = client.delete(
+            f"/api/v1/printers/{printer.id}/permissions/{user.id}",
+            headers=auth_headers,
+        )
+        assert revoked.status_code == 204
+        assert (
+            client.get(
+                f"/api/v1/printers/{printer.id}", headers=user_headers
+            ).status_code
+            == 403
+        )
+
+    def test_view_role_cannot_control_printer(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        printer = Printer(name="Shared", moonraker_url="http://shared.local:7125")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+        headers = _user_headers(db_session, "viewer-control")
+        _grant_printer(db_session, "viewer-control", printer, PrinterRole.VIEW)
+
+        response = client.post(f"/api/v1/printers/{printer.id}/pause", headers=headers)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "printer_permission_denied"
+
+    def test_print_role_passes_printer_gate_but_not_control_gate(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        printer = Printer(name="Shared", moonraker_url="http://shared.local:7125")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+        headers = _user_headers(db_session, "print-only")
+        _grant_printer(db_session, "print-only", printer, PrinterRole.PRINT)
+
+        send_response = client.post(
+            f"/api/v1/printers/{printer.id}/send",
+            json={"file_id": 999, "start_print": False},
+            headers=headers,
+        )
+        control_response = client.post(
+            f"/api/v1/printers/{printer.id}/pause", headers=headers
+        )
+
+        assert send_response.status_code == 404
+        assert send_response.json()["detail"] == "file_not_found"
+        assert control_response.status_code == 403
+
+    def test_control_role_can_pause_printer(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        printer = Printer(name="Shared", moonraker_url="http://shared.local:7125")
+        db_session.add(printer)
+        db_session.commit()
+        db_session.refresh(printer)
+        headers = _user_headers(db_session, "controller")
+        _grant_printer(db_session, "controller", printer, PrinterRole.CONTROL)
+
+        with patch(
+            "app.services.printer_provider.MoonrakerProvider.pause",
+            new_callable=AsyncMock,
+        ) as pause:
+            pause.return_value = {"result": "ok"}
+            response = client.post(
+                f"/api/v1/printers/{printer.id}/pause", headers=headers
+            )
+
+        assert response.status_code == 200
+        pause.assert_awaited_once()
 
 
 class TestListPrinters:
@@ -1142,7 +1284,7 @@ class TestPrinterJobs:
         resp = client.get(f"/api/v1/printers/{printer.id}/jobs", headers=headers)
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "admin_required"
+        assert resp.json()["detail"] == "printer_permission_denied"
 
 
 class TestPrinterFiles:
@@ -1430,7 +1572,7 @@ class TestPrinterFiles:
         resp = client.get(f"/api/v1/printers/{printer.id}/files", headers=headers)
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "admin_required"
+        assert resp.json()["detail"] == "printer_permission_denied"
 
     def test_non_superuser_cannot_send_to_printer(
         self, client: TestClient, db_session: Session
@@ -1471,7 +1613,7 @@ class TestPrinterFiles:
         )
 
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "admin_required"
+        assert resp.json()["detail"] == "printer_permission_denied"
 
     def test_start_matched_printer_file_creates_vault_job(
         self, client: TestClient, auth_headers, db_session: Session
@@ -2496,7 +2638,7 @@ class TestStartPrinterFileExtra:
             headers=headers,
         )
         assert resp.status_code == 403
-        assert resp.json()["detail"] == "admin_required"
+        assert resp.json()["detail"] == "printer_permission_denied"
 
     def test_start_provider_error_marks_job_failed(
         self, client: TestClient, auth_headers, db_session: Session

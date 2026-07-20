@@ -12,9 +12,18 @@ from sqlmodel import select
 from app.core.logging import get_logger
 from app.core.metrics import record_fleet_dispatch
 from app.core.time import utcnow
-from app.db.models import File, Printer, PrintJob, PrintJobState
+from app.db.models import (
+    CollectionRole,
+    File,
+    Model,
+    Printer,
+    PrinterRole,
+    PrintJob,
+    PrintJobState,
+    User,
+)
 from app.db.session import get_session_factory
-from app.services import fleet
+from app.services import fleet, printer_rbac, rbac
 from app.services.printer_files import upsert_printer_file
 from app.services.printer_provider import ProviderError, get_provider_client
 from app.services.storage_backend import get_backend
@@ -146,6 +155,39 @@ async def dispatch_next() -> int | None:
             printer, blocked_reason = fleet.choose_printer(
                 session, row.routing_strategy, requested_printer_id
             )
+            requester = (
+                session.get(User, row.requested_by) if row.requested_by else None
+            )
+            artifact = session.get(File, row.file_id)
+            model = session.get(Model, row.model_id)
+            if row.requested_by is not None and (
+                requester is None
+                or not requester.is_active
+                or requester.deleted_at is not None
+            ):
+                blocked_reason = "requester_access_revoked"
+            elif (
+                requester is not None
+                and printer is not None
+                and not printer_rbac.role_allows(
+                    printer_rbac.effective_printer_role(
+                        session, requester, int(printer.id)
+                    ),
+                    PrinterRole.PRINT,
+                )
+            ):
+                blocked_reason = "printer_access_revoked"
+            elif requester is not None and (
+                artifact is None
+                or model is None
+                or not rbac.role_allows(
+                    rbac.effective_collection_role(
+                        session, requester, model.collection_id if model else None
+                    ),
+                    CollectionRole.EDIT,
+                )
+            ):
+                blocked_reason = "collection_access_revoked"
             assigned_id = printer.id if printer else None
             if row.printer_id != assigned_id or row.blocked_reason != blocked_reason:
                 row.printer_id = assigned_id

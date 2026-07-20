@@ -17,6 +17,8 @@ import {
   PrinterFileRead,
   PrinterCreate,
   PrinterRead,
+  PrinterPermissionRead,
+  PrinterRole,
   PrinterStatusResponse,
   PrinterUpdate,
   SendToPrinter,
@@ -69,6 +71,37 @@ export function updatePrinter(
 
 export function deletePrinter(id: number): Promise<void> {
   return sendAction(`/api/v1/printers/${id}`, "DELETE");
+}
+
+export function listPrinterPermissions(
+  id: number,
+): Promise<PrinterPermissionRead[]> {
+  return getJson<PrinterPermissionRead[]>(
+    `/api/v1/printers/${id}/permissions`,
+    { fresh: true },
+  );
+}
+
+export function updatePrinterPermission(
+  printerId: number,
+  userId: number,
+  role: PrinterRole,
+): Promise<PrinterPermissionRead> {
+  return sendJson<PrinterPermissionRead>(
+    `/api/v1/printers/${printerId}/permissions/${userId}`,
+    "PUT",
+    { role },
+  );
+}
+
+export function deletePrinterPermission(
+  printerId: number,
+  userId: number,
+): Promise<void> {
+  return sendAction(
+    `/api/v1/printers/${printerId}/permissions/${userId}`,
+    "DELETE",
+  );
 }
 
 export function sendToPrinter(
