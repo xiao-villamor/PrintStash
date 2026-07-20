@@ -22,6 +22,7 @@ import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
 
 import { PRINT_JOB_PRESENTATION, printJobToneClass } from "./presentation";
+import { Localized } from "@/components/ui/localized";
 
 type PrintHistoryMode = "manual" | "auto";
 
@@ -140,7 +141,7 @@ export function PrintHistorySection({
   }
 
   return (
-    <section>
+    <Localized><section>
       <div className="flex items-center justify-between mb-4 pb-1 border-b border-outline-variant">
         <h2 className="text-lg font-semibold text-on-surface flex items-center gap-2">
           <Clock className="h-4 w-4" /> Print History
@@ -420,6 +421,6 @@ export function PrintHistorySection({
           })}
         </div>
       )}
-    </section>
+    </section></Localized>
   );
 }

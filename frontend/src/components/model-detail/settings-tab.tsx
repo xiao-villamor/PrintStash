@@ -5,6 +5,7 @@ import { MetadataRead } from "@/types";
 
 import { PrintSettingRow } from "./presentation";
 import { SettingRow } from "./setting-row";
+import { Localized } from "@/components/ui/localized";
 
 export function SettingsTab({
   meta,
@@ -16,7 +17,7 @@ export function SettingsTab({
   preferences: MetadataPreferences;
 }) {
   return (
-    <>
+    <Localized><>
       {printSettingRows.length === 0 && (
         <p className="font-mono text-xs text-on-surface-variant">
           No print settings recorded yet. Add a sliced G-code revision to capture them.
@@ -71,6 +72,6 @@ export function SettingsTab({
           {meta.slicer_version ? ` v${meta.slicer_version}` : ""}
         </p>
       )}
-    </>
+    </></Localized>
   );
 }

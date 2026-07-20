@@ -39,6 +39,7 @@ import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { FleetMaintenancePanel } from "@/components/fleet-panels";
 import { cn } from "@/lib/utils";
+import { Localized } from "@/components/ui/localized";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
 import {
   ArrowLeft,
@@ -401,7 +402,7 @@ export function PrinterDetailPage({
   }
 
   return (
-    <>
+    <Localized><>
       <ConfirmModal
         open={confirmEmergencyStop}
         onClose={() => { if (machineBusy !== "estop") setConfirmEmergencyStop(false); }}
@@ -1136,7 +1137,7 @@ export function PrinterDetailPage({
       </section>
       )}
       </div>
-    </>
+    </></Localized>
   );
 }
 
@@ -1257,7 +1258,7 @@ function PrinterSettings({
   }
 
   return (
-    <form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
+    <Localized><form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
       <div className={SECTION_HEADER_CLASS}>
         <div className="flex items-center gap-2">
           <Settings className="h-4 w-4 text-muted-foreground" />
@@ -1333,7 +1334,7 @@ function PrinterSettings({
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </div>
       </div>
-    </form>
+    </form></Localized>
   );
 }
 

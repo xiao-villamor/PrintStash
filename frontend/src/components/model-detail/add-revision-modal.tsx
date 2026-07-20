@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
+import { Localized } from "@/components/ui/localized";
 
 const GCODE_ACCEPT = ".gcode,.g,.gco";
 
@@ -99,7 +100,7 @@ export function AddGcodeRevisionModal({
   }
 
   return (
-    <Modal
+    <Localized><Modal
       open
       onClose={() => { if (!submitting) onClose(); }}
       title="Add G-code revision"
@@ -233,6 +234,6 @@ export function AddGcodeRevisionModal({
           </Button>
         </div>
       </form>
-    </Modal>
+    </Modal></Localized>
   );
 }

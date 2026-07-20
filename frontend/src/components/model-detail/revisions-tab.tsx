@@ -26,6 +26,7 @@ import {
 
 import { revisionStatusClass, revisionStatusLabel } from "./presentation";
 import { RevisionCompare } from "./revision-compare";
+import { Localized } from "@/components/ui/localized";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -140,7 +141,7 @@ export function RevisionsTab({
   }
 
   return (
-    <>
+    <Localized><>
       <ConfirmModal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -412,6 +413,6 @@ export function RevisionsTab({
           </div>
         </section>
       )}
-    </>
+    </></Localized>
   );
 }

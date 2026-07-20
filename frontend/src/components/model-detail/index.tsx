@@ -74,6 +74,7 @@ import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
+import { Localized } from "@/components/ui/localized";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
@@ -432,7 +433,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <Localized><div className="flex flex-col h-full">
       <ConfirmModal
         open={confirmDeleteOpen}
         onClose={() => setConfirmDeleteOpen(false)}
@@ -492,7 +493,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </h1>
             )}
             <span className="font-mono text-xs text-on-surface-variant">
-              {(meshFile ?? sourceFiles[0]) ? `${(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()} source · ` : ""}
+              {(meshFile ?? sourceFiles[0]) && <>{(meshFile ?? sourceFiles[0])!.file_type.toUpperCase()} source · </>}
               {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"} · Last updated {timeAgo(model.updated_at)}
             </span>
             {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
@@ -883,6 +884,6 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           </div>
         </div>
       </div>
-    </div>
+    </div></Localized>
   );
 }

@@ -6,8 +6,10 @@ import type { ReactNode } from "react";
 import {
   useCollections,
   useFilamentProfiles,
+  useModelFacets,
   usePrinterProfiles,
   usePrinters,
+  useOutlinerModels,
   useTags,
   useVaultStats,
 } from "@/lib/queries";
@@ -24,6 +26,8 @@ vi.mock("@/lib/api", () => ({
   listPrinters: vi.fn(),
   listPrinterProfiles: vi.fn(),
   listFilamentProfiles: vi.fn(),
+  listModels: vi.fn(),
+  getModelFacets: vi.fn(),
   getVaultStats: vi.fn(),
 }));
 
@@ -99,5 +103,57 @@ describe("usePrinters enabled gate", () => {
     expect(mocked.listPrinters).not.toHaveBeenCalled();
     expect(result.current.data).toBeUndefined();
     expect(result.current.fetchStatus).toBe("idle");
+  });
+});
+
+describe("filter query continuity", () => {
+  it("keeps outliner data mounted while changed filters refetch", async () => {
+    const firstModels = [{ id: 1, name: "Drawer Housing" }];
+    let resolveFiltered!: (value: typeof firstModels) => void;
+    mocked.listModels
+      .mockResolvedValueOnce(firstModels as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFiltered = resolve; }) as never);
+
+    const { result, rerender } = renderHook(
+      ({ filtered }) => useOutlinerModels(
+        { material_type: filtered ? ["PLA"] : undefined },
+        500,
+      ),
+      { initialProps: { filtered: false }, wrapper: wrapper() },
+    );
+
+    await waitFor(() => expect(result.current.data).toEqual(firstModels));
+    rerender({ filtered: true });
+    await waitFor(() => expect(mocked.listModels).toHaveBeenCalledTimes(2));
+
+    expect(result.current.data).toEqual(firstModels);
+    expect(result.current.isLoading).toBe(false);
+    resolveFiltered([{ id: 2, name: "PLA Bracket" }]);
+    await waitFor(() => expect(result.current.data).toEqual([{ id: 2, name: "PLA Bracket" }]));
+  });
+
+  it("keeps facet groups mounted while changed filters refetch", async () => {
+    const firstFacets = {
+      file_type: [{ value: "stl", count: 2 }],
+      material_type: [{ value: "PLA", count: 2 }],
+    };
+    let resolveFiltered!: (value: typeof firstFacets) => void;
+    mocked.getModelFacets
+      .mockResolvedValueOnce(firstFacets as never)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveFiltered = resolve; }) as never);
+
+    const { result, rerender } = renderHook(
+      ({ filtered }) => useModelFacets({ material_type: filtered ? ["PLA"] : undefined }),
+      { initialProps: { filtered: false }, wrapper: wrapper() },
+    );
+
+    await waitFor(() => expect(result.current.data).toEqual(firstFacets));
+    rerender({ filtered: true });
+    await waitFor(() => expect(mocked.getModelFacets).toHaveBeenCalledTimes(2));
+
+    expect(result.current.data).toEqual(firstFacets);
+    expect(result.current.isLoading).toBe(false);
+    resolveFiltered({ ...firstFacets, file_type: [{ value: "stl", count: 1 }] });
+    await waitFor(() => expect(result.current.data?.file_type[0].count).toBe(1));
   });
 });

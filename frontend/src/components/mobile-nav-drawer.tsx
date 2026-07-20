@@ -6,6 +6,7 @@ import { Box, SlidersHorizontal, LogIn, LogOut, Printer, Settings, User, X } fro
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
 import { Drawer } from "@/components/ui/drawer";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 
 interface MobileNavDrawerProps {
   open: boolean;
@@ -13,18 +14,19 @@ interface MobileNavDrawerProps {
 }
 
 const mainItems = [
-  { href: "/", label: "Vault", icon: Box },
-  { href: "/printers", label: "Printers", icon: Printer, adminOnly: true },
-  { href: "/profiles", label: "Profiles", icon: SlidersHorizontal },
+  { href: "/", labelKey: "nav.vault", icon: Box },
+  { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
+  { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
 ];
 
 const bottomItems = [
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { t } = useI18n();
   const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (
@@ -77,7 +79,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
               >
                 <item.icon className="h-5 w-5" />
                 <span className="font-mono text-xs tracking-wider uppercase">
-                  {item.label}
+                  {t(item.labelKey as MessageKey)}
                 </span>
               </Link>
             );
@@ -119,7 +121,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
             >
               <LogIn className="h-5 w-5" />
               <span className="font-mono text-xs tracking-wider uppercase">
-                Sign in
+                {t("nav.signIn")}
               </span>
             </Link>
           )}
@@ -139,7 +141,7 @@ export function MobileNavDrawer({ open, onClose }: MobileNavDrawerProps) {
               >
                 <item.icon className="h-5 w-5" />
                 <span className="font-mono text-xs tracking-wider uppercase">
-                  {item.label}
+                  {t(item.labelKey as MessageKey)}
                 </span>
               </Link>
             );

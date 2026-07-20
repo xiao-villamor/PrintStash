@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Modal } from "@/components/ui/modal";
+import { Localized } from "@/components/ui/localized";
 
 const selectClassName =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
@@ -237,7 +238,7 @@ export function SendToButtons({
   const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
 
   return (
-    <>
+    <Localized><>
       <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Printer status</span>
@@ -479,6 +480,6 @@ export function SendToButtons({
           </Button>
         </div>
       </Modal>
-    </>
+    </></Localized>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { ArtifactFileType, CollectionRead, FileRevisionStatus, ModelBatchResult, ModelListItem, PrinterRead, SavedViewRead, TagRead } from "@/types";
 import { ModelCard, MODEL_DND_MIME } from "@/components/model-card";
@@ -20,7 +20,8 @@ import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { SavedViewSelector } from "@/components/saved-view-selector";
-import { Localized } from "@/components/ui/localized";
+import { Localized, translateUiText } from "@/components/ui/localized";
+import { useI18n } from "@/lib/i18n";
 import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
   SlidersHorizontal,
@@ -40,9 +41,9 @@ import {
   Check,
   ChevronDown,
 } from "lucide-react";
-import { createCollection, updateModel, moveCollection, renameCollection, deleteCollection, batchMoveModels, batchTagModels, batchDeleteModels, createSavedView, updateSavedView, deleteSavedView, getModelFacets, listSavedViews, listModels, restoreModel } from "@/lib/api";
+import { createCollection, updateModel, moveCollection, renameCollection, deleteCollection, batchMoveModels, batchTagModels, batchDeleteModels, createSavedView, updateSavedView, deleteSavedView, listSavedViews, listModels, restoreModel } from "@/lib/api";
 import { isMeshFile, isGcodeFile, extensionOf, walkEntries, entriesFromDataTransfer, BulkItem } from "@/lib/bulk-upload";
-import { useCollections, useModelList, useOutlinerModels, usePrinters, useTags, useVaultStats, type ModelListFilters, } from "@/lib/queries";
+import { useCollections, useModelFacets, useModelList, useOutlinerModels, usePrinters, useTags, useVaultStats, type ModelListFilters, } from "@/lib/queries";
 import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
@@ -149,6 +150,8 @@ export interface BrowserInitialData {
 }
 
 export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
+  const { locale } = useI18n();
+  const ui = useCallback((value: string) => translateUiText(locale, value), [locale]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
@@ -393,14 +396,11 @@ async function onMainDrop(e: React.DragEvent) {
     uploaded_after: searchParams.get("uploaded_after") || undefined,
     uploaded_before: searchParams.get("uploaded_before") || undefined,
   };
-  const facetQuery = useQuery({
-    queryKey: [...queryKeys.models, "facets", baseFilters, selectedCollection, searchQuery],
-    queryFn: () => getModelFacets({
-      ...baseFilters,
-      collection: selectedCollection ?? undefined,
-      direct: !searchQuery,
-      q: searchQuery,
-    }),
+  const facetQuery = useModelFacets({
+    ...baseFilters,
+    collection: selectedCollection ?? undefined,
+    direct: !searchQuery,
+    q: searchQuery,
   });
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
@@ -874,19 +874,19 @@ async function onMainDrop(e: React.DragEvent) {
   const activeFilterItems: { label: string; onRemove: () => void }[] = (() => {
     const items: { label: string; onRemove: () => void }[] = [];
     if (query.trim()) {
-      items.push({ label: `Search: ${query.trim()}`, onRemove: clearSearch });
+      items.push({ label: `${ui("Search")}: ${query.trim()}`, onRemove: clearSearch });
     }
     for (const slug of selectedTags) {
       const tag = tags.find((item) => item.slug === slug);
       items.push({
-        label: `Tag: ${tag?.name ?? slug}`,
+        label: `${ui("Tag")}: ${tag?.name ?? slug}`,
         onRemove: () => setSelectedTags((current) => current.filter((item) => item !== slug)),
       });
     }
     if (selectedPrinterId !== null) {
       const printer = printers.find((item) => item.id === selectedPrinterId);
       items.push({
-        label: `Printer: ${printer?.name ?? selectedPrinterId}`,
+        label: `${ui("Printer")}: ${printer?.name ?? selectedPrinterId}`,
         onRemove: () => setSelectedPrinterId(null),
       });
     }
@@ -907,7 +907,7 @@ async function onMainDrop(e: React.DragEvent) {
     for (const key of ["uploaded_after", "uploaded_before"] as const) {
       const value = searchParams.get(key);
       if (value) items.push({
-        label: `${key === "uploaded_after" ? "Uploaded after" : "Uploaded before"}: ${value}`,
+        label: `${ui(key === "uploaded_after" ? "Uploaded after" : "Uploaded before")}: ${value}`,
         onRemove: () => {
           const params = new URLSearchParams(searchParams.toString());
           params.delete(key);
@@ -1037,7 +1037,7 @@ async function onMainDrop(e: React.DragEvent) {
             open={recentFoldersOpen}
             onOpenChange={setRecentFoldersOpen}
             align="start"
-            trigger={<button type="button" data-menu-trigger aria-haspopup="menu" aria-expanded={recentFoldersOpen} onClick={() => setRecentFoldersOpen(!recentFoldersOpen)} className="ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><History className="h-3.5 w-3.5" /> Recent</button>}
+            trigger={<button type="button" data-menu-trigger aria-haspopup="menu" aria-expanded={recentFoldersOpen} onClick={() => setRecentFoldersOpen(!recentFoldersOpen)} className="ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><History className="h-3.5 w-3.5" /> {ui("Recent")}</button>}
             contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
           >
             <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">Recent folders</p>
@@ -1134,7 +1134,7 @@ async function onMainDrop(e: React.DragEvent) {
                 open={sortOpen}
                 onOpenChange={setSortOpen}
                 align="end"
-                trigger={<Button type="button" variant="outline" size="xs" data-menu-trigger aria-haspopup="menu" aria-expanded={sortOpen} aria-label="Sort models" onClick={() => setSortOpen(!sortOpen)}><ArrowUpDown className="h-3.5 w-3.5" /><span>{SORT_OPTIONS.find((option) => option.value === sortKey)?.label}</span><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /></Button>}
+                trigger={<Button type="button" variant="outline" size="xs" data-menu-trigger aria-haspopup="menu" aria-expanded={sortOpen} aria-label={ui("Sort models")} onClick={() => setSortOpen(!sortOpen)}><ArrowUpDown className="h-3.5 w-3.5" /><span>{ui(SORT_OPTIONS.find((option) => option.value === sortKey)?.label ?? "Newest")}</span><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /></Button>}
                 contentClassName="w-52 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
               >
                 {SORT_OPTIONS.map((option) => <button key={option.value} type="button" role="menuitem" onClick={() => { setSortKey(option.value); localStorage.setItem("ps-vault-sort", option.value); setSortOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sortKey === option.value ? "bg-accent text-accent-foreground" : ""}`}><span className="flex-1">{option.label}</span>{sortKey === option.value && <Check className="h-3.5 w-3.5" />}</button>)}
@@ -1143,7 +1143,7 @@ async function onMainDrop(e: React.DragEvent) {
                 open={displayOpen}
                 onOpenChange={setDisplayOpen}
                 align="end"
-                trigger={<Button type="button" variant="outline" size="xs" data-menu-trigger aria-haspopup="menu" aria-expanded={displayOpen} onClick={() => setDisplayOpen(!displayOpen)}><Rows3 className="h-3.5 w-3.5" />Display<ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /></Button>}
+                trigger={<Button type="button" variant="outline" size="xs" data-menu-trigger aria-haspopup="menu" aria-expanded={displayOpen} onClick={() => setDisplayOpen(!displayOpen)}><Rows3 className="h-3.5 w-3.5" />{ui("Display")}<ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /></Button>}
                 contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
               >
                 <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">Layout</p>
@@ -1434,7 +1434,7 @@ function useModelDropTarget(path: string, onDropModel?: (modelId: number, path: 
 function CollectionFolderCard({ collection, onSelect, onDropModel, selectable, selected, onToggleSelect }: { collection: CollectionRead; onSelect: (path: string) => void; onDropModel?: (modelId: number, path: string) => void; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: number) => void }) {
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   return (
-    <button
+    <Localized><button
       type="button"
       data-collection-path={collection.path}
       onClick={() => selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path)}
@@ -1455,7 +1455,7 @@ function CollectionFolderCard({ collection, onSelect, onDropModel, selectable, s
         </div>
         <p className="text-sm font-bold text-foreground truncate tracking-tight">{collection.name}</p>
       </div>
-    </button>
+    </button></Localized>
   );
 }
 
@@ -1463,7 +1463,7 @@ function CollectionFolderCard({ collection, onSelect, onDropModel, selectable, s
 function CollectionListRow({ collection, onSelect, onDropModel, selectable, selected, onToggleSelect }: { collection: CollectionRead; onSelect: (path: string) => void; onDropModel?: (modelId: number, path: string) => void; selectable?: boolean; selected?: boolean; onToggleSelect?: (id: number) => void }) {
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   return (
-    <button
+    <Localized><button
       type="button"
       data-collection-path={collection.path}
       onClick={() => selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path)}
@@ -1488,7 +1488,7 @@ function CollectionListRow({ collection, onSelect, onDropModel, selectable, sele
       <span className="w-8 flex justify-center">
         <ChevronRight className="h-4 w-4 text-muted-foreground/50 opacity-60 group-hover:opacity-100" />
       </span>
-    </button>
+    </button></Localized>
   );
 }
 
@@ -1509,7 +1509,7 @@ function ModelListRow({
   const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
-    <Link
+    <Localized><Link
       href={`/models/${model.id}`}
       draggable={draggable}
       onDragStart={
@@ -1569,18 +1569,18 @@ function ModelListRow({
       <span className="w-24 text-right text-xs font-mono text-muted-foreground truncate hidden sm:block">{model.collection || "—"}</span>
       <span className="w-20 text-right text-xs font-mono text-muted-foreground">{model.file_count}</span>
       <span className="w-24 text-right text-xs font-mono text-muted-foreground hidden md:block">{timeAgo(model.updated_at)}</span>
-    </Link>
+    </Link></Localized>
   );
 }
 
 function LoadMore({ hasMore, loading, onClick }: { hasMore: boolean; loading: boolean; onClick: () => void }) {
   if (!hasMore) return null;
   return (
-    <div className="flex justify-center mt-6 pb-6">
+    <Localized><div className="flex justify-center mt-6 pb-6">
       <button onClick={onClick} disabled={loading} className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors">
         {loading ? "Loading..." : "Load more"}
       </button>
-    </div>
+    </div></Localized>
   );
 }
 

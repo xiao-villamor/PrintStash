@@ -23,6 +23,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Localized } from "@/components/ui/localized";
 
 const ACTIVE = new Set(["uploading", "started", "printing", "paused"]);
 
@@ -54,21 +55,21 @@ export function FleetQueuePanel({ printers }: { printers: PrinterRead[] }) {
   }
 
   if (queueQuery.isLoading) {
-    return <div className="space-y-3">{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-20 w-full" />)}</div>;
+    return <Localized><div className="space-y-3">{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} className="h-20 w-full" />)}</div></Localized>;
   }
   if (jobs.length === 0) {
     return (
-      <EmptyState
-        icon={ListOrdered}
-        title="No queued print jobs"
-        description="Add G-code from a model’s Send dialog to start building the fleet queue."
-        className="rounded-lg border border-border bg-card shadow-sm"
-      />
+      <Localized><EmptyState
+          icon={ListOrdered}
+          title="No queued print jobs"
+          description="Add G-code from a model’s Send dialog to start building the fleet queue."
+          className="rounded-lg border border-border bg-card shadow-sm"
+        /></Localized>
     );
   }
 
   return (
-    <div className="space-y-5">
+    <Localized><div className="space-y-5">
       <ConfirmModal
         open={cancelTarget !== null}
         onClose={() => setCancelTarget(null)}
@@ -125,7 +126,7 @@ export function FleetQueuePanel({ printers }: { printers: PrinterRead[] }) {
           </Button>
         </div>
       )}
-    </div>
+    </div></Localized>
   );
 }
 
@@ -144,7 +145,7 @@ function QueueSection({
 }) {
   if (jobs.length === 0) return null;
   return (
-    <section className="space-y-2" aria-label={`${title} print jobs`}>
+    <Localized><section className="space-y-2" aria-label={`${title} print jobs`}>
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
         {jobs.map((job, index) => (
@@ -162,7 +163,7 @@ function QueueSection({
           </div>
         ))}
       </div>
-    </section>
+    </section></Localized>
   );
 }
 
@@ -226,7 +227,7 @@ export function FleetMaintenancePanel({
   }
 
   return (
-    <div className="space-y-5">
+    <Localized><div className="space-y-5">
       <Modal open={mode !== null} onClose={() => { if (!busy) setMode(null); }} title={mode === "window" ? "Schedule maintenance" : "Log maintenance"}>
         <div className="space-y-4">
           {mode === "window" ? (
@@ -263,6 +264,6 @@ export function FleetMaintenancePanel({
           })}
         </div>
       )}
-    </div>
+    </div></Localized>
   );
 }

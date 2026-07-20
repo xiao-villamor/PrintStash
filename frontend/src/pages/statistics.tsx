@@ -23,6 +23,8 @@ import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { formatCurrency } from "@/lib/currency";
+import { useI18n } from "@/lib/i18n";
+import { translateUiText } from "@/components/ui/localized";
 import type {
   CollectionStatRead,
   FilamentStatRead,
@@ -70,6 +72,7 @@ function ChartTooltip({
   valueLabel: string;
   formatValue?: (v: number) => string;
 }) {
+  const { locale } = useI18n();
   if (!active || !payload || payload.length === 0) return null;
   const raw = payload[0]?.value;
   const text =
@@ -80,7 +83,7 @@ function ChartTooltip({
         <div className="mb-0.5 font-semibold text-foreground">{label}</div>
       )}
       <div className="text-muted-foreground">
-        {valueLabel}: <span className="font-medium text-foreground">{text}</span>
+        {translateUiText(locale, valueLabel)}: <span className="font-medium text-foreground">{text}</span>
       </div>
     </div>
   );
@@ -101,6 +104,7 @@ function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
 }) {
+  const { locale } = useI18n();
   return (
     <div className="inline-flex shrink-0 rounded-md border border-border bg-card p-0.5">
       {options.map((opt) => (
@@ -115,7 +119,7 @@ function Segmented<T extends string>({
               : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
         >
-          {opt.label}
+          {translateUiText(locale, opt.label)}
         </button>
       ))}
     </div>
@@ -133,6 +137,7 @@ function MetricCard({
   value: string;
   tone?: "blue" | "cyan" | "violet";
 }) {
+  const { locale } = useI18n();
   const toneClasses = {
     blue: "bg-accent text-primary",
     cyan: "bg-chart-cyan-soft text-chart-cyan",
@@ -146,7 +151,7 @@ function MetricCard({
         </div>
         <div className="min-w-0">
           <div className="truncate text-xs uppercase tracking-wider text-muted-foreground">
-            {label}
+            {translateUiText(locale, label)}
           </div>
           <div className="truncate text-xl font-bold text-foreground">{value}</div>
         </div>
@@ -181,7 +186,10 @@ function RankingCard({
   tone?: "blue" | "cyan" | "violet";
   formatValue?: (value: number) => string;
 }) {
+  const { locale } = useI18n();
   const max = Math.max(...data.map((item) => item.value), 1);
+  const localizedTitle = translateUiText(locale, title);
+  const localizedValueLabel = translateUiText(locale, valueLabel);
   const fill = {
     blue: "bg-chart-blue",
     cyan: "bg-chart-cyan",
@@ -190,12 +198,12 @@ function RankingCard({
   return (
     <Card className="overflow-hidden">
       <CardHeader className="border-b border-border/70 pb-3">
-        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
-        <p className="text-xs text-muted-foreground">Ranked by {valueLabel.toLowerCase()}</p>
+        <CardTitle className="text-sm font-semibold">{localizedTitle}</CardTitle>
+        <p className="text-xs text-muted-foreground">{translateUiText(locale, `Ranked by ${localizedValueLabel.toLowerCase()}`)}</p>
       </CardHeader>
       <CardContent className="pt-4">
         {data.length === 0 ? (
-          <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">No data for this period</p>
+          <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">{translateUiText(locale, "No data for this period")}</p>
         ) : (
           <ol className="space-y-3">
             {data.slice(0, 8).map((item, index) => (
@@ -222,6 +230,7 @@ function TimeSeriesCard({
   stats: PrintStatisticsRead;
   currency: string;
 }) {
+  const { locale } = useI18n();
   const [metric, setMetric] = useState<Metric>("cost");
   const [chartType, setChartType] = useState<ChartType>("area");
 
@@ -236,6 +245,7 @@ function TimeSeriesCard({
   }));
 
   const metricLabel = METRICS.find((m) => m.id === metric)!.label;
+  const localizedMetricLabel = translateUiText(locale, metricLabel);
   const formatValue = (v: number) =>
     metric === "cost"
       ? formatCurrency(v, currency)
@@ -262,7 +272,7 @@ function TimeSeriesCard({
   );
   const tooltip = (cursor: object) => (
     <Tooltip
-      content={<ChartTooltip valueLabel={metricLabel} formatValue={formatValue} />}
+      content={<ChartTooltip valueLabel={localizedMetricLabel} formatValue={formatValue} />}
       cursor={cursor}
     />
   );
@@ -270,7 +280,7 @@ function TimeSeriesCard({
   return (
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div><CardTitle className="text-sm font-semibold">{metricLabel} over time</CardTitle><p className="mt-1 text-xs text-muted-foreground">Completed jobs in selected period</p></div>
+        <div><CardTitle className="text-sm font-semibold">{translateUiText(locale, `${metricLabel} over time`)}</CardTitle><p className="mt-1 text-xs text-muted-foreground">{translateUiText(locale, "Completed jobs in selected period")}</p></div>
         <div className="flex flex-wrap gap-2">
           <Segmented options={METRICS} value={metric} onChange={setMetric} />
           <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
@@ -338,13 +348,14 @@ function StatsContent({
   currency: string;
   visibleWidgets: Set<WidgetId>;
 }) {
+  const { locale } = useI18n();
   if (stats.total_prints === 0) {
     return (
       <Card className="animate-panel-in">
         <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
           <BarChart3 className="h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            No completed prints in this period.
+            {translateUiText(locale, "No completed prints in this period.")}
           </p>
         </CardContent>
       </Card>
@@ -397,7 +408,7 @@ function StatsContent({
 
       <TimeSeriesCard stats={stats} currency={currency} />
 
-      <p className="-mt-3 text-xs text-muted-foreground">7-day forecast uses selected period’s daily filament average.</p>
+      <p className="-mt-3 text-xs text-muted-foreground">{translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}</p>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {visibleWidgets.has("models") && <RankingCard title="Most printed models" data={modelData} valueLabel="Prints" formatValue={(value) => `${value}×`} />}
@@ -410,6 +421,7 @@ function StatsContent({
 }
 
 export default function StatisticsPage() {
+  const { locale } = useI18n();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(
@@ -438,32 +450,32 @@ export default function StatisticsPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Statistics"
-        description="Cost, filament and print activity from completed jobs"
+        title={translateUiText(locale, "Statistics")}
+        description={translateUiText(locale, "Cost, filament and print activity from completed jobs")}
         actions={<div className="flex flex-wrap items-center gap-2">
           <Segmented options={PERIODS.map((p) => ({ id: p.value, label: p.label }))} value={period} onChange={setPeriod} />
           <DropdownMenu
             open={customizeOpen}
             onOpenChange={setCustomizeOpen}
             role="dialog"
-            trigger={<Button data-menu-trigger variant="outline" size="xs" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={() => setCustomizeOpen((open) => !open)}><Settings2 className="h-3.5 w-3.5" />Customize</Button>}
+            trigger={<Button data-menu-trigger variant="outline" size="xs" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={() => setCustomizeOpen((open) => !open)}><Settings2 className="h-3.5 w-3.5" />{translateUiText(locale, "Customize")}</Button>}
             contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
           >
-            <p className="px-2 pb-2 text-xs font-semibold">Visible ranking charts</p>
-            {WIDGETS.map((widget) => <label key={widget.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"><input type="checkbox" checked={visibleWidgets.has(widget.id)} onChange={() => toggleWidget(widget.id)} className="h-4 w-4 accent-primary" />{widget.label}</label>)}
+            <p className="px-2 pb-2 text-xs font-semibold">{translateUiText(locale, "Visible ranking charts")}</p>
+            {WIDGETS.map((widget) => <label key={widget.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"><input type="checkbox" checked={visibleWidgets.has(widget.id)} onChange={() => toggleWidget(widget.id)} className="h-4 w-4 accent-primary" />{translateUiText(locale, widget.label)}</label>)}
           </DropdownMenu>
         </div>}
       />
 
       {isLoading && (
         <div className="animate-panel-in py-16 text-center text-sm text-muted-foreground">
-          Loading statistics…
+          {translateUiText(locale, "Loading statistics…")}
         </div>
       )}
       {isError && (
         <Card className="animate-panel-in">
           <CardContent className="py-12 text-center text-sm text-destructive">
-            Failed to load statistics.
+            {translateUiText(locale, "Failed to load statistics.")}
           </CardContent>
         </Card>
       )}

@@ -14,6 +14,7 @@ import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 
 import { RecommendedPrintCard } from "./recommended-print-card";
+import { Localized } from "@/components/ui/localized";
 
 /** Edit-form state owned by the controller (Save lives in the page header). */
 export type ModelMetaEditor = {
@@ -85,7 +86,7 @@ export function OverviewTab({
   });
 
   return (
-    <>
+    <Localized><>
       <RecommendedPrintCard
         file={recommendedFile}
         hasGcode={hasGcode}
@@ -289,6 +290,6 @@ export function OverviewTab({
           ))}
         </div>
       )}
-    </>
+    </></Localized>
   );
 }

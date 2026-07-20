@@ -24,6 +24,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
+import { Localized } from "@/components/ui/localized";
+import { useI18n } from "@/lib/i18n";
+import { translateUiText } from "@/components/ui/localized";
 
 type FilamentEdit = {
   name: string;
@@ -139,6 +142,7 @@ function RowStatus({ state }: { state?: "saving" | "saved" }) {
 
 export function FilamentProfilesCard() {
   const auth = useRequireAuth();
+  const { locale } = useI18n();
   const [activeTab, setActiveTab] = useState<"filaments" | "printers">("filaments");
   const [filaments, setFilaments] = useState<FilamentProfileRead[]>([]);
   const [printers, setPrinters] = useState<PrinterProfileRead[]>([]);
@@ -345,7 +349,8 @@ export function FilamentProfilesCard() {
   const tabClass = "flex min-w-32 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
-    <div className="animate-panel-in space-y-4">
+    <Localized>
+      <div className="animate-panel-in space-y-4">
       {error && (
         <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {error}
@@ -356,8 +361,8 @@ export function FilamentProfilesCard() {
         <div className="flex flex-col gap-3 border-b bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
           <TabBar
             tabs={[
-              { key: "filaments", label: <><Layers className="h-4 w-4" aria-hidden />Filaments <Badge variant="secondary">{filaments.length}</Badge></> },
-              { key: "printers", label: <><Printer className="h-4 w-4" aria-hidden />Printers <Badge variant="secondary">{printers.length}</Badge></> },
+              { key: "filaments", label: <><Layers className="h-4 w-4" aria-hidden />{translateUiText(locale, "Filaments")} <Badge variant="secondary">{filaments.length}</Badge></> },
+              { key: "printers", label: <><Printer className="h-4 w-4" aria-hidden />{translateUiText(locale, "Printers")} <Badge variant="secondary">{printers.length}</Badge></> },
             ]}
             active={activeTab}
             onChange={setActiveTab}
@@ -371,7 +376,7 @@ export function FilamentProfilesCard() {
             {activeTab === "filaments" && spoolmanEnabled && (
               <Button type="button" variant="outline" size="xs" onClick={handleSyncSpoolman} loading={syncing} disabled={!auth.isAuthenticated}>
                 {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
-                Sync Spoolman
+                {translateUiText(locale, "Sync Spoolman")}
               </Button>
             )}
             <Button
@@ -386,7 +391,7 @@ export function FilamentProfilesCard() {
               }}
             >
               <Plus className="h-3.5 w-3.5" />
-              New {activeTab === "filaments" ? "filament" : "printer"}
+              {translateUiText(locale, activeTab === "filaments" ? "New filament" : "New printer")}
               <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-press ${(activeTab === "filaments" ? showAddFilament : showAddPrinter) ? "rotate-180" : ""}`} />
             </Button>
           </div>
@@ -498,6 +503,7 @@ export function FilamentProfilesCard() {
           </section>
         )}
       </Card>
-    </div>
+      </div>
+    </Localized>
   );
 }

@@ -10,6 +10,7 @@ import { getAssetUrl, starModel, unstarModel } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { Localized } from "@/components/ui/localized";
 
 // MIME type carrying a dragged model's id, so collection drop targets can tell
 // an internal "move model" drag apart from an OS file-upload drag.
@@ -162,7 +163,7 @@ function ModelCardInner({
   }
 
   return (
-    <article
+    <Localized><article
       draggable={draggable}
       onDragStart={
         draggable
@@ -314,7 +315,7 @@ function ModelCardInner({
         </div>
 
       </Link>
-    </article>
+    </article></Localized>
   );
 }
 
@@ -345,13 +346,13 @@ export function ModelCard({
   }, []);
 
   return (
-    <ModelCardMemo
+    <Localized><ModelCardMemo
       model={model}
       metrics={metrics}
       selectable={selectable}
       selected={selected}
       onToggleSelect={onToggleSelect}
       draggable={draggable}
-    />
+    /></Localized>
   );
 }

@@ -12,9 +12,10 @@ Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
 ## Where we are
 
 <!-- Update this block when a release ships. -->
-Latest shipped: v0.10.0 (Library Workflow Polish — bulk editing, saved views,
-richer Artifact comparison, portable library migration), merged to `main` and
-tagged. Next: 0.11 — Fleet and Scheduling (`docs/roadmap.md`). Private plans
+Latest shipped: v0.11.0 (Fleet, Scheduling, SSO, PWA, and i18n — queue/routing,
+maintenance windows, persistent background jobs, OIDC login, installable
+offline shell, EN/ES localization), merged to `main` and tagged. Next: 0.12
+(`docs/roadmap.md`). Private plans
 live in gitignored `reports/` — start with
 `reports/14-implementation-plan-to-1.0.0.md` (OSS) and
 `reports/15-cloud-implementation-plan.md` (cloud); never commit or quote them.

@@ -8,12 +8,13 @@ import { toast } from "@/lib/toast";
 import { FileRead } from "@/types";
 
 import { SlicerOpenButton } from "@/components/slicer-open-button";
+import { Localized } from "@/components/ui/localized";
 
 const SLICEABLE_TYPES = new Set(["stl", "3mf", "obj"]);
 
 export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
   return (
-    <section>
+    <Localized><section>
       <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
         Source Files
       </h2>
@@ -66,6 +67,6 @@ export function FilesTab({ sourceFiles }: { sourceFiles: FileRead[] }) {
           </div>
         ))}
       </div>
-    </section>
+    </section></Localized>
   );
 }

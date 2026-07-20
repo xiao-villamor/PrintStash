@@ -8,6 +8,7 @@ import {
   getPrintStatistics,
   getDashboard,
   getFleetSummary,
+  getModelFacets,
   getSpoolmanStatus,
   getVaultConfig,
   getVaultStats,
@@ -29,6 +30,7 @@ import type {
   FilamentProfileRead,
   ListModelsParams,
   ModelListItem,
+  ModelFacetsRead,
   PrinterProfileRead,
   PrinterRead,
   PrintJobRead,
@@ -166,6 +168,15 @@ export function useSpools(options?: { enabled?: boolean }) {
 /** Filters that key the model-list query (everything but pagination). */
 export type ModelListFilters = Omit<ListModelsParams, "limit" | "offset">;
 
+/** Facet counts stay mounted while a changed filter set is recomputed. */
+export function useModelFacets(filters: ModelListFilters) {
+  return useQuery<ModelFacetsRead>({
+    queryKey: [...queryKeys.models, "facets", filters],
+    queryFn: () => getModelFacets(filters),
+    placeholderData: keepPreviousData,
+  });
+}
+
 /**
  * Paginated model grid, cached and keyed by its filters.
  *
@@ -201,5 +212,6 @@ export function useOutlinerModels(filters: ModelListFilters, limit: number) {
   return useQuery<ModelListItem[]>({
     queryKey: [...queryKeys.models, "outliner", filters, limit],
     queryFn: () => listModels({ ...filters, limit }),
+    placeholderData: keepPreviousData,
   });
 }

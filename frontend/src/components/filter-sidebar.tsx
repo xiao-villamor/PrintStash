@@ -62,7 +62,7 @@ function DraggableModelLeaf({
 
   // No transform: Blender-style — source stays put (dimmed), only target highlights.
   return (
-    <div
+    <Localized><div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
@@ -74,7 +74,7 @@ function DraggableModelLeaf({
     >
       <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
       <span className="truncate">{model.name}</span>
-    </div>
+    </div></Localized>
   );
 }
 
@@ -148,7 +148,7 @@ function CollectionTreeRow({
   const hasContent = descCount > 0 || node.cat.model_count > 0;
 
   return (
-    <div style={isDragging ? { opacity: 0.3 } : undefined} className={isDragging ? "pointer-events-none" : undefined}>
+    <Localized><div style={isDragging ? { opacity: 0.3 } : undefined} className={isDragging ? "pointer-events-none" : undefined}>
       {confirming ? (
         <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
           <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
@@ -250,7 +250,7 @@ function CollectionTreeRow({
           ))}
         </div>
       )}
-    </div>
+    </div></Localized>
   );
 }
 
@@ -281,7 +281,7 @@ function DroppableAllModels({
     : rootModels;
 
   return (
-    <>
+    <Localized><>
       <div
         ref={setNodeRef}
         role="button"
@@ -335,7 +335,7 @@ function DroppableAllModels({
           )}
         </div>
       )}
-    </>
+    </></Localized>
   );
 }
 
@@ -844,7 +844,7 @@ export function FilterSidebar(props: FilterSidebarProps) {
   }
 
   return (
-    <aside style={{ width: sidebarWidth }} className="bg-sidebar border-r border-border flex flex-col shrink-0 hidden md:flex relative">
+    <Localized><aside style={{ width: sidebarWidth }} className="bg-sidebar border-r border-border flex flex-col shrink-0 hidden md:flex relative">
       <div className="p-2 border-b border-border bg-sidebar">
         <div className="relative">
           <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
@@ -874,6 +874,6 @@ export function FilterSidebar(props: FilterSidebarProps) {
         onMouseDown={handleResizeStart}
         className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
       />
-    </aside>
+    </aside></Localized>
   );
 }

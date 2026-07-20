@@ -2,6 +2,7 @@
 
 import { Camera, Code2, Grid3x3, Layers, Maximize2 } from "lucide-react";
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
+import { Localized } from "@/components/ui/localized";
 
 export type ViewerMode = "model" | "gcode";
 
@@ -30,7 +31,7 @@ export function ViewerToolbar({
     "w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors";
 
   return (
-    <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
+    <Localized><div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
       {/* 3D ↔ G-code toggle */}
       {hasGcode && (
         <div className={cluster}>
@@ -103,6 +104,6 @@ export function ViewerToolbar({
           </div>
         </>
       )}
-    </div>
+    </div></Localized>
   );
 }

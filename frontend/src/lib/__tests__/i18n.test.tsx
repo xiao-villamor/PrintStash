@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it } from "vitest";
 
 import { LocaleToggle } from "@/components/locale-toggle";
-import { Localized } from "@/components/ui/localized";
+import { DomLocalization, Localized } from "@/components/ui/localized";
+import { translateUiText } from "@/components/ui/localized";
 import { I18nProvider, useI18n } from "@/lib/i18n";
 
 function Probe() {
@@ -48,4 +49,35 @@ it("localizes page content and accessible labels", () => {
     "title",
     "Nueva colección",
   );
+});
+
+it("only translates complete UI messages and preserves user content", () => {
+  expect(translateUiText("es", "All Models")).toBe("Todos los modelos");
+  expect(translateUiText("es", "My Models collection")).toBe("My Models collection");
+  expect(translateUiText("es", "Model name: Dragon")).toBe("Model name: Dragon");
+  expect(translateUiText("es", "2 models total")).toBe("2 modelos en total");
+});
+
+it("translates nested legacy component text without rewriting user content", async () => {
+  localStorage.setItem("printstash.locale", "es");
+  const container = document.createElement("div");
+  container.id = "root";
+  document.body.append(container);
+
+  function NestedLegacySurface() {
+    return <section title="No backups available."><p>No backups available.</p><p>My Models collection</p></section>;
+  }
+
+  render(
+    <I18nProvider>
+      <NestedLegacySurface />
+      <DomLocalization />
+    </I18nProvider>,
+    { container },
+  );
+
+  await waitFor(() => expect(screen.getByText("No hay copias disponibles.")).toBeInTheDocument());
+  expect(screen.getByText("My Models collection")).toBeInTheDocument();
+  expect(screen.getByTitle("No hay copias disponibles.")).toBeInTheDocument();
+  container.remove();
 });

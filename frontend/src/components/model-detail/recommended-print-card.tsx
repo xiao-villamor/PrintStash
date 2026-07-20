@@ -21,6 +21,7 @@ import {
   revisionStatusClass,
 } from "./presentation";
 import { SettingRow } from "./setting-row";
+import { Localized } from "@/components/ui/localized";
 
 export function RecommendedPrintCard({
   file,
@@ -60,7 +61,7 @@ export function RecommendedPrintCard({
     : [];
 
   return (
-    <section>
+    <Localized><section>
       <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
         <Star className="h-4 w-4 text-primary" /> Recommended Print
       </h2>
@@ -154,6 +155,6 @@ export function RecommendedPrintCard({
           </div>
         </div>
       )}
-    </section>
+    </section></Localized>
   );
 }

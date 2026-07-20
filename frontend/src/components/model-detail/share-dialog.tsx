@@ -11,6 +11,7 @@ import {
 import { toast } from "@/lib/toast";
 import { FileRead, ShareLinkRead } from "@/types";
 import { ModalShell } from "@/components/ui/modal";
+import { Localized } from "@/components/ui/localized";
 
 function shareUrl(path: string): string {
   if (typeof window === "undefined") return path;
@@ -102,7 +103,7 @@ export function ShareDialog({
     creating || (revisionScope === "selected" && selectedRevisionIds.length === 0);
 
   return (
-    <ModalShell
+    <Localized><ModalShell
       open={open}
       onClose={onClose}
       className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
@@ -269,6 +270,6 @@ export function ShareDialog({
             )}
           </div>
         </div>
-    </ModalShell>
+    </ModalShell></Localized>
   );
 }

@@ -12,6 +12,7 @@ import {
 import { ArtifactOutcomeRead, FileRead } from "@/types";
 
 import { revisionStatusLabel } from "./presentation";
+import { Localized } from "@/components/ui/localized";
 
 export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead; right: FileRead; outcomes?: ArtifactOutcomeRead[] }) {
   const leftOutcome = outcomes.find((row) => row.file_id === left.id);
@@ -120,7 +121,7 @@ export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead
   ];
 
   return (
-    <div className="bg-surface border border-outline-variant rounded overflow-hidden">
+    <Localized><div className="bg-surface border border-outline-variant rounded overflow-hidden">
       <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
         <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">Field</span>
         <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">Rev {left.gcode_revision_number ?? left.version}</span>
@@ -138,6 +139,6 @@ export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead
           </span>
         </div>
       ))}
-    </div>
+    </div></Localized>
   );
 }

@@ -23,6 +23,9 @@ import { Modal, ModalShell } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabBar } from "@/components/ui/tabs";
+import { Localized } from "@/components/ui/localized";
+import { useOptionalI18n } from "@/lib/i18n";
+import { translateUiText } from "@/components/ui/localized";
 import { FleetMaintenancePanel, FleetQueuePanel } from "@/components/fleet-panels";
 import { readPrinterCardImagePreference } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
@@ -48,6 +51,7 @@ const STATUS_PRIORITY: Record<string, number> = {
 
 export function PrintersPage() {
   const { user } = useAuth();
+  const locale = useOptionalI18n()?.locale ?? "en";
   // Shared printers cache: mutations through the api layer invalidate
   // queryKeys.printers, so this list refetches itself after add/delete.
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
@@ -111,7 +115,8 @@ export function PrintersPage() {
   }
 
   return (
-    <>
+    <Localized>
+      <>
       <ConfirmModal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
@@ -148,12 +153,12 @@ export function PrintersPage() {
 
       <TabBar
         tabs={[
-          { key: "fleet", label: "Fleet" },
+          { key: "fleet", label: translateUiText(locale, "Fleet") },
           ...(user?.is_superuser || printers.some((printer) => printer.access.can_print)
-            ? [{ key: "queue" as const, label: "Queue" }]
+            ? [{ key: "queue" as const, label: translateUiText(locale, "Queue") }]
             : []),
           ...(user?.is_superuser || printers.some((printer) => printer.access.can_admin)
-            ? [{ key: "maintenance" as const, label: "Maintenance" }]
+            ? [{ key: "maintenance" as const, label: translateUiText(locale, "Maintenance") }]
             : []),
         ]}
         active={activeView}
@@ -355,7 +360,8 @@ export function PrintersPage() {
         />
       )}
       </div>
-    </>
+      </>
+    </Localized>
   );
 }
 
@@ -485,7 +491,8 @@ function PrinterModelPicker({
   const canSave = Boolean(selected && (selected !== OTHER_MODEL_OPTION || customValue.trim()));
 
   return (
-    <Modal open onClose={onClose} title="Select printer model" className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden">
+    <Localized>
+      <Modal open onClose={onClose} title="Select printer model" className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden">
       <div className="border-b border-border pb-4">
         <label className="relative block">
           <span className="sr-only">Search printer models</span>
@@ -556,7 +563,8 @@ function PrinterModelPicker({
           <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>Save model</Button>
         </div>
       </div>
-    </Modal>
+      </Modal>
+    </Localized>
   );
 }
 
@@ -655,7 +663,8 @@ function AddPrinterModal({
   }
 
   return (
-    <ModalShell
+    <Localized>
+      <ModalShell
       onClose={onClose}
       className="bg-card border border-border rounded w-full max-w-md p-6 shadow-lg"
     >
@@ -836,6 +845,7 @@ function AddPrinterModal({
             </Button>
           </div>
         </form>
-    </ModalShell>
+      </ModalShell>
+    </Localized>
   );
 }
