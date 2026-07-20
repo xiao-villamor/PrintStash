@@ -297,7 +297,9 @@ class TestThumbnailRebuildInternals:
         assert status.state == "completed"
         assert model.id in status.result["skipped_no_mesh"]
 
-    def test_skips_model_with_missing_blob(self, db_session: Session) -> None:
+    def test_records_model_with_missing_blob_as_failed_render(
+        self, db_session: Session
+    ) -> None:
         from app.api.v1.files import _run_thumbnail_rebuild
         from app.db.session import get_session_factory
 
@@ -309,7 +311,7 @@ class TestThumbnailRebuildInternals:
 
         status = registry.get(job_id)
         assert status is not None
-        assert model.id in status.result["skipped_no_mesh"]
+        assert model.id in status.result["failed_render"]
 
     def test_failed_render_recorded(
         self, db_session: Session, monkeypatch
@@ -365,12 +367,10 @@ class TestThumbnailRebuildInternals:
         from app.api.v1.files import _run_thumbnail_rebuild
         from app.db.session import get_session_factory
 
-        def boom_factory(*_a, **_kw):
+        def boom(*_a, **_kw):
             raise RuntimeError("db exploded")
 
-        monkeypatch.setattr(
-            "app.api.v1.files.get_backend", lambda: (_ for _ in ()).throw(RuntimeError("db exploded"))
-        )
+        monkeypatch.setattr("app.api.v1.files.select", boom)
 
         job_id = registry.create(owner_user_id=None)
         _run_thumbnail_rebuild(job_id, True, get_session_factory())

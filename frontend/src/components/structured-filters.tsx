@@ -25,6 +25,7 @@ export function StructuredFilters({
   uploadedAfter,
   uploadedBefore,
   onDateChange,
+  onClearAll,
   loading = false,
   error = false,
 }: {
@@ -34,6 +35,7 @@ export function StructuredFilters({
   uploadedAfter?: string;
   uploadedBefore?: string;
   onDateChange?: (key: "uploaded_after" | "uploaded_before", value: string) => void;
+  onClearAll?: () => void;
   loading?: boolean;
   error?: boolean;
 }) {
@@ -55,6 +57,10 @@ export function StructuredFilters({
   const count = Object.values(active).reduce((total, values) => total + (values?.length ?? 0), 0)
     + (uploadedAfter ? 1 : 0) + (uploadedBefore ? 1 : 0);
   function clearAll() {
+    if (onClearAll) {
+      onClearAll();
+      return;
+    }
     GROUPS.forEach(({ key }) => onChange(key, []));
     onDateChange?.("uploaded_after", "");
     onDateChange?.("uploaded_before", "");

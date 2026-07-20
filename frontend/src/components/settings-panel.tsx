@@ -1428,7 +1428,7 @@ export function SettingsPanel() {
                       className={INPUT}
                       disabled={printerAccessBusy === "load"}
                     >
-                      <option value="">Select user</option>
+                      <option value="">Choose printer user</option>
                       {nonSuperUsers.map((row) => (
                         <option key={row.id} value={row.id}>{row.username}</option>
                       ))}

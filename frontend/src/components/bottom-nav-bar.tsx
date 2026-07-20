@@ -45,8 +45,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
-  { href: "/statistics", labelKey: "nav.stats", icon: BarChart3, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { href: "/statistics", labelKey: "nav.stats", icon: BarChart3, adminOnly: true },
   { href: "/settings", labelKey: "nav.settings", icon: Settings },
   {
     href: "https://xiao-villamor.github.io/PrintStash/",

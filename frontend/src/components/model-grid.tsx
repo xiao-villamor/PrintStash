@@ -375,6 +375,15 @@ async function onMainDrop(e: React.DragEvent) {
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
   }
 
+  function clearStructuredFilters() {
+    const params = new URLSearchParams(searchParams.toString());
+    (Object.keys(structured) as (keyof typeof structured)[]).forEach((key) => params.delete(key));
+    params.delete("uploaded_after");
+    params.delete("uploaded_before");
+    const qs = params.toString();
+    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
+
   // Filters shared by the grid + outliner queries; only the search query and
   // pagination differ between them.
   const baseFilters: ModelListFilters = {
@@ -970,7 +979,7 @@ async function onMainDrop(e: React.DragEvent) {
         onCreateCollection={handleOpenCreateCollection}
         canViewPrinters={canViewPrinters}
         loading={facetsLoading || facetQuery.isLoading}
-        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} />}
+        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} onClearAll={clearStructuredFilters} />}
       />
 
       {/* Stitch layout: filter sidebar + main content */}
@@ -986,7 +995,7 @@ async function onMainDrop(e: React.DragEvent) {
         onDeleteCollection={handleDeleteCollection}
         canViewPrinters={canViewPrinters}
         loading={facetsLoading || facetQuery.isLoading}
-        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} />}
+        structuredFilters={<StructuredFilters facets={facetQuery.data} loading={facetQuery.isLoading} error={facetQuery.isError} active={structured} onChange={setStructuredFilter} uploadedAfter={searchParams.get("uploaded_after") ?? undefined} uploadedBefore={searchParams.get("uploaded_before") ?? undefined} onDateChange={(key, value) => { const params = new URLSearchParams(searchParams.toString()); if (value) params.set(key, value); else params.delete(key); router.replace(params.size ? `/?${params}` : "/", { scroll: false }); }} onClearAll={clearStructuredFilters} />}
       />
 
       <main

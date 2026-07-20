@@ -102,8 +102,19 @@ const printer = {
     support_notes: [],
     unsupported_actions: [],
   },
+  access: {
+    role: "admin",
+    can_view: true,
+    can_print: true,
+    can_control: true,
+    can_admin: true,
+  },
   notes: null,
   group: null,
+  is_default: false,
+  drain_mode: false,
+  drain_reason: null,
+  drain_updated_at: null,
   status: "ready",
   last_seen_at: now,
   last_error: null,
@@ -369,6 +380,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, []);
     return;
   }
+  if (url.pathname === "/api/v1/inbox") {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/models/stats") {
     sendJson(res, {
       model_count: modelList.length,
@@ -393,6 +408,19 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/models") {
     sendJson(res, modelList);
+    return;
+  }
+  if (url.pathname === "/api/v1/models/facets") {
+    sendJson(res, {
+      file_type: [],
+      material_type: [],
+      slicer_name: [],
+      printer_model: [],
+      revision_status: [],
+      print_outcome: [],
+      storage: [],
+      printed: [],
+    });
     return;
   }
   if (url.pathname === "/api/v1/models/1") {
@@ -459,6 +487,16 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       return;
     }
     sendJson(res, printer);
+    return;
+  }
+  if (url.pathname === "/api/v1/printers/3/config") {
+    sendJson(res, {
+      printer_id: printer.id,
+      server_info: {},
+      printer_info: {},
+      moonraker_config: {},
+      klipper_config: {},
+    });
     return;
   }
   if (url.pathname === "/api/v1/printers/3/ws-ticket" && req.method === "POST") {

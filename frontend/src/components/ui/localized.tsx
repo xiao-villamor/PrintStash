@@ -1024,6 +1024,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Slicer info", "Información del laminador"],
   ["Version", "Versión"],
   ["source ·", "origen ·"],
+  ["Choose printer user", "Elegir usuario de impresora"],
 ];
 
 const TRANSLATED_PROPS = new Set([
