@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { storeLogin } from "@/lib/auth-store";
@@ -42,11 +42,13 @@ describe("AuthProvider", () => {
 
     await screen.findByText("signed out");
 
-    storeLogin("setup-token", {
-      id: 1,
-      username: "admin",
-      email: null,
-      is_superuser: true,
+    act(() => {
+      storeLogin("setup-token", {
+        id: 1,
+        username: "admin",
+        email: null,
+        is_superuser: true,
+      });
     });
 
     await waitFor(() => {
