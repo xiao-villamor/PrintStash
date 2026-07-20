@@ -12,6 +12,9 @@ from sqlmodel import Session
 from app.core.time import utcnow
 from app.db.models import (
     BackgroundJob,
+    Collection,
+    Document,
+    DocumentKind,
     ExternalLibrary,
     File,
     FileType,
@@ -28,7 +31,12 @@ from app.db.models import (
 )
 from app.services import vault_audit
 from app.services.storage_backend import get_backend
-from app.services.storage_utils import OwnedBlob, StorageOwnershipSnapshot
+from app.services.storage_utils import (
+    OwnedBlob,
+    StorageOwnershipSnapshot,
+    all_owned_blob_keys,
+    ownership_snapshot,
+)
 
 
 def _make_user(session: Session, username: str, *, admin: bool = True) -> User:
@@ -717,3 +725,474 @@ def test_repair_finding_rescan_external_library_aborted_leaves_unresolved(
 def test_restore_recommended_no_files_returns_false(db_session: Session) -> None:
     model = _make_model(db_session, "restore-empty")
     assert vault_audit._restore_recommended(db_session, model.id) is False
+
+
+# --------------------------------------------------------------------------- #
+# _details — malformed JSON tolerance
+# --------------------------------------------------------------------------- #
+
+
+def test_details_malformed_json_returns_empty_dict() -> None:
+    finding = VaultAuditFinding(
+        run_id=1, code="x", severity=VaultAuditSeverity.INFO,
+        resource_type="file", resource_identifier="x",
+        details_json="{not valid json",
+    )
+    assert vault_audit._details(finding) == {}
+
+
+# --------------------------------------------------------------------------- #
+# _check_database — thumbnail existence-check exception and unreadable image
+# --------------------------------------------------------------------------- #
+
+
+def test_check_database_thumbnail_exists_check_raises_marks_missing(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "db-owner6")
+    run = _make_run(db_session, user)
+    model = _make_model(db_session, "thumb-exists-boom")
+    file_row = _make_file(db_session, model)
+    model.thumbnail_file_id = file_row.id
+    db_session.add(model)
+    db_session.commit()
+
+    def boom(_key: str) -> bool:
+        raise RuntimeError("storage backend unavailable")
+
+    monkeypatch.setattr(get_backend(), "exists", boom)
+
+    vault_audit._check_database(db_session, run)
+
+    from sqlmodel import select
+
+    findings = db_session.exec(select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)).all()
+    assert any(f.code == "thumbnail_missing" for f in findings)
+
+
+def test_check_database_flags_unreadable_thumbnail(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "db-owner7")
+    run = _make_run(db_session, user)
+    model = _make_model(db_session, "thumb-unreadable")
+    file_row = _make_file(db_session, model)
+    model.thumbnail_file_id = file_row.id
+    db_session.add(model)
+    db_session.commit()
+
+    # Thumbnail "exists" but is not a valid image — verify() raises.
+    monkeypatch.setattr(get_backend(), "exists", lambda _key: True)
+
+    class _BoomImage:
+        def __enter__(self):
+            raise OSError("truncated image")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("PIL.Image.open", lambda _path: _BoomImage())
+
+    vault_audit._check_database(db_session, run)
+
+    from sqlmodel import select
+
+    findings = db_session.exec(select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)).all()
+    assert any(f.code == "thumbnail_unreadable" for f in findings)
+
+
+# --------------------------------------------------------------------------- #
+# _check_external — stat() raising OSError
+# --------------------------------------------------------------------------- #
+
+
+def test_check_external_stat_raises_marks_unavailable(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    user = _make_user(db_session, "ext-owner3")
+    run = _make_run(db_session, user)
+    model = _make_model(db_session, "ext-stat-boom")
+    linked = tmp_path / "linked.stl"
+    linked.write_text("x")
+    file_row = _make_file(db_session, model, path=str(linked), is_external=True, external_library_id=None)
+
+    from pathlib import Path as _Path
+
+    def boom_stat(self):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(_Path, "stat", boom_stat)
+
+    vault_audit._check_external(
+        db_session,
+        run,
+        [OwnedBlob(key=str(linked), resource_type="file", resource_id=file_row.id, display_name="linked.stl")],
+    )
+
+    from sqlmodel import select
+
+    findings = db_session.exec(select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)).all()
+    assert any(f.code == "linked_file_missing" for f in findings)
+
+
+# --------------------------------------------------------------------------- #
+# _check_backups — cancellation mid-loop
+# --------------------------------------------------------------------------- #
+
+
+def test_check_backups_stops_when_cancelled(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import backup
+
+    user = _make_user(db_session, "backup-owner")
+    run = _make_run(db_session, user, VaultAuditMode.FULL)
+    run.cancel_requested = True
+    db_session.add(run)
+    db_session.commit()
+
+    called = {"verify": False}
+    monkeypatch.setattr(
+        backup,
+        "list_backups",
+        lambda: [backup.BackupMeta(
+            id="b1", created_at="now", size_bytes=1, storage_backend="local",
+            file_count=1, app_version="0.0.0", path="b1.tar.gz",
+        )],
+    )
+
+    def fake_verify(_id):
+        called["verify"] = True
+        raise AssertionError("verify_backup must not run once cancelled")
+
+    monkeypatch.setattr(backup, "verify_backup", fake_verify)
+
+    vault_audit._check_backups(db_session, run)
+
+    assert called["verify"] is False
+    db_session.refresh(run)
+    assert run.state == VaultAuditRunState.CANCELLED
+
+
+# --------------------------------------------------------------------------- #
+# execute_run — cancellation after external check, after database check,
+# after backup check, and embedded-image-missing detection
+# --------------------------------------------------------------------------- #
+
+
+def test_execute_run_cancelled_between_external_and_database_checks(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "exec-owner6")
+    run = _make_run(db_session, user)
+    run.cancel_requested = True
+    db_session.add(run)
+    db_session.commit()
+
+    monkeypatch.setattr(vault_audit, "ownership_snapshot", lambda _session: StorageOwnershipSnapshot())
+
+    vault_audit.execute_run(run.id)
+
+    db_session.refresh(run)
+    assert run.state == VaultAuditRunState.CANCELLED
+
+
+def test_execute_run_returns_when_database_check_cancels(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "exec-owner7")
+    run = _make_run(db_session, user)
+
+    monkeypatch.setattr(vault_audit, "ownership_snapshot", lambda _session: StorageOwnershipSnapshot())
+
+    def fake_check_database(session, run_arg):
+        run_arg.state = VaultAuditRunState.CANCELLED
+        session.add(run_arg)
+        session.commit()
+
+    monkeypatch.setattr(vault_audit, "_check_database", fake_check_database)
+
+    vault_audit.execute_run(run.id)
+
+    db_session.refresh(run)
+    assert run.state == VaultAuditRunState.CANCELLED
+    assert run.current_phase != "completed"
+
+
+def test_execute_run_flags_missing_embedded_image(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "exec-owner8")
+    run = _make_run(db_session, user)
+
+    blob = OwnedBlob(key="vault/collection-images/1/pic.png", resource_type="collection_image", resource_id=1)
+    snapshot = StorageOwnershipSnapshot(embedded=[blob])
+    monkeypatch.setattr(vault_audit, "ownership_snapshot", lambda _session: snapshot)
+    monkeypatch.setattr(get_backend(), "exists", lambda _key: False)
+
+    vault_audit.execute_run(run.id)
+
+    from sqlmodel import select
+
+    findings = db_session.exec(select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)).all()
+    assert any(f.code == "embedded_image_missing" for f in findings)
+    db_session.refresh(run)
+    assert run.state == VaultAuditRunState.COMPLETED
+
+
+def test_execute_run_full_mode_returns_when_backup_check_cancels(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session, "exec-owner9")
+    run = _make_run(db_session, user, VaultAuditMode.FULL)
+
+    monkeypatch.setattr(vault_audit, "ownership_snapshot", lambda _session: StorageOwnershipSnapshot())
+
+    def fake_check_backups(session, run_arg):
+        run_arg.state = VaultAuditRunState.CANCELLED
+        session.add(run_arg)
+        session.commit()
+
+    monkeypatch.setattr(vault_audit, "_check_backups", fake_check_backups)
+
+    vault_audit.execute_run(run.id)
+
+    db_session.refresh(run)
+    assert run.state == VaultAuditRunState.CANCELLED
+    assert run.finished_at is None
+
+
+# --------------------------------------------------------------------------- #
+# _reparse_metadata
+# --------------------------------------------------------------------------- #
+
+
+class _StubStrategy:
+    def process(self, _path):
+        return {"material_type": "PLA", "not_a_real_field": "ignored"}, b""
+
+
+def test_reparse_metadata_success_writes_metadata_row(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = _make_model(db_session, "reparse-ok")
+    file_row = _make_file(db_session, model, path="reparse-ok.gcode", file_type=FileType.GCODE)
+    get_backend().write_bytes(b"G28\n", file_row.path)
+
+    monkeypatch.setattr("app.services.ingestion._gcode_strategy", lambda: _StubStrategy())
+
+    result = vault_audit._reparse_metadata(db_session, file_row.id)
+
+    assert result is True
+    from sqlmodel import select
+
+    from app.db.models import Metadata
+
+    meta = db_session.exec(select(Metadata).where(Metadata.file_id == file_row.id)).first()
+    assert meta is not None
+    assert meta.material_type == "PLA"
+
+
+def test_reparse_metadata_missing_blob_returns_false(db_session: Session) -> None:
+    model = _make_model(db_session, "reparse-missing-blob")
+    file_row = _make_file(db_session, model, path="does-not-exist-in-backend.gcode", file_type=FileType.GCODE)
+
+    result = vault_audit._reparse_metadata(db_session, file_row.id)
+
+    assert result is False
+
+
+def test_reparse_metadata_missing_file_row_returns_false(db_session: Session) -> None:
+    assert vault_audit._reparse_metadata(db_session, 999999) is False
+
+
+def test_reparse_metadata_already_has_metadata_is_a_noop_success(db_session: Session) -> None:
+    from app.db.models import Metadata
+
+    model = _make_model(db_session, "reparse-has-meta")
+    file_row = _make_file(db_session, model, path="reparse-has-meta.gcode", file_type=FileType.GCODE)
+    db_session.add(Metadata(file_id=file_row.id, material_type="PETG"))
+    db_session.commit()
+
+    result = vault_audit._reparse_metadata(db_session, file_row.id)
+
+    assert result is True
+
+
+# --------------------------------------------------------------------------- #
+# ownership_snapshot — id-less rows and id-mismatched embedded image refs
+# --------------------------------------------------------------------------- #
+
+
+def _patch_exec_injecting_unpersisted_row(monkeypatch, db_session, entity_type, extra_row):
+    """Wrap ``session.exec`` so a query for ``entity_type`` also yields
+    ``extra_row`` (an in-memory instance with ``id=None`` that was never
+    flushed to the DB) alongside the real, persisted rows."""
+    original_exec = db_session.exec
+
+    class _ResultWrapper:
+        def __init__(self, real_result):
+            self._real_result = real_result
+
+        def all(self):
+            return [*self._real_result.all(), extra_row]
+
+    def patched_exec(statement, *args, **kwargs):
+        real_result = original_exec(statement, *args, **kwargs)
+        descriptions = getattr(statement, "column_descriptions", None)
+        if descriptions and descriptions[0].get("type") is entity_type:
+            return _ResultWrapper(real_result)
+        return real_result
+
+    monkeypatch.setattr(db_session, "exec", patched_exec)
+
+
+def test_ownership_snapshot_skips_file_row_with_no_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model = _make_model(db_session, "no-id-file")
+    _make_file(db_session, model, path="persisted.stl")
+    unpersisted = File(
+        model_id=model.id,
+        path="ghost.stl",
+        original_filename="ghost.stl",
+        file_type=FileType.STL,
+    )
+    assert unpersisted.id is None
+    _patch_exec_injecting_unpersisted_row(monkeypatch, db_session, File, unpersisted)
+
+    result = ownership_snapshot(db_session, discover=False)
+
+    primary_keys = {blob.key for blob in result.primary}
+    derived_keys = {blob.key for blob in result.derived}
+    assert "persisted.stl" in primary_keys
+    assert "ghost.stl" not in primary_keys
+    assert not any(blob.resource_id is None for blob in result.derived)
+    assert derived_keys  # the persisted file still contributed thumbnail/stl-cache keys
+
+
+def test_ownership_snapshot_skips_document_row_with_no_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persisted = Document(name="real-doc", kind=DocumentKind.MARKDOWN, filename="real.md")
+    db_session.add(persisted)
+    db_session.commit()
+    db_session.refresh(persisted)
+    unpersisted = Document(name="ghost-doc", kind=DocumentKind.MARKDOWN, filename="ghost.md")
+    assert unpersisted.id is None
+    _patch_exec_injecting_unpersisted_row(monkeypatch, db_session, Document, unpersisted)
+
+    result = ownership_snapshot(db_session, discover=False)
+
+    primary_names = {blob.display_name for blob in result.primary if blob.resource_type == "document"}
+    assert "real.md" in primary_names
+    assert "ghost.md" not in primary_names
+
+
+def test_ownership_snapshot_document_embedded_image_id_must_match_row(
+    db_session: Session,
+) -> None:
+    other = Document(name="other-doc", kind=DocumentKind.MARKDOWN)
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+
+    owner = Document(
+        name="owner-doc",
+        kind=DocumentKind.MARKDOWN,
+        body=f"![pic](/documents/{other.id}/images/stolen.png)",
+    )
+    db_session.add(owner)
+    db_session.commit()
+    db_session.refresh(owner)
+
+    result = ownership_snapshot(db_session, discover=False)
+
+    embedded_keys = {blob.key for blob in result.embedded}
+    stolen_key = get_backend().document_image_key(other.id, "stolen.png")
+    assert stolen_key not in embedded_keys
+
+    owner.body = f"![pic](/documents/{owner.id}/images/mine.png)"
+    db_session.add(owner)
+    db_session.commit()
+
+    result2 = ownership_snapshot(db_session, discover=False)
+    matching = [
+        blob
+        for blob in result2.embedded
+        if blob.resource_type == "document_image" and blob.resource_id == owner.id
+    ]
+    assert len(matching) == 1
+    assert matching[0].key == get_backend().document_image_key(owner.id, "mine.png")
+    assert matching[0].display_name == "mine.png"
+
+
+def test_ownership_snapshot_skips_collection_row_with_no_id(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    persisted = Collection(name="real-col", slug="real-col", path="real-col")
+    db_session.add(persisted)
+    db_session.commit()
+    db_session.refresh(persisted)
+    unpersisted = Collection(
+        name="ghost-col",
+        slug="ghost-col",
+        path="ghost-col",
+        readme="![pic](/collections/999999/images/never.png)",
+    )
+    assert unpersisted.id is None
+    _patch_exec_injecting_unpersisted_row(monkeypatch, db_session, Collection, unpersisted)
+
+    result = ownership_snapshot(db_session, discover=False)
+
+    assert not any(blob.resource_type == "collection_image" for blob in result.embedded)
+
+
+def test_ownership_snapshot_collection_embedded_image_id_must_match_row(
+    db_session: Session,
+) -> None:
+    other = Collection(name="other-col", slug="other-col", path="other-col")
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+
+    owner = Collection(
+        name="owner-col",
+        slug="owner-col",
+        path="owner-col",
+        readme=f"![pic](/collections/{other.id}/images/stolen.png)",
+    )
+    db_session.add(owner)
+    db_session.commit()
+    db_session.refresh(owner)
+
+    result = ownership_snapshot(db_session, discover=False)
+
+    stolen_key = get_backend().collection_image_key(other.id, "stolen.png")
+    assert stolen_key not in {blob.key for blob in result.embedded}
+
+    owner.readme = f"![pic](/collections/{owner.id}/images/mine.png)"
+    db_session.add(owner)
+    db_session.commit()
+
+    result2 = ownership_snapshot(db_session, discover=False)
+    matching = [
+        blob
+        for blob in result2.embedded
+        if blob.resource_type == "collection_image" and blob.resource_id == owner.id
+    ]
+    assert len(matching) == 1
+    assert matching[0].key == get_backend().collection_image_key(owner.id, "mine.png")
+
+
+def test_all_owned_blob_keys_includes_primary_and_external_files(db_session: Session) -> None:
+    model = _make_model(db_session, "owned-keys")
+    internal = _make_file(db_session, model, path="internal.stl")
+    external = _make_file(
+        db_session, model, path="/nas/external.stl", is_external=True, version=2,
+    )
+
+    keys = all_owned_blob_keys(db_session)
+
+    assert internal.path in keys
+    assert external.path in keys

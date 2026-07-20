@@ -12,12 +12,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from sqlmodel import Session
 
 from app.db.models import (
     ExternalLibrary,
     ExternalLibraryCollectionMode,
     FilamentProfile,
+    File,
+    FileType,
     Metadata,
+    Model,
+    PrinterProfile,
 )
 from app.services import importer as imp
 from app.services import model_views as mv
@@ -242,6 +247,121 @@ class TestCsvCell:
         assert row["top_shell_layers"] == "0"
         assert row["size_bytes"] == "0"
         assert row["slicer_name"] == ""  # truly absent stays blank
+
+
+# --------------------------------------------------------------------------- #
+# model_views — thumbnail URL resolution
+# --------------------------------------------------------------------------- #
+class TestThumbUrl:
+    def test_prefers_thumbnail_file_id(self) -> None:
+        model = Model(name="x", slug="x", hash="a" * 64, thumbnail_file_id=7, thumbnail_path="99.png")
+        assert mv.thumb_url(model) == "/api/v1/files/7/thumbnail"
+
+    def test_falls_back_to_legacy_digit_stem_path(self) -> None:
+        model = Model(name="x", slug="x", hash="a" * 64, thumbnail_path="uploads/42.png")
+        assert mv.thumb_url(model) == "/api/v1/files/42/thumbnail"
+
+    def test_non_digit_legacy_stem_returns_none(self) -> None:
+        model = Model(name="x", slug="x", hash="a" * 64, thumbnail_path="uploads/legacy.png")
+        assert mv.thumb_url(model) is None
+
+    def test_no_thumbnail_at_all_returns_none(self) -> None:
+        model = Model(name="x", slug="x", hash="a" * 64)
+        assert mv.thumb_url(model) is None
+
+
+# --------------------------------------------------------------------------- #
+# model_views — profile usage counters (DB-backed matching loops)
+# --------------------------------------------------------------------------- #
+class TestFilamentProfileUsage:
+    def test_counts_live_files_matching_each_profile(self, db_session: Session) -> None:
+        db_session.add_all(_profiles())
+        model = Model(name="m", slug="m", hash="b" * 64)
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        f1 = File(
+            model_id=model.id, path="a.gcode", original_filename="a.gcode",
+            file_type=FileType.GCODE, size_bytes=1, sha256="1" * 64,
+        )
+        f2 = File(
+            model_id=model.id, path="b.gcode", original_filename="b.gcode",
+            file_type=FileType.GCODE, size_bytes=1, sha256="2" * 64, version=2,
+        )
+        db_session.add(f1)
+        db_session.add(f2)
+        db_session.commit()
+        db_session.refresh(f1)
+        db_session.refresh(f2)
+        db_session.add(Metadata(file_id=f1.id, material_type="PLA", material_brand="Hatchbox"))
+        db_session.add(Metadata(file_id=f2.id, material_type="PLA", material_brand="Hatchbox"))
+        db_session.commit()
+
+        usage = mv.filament_profile_usage(db_session)
+
+        hatchbox = next(p for p in db_session.exec(
+            __import__("sqlmodel").select(FilamentProfile).where(FilamentProfile.name == "Hatchbox PLA")
+        ).all())
+        assert usage[hatchbox.id] == 2
+
+
+class TestPrinterProfileUsage:
+    def test_counts_live_files_matching_printer_model_or_preset_name(
+        self, db_session: Session
+    ) -> None:
+        profile = PrinterProfile(name="Voron 2.4 350", printer_model="Voron 2.4")
+        db_session.add(profile)
+        db_session.commit()
+        db_session.refresh(profile)
+        model = Model(name="pm", slug="pm", hash="c" * 64)
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        f1 = File(
+            model_id=model.id, path="a.gcode", original_filename="a.gcode",
+            file_type=FileType.GCODE, size_bytes=1, sha256="3" * 64,
+        )
+        db_session.add(f1)
+        db_session.commit()
+        db_session.refresh(f1)
+        db_session.add(Metadata(file_id=f1.id, printer_model="Voron 2.4"))
+        db_session.commit()
+
+        usage = mv.printer_profile_usage(db_session)
+
+        assert usage[profile.id] == 1
+
+    def test_blank_printer_model_is_skipped(self, db_session: Session) -> None:
+        model = Model(name="pm2", slug="pm2", hash="d" * 64)
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        f1 = File(
+            model_id=model.id, path="a.gcode", original_filename="a.gcode",
+            file_type=FileType.GCODE, size_bytes=1, sha256="4" * 64,
+        )
+        db_session.add(f1)
+        db_session.commit()
+        db_session.refresh(f1)
+        db_session.add(Metadata(file_id=f1.id, printer_model=None))
+        db_session.commit()
+
+        # No exception, and nothing counted for an unmatched/blank model.
+        assert mv.printer_profile_usage(db_session) == {}
+
+
+# --------------------------------------------------------------------------- #
+# model_views — metadata_read loading its own profile list when none is given
+# --------------------------------------------------------------------------- #
+class TestMetadataReadLoadsProfiles:
+    def test_loads_profiles_itself_when_not_provided(self, db_session: Session) -> None:
+        db_session.add_all(_profiles())
+        db_session.commit()
+        md = Metadata(file_id=1, material_type="PLA", material_brand="Hatchbox", filament_weight_g=100.0)
+
+        result = mv.metadata_read(db_session, md)
+
+        assert result.filament_cost == 2.0
 
 
 # --------------------------------------------------------------------------- #

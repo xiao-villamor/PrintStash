@@ -770,6 +770,162 @@ def test_purge_old_backups_noop_when_retention_non_positive(backup_env: BackupEn
     assert backup.purge_old_backups(retain_days=-5) == 0
 
 
+def test_backup_s3_key_prefixes_archive_name():
+    assert (
+        backup._backup_s3_key("printstash-backup-20240101-000000-abc123.tar.gz")
+        == "printstash-backups/printstash-backup-20240101-000000-abc123.tar.gz"
+    )
+
+
+def test_create_backup_raises_when_blob_size_changes_mid_archive(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """If the recorded size for a censused blob no longer matches what actually
+    gets streamed into the tar, the archive must not be reported as complete."""
+    _, key = _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
+
+    real_find_blobs = backup._find_blobs
+
+    def _wrong_size():
+        return [(k, size + 999) for k, size in real_find_blobs()]
+
+    monkeypatch.setattr(backup, "_find_blobs", _wrong_size)
+
+    with caplog.at_level("ERROR"), pytest.raises(RuntimeError, match="backup_blob_size_changed"):
+        backup.create_backup()
+
+    assert any("failed while streaming owned blobs" in r.message for r in caplog.records)
+    # The partial archive must not be left behind as if it were valid.
+    assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
+
+
+def test_list_backups_merges_s3_only_entry_and_local_wins_on_id_collision(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    local_meta = backup.create_backup()
+
+    s3_only = backup.BackupMeta(
+        id="s3-only-id",
+        created_at="2020-01-01T00:00:00+00:00",
+        size_bytes=42,
+        storage_backend="s3",
+        file_count=1,
+        app_version="0.0.0",
+        path="printstash-backups/s3-only.tar.gz",
+        location="s3",
+    )
+    # Same id as the local backup but different metadata: local must win.
+    s3_dupe = backup.BackupMeta(
+        id=local_meta.id,
+        created_at=local_meta.created_at,
+        size_bytes=999999,
+        storage_backend="s3",
+        file_count=999,
+        app_version="0.0.0",
+        path="printstash-backups/dupe.tar.gz",
+        location="s3",
+    )
+    monkeypatch.setattr(backup, "_list_s3_backups", lambda: [s3_only, s3_dupe])
+
+    merged = {m.id: m for m in backup.list_backups()}
+
+    assert set(merged) == {local_meta.id, "s3-only-id"}
+    assert merged[local_meta.id].location == "local"
+    assert merged[local_meta.id].file_count == local_meta.file_count
+
+
+def test_read_manifest_returns_none_when_manifest_entry_is_a_directory(tmp_path: Path):
+    import tarfile
+
+    archive = tmp_path / "dir-manifest.tar"
+    with tarfile.open(archive, mode="w") as tar:
+        # A directory-type TarInfo named manifest.json: extractfile() returns
+        # None for it, distinct from the "no manifest.json at all" case.
+        info = tarfile.TarInfo(name="manifest.json")
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+
+    # _read_manifest opens the path itself (gzip + streaming read), so wrap
+    # a gzip copy of the plain tar above for it to consume.
+    import gzip
+    import shutil
+
+    gz_archive = tmp_path / "dir-manifest.tar.gz"
+    with open(archive, "rb") as src, gzip.open(gz_archive, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+    assert backup._read_manifest(gz_archive) is None
+
+
+def test_read_manifest_returns_none_when_no_manifest_member_present(tmp_path: Path):
+    import gzip
+    import io
+    import tarfile
+
+    gz_archive = tmp_path / "no-manifest.tar.gz"
+    with gzip.open(gz_archive, "wb") as gz, tarfile.open(fileobj=gz, mode="w") as tar:
+        data = b"fake db bytes"
+        info = tarfile.TarInfo(name="db.sqlite3")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    assert backup._read_manifest(gz_archive) is None
+
+
+def test_restore_key_map_empty_when_manifest_entry_is_a_directory(tmp_path: Path):
+    import tarfile
+
+    archive = tmp_path / "dir-manifest.tar"
+    with tarfile.open(archive, mode="w") as tar:
+        info = tarfile.TarInfo(name="manifest.json")
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+
+    with tarfile.open(archive, mode="r") as tar:
+        assert backup._restore_key_map(tar) == {}
+
+
+def test_restore_skips_directory_entries_under_files_prefix(
+    backup_env: BackupEnv,
+):
+    """A directory entry under files/ (tar.extractfile returns None for it)
+    must be skipped, not crash the restore or count as a restored file."""
+    import gzip
+    import io
+    import tarfile
+
+    content = b"solid widget\n"
+    _model_id, key = _seed_model_with_blob(backup_env, name="Widget", content=content)
+    meta = backup.create_backup()
+    archive = Path(meta.path)
+
+    # Rewrite the archive with an extra directory entry under files/.
+    entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with gzip.open(archive, "rb") as gz, tarfile.open(fileobj=gz, mode="r:") as tar:
+        for member in tar.getmembers():
+            data = tar.extractfile(member).read() if member.isfile() else None
+            entries.append((member, data))
+
+    with gzip.open(archive, "wb") as gz, tarfile.open(fileobj=gz, mode="w:") as tar:
+        for member, data in entries:
+            if data is not None:
+                tar.addfile(member, io.BytesIO(data))
+            else:
+                tar.addfile(member)
+        dir_info = tarfile.TarInfo(name="files/empty-subdir")
+        dir_info.type = tarfile.DIRTYPE
+        tar.addfile(dir_info)
+
+    Path(key).unlink()
+
+    result = backup.restore_backup(meta.id)
+
+    # Only the real blob counts as restored; the directory entry is skipped.
+    assert result["restored_files"] == 1
+    assert Path(key).read_bytes() == content
+
+
 def test_purge_old_backups_skips_entry_with_invalid_created_at(
     backup_env: BackupEnv,
 ):
@@ -810,6 +966,138 @@ def test_purge_old_backups_skips_entry_with_invalid_created_at(
 
     assert removed == 0
     assert "badc0ffeeb00" in {m.id for m in backup.list_backups()}
+
+
+# ---------------------------------------------------------------------------
+# Narrow branch closures: S3 key helper, size-mismatch abort, list_backups
+# merge/dedup, and the "member present but unreadable" edge cases in
+# _read_manifest / _restore_key_map / restore_backup (all local-only, no
+# MinIO needed).
+# ---------------------------------------------------------------------------
+
+
+def test_list_backups_merges_s3_only_entry_and_local_wins_on_dup_id(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    """Exercises the merge/dedup loop in list_backups() without a real S3
+    endpoint: _list_s3_backups() is stubbed to return a cloud-only entry plus
+    a duplicate of a local id, and the loop's own logic is what's checked."""
+    _seed_model_with_blob(backup_env, name="Widget", content=b"x")
+    local_meta = backup.create_backup()
+
+    cloud_only = backup.BackupMeta(
+        id="cloud-only-id",
+        created_at="2020-01-01T00:00:00+00:00",
+        size_bytes=123,
+        storage_backend="local",
+        file_count=1,
+        app_version="0.0.0",
+        path="cloud-only.tar.gz",
+        location="s3",
+    )
+    duplicate_of_local = backup.BackupMeta(
+        id=local_meta.id,
+        created_at="1999-01-01T00:00:00+00:00",
+        size_bytes=999,
+        storage_backend="local",
+        file_count=999,
+        app_version="stale",
+        path="dup.tar.gz",
+        location="s3",
+    )
+    monkeypatch.setattr(
+        backup, "_list_s3_backups", lambda: [cloud_only, duplicate_of_local]
+    )
+
+    merged = backup.list_backups()
+
+    assert {m.id for m in merged} == {local_meta.id, "cloud-only-id"}
+    # Local wins the dup: the merged entry keeps the real local metadata, not
+    # the stale S3 stub sharing its id.
+    winner = next(m for m in merged if m.id == local_meta.id)
+    assert winner.location == "local"
+    assert winner.file_count == local_meta.file_count
+
+
+def test_read_manifest_returns_none_when_manifest_member_unreadable(tmp_path: Path):
+    """extractfile() returns None for non-regular members (e.g. a directory
+    entry) even when the name matches "manifest.json" exactly."""
+    import gzip
+    import tarfile
+
+    archive = tmp_path / "printstash-backup-20200101-000000-badbadbadbad.tar.gz"
+    with gzip.open(archive, "wb") as gz, tarfile.open(fileobj=gz, mode="w") as tar:
+        info = tarfile.TarInfo(name="manifest.json")
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+
+    assert backup._read_manifest(archive) is None
+
+
+def test_read_manifest_returns_none_when_manifest_member_absent(tmp_path: Path):
+    """No manifest.json member at all: the scan loop finishes without ever
+    matching, and the function must fall through to its final `return None`."""
+    import gzip
+    import io
+    import tarfile
+
+    archive = tmp_path / "printstash-backup-20200101-000000-cafecafecafe.tar.gz"
+    with gzip.open(archive, "wb") as gz, tarfile.open(fileobj=gz, mode="w") as tar:
+        data = b"fake db bytes"
+        info = tarfile.TarInfo(name="db.sqlite3")
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    assert backup._read_manifest(archive) is None
+
+
+def test_restore_key_map_empty_when_manifest_member_unreadable(tmp_path: Path):
+    """Same "member present but not a regular file" case as _read_manifest,
+    but for the restore-side key map."""
+    import tarfile
+
+    archive = tmp_path / "weird.tar"
+    with tarfile.open(archive, mode="w") as tar:
+        info = tarfile.TarInfo(name="manifest.json")
+        info.type = tarfile.DIRTYPE
+        tar.addfile(info)
+
+    with tarfile.open(archive, mode="r") as tar:
+        assert backup._restore_key_map(tar) == {}
+
+
+def test_restore_skips_unreadable_files_member(backup_env: BackupEnv):
+    """A files/ tar member that isn't a regular file (e.g. a directory entry)
+    must be skipped during restore, not crash it or count toward
+    restored_files."""
+    import gzip
+    import io
+    import tarfile
+
+    content = b"solid widget\n"
+    _seed_model_with_blob(backup_env, name="Widget", content=content)
+    meta = backup.create_backup()
+    archive = Path(meta.path)
+
+    entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with gzip.open(archive, "rb") as gz, tarfile.open(fileobj=gz, mode="r:") as tar:
+        for member in tar.getmembers():
+            data = tar.extractfile(member).read() if member.isfile() else None
+            entries.append((member, data))
+
+    with gzip.open(archive, "wb") as gz, tarfile.open(fileobj=gz, mode="w:") as tar:
+        for member, data in entries:
+            if data is not None:
+                tar.addfile(member, io.BytesIO(data))
+            else:
+                tar.addfile(member)
+        dir_info = tarfile.TarInfo(name="files/subdir")
+        dir_info.type = tarfile.DIRTYPE
+        tar.addfile(dir_info)
+
+    result = backup.restore_backup(meta.id)
+
+    assert result["restored_files"] == 1
 
 
 # ---------------------------------------------------------------------------
