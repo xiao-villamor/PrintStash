@@ -14,6 +14,12 @@
 ### Changed
 
 - Backup creation now fails if a database-owned blob is unreadable, missing, changes size, or vanishes while streaming instead of silently producing a smaller archive.
+- Completed Spanish translations across the Model detail print-settings panel, card-metric and metadata-field pickers, and remaining Settings surfaces left over from 0.11.0's localization foundation.
+
+### Fixed
+
+- Clearing all Structured Model filters at once now removes every active filter and date range from the URL instead of leaving the last-applied one in place.
+- The mobile bottom navigation no longer pushes "Profiles" into the overflow "More" sheet for administrators; it stays one tap away alongside Vault, Pending, and Printers.
 
 ### Security
 
