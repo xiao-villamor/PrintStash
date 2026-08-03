@@ -12,8 +12,9 @@ Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
 ## Where we are
 
 <!-- Update this block when a release ships. -->
-Latest shipped: v0.11.1 (Vault audit, Pending Imports/Quick Capture, structured
-Model filters, per-printer access control), merged to `main` and tagged. Next:
+Latest shipped: v0.11.2 (patch: theme toggle applies on the first click) on top
+of v0.11.1 (Vault audit, Pending Imports/Quick Capture, structured Model
+filters, per-printer access control), merged to `main` and tagged. Next:
 0.12 (`docs/roadmap.md`). Private plans
 live in gitignored `reports/` — start with
 `reports/14-implementation-plan-to-1.0.0.md` (OSS) and
