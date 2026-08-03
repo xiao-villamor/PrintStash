@@ -22,6 +22,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.11.2",
+    date: "Aug 2026",
+    changes: [
+      "The theme toggle now switches on the first click instead of needing two",
+    ],
+  },
+  {
     version: "0.11.1",
     date: "Jul 2026",
     changes: [
