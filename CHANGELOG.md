@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- The theme toggle now reads the theme already applied to the page instead of re-resolving it from storage, so it switches on the first click ([#55](https://github.com/xiao-villamor/PrintStash/issues/55)).
+
 ## 0.11.1
 
 **This patch-version release is an explicit exception to normal 0.x patch policy: it adds features and append-only database migrations. Back up before upgrading.**

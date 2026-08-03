@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
 const STORAGE_KEY = "printstash.theme";
@@ -21,17 +21,11 @@ function applyTheme(theme: Theme) {
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>("light");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const stored =
-      (localStorage.getItem(STORAGE_KEY) as Theme | null) ??
-      (localStorage.getItem(LEGACY_STORAGE_KEY) as Theme | null) ??
-      (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-    setTheme(stored);
-    setMounted(true);
-  }, []);
+  // The pre-paint script in index.html already resolved the theme onto <html>;
+  // read it back rather than re-resolving, so state can never disagree with the DOM.
+  const [theme, setTheme] = useState<Theme>(() =>
+    document.documentElement.classList.contains("dark") ? "dark" : "light",
+  );
 
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
@@ -40,8 +34,6 @@ export function ThemeToggle() {
     localStorage.removeItem(LEGACY_STORAGE_KEY);
     applyTheme(next);
   }
-
-  if (!mounted) return <div className="h-9 w-9" aria-hidden />;
 
   return (
     <button
