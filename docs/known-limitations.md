@@ -18,15 +18,17 @@ manufacturing platform.
   implemented; Prusa Connect cloud, SLA printers, raw G-code controls, and
   measured filament consumption are not.
 - Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
-  Carbon 2 have beta local status/control support, but no upload or inventory.
-  Neptune 2/3, OrangeStorm, and SLA models are not covered.
+  Carbon 2 have beta local status/control support and beta chunked HTTP
+  upload, but no file inventory, deletion, or print-history import. Neptune
+  2/3, OrangeStorm, and SLA models are not covered.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups. In particular, the
   0.11.0 protocol corrections — the Moonraker `server.connection.identify`
   handshake, Bambu LAN MQTT report-confirmed commands and status reads, and the
-  PrusaLink v1 file/job/start alignment — are verified against mocked transports
-  and emulators only; no real-hardware Validation Log rows exist yet (see
-  `docs/provider-support.md`).
+  PrusaLink v1 file/job/start alignment — and the 0.11.3 Elegoo Centauri
+  upload path (`pycentauri` 0.9.0's `upload_file`) are verified against mocked
+  transports and emulators only; no real-hardware Validation Log rows exist
+  yet (see `docs/provider-support.md`).
 
 ## Deployment
 

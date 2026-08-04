@@ -107,13 +107,17 @@ Support level: beta.
   states do not announce it while paused or errored.
 - Centauri Carbon 2: authenticated local MQTT on port 1883. Enable **LAN Only**
   in printer network settings and enter the access code shown by the printer.
-- Both models: live status, temperatures, progress, start of a file already on
-  printer storage, pause, resume, and cancel.
+- Both models: live status, temperatures, progress, upload, start of a file
+  already on printer storage, pause, resume, and cancel.
+- Upload runs over plain HTTP (CC1: chunked multipart POST, 1 MiB chunks; CC2:
+  chunked PUT with `Content-Range`), independent of the SDCP/MQTT control
+  channel used for status and print control.
 
-Upload, file inventory/deletion, raw G-code, and measured consumption are not
-advertised. Original Carbon file-list probes can terminate its printer daemon;
-Carbon 2's documented file-list request does not answer on validated firmware.
-PrintStash therefore never probes those operations.
+File inventory/deletion, raw G-code, print-history import, and measured
+consumption are not advertised. Original Carbon file-list probes can terminate
+its printer daemon when sent with an empty payload; Carbon 2's documented
+file-list request does not answer on validated firmware. PrintStash therefore
+never probes those operations.
 
 ## Hardware Validation Log
 

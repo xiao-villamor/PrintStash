@@ -45,6 +45,10 @@ class FakeConnection:
         self.calls.append(("start", (filename, kwargs)))
         return {}
 
+    async def upload_file(self, local_path: Any, *, remote_name: str | None = None) -> str:
+        self.calls.append(("upload_file", (local_path, remote_name)))
+        return remote_name or str(local_path)
+
     async def pause(self) -> dict[str, Any]:
         self.calls.append(("pause", None))
         return {}
@@ -121,6 +125,27 @@ async def test_centauri_controls_use_control_enabled_connections() -> None:
         "stop",
     ]
     assert all(connection.closed for connection in connections)
+
+
+@pytest.mark.asyncio
+async def test_upload_uses_control_enabled_connection_and_returns_remote_name() -> None:
+    from pathlib import Path
+
+    connection = FakeConnection()
+
+    async def connector(enable_control: bool) -> FakeConnection:
+        assert enable_control is True
+        return connection
+
+    client = ElegooCentauriClient(
+        "192.168.1.50",
+        model="elegoo_centauri_carbon",
+        connector=connector,
+    )
+    result = await client.upload(Path("/tmp/cube.gcode"), "cube.gcode")
+    assert result == {"result": "cube.gcode"}
+    assert connection.calls == [("upload_file", (Path("/tmp/cube.gcode"), "cube.gcode"))]
+    assert connection.closed is True
 
 
 @pytest.mark.asyncio

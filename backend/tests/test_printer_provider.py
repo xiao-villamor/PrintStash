@@ -53,7 +53,7 @@ class TestCapabilities:
         assert caps.can_live_status is True
         assert caps.can_start is True
         assert caps.can_pause is True
-        assert caps.can_upload is False
+        assert caps.can_upload is True
         assert caps.can_list_files is False
         assert caps.can_send_gcode is False
         assert caps.support_level == "beta"

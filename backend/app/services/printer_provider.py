@@ -1005,12 +1005,14 @@ class ElegooCentauriProvider(DelegatingProvider):
                 Capability.CANCEL,
                 Capability.LIVE_STATUS,
                 Capability.SERVER_INFO,
+                Capability.UPLOAD,
             }
         ),
         support_level="beta",
         support_notes=(
             "Centauri Carbon uses local SDCP; Carbon 2 uses local authenticated MQTT.",
-            "Upload and file inventory are unavailable because current firmware does not expose a safe confirmed file API.",
+            "Upload runs over plain HTTP, independent of the SDCP/MQTT control channel.",
+            "File inventory, deletion, and print-history import remain unavailable.",
         ),
     )
     client_error = ElegooCentauriError

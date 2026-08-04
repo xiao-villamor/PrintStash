@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 from pycentauri.cc2 import CC2Printer
@@ -21,6 +22,10 @@ class _CentauriConnection(Protocol):
     async def status(self) -> Status: ...
 
     def watch(self) -> AsyncIterator[Status]: ...
+
+    async def upload_file(
+        self, local_path: str | Path, *, remote_name: str | None = None
+    ) -> str: ...
 
     async def start_print(self, filename: str, **kwargs: Any) -> Any: ...
 
@@ -171,6 +176,21 @@ class ElegooCentauriClient:
                 "temperature": status.temp_chamber,
             },
         }
+
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        """Upload a g-code file to the printer's internal storage.
+
+        Runs over plain HTTP (CC1: chunked multipart POST; CC2: chunked PUT),
+        entirely separate from the SDCP/MQTT control channel used for status
+        and print control.
+        """
+        remote_name = await self._with_connection(
+            True,
+            lambda connection: connection.upload_file(
+                local_path, remote_name=remote_filename
+            ),
+        )
+        return {"result": remote_name}
 
     async def start(self, remote_filename: str) -> dict[str, Any]:
         await self._with_connection(

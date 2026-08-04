@@ -2,6 +2,10 @@
 
 ## 0.11.3
 
+### Added
+
+- **Elegoo Centauri Carbon upload.** Both Centauri Carbon models can now receive Vault G-code directly (chunked HTTP upload, independent of the SDCP/MQTT control channel), via an upgraded `pycentauri` dependency ([#57](https://github.com/xiao-villamor/PrintStash/issues/57)).
+
 ### Fixed
 
 - The Spoolman integration no longer enables consumption write-back by default; it stays off until an operator explicitly turns it on, since most providers (only Moonraker reports measured consumption today) could never act on it anyway ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).

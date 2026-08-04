@@ -121,7 +121,7 @@ def test_detailed_health_requires_admin_and_reports_release_components(
     centauri = next(p for p in providers if p["provider"] == "elegoo_centauri")
     assert centauri["support_level"] == "beta"
     assert centauri["capabilities"]["can_live_status"] is True
-    assert centauri["capabilities"]["can_upload"] is False
+    assert centauri["capabilities"]["can_upload"] is True
 
 
 def test_release_check_requires_admin(

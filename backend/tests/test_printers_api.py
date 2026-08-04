@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -785,7 +786,7 @@ class TestElegooCentauriPrinter:
         assert body["elegoo_centauri_host"] == "192.168.1.50"
         assert body["elegoo_centauri_mainboard_id"] == "mainboard-123"
         assert body["capabilities"]["can_live_status"] is True
-        assert body["capabilities"]["can_upload"] is False
+        assert body["capabilities"]["can_upload"] is True
 
     def test_create_carbon_2_redacts_access_code(
         self, client: TestClient, auth_headers, db_session: Session
@@ -2318,6 +2319,11 @@ class TestSendToPrinterExtraGates:
     def test_send_rejected_when_provider_cannot_upload(
         self, client: TestClient, auth_headers, db_session: Session
     ):
+        # Every registered provider currently supports upload, so there's no
+        # real fixture for "provider without upload" — force the gate the
+        # /send route actually checks (capabilities.can_upload) instead.
+        from app.services.printer_provider import ElegooCentauriProvider
+
         _, f = self._gcode_file(db_session, "eleg")
         p = Printer(
             name="Centauri",
@@ -2330,11 +2336,13 @@ class TestSendToPrinterExtraGates:
         db_session.commit()
         db_session.refresh(p)
 
-        resp = client.post(
-            f"/api/v1/printers/{p.id}/send",
-            json={"file_id": f.id, "start_print": False},
-            headers=auth_headers,
-        )
+        no_upload = replace(ElegooCentauriProvider.capabilities, supported=frozenset())
+        with patch.object(ElegooCentauriProvider, "capabilities", no_upload):
+            resp = client.post(
+                f"/api/v1/printers/{p.id}/send",
+                json={"file_id": f.id, "start_print": False},
+                headers=auth_headers,
+            )
         assert resp.status_code == 409
         assert resp.json()["detail"] == "operation_not_supported_for_provider"
 
