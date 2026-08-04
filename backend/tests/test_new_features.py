@@ -154,6 +154,31 @@ def test_inspect_archive_filters_and_blocks_traversal(tmp_path):
     assert image.is_image and image.file_type is None
 
 
+def test_inspect_archive_does_not_count_directory_entries_against_cap(tmp_path):
+    """A deeply nested tree racks up one directory record per folder; those
+    aren't extracted and must not count toward the file-count cap (#61)."""
+    from app.core.config import _overlay
+    from app.services import importer
+
+    _overlay["max_archive_entries"] = 3
+    try:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            # 4 directory records, only 2 real files — over the cap by
+            # raw entry count, under it by file count.
+            for d in ["a/", "a/b/", "a/b/c/", "a/b/c/d/"]:
+                zf.writestr(d, b"")
+            zf.writestr("a/b/c/d/part.stl", b"solid")
+            zf.writestr("a/b/preview.png", b"img")
+        archive = tmp_path / "nested.zip"
+        archive.write_bytes(buf.getvalue())
+
+        entries = importer.inspect_archive(archive)
+        assert {e.name for e in entries} == {"a/b/c/d/part.stl", "a/b/preview.png"}
+    finally:
+        _overlay.pop("max_archive_entries", None)
+
+
 def test_extract_selected_only_returns_importable(tmp_path):
     from app.core.config import _overlay
     from app.services import importer

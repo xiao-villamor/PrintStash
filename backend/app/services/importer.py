@@ -194,7 +194,11 @@ def inspect_archive(path: Path) -> list[ArchiveEntry]:
     try:
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
-            if len(infos) > max_entries:
+            # Count only files against the cap — directory records (which a
+            # deeply nested tree accumulates one per folder) aren't extracted
+            # and shouldn't count toward a limit meant to bound file count.
+            file_count = sum(1 for info in infos if not info.is_dir())
+            if file_count > max_entries:
                 raise ImportError_("archive_too_many_entries")
             total = 0
             for info in infos:
