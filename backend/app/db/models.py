@@ -737,10 +737,13 @@ class SystemConfig(SQLModel, table=True):
         default=None, sa_column=Column(EncryptedText(), nullable=True)
     )
     # Whether PrintStash writes consumption back to Spoolman on measured-print
-    # completion. On by default; the write path skips at runtime when Moonraker's
-    # native Spoolman hook is decrementing the active spool (see
-    # spoolman_write_force) so a print is never counted twice.
-    spoolman_write_enabled: bool = Field(default=True)
+    # completion. Off by default: enabling Spoolman only turns on write-back for
+    # providers that report measured consumption (currently Moonraker); leaving
+    # it off by default avoids implying write-back for providers that can never
+    # report it. The write path also skips at runtime when Moonraker's native
+    # Spoolman hook is decrementing the active spool (see spoolman_write_force)
+    # so a print is never counted twice.
+    spoolman_write_enabled: bool = Field(default=False)
     # Override the native-hook double-count guard: when True, PrintStash writes
     # consumption back even if Spoolman reports an active spool (use only after
     # disabling Moonraker's own Spoolman decrement). Off by default so the guard

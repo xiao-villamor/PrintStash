@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.3
+
+### Fixed
+
+- The Spoolman integration no longer enables consumption write-back by default; it stays off until an operator explicitly turns it on, since most providers (only Moonraker reports measured consumption today) could never act on it anyway ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).
+- The Spoolman spool inventory (`GET /api/v1/spoolman/spools`) and picker now surface Spoolman's `location` field, so spools that are otherwise identical (same vendor, material, color) can be told apart across multi-slot changers (AMS, CANVAS, MMU) ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).
+
 ## 0.11.2
 
 ### Fixed

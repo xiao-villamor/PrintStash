@@ -38,4 +38,5 @@ export interface SpoolRead {
   remaining_weight: number | null;
   used_weight: number | null;
   archived: boolean;
+  location: string | null;
 }

@@ -266,21 +266,21 @@ def test_boolean_toggles_default_and_round_trip(db_session: Session) -> None:
     assert runtime_config.external_libraries_enabled(db_session) is False
     assert runtime_config.notifications_enabled(db_session) is False
     assert runtime_config.spoolman_enabled(db_session) is False
-    assert runtime_config.spoolman_write_enabled(db_session) is True
+    assert runtime_config.spoolman_write_enabled(db_session) is False
     assert runtime_config.spoolman_write_force(db_session) is False
 
     runtime_config.set_auto_mark_known_good(db_session, False)
     runtime_config.set_external_libraries_enabled(db_session, True)
     runtime_config.set_notifications_enabled(db_session, True)
     runtime_config.set_spoolman_enabled(db_session, True)
-    runtime_config.set_spoolman_write_enabled(db_session, False)
+    runtime_config.set_spoolman_write_enabled(db_session, True)
     runtime_config.set_spoolman_write_force(db_session, True)
 
     assert runtime_config.auto_mark_known_good_enabled(db_session) is False
     assert runtime_config.external_libraries_enabled(db_session) is True
     assert runtime_config.notifications_enabled(db_session) is True
     assert runtime_config.spoolman_enabled(db_session) is True
-    assert runtime_config.spoolman_write_enabled(db_session) is False
+    assert runtime_config.spoolman_write_enabled(db_session) is True
     assert runtime_config.spoolman_write_force(db_session) is True
 
 

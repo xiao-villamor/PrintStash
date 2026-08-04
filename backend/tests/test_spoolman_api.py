@@ -327,6 +327,7 @@ def test_list_spools_returns_flattened_records(
                 "remaining_weight": 500.0,
                 "used_weight": 250.0,
                 "archived": False,
+                "location": "CANVAS-1",
                 "filament": {
                     "id": 3,
                     "name": "PLA Red",
@@ -348,6 +349,7 @@ def test_list_spools_returns_flattened_records(
     assert body[0]["id"] == 7
     assert body[0]["filament_name"] == "PLA Red"
     assert body[0]["vendor_name"] == "Acme"
+    assert body[0]["location"] == "CANVAS-1"
 
 
 def test_list_spools_degrades_on_spoolman_error(

@@ -334,12 +334,12 @@ def set_spoolman_enabled(session: Session, enabled: bool) -> SystemConfig:
 
 
 def spoolman_write_enabled(session: Session) -> bool:
-    """Whether measured consumption is written back to Spoolman. On by default;
+    """Whether measured consumption is written back to Spoolman. Off by default;
     the write path additionally skips the decrement at runtime when Moonraker's
     native hook is already counting the active spool (unless write-force is set —
     see ``spoolman_write_force``)."""
     config = session.get(SystemConfig, 1)
-    return True if config is None else bool(config.spoolman_write_enabled)
+    return False if config is None else bool(config.spoolman_write_enabled)
 
 
 def set_spoolman_write_enabled(session: Session, enabled: bool) -> SystemConfig:

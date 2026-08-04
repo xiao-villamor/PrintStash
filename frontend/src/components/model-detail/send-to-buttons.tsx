@@ -429,6 +429,7 @@ export function SendToButtons({
                     <option key={spool.id} value={spool.id}>
                       {(spool.filament_name || spool.name || `Spool ${spool.id}`) +
                         (spool.vendor_name ? ` · ${spool.vendor_name}` : "") +
+                        (spool.location ? ` · ${spool.location}` : "") +
                         (spool.remaining_weight != null ? ` (${formatGrams(spool.remaining_weight)} left)` : "")}
                     </option>
                   ))}

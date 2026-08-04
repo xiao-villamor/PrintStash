@@ -37,7 +37,7 @@ class SpoolmanStatus(BaseModel):
     enabled: bool = False
     base_url: Optional[str] = None
     has_api_key: bool = False
-    write_enabled: bool = True
+    write_enabled: bool = False
     # Override the native-hook double-count guard (write back even when Spoolman
     # reports an active spool). Off by default.
     write_force: bool = False
@@ -81,6 +81,10 @@ class SpoolRead(BaseModel):
     remaining_weight: Optional[float] = None
     used_weight: Optional[float] = None
     archived: bool = False
+    # Spoolman's free-text slot/bin label — the only thing that distinguishes
+    # otherwise-identical spools (same vendor/material/color) in a multi-slot
+    # changer (AMS, CANVAS, MMU).
+    location: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -104,6 +108,7 @@ def _spool_from_spoolman(raw: Dict[str, Any]) -> SpoolRead:
         remaining_weight=raw.get("remaining_weight"),
         used_weight=raw.get("used_weight"),
         archived=bool(raw.get("archived", False)),
+        location=raw.get("location"),
     )
 
 
