@@ -24,11 +24,13 @@ manufacturing platform.
 - Provider behavior still needs more real-world hardware validation across
   printers, firmware versions, networks, and auth setups. In particular, the
   0.11.0 protocol corrections — the Moonraker `server.connection.identify`
-  handshake, Bambu LAN MQTT report-confirmed commands and status reads, and the
-  PrusaLink v1 file/job/start alignment — and the 0.11.3 Elegoo Centauri
-  upload path (`pycentauri` 0.9.0's `upload_file`) are verified against mocked
+  handshake, Bambu LAN MQTT report-confirmed commands and status reads, and
+  the PrusaLink v1 file/job/start alignment — are verified against mocked
   transports and emulators only; no real-hardware Validation Log rows exist
-  yet (see `docs/provider-support.md`).
+  yet (see `docs/provider-support.md`). The 0.11.3 Elegoo CC1 upload path
+  (`pycentauri` 0.9.0's `upload_cc1`) has a community report of the
+  dependency call working against real CC1 hardware, but not a full
+  PrintStash-stack smoke test; the CC2 upload path is unconfirmed entirely.
 
 ## Deployment
 

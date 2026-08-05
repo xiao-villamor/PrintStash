@@ -119,6 +119,16 @@ its printer daemon when sent with an empty payload; Carbon 2's documented
 file-list request does not answer on validated firmware. PrintStash therefore
 never probes those operations.
 
+Upload is advertised for both models, but only CC1's path has any real-world
+confirmation: a community report (PR #62) ran `pycentauri` 0.9.0's
+`upload_cc1()` and `Printer.connect(enable_control=True)` — the exact calls
+`ElegooCentauriClient.upload()` makes — against a physical CC1 and got a
+correct transfer. That confirms the dependency call and the connection, not
+PrintStash's own service layer, Vault retrieval, or capability gating end to
+end, so it doesn't fully satisfy the smoke test below on its own. CC2's
+upload path (`upload_cc2`, PUT with `Content-Range`) shares the same
+`pycentauri` module but has no real-hardware report at all yet.
+
 ## Hardware Validation Log
 
 Automated tests cover protocol logic against mocked transports; they don't
