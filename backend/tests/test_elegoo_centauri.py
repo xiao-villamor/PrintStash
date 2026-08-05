@@ -30,10 +30,23 @@ def _status(code: int = 13) -> Status:
 
 
 class FakeConnection:
-    def __init__(self, status: Status | None = None) -> None:
+    """Mirrors real pycentauri connections: control actions (including
+    ``upload_file``) raise ``PrinterError`` unless opened with
+    ``enable_control=True``, the same gate ``Printer._require_control`` and
+    ``CC2Printer`` enforce. Kept honest so a regression that dropped
+    ``enable_control=True`` from a write path would fail here even in a test
+    that doesn't itself assert on the connector's argument.
+    """
+
+    def __init__(self, status: Status | None = None, *, enable_control: bool = True) -> None:
         self.current_status = status or _status()
         self.closed = False
+        self.enable_control = enable_control
         self.calls: list[tuple[str, Any]] = []
+
+    def _require_control(self, action: str) -> None:
+        if not self.enable_control:
+            raise PrinterError(f"{action!r} requires enable_control=True")
 
     async def status(self) -> Status:
         return self.current_status
@@ -42,22 +55,27 @@ class FakeConnection:
         yield self.current_status
 
     async def start_print(self, filename: str, **kwargs: Any) -> dict[str, Any]:
+        self._require_control("start_print")
         self.calls.append(("start", (filename, kwargs)))
         return {}
 
     async def upload_file(self, local_path: Any, *, remote_name: str | None = None) -> str:
+        self._require_control("upload_file")
         self.calls.append(("upload_file", (local_path, remote_name)))
         return remote_name or str(local_path)
 
     async def pause(self) -> dict[str, Any]:
+        self._require_control("pause")
         self.calls.append(("pause", None))
         return {}
 
     async def resume(self) -> dict[str, Any]:
+        self._require_control("resume")
         self.calls.append(("resume", None))
         return {}
 
     async def stop(self) -> dict[str, Any]:
+        self._require_control("stop")
         self.calls.append(("stop", None))
         return {}
 
@@ -67,7 +85,7 @@ class FakeConnection:
 
 @pytest.mark.asyncio
 async def test_centauri_status_is_normalized_and_connection_closed() -> None:
-    connection = FakeConnection()
+    connection = FakeConnection(enable_control=False)
 
     async def connector(enable_control: bool) -> FakeConnection:
         assert enable_control is False
@@ -149,6 +167,29 @@ async def test_upload_uses_control_enabled_connection_and_returns_remote_name() 
 
 
 @pytest.mark.asyncio
+async def test_upload_without_control_enabled_is_rejected() -> None:
+    """Regression guard flagged during #57 hardware validation: pycentauri's
+    upload_file() raises unless the connection was opened with
+    enable_control=True. If ElegooCentauriClient.upload() ever regressed to
+    opening a read-only connection, this must fail here rather than only
+    when someone happens to point a real printer at it."""
+    from pathlib import Path
+
+    connection = FakeConnection(enable_control=False)
+
+    async def connector(enable_control: bool) -> FakeConnection:
+        return connection
+
+    client = ElegooCentauriClient(
+        "192.168.1.50",
+        model="elegoo_centauri_carbon",
+        connector=connector,
+    )
+    with pytest.raises(ElegooCentauriError):
+        await client.upload(Path("/tmp/cube.gcode"), "cube.gcode")
+
+
+@pytest.mark.asyncio
 async def test_network_drop_during_action_becomes_provider_error() -> None:
     connection = FakeConnection()
 
@@ -193,7 +234,7 @@ async def test_close_failure_in_finally_is_swallowed() -> None:
 
 @pytest.mark.asyncio
 async def test_subscription_normalizes_status_and_honors_stop_event() -> None:
-    connection = FakeConnection(_status(6))
+    connection = FakeConnection(_status(6), enable_control=False)
 
     async def connector(enable_control: bool) -> FakeConnection:
         assert enable_control is False
