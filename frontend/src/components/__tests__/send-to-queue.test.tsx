@@ -4,11 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
-import type { PrinterRead } from "@/types";
+import type { PrinterRead, SpoolRead } from "@/types";
 
-const { enqueueFleetJob, mockUsePrinters } = vi.hoisted(() => ({
+const { enqueueFleetJob, mockUsePrinters, mockUseSpoolmanStatus, mockUseSpools } = vi.hoisted(() => ({
   enqueueFleetJob: vi.fn(),
   mockUsePrinters: vi.fn(),
+  mockUseSpoolmanStatus: vi.fn(() => ({ data: { enabled: false } })),
+  mockUseSpools: vi.fn(() => ({ data: [] as SpoolRead[] })),
 }));
 vi.mock("@/lib/api", () => ({
   enqueueFleetJob,
@@ -16,8 +18,8 @@ vi.mock("@/lib/api", () => ({
 }));
 vi.mock("@/lib/queries", () => ({
   usePrinters: () => mockUsePrinters(),
-  useSpoolmanStatus: () => ({ data: { enabled: false } }),
-  useSpools: () => ({ data: [] }),
+  useSpoolmanStatus: () => mockUseSpoolmanStatus(),
+  useSpools: () => mockUseSpools(),
 }));
 vi.mock("@/lib/use-require-auth", () => ({
   useRequireAuth: () => ({ isAuthenticated: true, showAuthRequiredToast: vi.fn() }),
@@ -74,6 +76,8 @@ beforeEach(() => {
   enqueueFleetJob.mockReset();
   enqueueFleetJob.mockResolvedValue({ id: 1 });
   mockUsePrinters.mockReturnValue({ data: [printer], isLoading: false, error: null });
+  mockUseSpoolmanStatus.mockReturnValue({ data: { enabled: false } });
+  mockUseSpools.mockReturnValue({ data: [] });
 });
 
 it("adds selected G-code to least-busy fleet queue", async () => {
@@ -86,6 +90,7 @@ it("adds selected G-code to least-busy fleet queue", async () => {
         gcode_revision_number: 1,
         revision_label: null,
         is_recommended: true,
+        metadata: null,
       }]}
       printerFiles={[]}
     />,
@@ -100,4 +105,63 @@ it("adds selected G-code to least-busy fleet queue", async () => {
     strategy: "least_busy",
     printer_id: undefined,
   })));
+});
+
+it("warns when the selected spool doesn't have enough filament left, but doesn't block sending", async () => {
+  mockUseSpoolmanStatus.mockReturnValue({ data: { enabled: true } });
+  mockUseSpools.mockReturnValue({
+    data: [
+      { id: 1, filament_id: null, name: "Almost empty", filament_name: null, vendor_name: null, material: null, color_hex: null, remaining_weight: 10, used_weight: null, archived: false, location: null },
+    ],
+  });
+
+  render(
+    <SendToButtons
+      gcodeFiles={[{
+        id: 42,
+        original_filename: "cube.gcode",
+        version: 1,
+        gcode_revision_number: 1,
+        revision_label: null,
+        is_recommended: true,
+        metadata: { filament_weight_g: 250 } as import("@/types").MetadataRead,
+      }]}
+      printerFiles={[]}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+  await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+
+  expect(await screen.findByText(/needs ~250g.*10g left/)).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).not.toBeDisabled();
+});
+
+it("warns when the spool has no tracked remaining weight instead of assuming it's plenty", async () => {
+  mockUseSpoolmanStatus.mockReturnValue({ data: { enabled: true } });
+  mockUseSpools.mockReturnValue({
+    data: [
+      { id: 1, filament_id: null, name: "Untracked", filament_name: null, vendor_name: null, material: null, color_hex: null, remaining_weight: null, used_weight: null, archived: false, location: null },
+    ],
+  });
+
+  render(
+    <SendToButtons
+      gcodeFiles={[{
+        id: 42,
+        original_filename: "cube.gcode",
+        version: 1,
+        gcode_revision_number: 1,
+        revision_label: null,
+        is_recommended: true,
+        metadata: { filament_weight_g: 250 } as import("@/types").MetadataRead,
+      }]}
+      printerFiles={[]}
+    />,
+  );
+
+  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+  await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+
+  expect(await screen.findByText(/no tracked remaining weight/)).toBeInTheDocument();
 });

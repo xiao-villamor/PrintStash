@@ -28,7 +28,10 @@ export function SendToButtons({
   onOpenChange,
   preselectFileId,
 }: {
-  gcodeFiles: Pick<FileRead, "id" | "original_filename" | "version" | "gcode_revision_number" | "revision_label" | "is_recommended">[];
+  gcodeFiles: Pick<
+    FileRead,
+    "id" | "original_filename" | "version" | "gcode_revision_number" | "revision_label" | "is_recommended" | "metadata"
+  >[];
   printerFiles: ModelPrinterFileRead[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -236,6 +239,19 @@ export function SendToButtons({
   }
 
   const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
+  const selectedSpool = selectedSpoolId !== "" ? spools.find((spool) => spool.id === selectedSpoolId) : undefined;
+  // ponytail: single-file check only — a multi-plate build evaluated as one set
+  // needs a batch-send feature that doesn't exist yet (#64 follow-up).
+  const requiredWeightG = selectedFileDetails?.metadata?.filament_weight_g ?? null;
+  const spoolCoverageWarning = selectedSpool
+    ? requiredWeightG == null
+      ? "This revision's filament weight is unknown — can't verify it fits the selected spool."
+      : selectedSpool.remaining_weight == null
+        ? "The selected spool has no tracked remaining weight — can't verify it covers this print."
+        : requiredWeightG > selectedSpool.remaining_weight
+          ? `This revision needs ~${formatGrams(requiredWeightG)}; the selected spool has ~${formatGrams(selectedSpool.remaining_weight)} left.`
+          : null
+    : null;
 
   return (
     <Localized><>
@@ -437,6 +453,12 @@ export function SendToButtons({
               </label>
             )}
           </div>
+
+          {spoolCoverageWarning && (
+            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+              {spoolCoverageWarning}
+            </div>
+          )}
 
           {deliveryMode === "send" && <label className={`flex items-start gap-3 rounded-lg border p-3 ${startPrint ? "border-warning/50 bg-warning/10" : "border-border bg-background"}`}>
             <Checkbox

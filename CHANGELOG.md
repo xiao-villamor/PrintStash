@@ -5,6 +5,7 @@
 ### Added
 
 - **Elegoo Centauri Carbon upload.** Both Centauri Carbon models can now receive Vault G-code directly (chunked HTTP upload, independent of the SDCP/MQTT control channel), via an upgraded `pycentauri` dependency ([#57](https://github.com/xiao-villamor/PrintStash/issues/57)).
+- **Spool coverage warning.** Selecting a spool on send now warns if it can't cover the revision's filament weight, or if that can't be verified (parsed weight missing, or the spool has no tracked remaining weight) — never assumed to be fine. The warning doesn't block sending ([#64](https://github.com/xiao-villamor/PrintStash/issues/64)).
 
 ### Fixed
 

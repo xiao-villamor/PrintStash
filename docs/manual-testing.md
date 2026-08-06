@@ -105,6 +105,10 @@ only after you have seen the result yourself in the browser.
 - [ ] After a Moonraker-measured completion, the spool decrements once.
 - [ ] Native-hook detection warning shows and write-back defaults off when the
       Moonraker active-spool hook is present.
+- [ ] Select a spool on send whose remaining weight is below the revision's
+      filament weight; a non-blocking warning shows and Send stays enabled.
+      Selecting an untracked spool (no `remaining_weight`) or a revision with
+      no parsed filament weight also warns instead of assuming it fits.
 
 ## 8. Public Share Links
 
