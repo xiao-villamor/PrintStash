@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
@@ -40,6 +41,11 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     assert "is_recommended" in files_columns
     assert files_columns["is_recommended"]["nullable"] is False
     assert files_columns["is_recommended"]["default"] is not None
+    model_columns = {col["name"]: col for col in inspector.get_columns("models")}
+    assert "next_file_version" in model_columns
+    file_indexes = {index["name"]: index for index in inspector.get_indexes("files")}
+    assert bool(file_indexes["uq_files_model_version"]["unique"]) is True
+    assert bool(file_indexes["uq_files_live_recommended_gcode"]["unique"]) is True
 
     share_columns = {col["name"]: col for col in inspector.get_columns("share_links")}
     assert "model_id" in share_columns
@@ -123,6 +129,89 @@ def test_runner_orphan_db_is_adopted_without_table_exists_error(tmp_path: Path) 
     # stamp first and finish cleanly at head.
     migrate_mod.run_migrations(url)
     assert _current(url) == _head_revision()
+
+
+def test_runner_rejects_incomplete_orphan_schema_without_stamping(tmp_path: Path) -> None:
+    url = _url(tmp_path, "incomplete-orphan.sqlite")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE models (id INTEGER PRIMARY KEY, name TEXT)"))
+    finally:
+        engine.dispose()
+
+    with pytest.raises(migrate_mod.OrphanSchemaError, match="does not match"):
+        migrate_mod.run_migrations(url)
+
+    assert _current(url) is None
+    assert "alembic_version" not in _table_names(url)
+
+
+def test_revision_uniqueness_migration_repairs_existing_duplicates(
+    tmp_path: Path,
+) -> None:
+    url = _url(tmp_path, "duplicate-revisions.sqlite")
+    cfg = migrate_mod._alembic_config(url)
+    command.upgrade(cfg, "a2f7c9d4e6b1")
+
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO models (name, slug, hash, created_at, updated_at)
+                    VALUES ('Duplicate', 'duplicate', :hash, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """
+                ),
+                {"hash": "d" * 64},
+            )
+            model_id = connection.execute(
+                text("SELECT id FROM models WHERE slug = 'duplicate'")
+            ).scalar_one()
+            for index in range(2):
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO files (
+                            model_id, path, original_filename, file_type, version,
+                            size_bytes, sha256, uploaded_at, is_recommended, is_external
+                        ) VALUES (
+                            :model_id, :path, :name, 'GCODE', 1,
+                            1, :sha, CURRENT_TIMESTAMP, 1, 0
+                        )
+                        """
+                    ),
+                    {
+                        "model_id": model_id,
+                        "path": f"/tmp/duplicate-{index}.gcode",
+                        "name": f"duplicate-{index}.gcode",
+                        "sha": str(index) * 64,
+                    },
+                )
+    finally:
+        engine.dispose()
+
+    command.upgrade(cfg, "head")
+
+    engine = create_engine(url)
+    try:
+        with engine.connect() as connection:
+            versions = connection.execute(
+                text("SELECT version FROM files ORDER BY version")
+            ).scalars().all()
+            recommended = connection.execute(
+                text("SELECT COUNT(*) FROM files WHERE is_recommended = 1")
+            ).scalar_one()
+            next_version = connection.execute(
+                text("SELECT next_file_version FROM models WHERE id = :id"),
+                {"id": model_id},
+            ).scalar_one()
+        assert versions == [1, 2]
+        assert recommended == 1
+        assert next_version == 3
+    finally:
+        engine.dispose()
 
 
 def test_runner_orphan_rescue_preserves_existing_data(tmp_path: Path) -> None:

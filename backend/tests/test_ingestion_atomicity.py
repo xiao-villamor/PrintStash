@@ -8,13 +8,17 @@ and no error anywhere to explain it.
 
 from __future__ import annotations
 
+import hashlib
+import threading
 from pathlib import Path
 
 import pytest
-from sqlmodel import Session, select
+from sqlalchemy import event
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.config import _overlay
 from app.db.models import File, FileType, Metadata, Model
+from app.db.session import _set_sqlite_pragmas
 from app.services import ingestion, thumbnail
 from app.services.storage_backend import get_backend
 
@@ -124,6 +128,119 @@ def test_version_numbers_increment_across_revisions(
     second = _persist(db_session, model, _staged(tmp_path, "v2.stl"))
 
     assert (first.version, second.version) == (1, 2)
+
+
+def test_concurrent_version_reservations_are_unique(tmp_path: Path) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'versions.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        concurrent_model = Model(name="Concurrent", slug="concurrent", hash="c" * 64)
+        session.add(concurrent_model)
+        session.commit()
+        session.refresh(concurrent_model)
+        model_id = concurrent_model.id
+    assert model_id is not None
+
+    start = threading.Barrier(3)
+    versions: list[int] = []
+    errors: list[BaseException] = []
+
+    def reserve() -> None:
+        try:
+            with Session(engine) as session:
+                start.wait(timeout=5)
+                version = ingestion._reserve_next_version(session, model_id)
+                session.commit()
+                versions.append(version)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=reserve) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+
+    try:
+        assert errors == []
+        assert sorted(versions) == [1, 2]
+        with Session(engine) as session:
+            assert session.get(Model, model_id).next_file_version == 3
+    finally:
+        engine.dispose()
+
+
+def test_concurrent_artifacts_keep_distinct_versions_and_matching_hashes(
+    tmp_path: Path, storage
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'artifacts.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        concurrent_model = Model(name="Race", slug="race", hash="a" * 64)
+        session.add(concurrent_model)
+        session.commit()
+        session.refresh(concurrent_model)
+        model_id = concurrent_model.id
+    assert model_id is not None
+
+    staged: list[tuple[Path, bytes]] = []
+    for index in range(2):
+        content = f"G28 ; artifact {index}\n".encode()
+        path = tmp_path / f"race-{index}.gcode"
+        path.write_bytes(content)
+        staged.append((path, content))
+
+    start = threading.Barrier(3)
+    errors: list[BaseException] = []
+
+    def persist(path: Path, content: bytes) -> None:
+        try:
+            with Session(engine) as session:
+                model_row = session.get(Model, model_id)
+                assert model_row is not None
+                start.wait(timeout=5)
+                ingestion.persist_artifact(
+                    session,
+                    model=model_row,
+                    staged_path=path,
+                    original_filename=path.name,
+                    file_type=FileType.GCODE,
+                    blob_hash=hashlib.sha256(content).hexdigest(),
+                    meta={},
+                    thumb_bytes=None,
+                    overwrite_thumbnail=False,
+                )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=persist, args=item) for item in staged]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=15)
+
+    try:
+        assert errors == []
+        with Session(engine) as session:
+            rows = session.exec(
+                select(File).where(File.model_id == model_id).order_by(File.version)
+            ).all()
+        assert [row.version for row in rows] == [1, 2]
+        assert sum(row.is_recommended for row in rows) == 1
+        for row in rows:
+            assert hashlib.sha256(Path(row.path).read_bytes()).hexdigest() == row.sha256
+    finally:
+        engine.dispose()
 
 
 def test_thumbnail_is_written_and_selected(

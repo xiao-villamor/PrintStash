@@ -14,19 +14,28 @@ from __future__ import annotations
 
 import hashlib
 import os
+import sqlite3
+import tarfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.services.backup as backup
 import app.services.storage_backend as storage_backend
 from app.core.config import _overlay
 from app.db.models import Document, DocumentKind, File, FileType, Model, User
-from app.db.session import SQLiteSessionFactory, override_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    override_session_factory,
+)
 from app.services.auth import create_access_token, hash_password
 from app.services.storage_backend import get_backend
 
@@ -68,6 +77,7 @@ def backup_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Back
     # A real on-disk SQLite DB that the session factory and the backup
     # service's file-level reads/writes both target.
     engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    event.listen(engine, "connect", _set_sqlite_pragmas)
     SQLModel.metadata.create_all(engine)
     override_session_factory(SQLiteSessionFactory(engine))
 
@@ -197,6 +207,32 @@ def test_create_backup_archive_contents(backup_env: BackupEnv):
     assert sum(1 for n in names if n.startswith("files/") and n != "files/") == 2
 
 
+def test_create_backup_includes_rows_committed_only_to_wal(backup_env: BackupEnv):
+    """A raw copy of the main SQLite file omits committed WAL pages."""
+    with backup_env.engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    _seed_model_with_blob(
+        backup_env,
+        name="Committed In WAL",
+        content=b"solid committed-in-wal\n",
+    )
+    wal_path = Path(f"{backup_env.db_file}-wal")
+    assert wal_path.exists() and wal_path.stat().st_size > 0
+
+    meta = backup.create_backup()
+    snapshot_path = backup_env.root / "snapshot.sqlite3"
+    with tarfile.open(meta.path, mode="r:gz") as archive:
+        db_member = archive.extractfile("db.sqlite3")
+        assert db_member is not None
+        snapshot_path.write_bytes(db_member.read())
+
+    with sqlite3.connect(snapshot_path) as connection:
+        names = [row[0] for row in connection.execute("SELECT name FROM models")]
+        assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert "Committed In WAL" in names
+
+
 def test_verify_backup_checks_manifest_members_and_sizes(backup_env: BackupEnv):
     _seed_model_with_blob(backup_env, name="Verified", content=b"solid verified\n")
     meta = backup.create_backup()
@@ -306,6 +342,30 @@ def test_restore_recovers_database_rows(backup_env: BackupEnv):
     backup.restore_backup(meta.id)
 
     assert "Widget" in _read_model_names(backup_env)
+
+
+def test_restore_replaces_live_wal_state_without_replay(backup_env: BackupEnv):
+    _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
+    meta = backup.create_backup()
+
+    # Keep a WAL connection open with a committed post-backup change. A raw
+    # overwrite of the main DB file lets this WAL replay over the restored DB.
+    live = sqlite3.connect(backup_env.db_file)
+    try:
+        assert live.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        live.execute("UPDATE models SET name = 'Post Backup State' WHERE name = 'Widget'")
+        live.commit()
+        assert live.execute("SELECT name FROM models").fetchone() == (
+            "Post Backup State",
+        )
+        assert Path(f"{backup_env.db_file}-wal").exists()
+
+        backup.restore_backup(meta.id)
+
+        assert live.execute("SELECT name FROM models").fetchone() == ("Widget",)
+        assert _read_model_names(backup_env) == ["Widget"]
+    finally:
+        live.close()
 
 
 def test_restore_recovers_blob_bytes(backup_env: BackupEnv):
@@ -469,6 +529,43 @@ def test_failed_restore_writes_failed_row(
     assert "restore.failed" in actions
 
 
+def test_failed_blob_restore_rolls_back_files_and_keeps_database(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+):
+    _, first_key = _seed_model_with_blob(
+        backup_env, name="First", content=b"backup-first"
+    )
+    _, second_key = _seed_model_with_blob(
+        backup_env, name="Second", content=b"backup-second"
+    )
+    meta = backup.create_backup()
+
+    Path(first_key).write_bytes(b"current-first")
+    Path(second_key).write_bytes(b"current-second")
+    with backup_env.new_session() as session:
+        session.exec(select(Model).where(Model.name == "First")).one().name = "Current First"
+        session.commit()
+
+    real_write = backup._write_staged_blob
+    writes = 0
+
+    def fail_second_write(staged_path: Path, key: str) -> int:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("simulated second blob failure")
+        return real_write(staged_path, key)
+
+    monkeypatch.setattr(backup, "_write_staged_blob", fail_second_write)
+
+    with pytest.raises(OSError, match="second blob failure"):
+        backup.restore_backup(meta.id)
+
+    assert Path(first_key).read_bytes() == b"current-first"
+    assert Path(second_key).read_bytes() == b"current-second"
+    assert "Current First" in _read_model_names(backup_env)
+
+
 # ---------------------------------------------------------------------------
 # Restore gate (item 11: quiesce background loops during restore)
 # ---------------------------------------------------------------------------
@@ -517,6 +614,50 @@ def test_gc_skips_during_restore(backup_env: BackupEnv):
     assert result == {"rows": 0, "orphan_blobs": 0}
     with backup_env.new_session() as session:
         assert session.exec(select(Tag)).first() is not None
+
+
+def test_restore_maintenance_waits_for_admitted_mutation(backup_env: BackupEnv):
+    assert backup.begin_mutating_operation() is True
+    maintenance_ready = threading.Event()
+    release_maintenance = threading.Event()
+
+    def enter_maintenance() -> None:
+        backup._begin_restore_maintenance()
+        maintenance_ready.set()
+        release_maintenance.wait(timeout=5)
+        backup._end_restore_maintenance()
+
+    thread = threading.Thread(target=enter_maintenance)
+    thread.start()
+    try:
+        for _ in range(100):
+            if backup.restore_in_progress():
+                break
+            time.sleep(0.01)
+        assert backup.restore_in_progress() is True
+        assert maintenance_ready.is_set() is False
+
+        backup.end_mutating_operation()
+        assert maintenance_ready.wait(timeout=5) is True
+    finally:
+        release_maintenance.set()
+        thread.join(timeout=5)
+        if backup.restore_in_progress():
+            backup._end_restore_maintenance()
+
+
+def test_mutating_request_is_rejected_during_restore(
+    client: TestClient, backup_env: BackupEnv
+):
+    headers = _auth_headers(backup_env)
+    backup._restore_gate.set()
+    try:
+        response = client.post("/api/v1/backups", headers=headers)
+    finally:
+        backup._restore_gate.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "restore_in_progress"}
 
 
 def test_gate_is_cleared_when_restore_raises(
@@ -786,8 +927,8 @@ def test_create_backup_raises_when_blob_size_changes_mid_archive(
 
     real_find_blobs = backup._find_blobs
 
-    def _wrong_size():
-        return [(k, size + 999) for k, size in real_find_blobs()]
+    def _wrong_size(session: Session | None = None):
+        return [(k, size + 999) for k, size in real_find_blobs(session)]
 
     monkeypatch.setattr(backup, "_find_blobs", _wrong_size)
 

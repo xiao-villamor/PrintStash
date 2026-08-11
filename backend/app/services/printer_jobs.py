@@ -309,9 +309,14 @@ async def _dispatch_claimed(job_id: int) -> None:
 
 
 async def run_fleet_scheduler() -> None:
+    from app.services.backup import begin_mutating_operation, end_mutating_operation
+
     scheduler_status.running = True
     try:
         while True:
+            if not begin_mutating_operation():
+                await asyncio.sleep(0.5)
+                continue
             scheduler_status.last_tick_at = utcnow()
             try:
                 dispatched = await dispatch_next()
@@ -322,6 +327,8 @@ async def run_fleet_scheduler() -> None:
                 logger.exception("fleet scheduler tick failed")
                 scheduler_status.last_error = exc.__class__.__name__
                 dispatched = None
+            finally:
+                end_mutating_operation()
             if dispatched is not None:
                 await asyncio.sleep(0)
                 continue

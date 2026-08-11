@@ -10,8 +10,9 @@ app's startup ``create_all()`` without ever recording an Alembic version (what
 happened when a user removed the Compose migration step). Running ``upgrade head``
 on such a DB would fail with "table already exists" because the baseline
 migration tries to re-create existing tables. So if we find application tables
-but no ``alembic_version``, we ``stamp head`` first to adopt the existing schema,
-then upgrade. ``stamp`` only writes the version marker — it touches no data.
+but no ``alembic_version``, we first verify that its schema matches the current
+application metadata. Only a complete match is adopted with ``stamp head``;
+partial or ambiguous schemas fail closed without writing a version marker.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import UniqueConstraint, create_engine, inspect
 from sqlmodel import SQLModel
 
 from alembic import command
@@ -32,6 +33,10 @@ logger = get_logger(__name__)
 # backend/app/db/migrate.py -> parents[2] == backend/
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _SCRIPT_LOCATION = _BACKEND_DIR / "alembic"
+
+
+class OrphanSchemaError(RuntimeError):
+    """Raised when an unversioned database is not demonstrably current."""
 
 
 def _alembic_config(url: str) -> Config:
@@ -60,6 +65,60 @@ def _has_application_tables(engine) -> bool:
     return bool(tables)
 
 
+def _orphan_schema_issues(engine) -> list[str]:
+    """Return structural differences that make ``stamp head`` unsafe.
+
+    Adoption is intentionally conservative: every current table, column,
+    named index, and named unique constraint must already exist. Extra tables
+    are tolerated so operator-owned extensions do not block startup.
+    """
+    import app.db.models  # noqa: F401 — register all tables on SQLModel.metadata
+
+    inspector = inspect(engine)
+    actual_tables = set(inspector.get_table_names())
+    issues: list[str] = []
+    # Ordering is irrelevant for inspection; ``sorted_tables`` warns about the
+    # intentional Model.thumbnail_file_id ↔ File.model_id FK cycle.
+    for table in SQLModel.metadata.tables.values():
+        if table.name not in actual_tables:
+            issues.append(f"missing table {table.name}")
+            continue
+
+        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
+        missing_columns = set(table.columns.keys()) - actual_columns
+        issues.extend(
+            f"missing column {table.name}.{column}"
+            for column in sorted(missing_columns)
+        )
+
+        actual_indexes = {
+            index.get("name")
+            for index in inspector.get_indexes(table.name)
+            if index.get("name")
+        }
+        expected_indexes = {index.name for index in table.indexes if index.name}
+        issues.extend(
+            f"missing index {index}"
+            for index in sorted(expected_indexes - actual_indexes)
+        )
+
+        actual_unique = {
+            constraint.get("name")
+            for constraint in inspector.get_unique_constraints(table.name)
+            if constraint.get("name")
+        }
+        expected_unique = {
+            constraint.name
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint) and constraint.name
+        }
+        issues.extend(
+            f"missing unique constraint {constraint}"
+            for constraint in sorted(expected_unique - actual_unique)
+        )
+    return issues
+
+
 def _create_all(url: str) -> None:
     """Build the full current schema directly from the SQLModel models."""
     import app.db.models  # noqa: F401 — register all tables on SQLModel.metadata
@@ -78,8 +137,9 @@ def run_migrations(database_url: str | None = None) -> None:
 
     * **already managed** (has ``alembic_version``): applies any pending
       migrations; a no-op when already at head.
-    * **orphan** (app tables but no ``alembic_version``): stamps head to adopt the
-      existing schema, then upgrades — no data touched, no "table exists" error.
+    * **orphan** (app tables but no ``alembic_version``): adopts it only when its
+      structural fingerprint matches the current schema exactly; old or partial
+      schemas fail closed instead of being mislabeled as current.
     * **fresh** (no tables): builds the schema directly from the models and stamps
       head, rather than replaying the historical migration chain. That chain was
       authored against SQLite and does not apply cleanly on stricter engines like
@@ -102,11 +162,26 @@ def run_migrations(database_url: str | None = None) -> None:
         # Already managed by Alembic — apply any pending migrations.
         command.upgrade(cfg, "head")
     elif has_tables:
-        # Orphan: schema built without recording a version (issue #29).
+        # Orphan: only a full schema built from the current models is safe to
+        # adopt at head. Any older/partial shape has an unknown baseline and
+        # stamping it would silently skip the migrations it still needs.
+        validation_engine = create_engine(url)
+        try:
+            issues = _orphan_schema_issues(validation_engine)
+        finally:
+            validation_engine.dispose()
+        if issues:
+            preview = "; ".join(issues[:8])
+            if len(issues) > 8:
+                preview += f"; and {len(issues) - 8} more"
+            raise OrphanSchemaError(
+                "unversioned database does not match the current schema; "
+                f"refusing to stamp head ({preview}). Create a backup and "
+                "restore the missing migration history or contact support."
+            )
         logger.warning(
-            "migrate: database has tables but no Alembic version — stamping head "
-            "to adopt the existing schema before upgrading (orphan rescue). This "
-            "writes only the version marker; no data is changed."
+            "migrate: database has a complete current schema but no Alembic "
+            "version — stamping head to adopt it (orphan rescue)."
         )
         command.stamp(cfg, "head")
         command.upgrade(cfg, "head")

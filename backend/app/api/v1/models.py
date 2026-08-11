@@ -1146,8 +1146,8 @@ def update_file_revision(
         notes = payload.revision_notes
         file_row.revision_notes = notes.strip() if notes and notes.strip() else None
     if "is_recommended" in fields:
-        file_row.is_recommended = bool(payload.is_recommended)
-        if file_row.is_recommended:
+        make_recommended = bool(payload.is_recommended)
+        if make_recommended:
             other_gcode = session.exec(
                 select(File).where(
                     File.model_id == model_id,
@@ -1159,6 +1159,9 @@ def update_file_revision(
             for other in other_gcode:
                 other.is_recommended = False
                 session.add(other)
+            if other_gcode:
+                session.flush()
+        file_row.is_recommended = make_recommended
 
     m.updated_at = utcnow()
     session.add(file_row)
@@ -1198,6 +1201,9 @@ def delete_file_revision(
     file_row.deleted_at = utcnow()
     file_row.deleted_by = current_user.id
     file_row.is_recommended = False
+    session.add(file_row)
+    # Clear the old partial-index entry before promoting its replacement.
+    session.flush()
 
     # Invariant: a model with G-code always keeps exactly one recommended
     # revision (CONTEXT.md). If we just removed the recommended one, promote the
@@ -1224,7 +1230,6 @@ def delete_file_revision(
         m.thumbnail_path = None
 
     m.updated_at = utcnow()
-    session.add(file_row)
     session.add(m)
     session.commit()
     return _detail_or_404(session, model_id, current_user)

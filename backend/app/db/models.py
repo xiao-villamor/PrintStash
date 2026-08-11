@@ -14,7 +14,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, Integer, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy import Enum as SAEnum
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -261,6 +261,20 @@ class File(SQLModel, table=True):
     """Physical artifact stored on disk; many-to-one with Model."""
 
     __tablename__ = "files"
+    __table_args__ = (
+        Index("uq_files_model_version", "model_id", "version", unique=True),
+        Index(
+            "uq_files_live_recommended_gcode",
+            "model_id",
+            unique=True,
+            sqlite_where=text(
+                "file_type = 'GCODE' AND is_recommended = 1 AND deleted_at IS NULL"
+            ),
+            postgresql_where=text(
+                "file_type = 'GCODE' AND is_recommended IS TRUE AND deleted_at IS NULL"
+            ),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     model_id: int = Field(foreign_key="models.id", index=True)
@@ -416,6 +430,13 @@ class Model(SQLModel, table=True):
     name: str = Field(index=True, max_length=255)
     slug: str = Field(index=True, unique=True, max_length=255)
     hash: str = Field(index=True, unique=True, max_length=64)
+    # Allocated atomically before an Artifact is persisted. Keeping the counter
+    # on the owning Model turns version selection into a row-level write instead
+    # of the racy ``MAX(files.version) + 1`` read.
+    next_file_version: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False, server_default="1"),
+    )
 
     collection_id: Optional[int] = Field(
         default=None, foreign_key="collections.id", index=True

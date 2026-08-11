@@ -13,13 +13,22 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
+import shutil
+import sqlite3
 import tarfile
+import tempfile
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path, PurePosixPath
+from typing import Callable, Iterator, ParamSpec, TypeVar
+
+from sqlmodel import Session, create_engine
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -38,6 +47,12 @@ logger = get_logger(__name__)
 # Event — not built here.
 _restore_gate = threading.Event()
 _RESTORE_GRACE_PERIOD_S = 2.0
+_RESTORE_DRAIN_TIMEOUT_S = 30.0
+_backup_restore_lock = threading.RLock()
+_mutation_condition = threading.Condition()
+_active_mutations = 0
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class RestoreConflictError(Exception):
@@ -46,6 +61,59 @@ class RestoreConflictError(Exception):
 
 def restore_in_progress() -> bool:
     return _restore_gate.is_set()
+
+
+def begin_mutating_operation() -> bool:
+    """Register a write-capable operation unless restore maintenance is active."""
+    global _active_mutations
+    with _mutation_condition:
+        if _restore_gate.is_set():
+            return False
+        _active_mutations += 1
+        return True
+
+
+def end_mutating_operation() -> None:
+    global _active_mutations
+    with _mutation_condition:
+        if _active_mutations <= 0:
+            raise RuntimeError("unbalanced_mutating_operation")
+        _active_mutations -= 1
+        if _active_mutations == 0:
+            _mutation_condition.notify_all()
+
+
+def _begin_restore_maintenance() -> None:
+    """Block new mutations and wait for already-admitted ones to drain."""
+    deadline = time.monotonic() + _RESTORE_DRAIN_TIMEOUT_S
+    with _mutation_condition:
+        _restore_gate.set()
+        while _active_mutations:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _restore_gate.clear()
+                _mutation_condition.notify_all()
+                raise RestoreConflictError(
+                    f"{_active_mutations} write operation(s) still active; retry later"
+                )
+            _mutation_condition.wait(timeout=remaining)
+
+
+def _end_restore_maintenance() -> None:
+    with _mutation_condition:
+        _restore_gate.clear()
+        _mutation_condition.notify_all()
+
+
+def _exclusive_backup_operation(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Prevent overlapping backup/restore operations in this process."""
+
+    @wraps(func)
+    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with _backup_restore_lock:
+            return func(*args, **kwargs)
+
+    return serialized
 
 MANIFEST_VERSION = "1"
 _BACKUP_S3_PREFIX = "printstash-backups/"
@@ -137,14 +205,50 @@ def _db_path() -> Path | None:
     return resolve_db(settings.db_url)
 
 
-def _backup_sqlite_copy() -> bytes:
+def _validate_sqlite_snapshot(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        result = connection.execute("PRAGMA integrity_check").fetchone()
+    if result != ("ok",):
+        raise RuntimeError("sqlite_snapshot_integrity_check_failed")
+
+
+@contextmanager
+def _sqlite_snapshot_file() -> Iterator[Path]:
+    """Yield a self-cleaning, transactionally consistent SQLite snapshot."""
     db_path = _db_path()
     if db_path is None:
         raise RuntimeError("database is not a file-based SQLite database")
-    return db_path.read_bytes()
+    if not db_path.is_file():
+        raise FileNotFoundError(db_path)
+
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    fd, raw_name = tempfile.mkstemp(
+        prefix=".printstash-db-snapshot-",
+        suffix=".sqlite3",
+        dir=settings.backup_dir,
+    )
+    os.close(fd)
+    snapshot_path = Path(raw_name)
+    try:
+        with (
+            sqlite3.connect(db_path, timeout=30) as source,
+            sqlite3.connect(snapshot_path, timeout=30) as destination,
+        ):
+            source.execute("PRAGMA query_only=ON")
+            source.backup(destination)
+        _validate_sqlite_snapshot(snapshot_path)
+        yield snapshot_path
+    finally:
+        snapshot_path.unlink(missing_ok=True)
 
 
-def _find_blobs() -> list[tuple[str, int]]:
+def _backup_sqlite_copy() -> bytes:
+    """Compatibility helper; production backup streams the snapshot file."""
+    with _sqlite_snapshot_file() as snapshot_path:
+        return snapshot_path.read_bytes()
+
+
+def _find_blobs(session: Session | None = None) -> list[tuple[str, int]]:
     """Return ``(key, size_bytes)`` for every vault-owned primary blob.
 
     One ``stat_size`` per key doubles as the existence check (it raises when the
@@ -153,10 +257,13 @@ def _find_blobs() -> list[tuple[str, int]]:
     indexed by the vault but user-owned, so their paths must never be read into
     a backup archive.
     """
-    with get_session_factory().session() as session:
-        keys = sorted(
-            {blob.key for blob in ownership_snapshot(session, discover=False).primary}
-        )
+    if session is None:
+        with get_session_factory().session() as owned_session:
+            return _find_blobs(owned_session)
+
+    keys = sorted(
+        {blob.key for blob in ownership_snapshot(session, discover=False).primary}
+    )
     backend = get_backend()
     out: list[tuple[str, int]] = []
     for key in keys:
@@ -164,6 +271,16 @@ def _find_blobs() -> list[tuple[str, int]]:
         # unreadable. Surface failure instead of silently shrinking archive.
         out.append((key, backend.stat_size(key)))
     return out
+
+
+def _find_snapshot_blobs(snapshot_path: Path) -> list[tuple[str, int]]:
+    """Read blob ownership from the same DB snapshot archived in the backup."""
+    engine = create_engine(f"sqlite:///{snapshot_path}")
+    try:
+        with Session(engine) as session:
+            return _find_blobs(session)
+    finally:
+        engine.dispose()
 
 
 def _add_file_to_tar(tar: tarfile.TarFile, key: str, arcname: str) -> int:
@@ -179,6 +296,7 @@ def _add_file_to_tar(tar: tarfile.TarFile, key: str, arcname: str) -> int:
 # ---------------------------------------------------------------------------
 
 
+@_exclusive_backup_operation
 def create_backup() -> BackupMeta:
     """Create a full vault backup: DB + all stored files as a tar.gz.
 
@@ -189,68 +307,62 @@ def create_backup() -> BackupMeta:
     timestamp = utcnow()
     ts = timestamp.isoformat()
 
-    db_sql = _backup_sqlite_copy()
-    blobs = _find_blobs()
-    backend_name = settings.storage_backend
-
     archive_name = (
         f"{_BACKUP_NAME_PREFIX}{timestamp.strftime('%Y%m%d-%H%M%S')}-{backup_id}.tar.gz"
     )
     archive_path = settings.backup_dir / archive_name
-
-    # Map each tar entry back to the exact storage key it came from. Keys can be
-    # absolute paths (local backend) or prefixed object keys (S3), neither of
-    # which survives the tar arcname transform below — so restore relies on this
-    # map instead of trying to reverse it.
-    file_entries: list[dict[str, str | int]] = [
-        {
-            "arc": f"files/{key.replace('vault-data/', '').lstrip('/')}",
-            "key": key,
-            "size": size,
-        }
-        for key, size in blobs
-    ]
-    total_size = len(db_sql) + sum(size for _key, size in blobs)
-
-    # Build the manifest up front and write it as the FIRST archive member.
-    # Writing it last forced list_backups() to stream the entire archive (the
-    # manifest sat behind every blob) just to read a few metadata fields; as the
-    # first member a streaming read stops after one small entry.
-    manifest = {
-        "version": MANIFEST_VERSION,
-        "created_at": ts,
-        "app_version": settings.app_version,
-        "storage_backend": backend_name,
-        "file_count": len(file_entries),
-        "total_size_bytes": total_size,
-        "files": file_entries,
-    }
-    manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+    backend_name = settings.storage_backend
 
     written_files = 0
-    try:
-        with gzip.open(archive_path, "wb") as gz:
-            with tarfile.open(fileobj=gz, mode="w|") as tar:
-                man_info = tarfile.TarInfo(name="manifest.json")
-                man_info.size = len(manifest_bytes)
-                tar.addfile(man_info, io.BytesIO(manifest_bytes))
+    with _sqlite_snapshot_file() as db_snapshot:
+        blobs = _find_snapshot_blobs(db_snapshot)
 
-                db_info = tarfile.TarInfo(name="db.sqlite3")
-                db_info.size = len(db_sql)
-                tar.addfile(db_info, io.BytesIO(db_sql))
+        # Map each tar entry back to the exact storage key it came from. Keys can
+        # be absolute paths (local) or object keys (S3), so the manifest is the
+        # authoritative reverse mapping used by restore.
+        file_entries: list[dict[str, str | int]] = [
+            {
+                "arc": f"files/{key.replace('vault-data/', '').lstrip('/')}",
+                "key": key,
+                "size": size,
+            }
+            for key, size in blobs
+        ]
+        total_size = db_snapshot.stat().st_size + sum(size for _key, size in blobs)
+        manifest = {
+            "version": MANIFEST_VERSION,
+            "created_at": ts,
+            "app_version": settings.app_version,
+            "storage_backend": backend_name,
+            "file_count": len(file_entries),
+            "total_size_bytes": total_size,
+            "files": file_entries,
+        }
+        manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
 
-                for entry in file_entries:
-                    key = str(entry["key"])
-                    arc = str(entry["arc"])
-                    written = _add_file_to_tar(tar, key, arc)
-                    expected = int(entry["size"])
-                    if written != expected:
-                        raise RuntimeError("backup_blob_size_changed")
-                    written_files += 1
-    except Exception:
-        archive_path.unlink(missing_ok=True)
-        logger.exception("backup %s failed while streaming owned blobs", backup_id)
-        raise
+        try:
+            with gzip.open(archive_path, "wb") as gz:
+                with tarfile.open(fileobj=gz, mode="w|") as tar:
+                    man_info = tarfile.TarInfo(name="manifest.json")
+                    man_info.size = len(manifest_bytes)
+                    tar.addfile(man_info, io.BytesIO(manifest_bytes))
+
+                    # tarfile streams this file; the database is never loaded as
+                    # one in-memory bytes object.
+                    tar.add(db_snapshot, arcname="db.sqlite3", recursive=False)
+
+                    for entry in file_entries:
+                        key = str(entry["key"])
+                        arc = str(entry["arc"])
+                        written = _add_file_to_tar(tar, key, arc)
+                        expected = int(entry["size"])
+                        if written != expected:
+                            raise RuntimeError("backup_blob_size_changed")
+                        written_files += 1
+        except Exception:
+            archive_path.unlink(missing_ok=True)
+            logger.exception("backup %s failed while streaming owned blobs", backup_id)
+            raise
 
     final_size = archive_path.stat().st_size
 
@@ -637,14 +749,114 @@ def _restore_key_map(tar: tarfile.TarFile) -> dict[str, str]:
     }
 
 
+@dataclass(frozen=True)
+class _StagedBlob:
+    key: str
+    path: Path
+
+
+@dataclass(frozen=True)
+class _AppliedBlob:
+    key: str
+    existed: bool
+    rollback_path: Path | None
+
+
+def _stage_restore_archive(
+    archive_path: Path, staging_dir: Path
+) -> tuple[Path, list[_StagedBlob]]:
+    """Extract a validated database and blobs into private staging files."""
+    database_path = staging_dir / "db.sqlite3"
+    staged_blobs: list[_StagedBlob] = []
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        members = tar.getmembers()
+        for member in members:
+            if _unsafe_member_name(member.name) or member.issym() or member.islnk():
+                raise RuntimeError("backup_manifest_invalid")
+
+        arc_to_key = _restore_key_map(tar)
+        db_member = (
+            tar.extractfile("db.sqlite3") if _has_member(tar, "db.sqlite3") else None
+        )
+        if db_member is None:
+            raise RuntimeError("backup_member_missing:db.sqlite3")
+        with database_path.open("wb") as destination:
+            shutil.copyfileobj(db_member, destination)
+        _validate_sqlite_snapshot(database_path)
+
+        for member in members:
+            if not member.name.startswith("files/") or member.name == "files/":
+                continue
+            source = tar.extractfile(member)
+            if source is None:
+                continue
+            key = arc_to_key.get(member.name, member.name[len("files/") :])
+            staged_path = staging_dir / f"blob-{len(staged_blobs):08d}"
+            with staged_path.open("wb") as destination:
+                shutil.copyfileobj(source, destination)
+            if staged_path.stat().st_size != member.size:
+                raise RuntimeError("backup_member_size_mismatch")
+            staged_blobs.append(_StagedBlob(key=key, path=staged_path))
+    return database_path, staged_blobs
+
+
+def _write_staged_blob(staged_path: Path, key: str) -> int:
+    with staged_path.open("rb") as source:
+        return get_backend().write_stream(source, key)
+
+
+def _rollback_applied_blobs(applied: list[_AppliedBlob]) -> None:
+    backend = get_backend()
+    for item in reversed(applied):
+        try:
+            if item.existed:
+                assert item.rollback_path is not None
+                with item.rollback_path.open("rb") as source:
+                    backend.write_stream(source, item.key)
+            else:
+                backend.delete(item.key)
+        except Exception:
+            logger.exception("restore rollback failed for storage key %s", item.key)
+
+
+def _apply_staged_blobs(
+    blobs: list[_StagedBlob], rollback_dir: Path
+) -> list[_AppliedBlob]:
+    backend = get_backend()
+    applied: list[_AppliedBlob] = []
+    try:
+        for index, blob in enumerate(blobs):
+            existed = backend.exists(blob.key)
+            rollback_path = rollback_dir / f"original-{index:08d}" if existed else None
+            if rollback_path is not None:
+                with backend.local_path(blob.key) as current:
+                    shutil.copyfile(current, rollback_path)
+            # Record the target before writing so a partial write is rolled back.
+            applied.append(
+                _AppliedBlob(
+                    key=blob.key,
+                    existed=existed,
+                    rollback_path=rollback_path,
+                )
+            )
+            written = _write_staged_blob(blob.path, blob.key)
+            if written != blob.path.stat().st_size:
+                raise RuntimeError("restore_blob_size_mismatch")
+    except Exception:
+        _rollback_applied_blobs(applied)
+        raise
+    return applied
+
+
+@_exclusive_backup_operation
 def restore_backup(backup_id: str) -> dict:
-    """Restore a backup: replace the DB and all files from the archive.
+    """Restore a backup with staged blobs and SQLite's online backup API.
 
     Downloads from S3 if the backup is only in cloud storage.
     WARNING: This replaces the current database and all files.
 
     Sets a process-wide gate so background loops (GC, external scans, printer
-    sync) skip their tick instead of racing the DB file swap. Refuses with
+    sync) skip their tick instead of racing the restore. Refuses with
     ``RestoreConflictError`` if ingestion work is still running after a short
     grace period, rather than restoring underneath it.
     """
@@ -656,8 +868,9 @@ def restore_backup(backup_id: str) -> dict:
     # post-swap "complete" row (the ambient ContextVar survives the swap, but
     # writing it from a session bound to the restored DB is easiest to read).
     restoring_actor_id, restoring_ip = audit.current_audit_context()
+    restored_files = 0
 
-    _restore_gate.set()
+    _begin_restore_maintenance()
     try:
         with get_session_factory().session() as session:
             audit.record(
@@ -687,47 +900,39 @@ def restore_backup(backup_id: str) -> dict:
 
         try:
             archive_path = _download_backup_to_local(meta)
-            restored_files = 0
-
-            # Seekable read so the manifest (written last) can be consulted before the
-            # file members are written, regardless of their order in the archive.
-            with tarfile.open(archive_path, mode="r:gz") as tar:
-                arc_to_key = _restore_key_map(tar)
-
-                db_member = (
-                    tar.extractfile("db.sqlite3")
-                    if _has_member(tar, "db.sqlite3")
-                    else None
+            settings.backup_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=".printstash-restore-", dir=settings.backup_dir
+            ) as raw_staging_dir:
+                staging_dir = Path(raw_staging_dir)
+                database_path, staged_blobs = _stage_restore_archive(
+                    archive_path, staging_dir
                 )
-                if db_member is not None:
-                    _restore_database(db_member.read())
-
-                for member in tar.getmembers():
-                    if not member.name.startswith("files/") or member.name == "files/":
-                        continue
-                    f = tar.extractfile(member)
-                    if f is None:
-                        continue
-                    # Prefer the exact key the manifest recorded; fall back to the legacy
-                    # arcname transform for archives created before the map existed.
-                    key = arc_to_key.get(member.name, member.name[len("files/") :])
-                    get_backend().write_bytes(f.read(), key)
-                    restored_files += 1
+                rollback_dir = staging_dir / "rollback"
+                rollback_dir.mkdir()
+                applied = _apply_staged_blobs(staged_blobs, rollback_dir)
+                try:
+                    # Restore the DB last. Until this succeeds, rollback can put
+                    # every touched blob back under the still-current database.
+                    _restore_database_from_path(database_path)
+                except Exception:
+                    _rollback_applied_blobs(applied)
+                    raise
+                restored_files = len(staged_blobs)
         except Exception:
-            # The DB may already be the restored one at this point (a failure
-            # while restoring files, after _restore_database ran) or still the
-            # pre-restore one (a failure downloading/opening the archive) —
-            # either way get_session_factory() points at whichever is live.
-            with get_session_factory().session() as session:
-                audit.record(
-                    session,
-                    action="restore.failed",
-                    resource_type="backup",
-                    diff={"backup_id": backup_id, "reason": "restore_error"},
-                )
+            try:
+                with get_session_factory().session() as session:
+                    audit.record(
+                        session,
+                        action="restore.failed",
+                        resource_type="backup",
+                        diff={"backup_id": backup_id, "reason": "restore_error"},
+                    )
+            except Exception:
+                logger.exception("restore %s failed and audit recording also failed", backup_id)
             raise
     finally:
-        _restore_gate.clear()
+        _end_restore_maintenance()
 
     logger.info("backup %s restored: %d files", backup_id, restored_files)
 
@@ -757,14 +962,55 @@ def restore_backup(backup_id: str) -> dict:
     }
 
 
-def _restore_database(db_data: bytes) -> None:
+def _dispose_session_engine() -> None:
+    factory = get_session_factory()
+    dispose = getattr(factory, "dispose", None)
+    if callable(dispose):
+        dispose()
+    else:  # Compatibility for third-party SessionFactory implementations.
+        get_engine().dispose()
+
+
+def _restore_database_from_path(source_path: Path) -> None:
     db_path = _db_path()
     if db_path is None:
         raise RuntimeError("cannot restore to non-file database")
-    db_path.write_bytes(db_data)
-    _eng = get_engine()
-    if hasattr(_eng, "dispose"):
-        _eng.dispose()
+    _validate_sqlite_snapshot(source_path)
+
+    # Close idle pooled connections before and after the online copy. Checked
+    # out read connections remain safe: SQLite coordinates them with the backup
+    # transaction instead of replaying a stale sidecar over a raw file swap.
+    _dispose_session_engine()
+    try:
+        with (
+            sqlite3.connect(source_path, timeout=30) as source,
+            sqlite3.connect(db_path, timeout=30) as destination,
+        ):
+            source.execute("PRAGMA query_only=ON")
+            source.backup(destination)
+            if destination.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                raise RuntimeError("restored_database_integrity_check_failed")
+    finally:
+        _dispose_session_engine()
+
+
+def _restore_database(db_data: bytes) -> None:
+    """Compatibility wrapper for callers/tests that still provide bytes."""
+    if _db_path() is None:
+        raise RuntimeError("cannot restore to non-file database")
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    fd, raw_name = tempfile.mkstemp(
+        prefix=".printstash-restore-db-",
+        suffix=".sqlite3",
+        dir=settings.backup_dir,
+    )
+    os.close(fd)
+    source_path = Path(raw_name)
+    try:
+        source_path.write_bytes(db_data)
+        _restore_database_from_path(source_path)
+    finally:
+        source_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

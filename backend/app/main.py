@@ -36,7 +36,10 @@ from app.services.audit import (
     install_audit_listeners,
     set_audit_context,
 )
-from app.services.backup import restore_in_progress
+from app.services.backup import (
+    begin_mutating_operation,
+    end_mutating_operation,
+)
 from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
 from app.services.printer_hub import PrinterHub
@@ -144,23 +147,29 @@ async def _gc_loop() -> None:
     # an hour — frequent redeploys, dev — would otherwise never GC expired
     # trash or prune old notification deliveries.
     while True:
+        if not begin_mutating_operation():
+            await asyncio.sleep(1)
+            continue
         try:
-            # Sync DB + storage I/O — keep it off the event loop.
-            await asyncio.to_thread(gc_soft_deleted)
-        except Exception:
-            logger.exception("scheduled GC failed")
-        try:
-            from app.services.notifications import prune_deliveries
+            try:
+                # Sync DB + storage I/O — keep it off the event loop.
+                await asyncio.to_thread(gc_soft_deleted)
+            except Exception:
+                logger.exception("scheduled GC failed")
+            try:
+                from app.services.notifications import prune_deliveries
 
-            await asyncio.to_thread(prune_deliveries)
-        except Exception:
-            logger.exception("notification delivery pruning failed")
-        try:
-            from app.services.inbox import prune_history
+                await asyncio.to_thread(prune_deliveries)
+            except Exception:
+                logger.exception("notification delivery pruning failed")
+            try:
+                from app.services.inbox import prune_history
 
-            await asyncio.to_thread(prune_history)
-        except Exception:
-            logger.exception("pending import history pruning failed")
+                await asyncio.to_thread(prune_history)
+            except Exception:
+                logger.exception("pending import history pruning failed")
+        finally:
+            end_mutating_operation()
         await asyncio.sleep(3600)
 
 
@@ -172,12 +181,14 @@ async def _external_scan_loop() -> None:
     """
     while True:
         await asyncio.sleep(60)
-        if restore_in_progress():
+        if not begin_mutating_operation():
             continue
         try:
             await asyncio.to_thread(_run_due_external_scans)
         except Exception:
             logger.exception("external library scan tick failed")
+        finally:
+            end_mutating_operation()
 
 
 def _run_due_external_scans() -> None:
@@ -264,6 +275,30 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "internal_server_error"},
     )
+
+
+@app.middleware("http")
+async def quiesce_writes_during_restore(request: Request, call_next):
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return await call_next(request)
+
+    path = request.url.path.rstrip("/")
+    is_restore_request = (
+        request.method == "POST"
+        and path.startswith("/api/v1/backups/")
+        and path.endswith("/restore")
+    )
+    if is_restore_request:
+        return await call_next(request)
+    if not begin_mutating_operation():
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "restore_in_progress"},
+        )
+    try:
+        return await call_next(request)
+    finally:
+        end_mutating_operation()
 
 
 @app.middleware("http")

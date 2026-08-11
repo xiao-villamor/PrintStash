@@ -561,9 +561,12 @@ def _restore_recommended(session: Session, model_id: int) -> bool:
     ).all()
     if not files:
         return False
-    for index, row in enumerate(files):
-        row.is_recommended = index == 0
+    for row in files:
+        row.is_recommended = False
         session.add(row)
+    session.flush()
+    files[0].is_recommended = True
+    session.add(files[0])
     session.commit()
     return True
 

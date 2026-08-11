@@ -383,7 +383,8 @@ async def test_external_scan_loop_skips_during_restore_then_logs_scan_failure(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """_external_scan_loop must (a) skip a tick entirely while a restore is in
-    progress, and (b) log-and-continue if the scan tick itself raises."""
+    progress, (b) log-and-continue if the scan tick itself raises, and (c)
+    release every admitted mutation slot."""
     import asyncio
 
     _real_sleep = asyncio.sleep
@@ -391,18 +392,24 @@ async def test_external_scan_loop_skips_during_restore_then_logs_scan_failure(
     # Collapse the loop's per-tick 60s sleep so several iterations happen fast.
     monkeypatch.setattr(app_main.asyncio, "sleep", lambda _s: _real_sleep(0))
 
-    calls = {"restore_checks": 0, "scan_calls": 0}
+    calls = {"admission_checks": 0, "scan_calls": 0, "mutation_ends": 0}
 
-    def _restore_in_progress() -> bool:
-        calls["restore_checks"] += 1
+    def _begin_mutating_operation() -> bool:
+        calls["admission_checks"] += 1
         # First tick: restore in progress (must skip). Second+ tick: clear.
-        return calls["restore_checks"] == 1
+        return calls["admission_checks"] > 1
+
+    def _end_mutating_operation() -> None:
+        calls["mutation_ends"] += 1
 
     def _run_due_external_scans() -> None:
         calls["scan_calls"] += 1
         raise RuntimeError("scan tick blew up")
 
-    monkeypatch.setattr(app_main, "restore_in_progress", _restore_in_progress)
+    monkeypatch.setattr(
+        app_main, "begin_mutating_operation", _begin_mutating_operation
+    )
+    monkeypatch.setattr(app_main, "end_mutating_operation", _end_mutating_operation)
     monkeypatch.setattr(app_main, "_run_due_external_scans", _run_due_external_scans)
 
     with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
@@ -414,6 +421,7 @@ async def test_external_scan_loop_skips_during_restore_then_logs_scan_failure(
         await asyncio.gather(task, return_exceptions=True)
 
     # Skipped on the first tick (restore in progress): scan must not have run then.
-    assert calls["restore_checks"] >= 2
+    assert calls["admission_checks"] >= 2
     assert calls["scan_calls"] >= 1
+    assert calls["mutation_ends"] == calls["scan_calls"]
     assert any("external library scan tick failed" in r.getMessage() for r in caplog.records)

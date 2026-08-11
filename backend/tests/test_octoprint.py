@@ -135,6 +135,30 @@ async def test_upload_to_subfolder_posts_path_field(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_upload_streams_file_without_reading_it_all_up_front(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"G1 X1 Y1\n" * 20_000
+    source = tmp_path / "large.gcode"
+    source.write_bytes(payload)
+    seen_body = b""
+
+    def forbid_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("upload must not call Path.read_bytes()")
+
+    monkeypatch.setattr(Path, "read_bytes", forbid_read_bytes)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal seen_body
+        seen_body = request.content
+        return httpx.Response(200, json={})
+
+    await _client(handler).upload(source, source.name)
+
+    assert payload in seen_body
+
+
+@pytest.mark.asyncio
 async def test_file_operations_and_controls(tmp_path: Path) -> None:
     seen: list[tuple[str, str]] = []
 

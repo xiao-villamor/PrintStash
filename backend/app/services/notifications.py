@@ -480,14 +480,20 @@ async def dispatch_due() -> int:
 
 async def run_dispatcher_loop() -> None:
     """Background task: poll and deliver due notifications until cancelled."""
+    from app.services.backup import begin_mutating_operation, end_mutating_operation
+
     while True:
         await asyncio.sleep(_POLL_INTERVAL_S)
+        if not begin_mutating_operation():
+            continue
         try:
             await dispatch_due()
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("notification dispatcher tick failed")
+        finally:
+            end_mutating_operation()
 
 
 def prune_deliveries(retention_days: int = _DELIVERY_RETENTION_DAYS) -> int:

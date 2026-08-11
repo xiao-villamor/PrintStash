@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, ParamSpec, TypeVar
 
-from sqlalchemy import func
+from sqlalchemy import case, func, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -37,6 +39,15 @@ logger = get_logger(__name__)
 
 
 ProgressFn = Callable[[str], None]
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+# SQLite deployments are intentionally single-process, but background tasks
+# can persist two Artifacts concurrently in different worker threads. Striped
+# locks avoid an unbounded per-Model lock registry while keeping unrelated
+# Models concurrent. The database counter below remains the cross-process/
+# Postgres source of truth.
+_ARTIFACT_LOCKS = tuple(threading.RLock() for _ in range(256))
 
 
 def _noop_progress(_label: str) -> None:
@@ -62,11 +73,48 @@ def _model_exists_with_slug(session: Session, slug: str) -> bool:
     return session.exec(stmt).first() is not None
 
 
-def _next_version_for_model(session: Session, model_id: int) -> int:
-    max_version = session.exec(
-        select(func.max(File.version)).where(File.model_id == model_id)
-    ).one()
-    return (max_version or 0) + 1
+def _reserve_next_version(session: Session, model_id: int) -> int:
+    """Atomically reserve and return one Artifact version for a Model.
+
+    Updating the owner row serializes callers on both SQLite and Postgres. The
+    increment lives in the same transaction as the File row, so a failed
+    persistence rolls the reservation back together with the row.
+    """
+    # Self-heal counters for rows created by older integrations/tests that may
+    # have inserted File rows directly. The migration backfills production
+    # data, while this floor keeps the invariant true for future raw imports.
+    minimum_next = (
+        select(func.coalesce(func.max(File.version) + 1, 1))
+        .where(File.model_id == model_id)
+        .scalar_subquery()
+    )
+    reserved = case(
+        (Model.next_file_version < minimum_next, minimum_next),
+        else_=Model.next_file_version,
+    )
+    statement = (
+        update(Model)
+        .where(Model.id == model_id)
+        .values(next_file_version=reserved + 1)
+        .returning(Model.next_file_version)
+    )
+    next_value = session.execute(statement).scalar_one_or_none()
+    if next_value is None:
+        raise RuntimeError("artifact_model_not_found")
+    return int(next_value) - 1
+
+
+def _serialize_artifact_persistence(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    @wraps(func)
+    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        model = kwargs.get("model")
+        if not isinstance(model, Model) or model.id is None:
+            raise RuntimeError("artifact_model_not_persisted")
+        lock = _ARTIFACT_LOCKS[model.id % len(_ARTIFACT_LOCKS)]
+        with lock:
+            return func(*args, **kwargs)
+
+    return serialized
 
 
 def _apply_taxonomy(
@@ -157,6 +205,7 @@ def resolve_or_create_model(
     return existing, False
 
 
+@_serialize_artifact_persistence
 def persist_artifact(
     session: Session,
     *,
@@ -198,7 +247,13 @@ def persist_artifact(
     assert model.id is not None
     backend = get_backend()
 
-    version = _next_version_for_model(session, model.id)
+    model_id = model.id
+    # Callers hand this service transaction ownership and it commits on
+    # success. End any read-only transaction used to load the Model before the
+    # counter UPDATE so SQLite never has to upgrade a stale read transaction
+    # while another process owns the write lock.
+    session.commit()
+    version = _reserve_next_version(session, model_id)
     dest_key = (
         dest_key_override
         if dest_key_override is not None
@@ -219,24 +274,29 @@ def persist_artifact(
             except OSError:
                 source_mtime = None
 
-    if file_type == FileType.GCODE and not is_recommended:
-        # A model with G-code always has exactly one recommended revision:
-        # the first upload claims the marker unless one already exists.
-        has_recommended = (
-            session.exec(
-                select(File).where(
-                    File.model_id == model.id,
-                    File.file_type == FileType.GCODE,
-                    File.is_recommended == True,  # noqa: E712
-                    live(File),
-                )
-            ).first()
-            is not None
-        )
-        is_recommended = not has_recommended
+    if file_type == FileType.GCODE:
+        recommended_rows = session.exec(
+            select(File).where(
+                File.model_id == model_id,
+                File.file_type == FileType.GCODE,
+                File.is_recommended == True,  # noqa: E712
+                live(File),
+            )
+        ).all()
+        if is_recommended:
+            # Clear first and flush before inserting the replacement so the
+            # partial unique index is never transiently violated.
+            for recommended in recommended_rows:
+                recommended.is_recommended = False
+                session.add(recommended)
+            if recommended_rows:
+                session.flush()
+        else:
+            # A Model's first live G-code claims the recommendation marker.
+            is_recommended = not recommended_rows
 
     file_row = File(
-        model_id=model.id,
+        model_id=model_id,
         path=dest_key,
         original_filename=original_filename,
         file_type=file_type,

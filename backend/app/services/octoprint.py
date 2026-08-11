@@ -208,16 +208,16 @@ class OctoPrintClient:
         data = {"select": "false", "print": "false"}
         if parent_parts:
             data["path"] = "/".join(unquote(part) for part in parent_parts)
-        # ponytail: whole-file read off the loop via a thread; fine for
-        # typical gcode sizes. Chunked/streaming upload is the upgrade path
-        # if hundreds-of-MB files start pressuring RAM.
-        content = await asyncio.to_thread(local_path.read_bytes)
-        body = await self._request(
-            "POST",
-            "/api/files/local",
-            files={"file": (filename, content, "application/octet-stream")},
-            data=data,
-        )
+        # httpx's multipart encoder reads file objects incrementally. Keep the
+        # handle open for the complete request instead of materialising a
+        # potentially hundreds-of-MiB G-code as one bytes object.
+        with local_path.open("rb") as content:
+            body = await self._request(
+                "POST",
+                "/api/files/local",
+                files={"file": (filename, content, "application/octet-stream")},
+                data=data,
+            )
         return body if isinstance(body, dict) else {"ok": True}
 
     async def delete_file(self, remote_filename: str) -> dict[str, Any]:

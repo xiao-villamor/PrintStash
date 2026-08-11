@@ -85,6 +85,10 @@ class LibraryWatcher:
         Starts watchers that should run, stops those that shouldn't, and restarts
         any whose root path changed. Safe to call repeatedly (API edits, ticks).
         """
+        from app.services.backup import restore_in_progress
+
+        if restore_in_progress():
+            return
         desired = await asyncio.to_thread(self._compute_desired)
 
         async with self._lock:
@@ -199,13 +203,21 @@ class LibraryWatcher:
         )
 
     async def _debounced_scan(self, library_id: int) -> None:
+        from app.services.backup import (
+            begin_mutating_operation,
+            end_mutating_operation,
+        )
+
         try:
             await asyncio.sleep(_DEBOUNCE_S)
         except asyncio.CancelledError:
             return
+        if not begin_mutating_operation():
+            return
         # Don't overlap scans for the same library; remember to rescan after.
         if library_id in self._scanning:
             self._rescan_requested.add(library_id)
+            end_mutating_operation()
             return
         self._scanning.add(library_id)
         try:
@@ -214,6 +226,7 @@ class LibraryWatcher:
             logger.exception("watched scan failed for library %s", library_id)
         finally:
             self._scanning.discard(library_id)
+            end_mutating_operation()
         # Catch changes that landed while the previous scan was running.
         if library_id in self._rescan_requested and library_id in self.tasks:
             self._rescan_requested.discard(library_id)

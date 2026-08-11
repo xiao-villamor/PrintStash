@@ -241,23 +241,18 @@ def test_check_database_flags_model_without_live_artifact(db_session: Session) -
     assert any(f.code == "model_without_live_artifact" for f in findings)
 
 
-def test_check_database_flags_missing_and_duplicate_recommended_revision(db_session: Session) -> None:
+def test_check_database_flags_missing_recommended_revision(db_session: Session) -> None:
     user = _make_user(db_session, "db-owner2")
     run = _make_run(db_session, user)
     missing_rec = _make_model(db_session, "no-rec")
     _make_file(db_session, missing_rec, file_type=FileType.GCODE, is_recommended=False, path="a.gcode")
-    dup_rec = _make_model(db_session, "dup-rec")
-    _make_file(db_session, dup_rec, file_type=FileType.GCODE, is_recommended=True, path="b1.gcode")
-    _make_file(db_session, dup_rec, file_type=FileType.GCODE, is_recommended=True, path="b2.gcode", version=2)
 
     vault_audit._check_database(db_session, run)
 
     from sqlmodel import select
 
     findings = db_session.exec(select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)).all()
-    codes = {f.code for f in findings}
-    assert "recommended_revision_missing" in codes
-    assert "recommended_revision_duplicate" in codes
+    assert any(f.code == "recommended_revision_missing" for f in findings)
 
 
 def test_check_database_flags_metadata_missing(db_session: Session) -> None:

@@ -39,11 +39,14 @@ def _artifact(
     material: str | None = None,
     status: FileRevisionStatus | None = None,
 ) -> File:
+    version = model.next_file_version
+    model.next_file_version += 1
     row = File(
         model_id=model.id,
         path=filename,
         original_filename=filename,
         file_type=file_type,
+        version=version,
         revision_status=status,
         size_bytes=1,
         sha256=(filename[0] * 64),

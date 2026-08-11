@@ -30,7 +30,7 @@ from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.services import filament as filament_svc
 from app.services import notifications, print_results
-from app.services.backup import restore_in_progress
+from app.services.backup import begin_mutating_operation, end_mutating_operation
 from app.services.printer_provider import ProviderError, get_provider_client
 from app.services.realtime import InProcessBus, RealtimeBus
 from app.services.runtime_config import auto_mark_known_good_enabled
@@ -298,11 +298,16 @@ class PrinterHub:
             and now - last[2] < _STATUS_WRITE_INTERVAL_S
         ):
             return
+        if not begin_mutating_operation():
+            return
         self._last_status_write[printer_id] = (status, error, now)
         try:
-            await asyncio.to_thread(self._mark_status_db, printer_id, status, error)
-        except Exception:
-            logger.exception("printer hub: failed to mark status for %s", printer_id)
+            try:
+                await asyncio.to_thread(self._mark_status_db, printer_id, status, error)
+            except Exception:
+                logger.exception("printer hub: failed to mark status for %s", printer_id)
+        finally:
+            end_mutating_operation()
 
     @staticmethod
     def _mark_status_db(
@@ -349,8 +354,6 @@ class PrinterHub:
         """
         if not filename:
             return
-        if restore_in_progress():
-            return
         now = time.monotonic()
         breaker = self._job_sync_breakers.get(printer_id)
         if breaker is not None and now < breaker[1]:
@@ -362,6 +365,8 @@ class PrinterHub:
             and last[1] == ms_state
             and now - last[3] < _JOB_PROGRESS_WRITE_INTERVAL_S
         ):
+            return
+        if not begin_mutating_operation():
             return
         try:
             await asyncio.to_thread(
@@ -389,6 +394,8 @@ class PrinterHub:
                 )
             self._job_sync_breakers[printer_id] = (failures, now + delay)
             logger.exception("printer hub: job sync failed for printer %s", printer_id)
+        finally:
+            end_mutating_operation()
 
     def _sync_active_job_db(
         self,

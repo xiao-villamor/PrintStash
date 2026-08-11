@@ -106,6 +106,7 @@ class SessionFactory(Protocol):
     def session(self) -> Session: ...
     def async_session(self) -> AsyncSession: ...
     def scoped_session(self) -> Generator[Session, None, None]: ...
+    def dispose(self) -> None: ...
 
 
 class SQLiteSessionFactory:
@@ -120,6 +121,10 @@ class SQLiteSessionFactory:
     def async_session(self) -> AsyncSession:
         maker = _async_session_factory()
         return maker()
+
+    def dispose(self) -> None:
+        """Close idle pooled connections before/after a database restore."""
+        self._engine.dispose()
 
     @contextmanager
     def scoped_session(self) -> Generator[Session, None, None]:
