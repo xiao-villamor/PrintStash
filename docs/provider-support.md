@@ -103,8 +103,9 @@ support is documented separately below.
 Support level: beta.
 
 - Original Centauri Carbon: local SDCP v3 over WebSocket port 3030; no
-  authentication. Saving the mainboard ID is recommended because some firmware
-  states do not announce it while paused or errored.
+  authentication. Saving the mainboard ID is needed for reliable command paths:
+  firmware announcements become intermittent while idle and may be absent while
+  idle, paused, or errored. HTTP upload itself does not use the ID.
 - Centauri Carbon 2: authenticated local MQTT on port 1883. Enable **LAN Only**
   in printer network settings and enter the access code shown by the printer.
 - Both models: live status, temperatures, progress, upload, start of a file
@@ -120,14 +121,17 @@ file-list request does not answer on validated firmware. PrintStash therefore
 never probes those operations.
 
 Upload is advertised for both models, but only CC1's path has any real-world
-confirmation: a community report (PR #62) ran `pycentauri` 0.9.0's
-`upload_cc1()` and `Printer.connect(enable_control=True)` — the exact calls
-`ElegooCentauriClient.upload()` makes — against a physical CC1 and got a
-correct transfer. That confirms the dependency call and the connection, not
-PrintStash's own service layer, Vault retrieval, or capability gating end to
-end, so it doesn't fully satisfy the smoke test below on its own. CC2's
-upload path (`upload_cc2`, PUT with `Content-Range`) shares the same
-`pycentauri` module but has no real-hardware report at all yet.
+confirmation. A community report (PR #62) first exercised `pycentauri` 0.9.0's
+`upload_cc1()` and control-enabled connection directly, then ran PrintStash
+0.11.3 from source in an isolated instance against the same physical CC1. Live
+status/model detection and an upload-only Vault send completed through
+PrintStash's service layer, credential retrieval, capability gate, and ingest
+to send path; an independent SDCP listing confirmed the file on printer
+storage and the printer remained idle. Start, pause/resume/cancel, and
+reconnect-while-paused were not exercised because that printer could not start
+a job due to a separate hardware filament-runout fault, so this is still a
+partial hardware smoke rather than a complete Validation Log entry. CC2's
+upload path (`upload_cc2`, PUT with `Content-Range`) has no real-hardware report.
 
 ## Hardware Validation Log
 

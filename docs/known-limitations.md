@@ -27,10 +27,13 @@ manufacturing platform.
   handshake, Bambu LAN MQTT report-confirmed commands and status reads, and
   the PrusaLink v1 file/job/start alignment — are verified against mocked
   transports and emulators only; no real-hardware Validation Log rows exist
-  yet (see `docs/provider-support.md`). The 0.11.3 Elegoo CC1 upload path
-  (`pycentauri` 0.9.0's `upload_cc1`) has a community report of the
-  dependency call working against real CC1 hardware, but not a full
-  PrintStash-stack smoke test; the CC2 upload path is unconfirmed entirely.
+  yet (see `docs/provider-support.md`). The 0.11.3 Elegoo CC1 upload path has a
+  community report of a successful upload-only smoke through an isolated
+  PrintStash instance, including status/model detection, Vault retrieval,
+  capability gating, and independent confirmation of the remote file. Active
+  print controls and reconnect-while-paused remain untested because that
+  printer had a separate filament-runout hardware fault; the CC2 upload path
+  is unconfirmed entirely.
 
 ## Deployment
 

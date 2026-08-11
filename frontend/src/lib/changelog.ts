@@ -22,6 +22,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.11.3",
+    date: "Aug 2026",
+    changes: [
+      "Elegoo Centauri Carbon beta can now upload Vault G-code directly over its local chunked HTTP path without starting the print",
+      "The send dialog warns without blocking when the selected Spoolman spool has insufficient material or its remaining amount cannot be verified",
+      "Spoolman write-back now defaults to off for new configurations, and spool locations distinguish otherwise-identical spools in multi-slot changers",
+      "Deeply nested ZIP imports count real files rather than folder records against the archive limit",
+      "Centauri Carbon setup now explains that Mainboard ID is needed for reliable printer commands while idle, paused, or errored",
+      "SQLite backup and restore now use consistent validated snapshots, coordinate concurrent writers, and roll storage changes back if restore fails",
+      "Concurrent Artifact imports reserve unique Revision numbers, with migration repair and database guards for Revision and recommended-marker invariants",
+      "Incomplete unversioned databases are no longer stamped as current, preventing required migrations from being silently skipped",
+      "OctoPrint uploads stream large G-code files instead of loading each complete file into memory",
+      "Updated the Python cryptography dependency to its patched release",
+    ],
+  },
+  {
     version: "0.11.2",
     date: "Aug 2026",
     changes: [

@@ -2,6 +2,8 @@
 
 ## 0.11.3
 
+**This patch-version release is an explicit exception to normal 0.x patch policy: it adds two user-facing features and an append-only database migration. Back up before upgrading.**
+
 ### Added
 
 - **Elegoo Centauri Carbon upload.** Both Centauri Carbon models can now receive Vault G-code directly (chunked HTTP upload, independent of the SDCP/MQTT control channel), via an upgraded `pycentauri` dependency ([#57](https://github.com/xiao-villamor/PrintStash/issues/57)).
@@ -13,6 +15,17 @@
 - The Spoolman spool inventory (`GET /api/v1/spoolman/spools`) and picker now surface Spoolman's `location` field, so spools that are otherwise identical (same vendor, material, color) can be told apart across multi-slot changers (AMS, CANVAS, MMU) ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).
 - Importing a zip archive with deeply nested folders no longer fails with "too many files" — the archive entry-count cap now counts real files, not the directory records a nested tree accumulates ([#61](https://github.com/xiao-villamor/PrintStash/issues/61)).
 - Centauri Carbon setup and settings now explain that the Mainboard ID is needed for reliable printer commands while idle, paused, or errored, instead of describing it as a reconnection-only aid ([#65](https://github.com/xiao-villamor/PrintStash/issues/65)).
+- Concurrent Artifact imports now reserve Revision numbers atomically. The upgrade repairs any duplicate Revision numbers or recommended markers already present, then adds database constraints that keep both invariants intact.
+- SQLite backups now capture a transactionally consistent database snapshot, including committed WAL data, and archive the blob set owned by that same snapshot. Restore validates and stages the database and blobs, rolls storage changes back on failure, and pauses concurrent writers before applying anything.
+- The migration runner no longer marks an incomplete, unversioned database as current. Orphan databases are adopted only when their schema matches the complete application schema; ambiguous states fail with recovery guidance instead of silently skipping migrations.
+
+### Performance
+
+- OctoPrint uploads now stream G-code into the multipart request instead of loading the entire file into memory first.
+
+### Security
+
+- Updated the Python `cryptography` dependency to its patched 50.0.0 release.
 
 ## 0.11.2
 

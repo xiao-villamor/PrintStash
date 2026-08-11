@@ -134,8 +134,9 @@ together, so it ships as one release.
 - OctoPrint beta provider: status, upload/send, file inventory, and
   pause/resume/cancel
 - Elegoo Neptune 4-family guided setup over the existing Moonraker transport
-- Elegoo Centauri Carbon and Carbon 2 beta local status/control integration;
-  upload stays disabled until firmware exposes a safe confirmed file API
+- Elegoo Centauri Carbon and Carbon 2 beta local status/control integration
+  with chunked HTTP upload; CC1 has a community upload-only PrintStash smoke,
+  while CC2 hardware validation and remote file inventory remain outstanding
 - Exponential reconnect backoff and circuit-breaking for repeated job-sync DB
   failures
 - Capability-driven UI states for unsupported printer actions
