@@ -1323,7 +1323,7 @@ function PrinterSettings({
             </SettingsField>
           )}
           {printer.provider === "elegoo_centauri" && printer.provider_variant === "elegoo_centauri_carbon" && (
-            <SettingsField label="Mainboard ID" hint="Used for reliable reconnection">
+            <SettingsField label="Mainboard ID" hint="Needed for reliable printer commands while idle, paused, or errored.">
               <Input value={mainboardId} onChange={(e) => setMainboardId(e.target.value)} disabled={!canEdit} />
             </SettingsField>
           )}

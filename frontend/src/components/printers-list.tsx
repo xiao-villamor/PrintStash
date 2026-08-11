@@ -793,7 +793,7 @@ function AddPrinterModal({
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
               placeholder="From printer discovery or diagnostics"
             />
-            <p className="mt-1.5 text-xs text-muted-foreground">Needed for reliable reconnection while paused or errored.</p>
+            <p className="mt-1.5 text-xs text-muted-foreground">Needed for reliable printer commands while idle, paused, or errored.</p>
           </div>}
           {setupKind === "elegoo_centauri_carbon_2" && <>
             <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">

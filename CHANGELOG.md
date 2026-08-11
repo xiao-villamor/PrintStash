@@ -12,6 +12,7 @@
 - The Spoolman integration no longer enables consumption write-back by default; it stays off until an operator explicitly turns it on, since most providers (only Moonraker reports measured consumption today) could never act on it anyway ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).
 - The Spoolman spool inventory (`GET /api/v1/spoolman/spools`) and picker now surface Spoolman's `location` field, so spools that are otherwise identical (same vendor, material, color) can be told apart across multi-slot changers (AMS, CANVAS, MMU) ([#58](https://github.com/xiao-villamor/PrintStash/issues/58)).
 - Importing a zip archive with deeply nested folders no longer fails with "too many files" — the archive entry-count cap now counts real files, not the directory records a nested tree accumulates ([#61](https://github.com/xiao-villamor/PrintStash/issues/61)).
+- Centauri Carbon setup and settings now explain that the Mainboard ID is needed for reliable printer commands while idle, paused, or errored, instead of describing it as a reconnection-only aid ([#65](https://github.com/xiao-villamor/PrintStash/issues/65)).
 
 ## 0.11.2
 

@@ -170,6 +170,21 @@ describe("printer setup", () => {
     })));
   });
 
+  it("explains that Centauri Carbon commands need the Mainboard ID while idle", async () => {
+    await openForm();
+    await userEvent.selectOptions(
+      screen.getByLabelText("Integration"),
+      "elegoo_centauri_carbon",
+    );
+
+    expect(screen.getByLabelText(/Mainboard ID/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Needed for reliable printer commands while idle, paused, or errored.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("submits Centauri Carbon 2 local MQTT credentials", async () => {
     await openForm();
     await userEvent.type(screen.getByLabelText("Name"), "Centauri Carbon 2");
