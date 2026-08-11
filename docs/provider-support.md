@@ -121,7 +121,7 @@ file-list request does not answer on validated firmware. PrintStash therefore
 never probes those operations.
 
 Upload is advertised for both models, but only CC1's path has any real-world
-confirmation. A community report (PR #62) first exercised `pycentauri` 0.9.0's
+confirmation. A community report (PR #62) first exercised `pycentauri` 0.9.1's
 `upload_cc1()` and control-enabled connection directly, then ran PrintStash
 0.11.3 from source in an isolated instance against the same physical CC1. Live
 status/model detection and an upload-only Vault send completed through

@@ -1544,7 +1544,7 @@ requires-dist = [
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "prometheus-client", specifier = ">=0.20" },
     { name = "psycopg2-binary", specifier = ">=2.9" },
-    { name = "pycentauri", specifier = "==0.9.0" },
+    { name = "pycentauri", specifier = "==0.9.1" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "pyjwt", specifier = ">=2.10" },
@@ -1637,7 +1637,7 @@ wheels = [
 
 [[package]]
 name = "pycentauri"
-version = "0.9.0"
+version = "0.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1647,9 +1647,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/b9/0652c5244f69f00dbfa32a1356e0c3d271e82f82051338495e717bab1058/pycentauri-0.9.0.tar.gz", hash = "sha256:84ca63d02f88ed77ffbc77258aaeaa7bfda80dc2ec96cc176c9e7c6d475b4d79", size = 111940, upload-time = "2026-07-16T05:21:45.534Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/da/ed25970b19d8f9b26baa2a896cce13f07deb56b3f26ae85ebcec03f18449/pycentauri-0.9.1.tar.gz", hash = "sha256:688c9a49870ae72ab8d8ad5a5d5b960e2ff4414ff2a17e932d463e157351600a", size = 111998, upload-time = "2026-08-08T02:18:38.296Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ea/84/48b4ff9e9598a35868926184285b855917e35c6f8c38507c578d0adcf512/pycentauri-0.9.0-py3-none-any.whl", hash = "sha256:922f49712f6d135819504481a70cbcd5d1321db8b22bab06b66ef3356f2aed1b", size = 92659, upload-time = "2026-07-16T05:21:44.107Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/7e/5b60b7f7a03465abf63f238efa6a4512e6f74e2f0906e0961eec9db42209/pycentauri-0.9.1-py3-none-any.whl", hash = "sha256:586a008c47114d50a829b97e58cad144de3a375bd630e54ab2f53b4118d58732", size = 92678, upload-time = "2026-08-08T02:18:36.689Z" },
 ]
 
 [[package]]
