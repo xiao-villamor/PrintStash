@@ -183,7 +183,7 @@ _backup_s3: object | None = None
 
 
 def _get_backup_s3():  # pragma: no cover — needs a real S3-compatible endpoint;
-    # verified against MinIO in the storage-s3 CI job (see docs/backend.md).
+    # verified against SeaweedFS in the storage-s3 CI job (see docs/backend.md).
     """Return a boto3 S3 client for the backup bucket, or None if not configured."""
     global _backup_s3
     if _backup_s3 is not None:

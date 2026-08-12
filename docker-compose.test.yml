@@ -1,4 +1,4 @@
-# Standalone MinIO instance for the S3 storage-backend integration tests
+# Standalone SeaweedFS instance for the S3 storage-backend integration tests
 # (backend/tests/test_storage_s3.py). Not part of the app stack — start it,
 # point PRINTSTASH_TEST_S3_ENDPOINT at it, run the tests, tear it down:
 #
@@ -7,20 +7,20 @@
 #     (cd backend && uv run pytest tests/test_storage_s3.py -v)
 #   docker compose -f docker-compose.test.yml down -v
 services:
-  minio:
-    image: minio/minio:latest
-    container_name: printstash-test-minio
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.41@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d
+    container_name: printstash-test-seaweedfs
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data
+      AWS_ACCESS_KEY_ID: printstash
+      AWS_SECRET_ACCESS_KEY: printstash-secret
+    command: mini -dir=/data -master.volumeSizeLimitMB=64 -master.telemetry=false
     ports:
-      # Non-default host port so this can run alongside a dev-stack MinIO
-      # started from the main docker-compose.yml (profile "s3", port 9000).
-      - "9100:9000"
+      # Non-default host port so this can run alongside the optional dev-stack
+      # SeaweedFS service (profile "s3", host port 9000).
+      - "9100:8333"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9333/cluster/status"]
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 5s
+      start_period: 10s

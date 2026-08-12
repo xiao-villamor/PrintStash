@@ -121,12 +121,39 @@ services:
       retries: 5
       start_period: 10s
 
-  minio:
-    image: minio/minio:latest
-    container_name: printstash-minio
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.41@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d
+    container_name: printstash-seaweedfs
     restart: unless-stopped
     profiles:
       - s3
+    environment:
+      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:-printstash}
+      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:-printstash-secret}
+    command: mini -dir=/data -master.telemetry=false
+    ports:
+      - "9000:8333"
+      - "9001:23646"
+    volumes:
+      - printstash_seaweedfs:/data
+    networks:
+      - printstash_net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9333/cluster/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Compatibility profile for operators with an existing printstash_minio
+  # volume. MinIO upstream is archived; migrate deliberately before removing
+  # this service rather than silently abandoning existing object data.
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    container_name: printstash-minio
+    restart: unless-stopped
+    profiles:
+      - minio-legacy
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -156,4 +183,5 @@ volumes:
   printstash_staging:
   printstash_backups:
   printstash_postgres:
+  printstash_seaweedfs:
   printstash_minio:

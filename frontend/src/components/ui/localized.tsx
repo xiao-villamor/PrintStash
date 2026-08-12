@@ -20,7 +20,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Configured devices", "Dispositivos configurados"],
   ["File storage backend, S3 credentials, and backup retention", "Backend de archivos, credenciales S3 y retención de copias"],
   ["Changes to the storage backend require an application restart.", "Cambiar el backend de almacenamiento requiere reiniciar la aplicación."],
-  ["Leave empty for AWS S3. Required for Cloudflare R2, MinIO, etc.", "Déjalo vacío para AWS S3. Es obligatorio para Cloudflare R2, MinIO, etc."],
+  ["Leave empty for AWS S3. Required for Cloudflare R2, SeaweedFS, MinIO, etc.", "Déjalo vacío para AWS S3. Es obligatorio para Cloudflare R2, SeaweedFS, MinIO, etc."],
   ["Keys are stored in the vault database. Set via environment for production.", "Las claves se guardan en la base de datos. En producción, configúralas mediante variables de entorno."],
   ["Set to 0 to keep backups forever. Old backups are purged after each new backup.", "Usa 0 para conservar las copias siempre. Las antiguas se eliminan después de cada copia nueva."],
   ["Backups are always stored locally first. If configured here, they are also uploaded to cloud storage for off-site durability.", "Las copias siempre se guardan primero en local. Si lo configuras aquí, también se suben a la nube."],

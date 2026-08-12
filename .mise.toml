@@ -59,9 +59,13 @@ run = "cd backend && uv run alembic upgrade head"
 description = "Generate alembic migration"
 run = "cd backend && uv run alembic revision --autogenerate -m"
 
+[tasks."s3:seaweedfs"]
+description = "Start optional SeaweedFS S3 (ports 9000/9001)"
+run = "docker compose --profile s3 up -d seaweedfs"
+
 [tasks."s3:minio"]
-description = "Start optional minio S3 (ports 9000/9001)"
-run = "docker compose --profile s3 up -d minio"
+description = "Start legacy MinIO S3 for an existing volume (ports 9000/9001)"
+run = "docker compose --profile minio-legacy up -d minio"
 
 [tasks."docker:up"]
 description = "Start full production stack"

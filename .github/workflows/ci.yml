@@ -9,7 +9,7 @@ on:
   # checks passing first (see ghcr.yml).
   workflow_call:
   # Nightly "full-matrix" gate + on-demand run. Every job below already runs
-  # per-PR (backend + coverage, storage-s3/MinIO, e2e-real Playwright, frontend
+  # per-PR (backend + coverage, storage-s3/SeaweedFS, e2e-real Playwright, frontend
   # mock-API Playwright); these two triggers re-run the whole gauntlet off-peak
   # daily and on manual dispatch, so a comprehensive gate exists without adding
   # new job definitions or slowing individual PRs.
@@ -100,7 +100,7 @@ jobs:
         run: uv run pytest tests/postgres -v
 
   storage-s3:
-    name: Storage backend (S3/MinIO)
+    name: Storage backend (S3/SeaweedFS)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -122,22 +122,22 @@ jobs:
       - name: Install backend dependencies
         run: uv sync --extra dev --frozen
 
-      # GitHub Actions `services:` containers can't override CMD, and
-      # minio/minio's image needs an explicit `server /data` command to run
-      # as a server (its default CMD just prints usage and exits) — so start
-      # it by hand instead of as a service container.
-      - name: Start MinIO
+      # Keep this as an explicit container so the command and development-sized
+      # volume allocation match the local integration-test environment.
+      - name: Start SeaweedFS
         run: |
-          docker run -d --name minio -p 9100:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
+          docker run -d --name seaweedfs -p 9100:8333 \
+            -e AWS_ACCESS_KEY_ID=printstash \
+            -e AWS_SECRET_ACCESS_KEY=printstash-secret \
+            chrislusf/seaweedfs:4.41@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d \
+            mini -dir=/data -master.volumeSizeLimitMB=64 -master.telemetry=false
           for i in $(seq 1 20); do
-            curl -fsS http://localhost:9100/minio/health/live && break
+            curl -sS http://localhost:9100/ >/dev/null && break
             sleep 1
           done
+          curl -sS http://localhost:9100/ >/dev/null
 
-      - name: Test S3 storage backend + backup destination against real MinIO
+      - name: Test S3 storage backend + backup destination against real SeaweedFS
         env:
           PRINTSTASH_TEST_S3_ENDPOINT: http://localhost:9100
         run: uv run pytest tests/test_storage_s3.py tests/test_backup_restore.py -v

@@ -25,7 +25,7 @@ examples from history:
 fix(printers): dedupe print-job history import case-insensitively
 feat(auth): rate-limit login and refresh (P3-02)
 perf(rbac): resolve accessible collections in one query
-test(storage): MinIO integration fixture; fix S3 bucket auto-create
+test(storage): SeaweedFS integration fixture; fix S3 bucket auto-create
 refactor(ui): migrate connect/config cards to shadcn semantic tokens
 docs(roadmap): drop "a public cloud service" from Not Planned
 chore(release): bump to 0.8.5

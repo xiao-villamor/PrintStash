@@ -249,7 +249,7 @@ export function StorageConfigCard() {
                 className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
               />
               <p className="text-3xs text-muted-foreground mt-0.5">
-                Leave empty for AWS S3. Required for Cloudflare R2, MinIO, etc.
+                Leave empty for AWS S3. Required for Cloudflare R2, SeaweedFS, MinIO, etc.
               </p>
             </div>
 

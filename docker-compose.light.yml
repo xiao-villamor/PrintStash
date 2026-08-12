@@ -1,5 +1,5 @@
 # Light deployment: the minimal two-service stack (frontend + SQLite api) with
-# no optional services (no Postgres, MinIO/S3, or backup config). Runs with zero
+# no optional services (no Postgres, S3-compatible store, or backup config). Runs with zero
 # env — `docker compose -f docker-compose.light.yml up -d` — but every value can
 # still be overridden from a .env file or the shell if you want to.
 services:

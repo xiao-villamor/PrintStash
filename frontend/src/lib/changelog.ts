@@ -38,6 +38,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Database safety now includes structural orphan-schema validation, explicit backup capabilities, and a real PostgreSQL CI contract suite",
       "Vault garbage collection cleans orphaned STL caches and Collection images without deleting derivatives still shared by live Artifacts",
       "Numeric environment limits fail clearly at startup, OpenAPI documents the actual Bearer JWT contract, and critical backend seams now pass an incremental Pyright gate",
+      "The bundled local S3 service and real-storage CI now use pinned SeaweedFS 4.41, while existing MinIO volumes remain accessible through a legacy migration profile",
       "Background tasks are awaited during shutdown, the container uv toolchain is pinned by version and digest, and remote thumbnails support ETag revalidation",
     ],
   },

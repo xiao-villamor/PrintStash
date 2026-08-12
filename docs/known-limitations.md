@@ -40,7 +40,7 @@ manufacturing platform.
 - Docker Compose is the recommended install path.
 - SQLite and local disk are the default path and the best-tested path for home
   installs.
-- Postgres, S3/R2 storage, MinIO, and cloud backup targets are optional and
+- Postgres, S3/R2-compatible storage, SeaweedFS, and cloud backup targets are optional and
   should be treated as larger-install paths.
 - The built-in database backup and restore operation supports file-backed
   SQLite only. PostgreSQL installations must use operator-managed `pg_dump`

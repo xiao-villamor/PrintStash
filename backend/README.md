@@ -161,12 +161,12 @@ docker compose run --rm api uv run alembic upgrade head
 Local filesystem storage remains the default for self-hosted installs. S3 is
 an optional adapter for operators who want object storage semantics.
 
-Supported endpoints include AWS S3, Cloudflare R2, and MinIO.
+Supported endpoints include AWS S3, Cloudflare R2, SeaweedFS, and MinIO.
 
-### MinIO for local testing
+### SeaweedFS for local testing
 
 ```bash
-docker compose --profile s3 up -d minio
+docker compose --profile s3 up -d seaweedfs
 ```
 
 Then configure:
@@ -174,11 +174,16 @@ Then configure:
 ```bash
 VAULT_STORAGE_BACKEND=s3
 VAULT_S3_BUCKET=printstash-vault
-VAULT_S3_ENDPOINT_URL=http://minio:9000
+VAULT_S3_ENDPOINT_URL=http://seaweedfs:8333
 VAULT_S3_REGION=us-east-1
-VAULT_S3_ACCESS_KEY=minioadmin
-VAULT_S3_SECRET_KEY=minioadmin
+VAULT_S3_ACCESS_KEY=printstash
+VAULT_S3_SECRET_KEY=printstash-secret
 ```
+
+The bundled image is pinned to SeaweedFS 4.41. MinIO remains an S3-compatible
+endpoint, but its upstream repository is archived. Existing Compose-backed
+MinIO data is deliberately retained under the `minio-legacy` profile; migrate
+the objects before deleting its volume.
 
 ### Storage and file capabilities
 

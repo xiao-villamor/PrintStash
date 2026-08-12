@@ -33,6 +33,7 @@
 
 - The supported deployment topology is explicitly one API process per vault. Startup claims a vault lock and fails fast when another API process is active; detailed health reports this topology.
 - PostgreSQL 16 now has a real CI contract gate covering fresh migrations, CRUD/RBAC enums, partial indexes, and concurrent refresh-token consumption; critical backend modules and architecture seams also have an incremental Pyright gate.
+- The bundled local S3 service and real-storage CI gate now use pinned SeaweedFS 4.41 instead of archived MinIO. Existing MinIO volumes remain available through an explicit legacy profile for deliberate migration.
 
 ### Security
 
@@ -301,9 +302,9 @@
 - **S3/R2 backends could fail to boot on first run.** `_ensure_bucket`'s
   missing-bucket check compared against a response field
   (`Error.StatusCode`) that a `ClientError` never sets, so the auto-create
-  path never ran on a real S3-compatible store (including MinIO) — startup
+  path never ran on a real S3-compatible store — startup
   failed instead of creating the bucket. Found by adding integration tests
-  against a real MinIO instance.
+  against a real SeaweedFS instance.
 - **A rejected send-to-printer could leave a job stuck "uploading" forever.**
   The print job was marked `UPLOADING` before checking the printer's provider
   supported the upload; a 409 on an unsupported provider left it orphaned in

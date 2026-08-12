@@ -1,7 +1,7 @@
-"""S3StorageBackend exercised against a real object store (MinIO).
+"""S3StorageBackend exercised against a real object store (SeaweedFS).
 
 Skipped unless PRINTSTASH_TEST_S3_ENDPOINT is set, so ``uv run pytest tests``
-stays dependency-free for contributors. Start a throwaway MinIO with:
+stays dependency-free for contributors. Start a throwaway SeaweedFS with:
 
     docker compose -f docker-compose.test.yml up -d
     PRINTSTASH_TEST_S3_ENDPOINT=http://localhost:9100 \
@@ -40,8 +40,10 @@ def s3_backend() -> Iterator[S3StorageBackend]:
             "s3_bucket": bucket,
             "s3_endpoint_url": _ENDPOINT,
             "s3_region": "us-east-1",
-            "s3_access_key": os.environ.get("PRINTSTASH_TEST_S3_ACCESS_KEY", "minioadmin"),
-            "s3_secret_key": os.environ.get("PRINTSTASH_TEST_S3_SECRET_KEY", "minioadmin"),
+            "s3_access_key": os.environ.get("PRINTSTASH_TEST_S3_ACCESS_KEY", "printstash"),
+            "s3_secret_key": os.environ.get(
+                "PRINTSTASH_TEST_S3_SECRET_KEY", "printstash-secret"
+            ),
         }
     )
     backend = S3StorageBackend()  # creates the bucket (_ensure_bucket)
@@ -64,14 +66,14 @@ def test_round_trips_bytes(s3_backend: S3StorageBackend):
     key = "models/round-trip.txt"
     assert not s3_backend.exists(key)
 
-    s3_backend.write_bytes(b"hello minio", key)
+    s3_backend.write_bytes(b"hello s3", key)
 
     assert s3_backend.exists(key)
-    assert s3_backend.stat_size(key) == len(b"hello minio")
-    assert s3_backend.read_bytes(key) == b"hello minio"
+    assert s3_backend.stat_size(key) == len(b"hello s3")
+    assert s3_backend.read_bytes(key) == b"hello s3"
     info = s3_backend.object_info(key)
     assert info is not None
-    assert info.size == len(b"hello minio")
+    assert info.size == len(b"hello s3")
     assert info.etag
 
 
@@ -231,7 +233,7 @@ def test_ensure_setup_applies_lifecycle_policy_when_configured(
 ):
     _overlay["s3_lifecycle_expiration_days"] = 30
     try:
-        s3_backend.ensure_setup()  # must not raise against a real MinIO bucket
+        s3_backend.ensure_setup()  # must not raise against a real S3-compatible bucket
 
         lifecycle = s3_backend._client.get_bucket_lifecycle_configuration(
             Bucket=s3_backend._bucket

@@ -735,7 +735,7 @@ def test_purge_keeps_fresh_removes_old(
 
 
 # ---------------------------------------------------------------------------
-# Corrupted / invalid archives (local — no MinIO needed)
+# Corrupted / invalid archives (local — no S3 endpoint needed)
 # ---------------------------------------------------------------------------
 
 
@@ -1126,7 +1126,7 @@ def test_purge_old_backups_skips_entry_with_invalid_created_at(
 # Narrow branch closures: S3 key helper, size-mismatch abort, list_backups
 # merge/dedup, and the "member present but unreadable" edge cases in
 # _read_manifest / _restore_key_map / restore_backup (all local-only, no
-# MinIO needed).
+# S3 endpoint needed).
 # ---------------------------------------------------------------------------
 
 
@@ -1255,7 +1255,7 @@ def test_restore_skips_unreadable_files_member(backup_env: BackupEnv):
 
 
 # ---------------------------------------------------------------------------
-# S3 backup destination (independent from vault storage) — needs MinIO
+# S3 backup destination (independent from vault storage) — needs a real endpoint
 # ---------------------------------------------------------------------------
 
 _S3_ENDPOINT = os.environ.get("PRINTSTASH_TEST_S3_ENDPOINT")
@@ -1275,10 +1275,10 @@ def backup_s3_env(backup_env: BackupEnv) -> Iterator[BackupEnv]:
             "backup_s3_endpoint_url": _S3_ENDPOINT,
             "backup_s3_region": "us-east-1",
             "backup_s3_access_key": os.environ.get(
-                "PRINTSTASH_TEST_S3_ACCESS_KEY", "minioadmin"
+                "PRINTSTASH_TEST_S3_ACCESS_KEY", "printstash"
             ),
             "backup_s3_secret_key": os.environ.get(
-                "PRINTSTASH_TEST_S3_SECRET_KEY", "minioadmin"
+                "PRINTSTASH_TEST_S3_SECRET_KEY", "printstash-secret"
             ),
         }
     )
@@ -1348,7 +1348,7 @@ def test_restore_downloads_s3_only_backup_before_restoring(backup_s3_env: Backup
 
 
 # ---------------------------------------------------------------------------
-# Router branches (404/409/500) — local backend, no MinIO
+# Router branches (404/409/500) — local backend, no S3 endpoint
 # ---------------------------------------------------------------------------
 
 

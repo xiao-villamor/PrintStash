@@ -1,4 +1,4 @@
-"""Storage backend abstraction: local filesystem and S3-compatible (R2, MinIO)."""
+"""Storage backend abstraction: local filesystem and S3-compatible stores."""
 
 from __future__ import annotations
 
@@ -319,12 +319,12 @@ class LocalStorageBackend(StorageBackend):
 
 
 # ---------------------------------------------------------------------------
-# S3-compatible backend (AWS S3, Cloudflare R2, MinIO, etc.)
+# S3-compatible backend (AWS S3, Cloudflare R2, SeaweedFS, MinIO, etc.)
 # ---------------------------------------------------------------------------
 
 
 class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-compatible
-    # endpoint; verified against MinIO in the storage-s3 CI job (see docs).
+    # endpoint; verified against SeaweedFS in the storage-s3 CI job (see docs).
     def __init__(self) -> None:
         import boto3
         from botocore.config import Config as BotoConfig
