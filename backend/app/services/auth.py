@@ -7,7 +7,7 @@ from typing import Optional
 
 import bcrypt
 import jwt
-from fastapi import Response
+from fastapi import Request, Response
 from jwt import InvalidTokenError
 from sqlmodel import Session, delete, select, update
 
@@ -20,6 +20,18 @@ from app.db.session import get_session_factory
 logger = get_logger(__name__)
 ACCESS_BLOCKLIST: set[str] = set()
 SESSION_COOKIE_NAME = "printstash_session"
+
+
+def extract_access_token(
+    request: Request, bearer_token: str | None = None
+) -> str | None:
+    """Canonical bearer/cookie token extraction for auth and audit paths."""
+    if bearer_token:
+        return bearer_token
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1]
+    return request.cookies.get(SESSION_COOKIE_NAME)
 
 
 def set_session_cookie(

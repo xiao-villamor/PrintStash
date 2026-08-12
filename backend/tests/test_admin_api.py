@@ -12,12 +12,13 @@ import time
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.api.v1 import admin as admin_api
 from app.core.time import utcnow
 from app.db.models import AuditLog, Collection, File, FileType, Model, Tag, User
 from app.schemas.auth import UserUpdate
+from app.services.audit import install_audit_listeners
 from app.services.auth import create_access_token, hash_password
 
 
@@ -553,6 +554,34 @@ class TestRestoreResource:
 
 
 class TestAuditLog:
+    def test_cookie_authenticated_mutation_records_actor(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        install_audit_listeners()
+        admin = _user(db_session, "cookie-audit-admin")
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": admin.username, "password": "Password123"},
+        )
+        assert login.status_code == 200
+
+        created = client.post(
+            "/api/v1/admin/users",
+            json={"username": "cookie-audit-target", "password": "Password123"},
+        )
+
+        assert created.status_code == 201
+        audit_row = db_session.exec(
+            select(AuditLog)
+            .where(
+                AuditLog.resource_type == "users",
+                AuditLog.resource_id == created.json()["id"],
+            )
+            .order_by(AuditLog.id.desc())
+        ).first()
+        assert audit_row is not None
+        assert audit_row.actor_id == admin.id
+
     def test_list_audit_returns_list(
         self, client: TestClient, db_session: Session
     ) -> None:

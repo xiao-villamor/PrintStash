@@ -316,11 +316,14 @@ async def quiesce_writes_during_restore(request: Request, call_next):
 @app.middleware("http")
 async def bind_audit_context(request: Request, call_next):
     actor_id = None
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        from app.services.auth import verify_access_token  # deferred: avoids cycle
+    from app.services.auth import (  # deferred: avoids cycle
+        extract_access_token,
+        verify_access_token,
+    )
 
-        payload = verify_access_token(auth.split(" ", 1)[1])
+    token = extract_access_token(request)
+    if token:
+        payload = verify_access_token(token)
         if payload and payload.get("sub"):
             try:
                 actor_id = int(payload["sub"])
