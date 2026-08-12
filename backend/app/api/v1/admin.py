@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlmodel import Session, select
 
@@ -28,6 +30,7 @@ from app.services.trash import gc_soft_deleted, hard_delete_file
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)]
 )
+_admin_security_lock = threading.RLock()
 
 _RESOURCE_MODEL = {
     "models": Model,
@@ -106,6 +109,18 @@ def update_user(
     payload: UserUpdate,
     session: Session = Depends(get_session),
 ) -> UserRead:
+    # Official deployments are single-process (validated at startup). This
+    # lock serializes the thread-pooled read/check/write transaction so two
+    # simultaneous demotions cannot both observe two active administrators.
+    with _admin_security_lock:
+        return _update_user_locked(user_id, payload, session)
+
+
+def _update_user_locked(
+    user_id: int,
+    payload: UserUpdate,
+    session: Session,
+) -> UserRead:
     user = session.get(User, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="user_not_found")
@@ -155,6 +170,11 @@ def reset_user_password(
 
 @router.delete("/users/{user_id}", status_code=204)
 def deactivate_user(user_id: int, session: Session = Depends(get_session)) -> Response:
+    with _admin_security_lock:
+        return _deactivate_user_locked(user_id, session)
+
+
+def _deactivate_user_locked(user_id: int, session: Session) -> Response:
     user = session.get(User, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="user_not_found")

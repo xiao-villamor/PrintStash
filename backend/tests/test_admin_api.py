@@ -6,11 +6,18 @@ coverage on user/role management error branches, 165-220).
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-from sqlmodel import Session
+import threading
+import time
 
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.api.v1 import admin as admin_api
 from app.core.time import utcnow
 from app.db.models import AuditLog, Collection, File, FileType, Model, Tag, User
+from app.schemas.auth import UserUpdate
 from app.services.auth import create_access_token, hash_password
 
 
@@ -339,6 +346,57 @@ class TestDeactivateUser:
             ).status_code
             == 401
         )
+
+    def test_concurrent_admin_lockout_attempts_leave_one_active_superuser(
+        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'admin-race.db'}",
+            connect_args={"check_same_thread": False, "timeout": 5},
+        )
+        SQLModel.metadata.create_all(engine)
+        with Session(engine) as session:
+            first = _user(session, "race-admin-a")
+            second = _user(session, "race-admin-b")
+            user_ids = [first.id, second.id]
+
+        original_count = admin_api._active_superuser_count  # noqa: SLF001
+
+        def slow_count(session: Session) -> int:
+            count = original_count(session)
+            time.sleep(0.1)
+            return count
+
+        monkeypatch.setattr(admin_api, "_active_superuser_count", slow_count)
+        start = threading.Barrier(3)
+        outcomes: list[int] = []
+
+        def deactivate(user_id: int) -> None:
+            with Session(engine) as session:
+                start.wait(timeout=5)
+                try:
+                    admin_api.update_user(
+                        user_id,
+                        UserUpdate(is_active=False),
+                        session,
+                    )
+                except HTTPException as exc:
+                    outcomes.append(exc.status_code)
+                else:
+                    outcomes.append(200)
+
+        threads = [
+            threading.Thread(target=deactivate, args=(user_id,)) for user_id in user_ids
+        ]
+        for thread in threads:
+            thread.start()
+        start.wait(timeout=5)
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert sorted(outcomes) == [200, 400]
+        with Session(engine) as session:
+            assert admin_api._active_superuser_count(session) == 1  # noqa: SLF001
 
 
 class TestAdminDeleteResource:
