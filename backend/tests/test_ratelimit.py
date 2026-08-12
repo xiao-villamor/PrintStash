@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
+import app.core.ratelimit as ratelimit
 from app.core.ratelimit import RateLimiter
 
 
@@ -41,3 +44,31 @@ def test_reset_clears_all_keys():
     assert limiter.check("1.2.3.4") is False
     limiter.reset()
     assert limiter.check("1.2.3.4") is True
+
+
+def test_key_cardinality_is_bounded_under_ip_churn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(ratelimit.time, "monotonic", lambda: now)
+    limiter = RateLimiter(limit=2, window_s=60.0, max_keys=100)
+
+    for index in range(10_000):
+        assert limiter.check(f"198.51.{index // 256}.{index % 256}") is True
+
+    assert limiter.key_count <= 100
+
+
+def test_expired_keys_are_removed_before_capacity_eviction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(ratelimit.time, "monotonic", lambda: now)
+    limiter = RateLimiter(limit=1, window_s=10.0, max_keys=2)
+    limiter.check("old-a")
+    limiter.check("old-b")
+
+    now = 11.0
+    limiter.check("new")
+
+    assert limiter.key_count == 1
