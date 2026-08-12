@@ -193,7 +193,8 @@ def patch_printer_routing(
     try:
         printer = fleet.update_routing(session, printer_id, payload, current_user)
     except fleet.FleetError as exc:
-        raise HTTPException(status_code=404, detail=exc.code) from exc
+        status_code = 409 if exc.code == "default_printer_conflict" else 404
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
     return PrinterRoutingRead(
         printer_id=printer.id,  # type: ignore[arg-type]
         is_default=printer.is_default,

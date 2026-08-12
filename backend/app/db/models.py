@@ -516,6 +516,15 @@ class Document(SQLModel, table=True):
 
 class Printer(SQLModel, table=True):
     __tablename__ = "printers"
+    __table_args__ = (
+        Index(
+            "uq_printers_live_default",
+            "is_default",
+            unique=True,
+            sqlite_where=text("is_default = 1 AND deleted_at IS NULL"),
+            postgresql_where=text("is_default IS TRUE AND deleted_at IS NULL"),
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)

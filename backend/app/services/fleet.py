@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -90,7 +91,9 @@ def choose_printer(
     strategy: RoutingStrategy,
     requested_printer_id: int | None,
 ) -> tuple[Printer | None, str | None]:
-    printers = list(session.exec(select(Printer).where(live(Printer))).all())
+    printers = list(
+        session.exec(select(Printer).where(live(Printer)).order_by(Printer.id)).all()
+    )
     if strategy == RoutingStrategy.MANUAL:
         printer = next(
             (row for row in printers if row.id == requested_printer_id), None
@@ -333,7 +336,11 @@ def update_routing(
     printer.updated_by = current_user.id
     printer.updated_at = utcnow()
     session.add(printer)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise FleetError("default_printer_conflict") from exc
     session.refresh(printer)
     return printer
 
