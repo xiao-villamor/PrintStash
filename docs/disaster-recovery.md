@@ -15,6 +15,12 @@ A PrintStash backup archive contains:
 Backup archives are written locally first. If backup S3/R2 settings are
 configured, the archive is also uploaded to the backup bucket.
 
+The built-in create/restore flow currently requires file-backed SQLite. A
+PostgreSQL deployment must use an operator-managed `pg_dump`/restore workflow
+and back up the configured object/local storage separately. Query
+`GET /api/v1/backups/capabilities/database` to detect support before offering
+the built-in action.
+
 ## Create A Backup Before Risky Work
 
 Via API:

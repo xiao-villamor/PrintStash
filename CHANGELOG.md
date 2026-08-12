@@ -22,10 +22,17 @@
 - Document trash now supports listing, restore, permanent purge, and retention GC without leaking its binary or embedded-image blobs.
 - Rate-limit state now evicts expired or least-recently-used IP buckets at a fixed cardinality ceiling.
 - Shutdown now cancels and awaits every managed background loop before closing shared clients.
+- Fleet queue pagination now applies printer permissions in SQL before page limits, and one live default printer is enforced by the database with deterministic migration repair.
+- Orphan-database adoption now compares column types, nullability, defaults, keys, constraints, indexes, and partial predicates before stamping a schema as current.
+- Vault garbage collection now removes unreferenced STL caches and Collection images while preserving shared derivatives until their final owner is deleted.
+- Backup APIs now publish database capabilities and return a stable unsupported response for PostgreSQL instead of failing late in SQLite-specific code.
+- Numeric environment limits are validated at startup, including archive and S3 lifecycle relationships, while documented zero-value sentinels remain supported.
+- OpenAPI now describes the actual HTTP Bearer JWT contract used by programmatic clients.
 
 ### Changed
 
 - The supported deployment topology is explicitly one API process per vault. Startup claims a vault lock and fails fast when another API process is active; detailed health reports this topology.
+- PostgreSQL 16 now has a real CI contract gate covering fresh migrations, CRUD/RBAC enums, partial indexes, and concurrent refresh-token consumption; critical backend modules and architecture seams also have an incremental Pyright gate.
 
 ### Security
 
@@ -39,6 +46,7 @@
 - Background-job reconnect reads filter and bound persisted history in SQL before deserialization, while active polling runs only while work exists.
 - External-library scans coalesce progress persistence to 250 ms or one-percent steps instead of committing once per unchanged Artifact.
 - Model facets and vault counters now each use one aggregate database round-trip, backed by composite indexes for live Artifact, Model cursor, and background-job lookup paths.
+- Fleet dispatch now processes bounded candidate batches, preloads routing and permission data in fixed-query snapshots, and moves synchronous database/import work out of async event loops.
 - Initial font CSS is limited to the Latin subset, and Vite's native TypeScript path resolver replaces the redundant plugin.
 
 ## 0.11.3

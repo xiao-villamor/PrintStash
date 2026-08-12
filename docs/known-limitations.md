@@ -42,6 +42,10 @@ manufacturing platform.
   installs.
 - Postgres, S3/R2 storage, MinIO, and cloud backup targets are optional and
   should be treated as larger-install paths.
+- The built-in database backup and restore operation supports file-backed
+  SQLite only. PostgreSQL installations must use operator-managed `pg_dump`
+  and restore procedures; the backup API exposes this capability explicitly
+  and rejects unsupported database operations without modifying data.
 - One API process is the supported topology. Do not pass `--workers` greater
   than one or run multiple API replicas against the same vault: scheduling,
   rate limits, session coordination, and background registries are deliberately
