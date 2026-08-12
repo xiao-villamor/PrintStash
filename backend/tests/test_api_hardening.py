@@ -41,6 +41,18 @@ def test_malformed_json_returns_stable_validation_contract(client: TestClient) -
     assert isinstance(body["errors"], list)
 
 
+def test_openapi_describes_the_actual_http_bearer_contract(
+    client: TestClient,
+) -> None:
+    schema = client.get("/openapi.json").json()
+
+    assert schema["components"]["securitySchemes"]["BearerAuth"] == {
+        "type": "http",
+        "scheme": "bearer",
+    }
+    assert "OAuth2PasswordBearer" not in schema["components"]["securitySchemes"]
+
+
 def test_api_rejects_oversized_request_body_before_route(client: TestClient) -> None:
     _overlay["max_upload_mb"] = 1
     try:
