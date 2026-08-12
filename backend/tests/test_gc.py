@@ -7,6 +7,7 @@ orphan and was deleted on the next hourly cycle.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ from sqlmodel import Session
 
 from app.core.config import _overlay
 from app.core.time import utcnow
-from app.db.models import Document, DocumentKind, File, FileType, Model
+from app.db.models import Collection, Document, DocumentKind, File, FileType, Model
 from app.services.storage_backend import get_backend
 from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
 
@@ -89,6 +90,23 @@ def test_gc_preserves_model_blobs(db_session: Session, storage) -> None:
     assert Path(f.path).exists()
 
 
+def test_gc_preserves_file_derivatives_while_artifact_exists(
+    db_session: Session, storage
+) -> None:
+    artifact = _model_with_file(db_session, storage, "derived-live")
+    keys = (
+        storage.thumbnail_key(artifact.id),
+        storage.legacy_thumbnail_key(artifact.id),
+        storage.stl_cache_key(artifact.sha256),
+    )
+    for key in keys:
+        _write(key)
+
+    _cleanup_orphan_blobs(db_session)
+
+    assert all(Path(key).exists() for key in keys)
+
+
 def test_gc_preserves_trashed_model_blobs(db_session: Session, storage) -> None:
     """A trashed model's bytes must survive until hard delete — restore needs them."""
     f = _model_with_file(db_session, storage, "trashed")
@@ -161,3 +179,99 @@ def test_gc_hard_deletes_expired_document_and_its_blob(
     assert not Path(key).exists()
     db_session.expire_all()
     assert db_session.get(Document, document_id) is None
+
+
+def test_gc_hard_deletes_expired_artifact_and_its_derivatives(
+    db_session: Session, storage
+) -> None:
+    artifact = _model_with_file(db_session, storage, "derived-expired")
+    artifact_id = artifact.id
+    keys = (
+        artifact.path,
+        storage.thumbnail_key(artifact.id),
+        storage.legacy_thumbnail_key(artifact.id),
+        storage.stl_cache_key(artifact.sha256),
+    )
+    for key in keys[1:]:
+        _write(key)
+    artifact.deleted_at = utcnow() - timedelta(days=1)
+    db_session.add(artifact)
+    db_session.commit()
+
+    gc_soft_deleted(retention_days=0)
+
+    assert all(not Path(key).exists() for key in keys)
+    db_session.expire_all()
+    assert db_session.get(File, artifact_id) is None
+
+
+def test_gc_preserves_shared_stl_cache_until_last_artifact_is_purged(
+    db_session: Session, storage
+) -> None:
+    expired = _model_with_file(db_session, storage, "cache-expired")
+    survivor = _model_with_file(db_session, storage, "cache-survivor")
+    survivor.sha256 = expired.sha256
+    expired.deleted_at = utcnow() - timedelta(days=1)
+    db_session.add(expired)
+    db_session.add(survivor)
+    db_session.commit()
+    cache_key = _write(storage.stl_cache_key(expired.sha256))
+
+    gc_soft_deleted(retention_days=0)
+
+    assert Path(cache_key).exists()
+    db_session.expire_all()
+    assert db_session.get(File, survivor.id) is not None
+
+
+def test_gc_sweeps_unreferenced_collection_images(db_session: Session, storage) -> None:
+    collection = Collection(name="Docs", slug="docs", path="docs")
+    db_session.add(collection)
+    db_session.commit()
+    db_session.refresh(collection)
+    unreferenced = _write(storage.collection_image_key(collection.id, "gone.png"))
+
+    removed = _cleanup_orphan_blobs(db_session)
+
+    assert removed == 1
+    assert not Path(unreferenced).exists()
+
+
+def test_gc_preserves_referenced_collection_images(
+    db_session: Session, storage
+) -> None:
+    collection = Collection(name="Docs", slug="docs", path="docs")
+    db_session.add(collection)
+    db_session.commit()
+    db_session.refresh(collection)
+    name = "a" * 64 + ".png"
+    collection.readme = f"![diagram](/api/v1/collections/{collection.id}/images/{name})"
+    db_session.add(collection)
+    db_session.commit()
+    key = _write(storage.collection_image_key(collection.id, name))
+
+    _cleanup_orphan_blobs(db_session)
+
+    assert Path(key).exists()
+
+
+def test_gc_hard_deletes_expired_collection_image_namespace(
+    db_session: Session, storage
+) -> None:
+    collection = Collection(
+        name="Old docs",
+        slug="old-docs",
+        path="old-docs",
+        deleted_at=utcnow() - timedelta(days=1),
+    )
+    db_session.add(collection)
+    db_session.commit()
+    db_session.refresh(collection)
+    collection_id = collection.id
+    key = _write(storage.collection_image_key(collection.id, "unlinked.png"))
+
+    gc_soft_deleted(retention_days=0)
+
+    assert not Path(key).exists()
+    db_session.expire_all()
+    assert db_session.get(Collection, collection_id) is None

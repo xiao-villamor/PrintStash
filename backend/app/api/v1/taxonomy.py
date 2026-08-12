@@ -251,8 +251,12 @@ def move_collection(
     col = get_or_404(session, Collection, collection_id, "collection_not_found")
     rbac.require_collection_role(session, current_user, col.id, CollectionRole.ADMIN)
 
-    moving = "parent_id" in payload.model_fields_set and payload.parent_id != col.parent_id
-    new_parent_id = payload.parent_id if "parent_id" in payload.model_fields_set else col.parent_id
+    moving = (
+        "parent_id" in payload.model_fields_set and payload.parent_id != col.parent_id
+    )
+    new_parent_id = (
+        payload.parent_id if "parent_id" in payload.model_fields_set else col.parent_id
+    )
     new_name = payload.name.strip() if payload.name is not None else col.name
     if not new_name:
         raise HTTPException(status_code=422, detail="collection_name_required")
@@ -376,9 +380,11 @@ async def upload_collection_image(
     col = get_or_404(session, Collection, collection_id, "collection_not_found")
     rbac.require_collection_role(session, current_user, col.id, CollectionRole.EDIT)
 
-    ext = ("." + (file.filename or "").rsplit(".", 1)[-1].lower()) if "." in (
-        file.filename or ""
-    ) else ""
+    ext = (
+        ("." + (file.filename or "").rsplit(".", 1)[-1].lower())
+        if "." in (file.filename or "")
+        else ""
+    )
     media_type = _IMAGE_TYPES.get(ext)
     if media_type is None:
         raise HTTPException(status_code=400, detail="unsupported_image_type")
@@ -400,12 +406,7 @@ async def upload_collection_image(
     key = backend.collection_image_key(col.id, name)
     if not backend.exists(key):
         backend.write_bytes(data, key)
-    # ponytail: orphaned image blobs aren't reclaimed when a readme drops the ref
-    # or the collection is deleted. Add a sweep keyed on collection_image_key
-    # prefixes if storage growth becomes a problem.
-    return CollectionImageUpload(
-        url=f"/api/v1/collections/{col.id}/images/{name}"
-    )
+    return CollectionImageUpload(url=f"/api/v1/collections/{col.id}/images/{name}")
 
 
 @router.get(

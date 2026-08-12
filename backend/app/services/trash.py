@@ -31,7 +31,7 @@ from app.db.models import (
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
 from app.services.storage_backend import get_backend
-from app.services.storage_utils import all_owned_blob_keys
+from app.services.storage_utils import ownership_snapshot
 
 logger = get_logger(__name__)
 _DOCUMENT_IMAGE_RE = re.compile(
@@ -99,6 +99,14 @@ def hard_delete_file(
         backend.delete(file_row.path)
     backend.delete(backend.thumbnail_key(file_id))
     backend.delete(backend.legacy_thumbnail_key(file_id))
+    shared_cache_owner = session.exec(
+        select(File.id).where(
+            File.id != file_id,
+            File.sha256 == file_row.sha256,
+        )
+    ).first()
+    if shared_cache_owner is None and file_row.sha256:
+        backend.delete(backend.stl_cache_key(file_row.sha256))
 
     model = session.get(Model, file_row.model_id)
     if model is not None and model.thumbnail_file_id == file_id:
@@ -157,6 +165,17 @@ def restore_document(session: Session, document: Document) -> None:
     session.add(document)
 
 
+def hard_delete_collection(session: Session, collection: Collection) -> None:
+    """Permanently remove a Collection and its namespaced readme images."""
+    if collection.id is None:
+        return
+    backend = get_backend()
+    prefix = backend.collection_image_key(collection.id, "")
+    for key in backend.walk_keys(prefix):
+        backend.delete(key)
+    session.delete(collection)
+
+
 def hard_delete_model(session: Session, model: Model) -> None:
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
@@ -198,14 +217,11 @@ def hard_delete_expired_models(session: Session, retention_days: int) -> list[in
 
 def _cleanup_orphan_blobs(session: Session) -> int:
     backend = get_backend()
-    owned = all_owned_blob_keys(session)
+    snapshot = ownership_snapshot(session)
+    protected = snapshot.claimed_keys | {blob.key for blob in snapshot.external}
     removed = 0
-    if settings.storage_backend == "s3":
-        walker = backend.walk_keys("vault-data/files/")
-    else:
-        walker = backend.walk_keys(str(settings.data_dir))
-    for key in walker:
-        if key not in owned:
+    for key in snapshot.discovered_keys:
+        if key not in protected:
             backend.delete(key)
             removed += 1
     return removed
@@ -244,7 +260,25 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
         for document in expired_documents:
             hard_delete_document(session, document)
         purged["rows"] += len(expired_documents)
-        for model in (File, Tag, Collection, Printer, User):
+        expired_files = session.exec(
+            select(File).where(
+                trashed(File),
+                File.deleted_at < cutoff,  # type: ignore[operator]
+            )
+        ).all()
+        for file_row in expired_files:
+            hard_delete_file(session, file_row)
+        purged["rows"] += len(expired_files)
+        expired_collections = session.exec(
+            select(Collection).where(
+                trashed(Collection),
+                Collection.deleted_at < cutoff,  # type: ignore[operator]
+            )
+        ).all()
+        for collection in expired_collections:
+            hard_delete_collection(session, collection)
+        purged["rows"] += len(expired_collections)
+        for model in (Tag, Printer, User):
             result = session.exec(
                 delete(model).where(
                     trashed(model),

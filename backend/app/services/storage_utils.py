@@ -49,7 +49,9 @@ class StorageOwnershipSnapshot:
         }
 
 
-def ownership_snapshot(session: Session, *, discover: bool = True) -> StorageOwnershipSnapshot:
+def ownership_snapshot(
+    session: Session, *, discover: bool = True
+) -> StorageOwnershipSnapshot:
     """Typed census for audit/backup; never used to widen trash deletion."""
     backend = get_backend()
     result = StorageOwnershipSnapshot()
@@ -148,12 +150,11 @@ def all_owned_blob_keys(session: Session) -> set[str]:
     Trashed rows are included on purpose: their bytes must survive until the
     row is hard-deleted, otherwise restoring from trash yields an empty file.
 
-    Derived artefacts (thumbnails, the STL cache) and readme/body images are
-    absent because neither sweeper walks their prefixes — they live under
-    ``thumb_dir`` locally and outside ``vault-data/files/`` on S3. Widening a
-    walker to cover them means teaching this function to enumerate them first.
+    Includes derived and embedded keys now that the sweeper covers their
+    namespaces. External paths remain protected for compatibility and because
+    their bytes are always user-owned.
     """
     snapshot = ownership_snapshot(session, discover=False)
     # Compatibility contract: external File.path values historically appeared
     # here even though trash and backup callers separately avoid deleting them.
-    return {blob.key for blob in (*snapshot.primary, *snapshot.external)}
+    return snapshot.claimed_keys | {blob.key for blob in snapshot.external}

@@ -6,8 +6,8 @@ filesystem path) to pin two blob-ownership invariants on that path:
 
 * hard delete removes the vault blob key and the thumbnail keys, but must never
   delete the bytes of a NAS-linked (external) file;
-* the orphan-blob sweep walks the S3 ``vault-data/files/`` prefix and deletes
-  only keys that no live ``File`` row references.
+* the orphan-blob sweep walks the complete vault namespace and deletes only
+  keys that no database row references.
 """
 
 from __future__ import annotations
@@ -123,8 +123,8 @@ def test_orphan_gc_on_remote_backend_uses_s3_prefix_and_keeps_referenced(
 
     removed = trash._cleanup_orphan_blobs(db_session)
 
-    # The sweep walks the S3 blob prefix (not the local data_dir)...
-    assert backend.walked == ["vault-data/files/"]
+    # The sweep covers the full S3-style vault namespace, including derivatives.
+    assert backend.walked == [""]
     # ...and deletes only the key no File row references.
     assert backend.deleted == [orphan_key]
     assert removed == 1
