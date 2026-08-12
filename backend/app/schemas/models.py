@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import List, Literal, Optional
 from urllib.parse import urlparse
 
@@ -167,6 +168,31 @@ class ModelListItem(BaseModel):
     recommended_revision_status: Optional[FileRevisionStatus] = None
     recommended_revision_label: Optional[str] = None
     starred: bool = False
+
+
+class ModelSort(str, Enum):
+    DATE_DESC = "date-desc"
+    DATE_ASC = "date-asc"
+    NAME_ASC = "name-asc"
+    NAME_DESC = "name-desc"
+    SUCCESS_DESC = "success-desc"
+    PRINTED_DESC = "printed-desc"
+    DURATION_ASC = "duration-asc"
+    FILAMENT_ASC = "filament-asc"
+    COST_ASC = "cost-asc"
+
+
+class ModelPageRead(BaseModel):
+    items: list[ModelListItem]
+    next_cursor: Optional[str] = None
+    total: int
+
+
+class OutlinerModelRead(BaseModel):
+    id: int
+    name: str
+    collection: Optional[str] = None
+    collection_id: Optional[int] = None
 
 
 class ModelFilters(BaseModel):

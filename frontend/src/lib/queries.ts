@@ -15,7 +15,8 @@ import {
   listCollections,
   listFilamentProfiles,
   listFleetQueue,
-  listModels,
+  listModelPage,
+  listOutlinerModels,
   listPrinterProfiles,
   listPrinters,
   listSpools,
@@ -29,8 +30,10 @@ import type {
   FleetSummary,
   FilamentProfileRead,
   ListModelsParams,
-  ModelListItem,
+  ModelPageRead,
+  ModelSort,
   ModelFacetsRead,
+  OutlinerModelRead,
   PrinterProfileRead,
   PrinterRead,
   PrintJobRead,
@@ -191,14 +194,22 @@ export function useModelFacets(filters: ModelListFilters) {
  * Mutations invalidate `["models"]` via `invalidateQueriesForPath`, which by
  * prefix-matching also busts every keyed list here.
  */
-export function useModelList(filters: ModelListFilters, pageSize: number) {
-  return useInfiniteQuery<ModelListItem[]>({
-    queryKey: [...queryKeys.models, "list", filters],
+export function useModelList(
+  filters: ModelListFilters,
+  pageSize: number,
+  sort: ModelSort,
+) {
+  return useInfiniteQuery<ModelPageRead>({
+    queryKey: [...queryKeys.models, "list", filters, sort],
     queryFn: ({ pageParam }) =>
-      listModels({ ...filters, limit: pageSize, offset: pageParam as number }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === pageSize ? allPages.length * pageSize : undefined,
+      listModelPage({
+        ...filters,
+        limit: pageSize,
+        sort,
+        cursor: (pageParam as string | null) ?? undefined,
+      }),
+    initialPageParam: null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
   });
 }
@@ -208,10 +219,15 @@ export function useModelList(filters: ModelListFilters, pageSize: number) {
  * tag/printer filters but ignores the search query and pagination, so the tree
  * keeps showing every matching leaf.
  */
-export function useOutlinerModels(filters: ModelListFilters, limit: number) {
-  return useQuery<ModelListItem[]>({
+export function useOutlinerModels(
+  filters: ModelListFilters,
+  limit: number,
+  options?: { enabled?: boolean },
+) {
+  return useQuery<OutlinerModelRead[]>({
     queryKey: [...queryKeys.models, "outliner", filters, limit],
-    queryFn: () => listModels({ ...filters, limit }),
+    queryFn: () => listOutlinerModels({ ...filters, limit }),
+    enabled: options?.enabled ?? true,
     placeholderData: keepPreviousData,
   });
 }

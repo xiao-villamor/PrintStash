@@ -103,9 +103,29 @@ def test_facets_count_distinct_models(db_session: Session) -> None:
     db_session.refresh(user)
     model = _model(db_session, "Facet", "e")
     _artifact(db_session, model, filename="one.stl", file_type=FileType.STL, material="PLA")
-    _artifact(db_session, model, filename="two.stl", file_type=FileType.STL, material="PLA")
+    _artifact(
+        db_session,
+        model,
+        filename="two.stl",
+        file_type=FileType.STL,
+        material="PLA",
+        status=FileRevisionStatus.KNOWN_GOOD,
+    )
     result = model_views.facets(db_session, user, ModelFilters())
     assert next(item.count for item in result.material_type if item.value == "PLA") == 1
+    assert [item.model_dump() for item in result.file_type] == [
+        {"value": "stl", "count": 1}
+    ]
+    assert [item.model_dump() for item in result.revision_status] == [
+        {"value": "known_good", "count": 1}
+    ]
+    assert [item.model_dump() for item in result.storage] == [
+        {"value": "vault", "count": 1}
+    ]
+    assert [item.model_dump() for item in result.printed] == [
+        {"value": "yes", "count": 0},
+        {"value": "no", "count": 1},
+    ]
 
 
 def _admin(db_session: Session, username: str) -> User:

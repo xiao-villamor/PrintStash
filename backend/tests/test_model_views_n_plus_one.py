@@ -14,6 +14,7 @@ from sqlalchemy import event
 from sqlmodel import Session
 
 from app.db.models import CollectionPermission, CollectionRole, Model, User
+from app.schemas.models import ModelFilters, ModelSort
 from app.services import model_views, taxonomy
 from app.services.auth import hash_password
 
@@ -31,7 +32,7 @@ def _user(session: Session, username: str, *, superuser: bool = False) -> User:
     return user
 
 
-def _seed_models(session: Session, count: int, collection_id: int) -> None:
+def _seed_models(session: Session, count: int, collection_id: int | None) -> None:
     for i in range(count):
         session.add(
             Model(
@@ -130,3 +131,64 @@ def test_effective_role_is_still_correct_per_row(db_session: Session) -> None:
 
     assert roles["P"] == CollectionRole.ADMIN
     assert roles["T"] == CollectionRole.VIEW
+
+
+def test_facets_are_consolidated_into_one_query(db_session: Session) -> None:
+    user = _user(db_session, "facet-query-count", superuser=True)
+    _seed_models(db_session, 3, collection_id=None)
+    _ = user.is_superuser  # refresh the expired fixture row outside the counter
+
+    count = _count_queries(
+        db_session,
+        lambda: model_views.facets(db_session, user, ModelFilters()),
+    )
+
+    assert count == 1
+
+
+def test_vault_stats_counts_are_consolidated_into_one_query(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _user(db_session, "stats-query-count", superuser=True)
+    monkeypatch.setattr(
+        model_views,
+        "_cached_storage_usage",
+        lambda: {"backend": "local", "ok": True},
+    )
+
+    count = _count_queries(db_session, lambda: model_views.vault_stats(db_session, user))
+
+    assert count == 1
+
+
+def test_cursor_total_is_counted_only_on_the_first_page(db_session: Session) -> None:
+    user = _user(db_session, "cursor-count", superuser=True)
+    _seed_models(db_session, 4, collection_id=None)
+    _ = user.is_superuser
+    first_page = None
+
+    def load_first_page():
+        nonlocal first_page
+        first_page = model_views.page_items(
+            db_session,
+            user,
+            filters=ModelFilters(),
+            sort=ModelSort.NAME_ASC,
+            limit=2,
+        )
+
+    first_queries = _count_queries(db_session, load_first_page)
+    assert first_page is not None and first_page.next_cursor is not None
+    second_queries = _count_queries(
+        db_session,
+        lambda: model_views.page_items(
+            db_session,
+            user,
+            filters=ModelFilters(),
+            sort=ModelSort.NAME_ASC,
+            cursor=first_page.next_cursor,
+            limit=2,
+        ),
+    )
+
+    assert second_queries == first_queries - 1

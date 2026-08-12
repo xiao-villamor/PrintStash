@@ -459,6 +459,36 @@ export interface ListModelsParams {
   offset?: number;
 }
 
+export type ModelSort =
+  | "date-desc"
+  | "date-asc"
+  | "name-asc"
+  | "name-desc"
+  | "success-desc"
+  | "printed-desc"
+  | "duration-asc"
+  | "filament-asc"
+  | "cost-asc";
+
+export interface ModelPageRead {
+  items: ModelListItem[];
+  next_cursor: string | null;
+  total: number;
+}
+
+export interface OutlinerModelRead {
+  id: number;
+  name: string;
+  collection: string | null;
+  collection_id: number | null;
+}
+
+export interface ListModelPageParams
+  extends Omit<ListModelsParams, "offset"> {
+  sort?: ModelSort;
+  cursor?: string;
+}
+
 export interface SavedViewFilters {
   collection?: string | null;
   direct: boolean;

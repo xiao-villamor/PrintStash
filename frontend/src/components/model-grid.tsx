@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
-import { ArtifactFileType, CollectionRead, FileRevisionStatus, ModelBatchResult, ModelListItem, PrinterRead, SavedViewRead, TagRead } from "@/types";
+import { ArtifactFileType, CollectionRead, FileRevisionStatus, ModelBatchResult, ModelListItem, ModelSort, PrinterRead, SavedViewRead, TagRead } from "@/types";
 import { ModelCard, MODEL_DND_MIME } from "@/components/model-card";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,8 +52,9 @@ import { Link } from "@/lib/navigation";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useMediaQuery } from "@/lib/use-media-query";
 
-type SortKey = "date-desc" | "date-asc" | "name-asc" | "name-desc" | "success-desc" | "printed-desc" | "duration-asc" | "filament-asc" | "cost-asc";
+type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
 
 const PAGE_SIZE = 60;
@@ -74,32 +75,6 @@ function readRecentFolders(): string[] {
   try { return JSON.parse(readVaultPreference("ps-recent-folders") ?? "[]") as string[]; }
   catch { return []; }
 }
-
-function sortModels(models: ModelListItem[], key: SortKey): ModelListItem[] {
-  const sorted = [...models];
-  const numeric = (value: number | null | undefined) => value ?? Number.POSITIVE_INFINITY;
-  switch (key) {
-    case "date-desc":
-      sorted.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
-      break;
-    case "date-asc":
-      sorted.sort((a, b) => new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime());
-      break;
-    case "name-asc":
-      sorted.sort((a, b) => a.name.localeCompare(b.name));
-      break;
-    case "name-desc":
-      sorted.sort((a, b) => b.name.localeCompare(a.name));
-      break;
-    case "success-desc": sorted.sort((a, b) => (b.print_summary?.success_rate ?? -1) - (a.print_summary?.success_rate ?? -1)); break;
-    case "printed-desc": sorted.sort((a, b) => (b.print_summary?.last_printed_at ? new Date(b.print_summary.last_printed_at).getTime() : 0) - (a.print_summary?.last_printed_at ? new Date(a.print_summary.last_printed_at).getTime() : 0)); break;
-    case "duration-asc": sorted.sort((a, b) => numeric(a.print_summary?.average_duration_s ?? a.print_summary?.estimated_time_s) - numeric(b.print_summary?.average_duration_s ?? b.print_summary?.estimated_time_s)); break;
-    case "filament-asc": sorted.sort((a, b) => numeric(a.print_summary?.filament_weight_g) - numeric(b.print_summary?.filament_weight_g)); break;
-    case "cost-asc": sorted.sort((a, b) => numeric(a.print_summary?.total_cost) - numeric(b.print_summary?.total_cost)); break;
-  }
-  return sorted;
-}
-
 
 function childCollections(
   collections: CollectionRead[],
@@ -156,6 +131,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const { user } = useAuth();
+  const desktopOutliner = useMediaQuery("(min-width: 768px)");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
   // with the detail/upload views, revalidated on focus, and refetched after any
   // collection/tag mutation (the api layer invalidates the query cache).
@@ -512,11 +488,14 @@ async function onMainDrop(e: React.DragEvent) {
       q: searchQuery,
     },
     PAGE_SIZE,
+    sortKey,
   );
-  const outlinerQuery = useOutlinerModels(baseFilters, 500);
+  const outlinerQuery = useOutlinerModels(baseFilters, 500, {
+    enabled: desktopOutliner,
+  });
 
   const models = useMemo(
-    () => modelQuery.data?.pages.flat() ?? [],
+    () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [modelQuery.data],
   );
   const outlinerModels = outlinerQuery.data ?? [];
@@ -531,9 +510,6 @@ async function onMainDrop(e: React.DragEvent) {
   function loadMore() {
     if (hasMore && !loadingMore) fetchNextPage();
   }
-  useEffect(() => {
-    if (["success-desc", "printed-desc", "duration-asc", "filament-asc", "cost-asc"].includes(sortKey) && hasMore && !loadingMore) void fetchNextPage();
-  }, [fetchNextPage, hasMore, loadingMore, sortKey]);
   function refresh() {
     queryClient.invalidateQueries({ queryKey: queryKeys.models });
   }
@@ -549,7 +525,7 @@ async function onMainDrop(e: React.DragEvent) {
   const [selectingAll, setSelectingAll] = useState(false);
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
-  const sortedModels = useMemo(() => sortModels(models, sortKey), [models, sortKey]);
+  const sortedModels = models;
 
   const toggleSelect = useCallback((id: number, range = false) => {
     setSelectedIds((prev) => {

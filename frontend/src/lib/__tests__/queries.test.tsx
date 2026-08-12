@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 import {
   useCollections,
   useFilamentProfiles,
   useModelFacets,
+  useModelList,
   usePrinterProfiles,
   usePrinters,
   useOutlinerModels,
@@ -26,7 +27,8 @@ vi.mock("@/lib/api", () => ({
   listPrinters: vi.fn(),
   listPrinterProfiles: vi.fn(),
   listFilamentProfiles: vi.fn(),
-  listModels: vi.fn(),
+  listModelPage: vi.fn(),
+  listOutlinerModels: vi.fn(),
   getModelFacets: vi.fn(),
   getVaultStats: vi.fn(),
 }));
@@ -49,6 +51,11 @@ beforeEach(() => {
   mocked.listPrinterProfiles.mockResolvedValue([{ id: 1, name: "Ender" }] as never);
   mocked.listFilamentProfiles.mockResolvedValue([{ id: 1, name: "PLA" }] as never);
   mocked.getVaultStats.mockResolvedValue({ model_count: 3 } as never);
+  mocked.listModelPage.mockResolvedValue({
+    items: [],
+    next_cursor: null,
+    total: 0,
+  } as never);
 });
 
 afterEach(() => {
@@ -110,7 +117,7 @@ describe("filter query continuity", () => {
   it("keeps outliner data mounted while changed filters refetch", async () => {
     const firstModels = [{ id: 1, name: "Drawer Housing" }];
     let resolveFiltered!: (value: typeof firstModels) => void;
-    mocked.listModels
+    mocked.listOutlinerModels
       .mockResolvedValueOnce(firstModels as never)
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFiltered = resolve; }) as never);
 
@@ -124,7 +131,7 @@ describe("filter query continuity", () => {
 
     await waitFor(() => expect(result.current.data).toEqual(firstModels));
     rerender({ filtered: true });
-    await waitFor(() => expect(mocked.listModels).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocked.listOutlinerModels).toHaveBeenCalledTimes(2));
 
     expect(result.current.data).toEqual(firstModels);
     expect(result.current.isLoading).toBe(false);
@@ -155,5 +162,57 @@ describe("filter query continuity", () => {
     expect(result.current.isLoading).toBe(false);
     resolveFiltered({ ...firstFacets, file_type: [{ value: "stl", count: 1 }] });
     await waitFor(() => expect(result.current.data?.file_type[0].count).toBe(1));
+  });
+});
+
+describe("server-owned Model pagination", () => {
+  it("sends the sort and only requests the next cursor on demand", async () => {
+    mocked.listModelPage
+      .mockResolvedValueOnce({
+        items: [{ id: 1, name: "First" }],
+        next_cursor: "cursor-2",
+        total: 2,
+      } as never)
+      .mockResolvedValueOnce({
+        items: [{ id: 2, name: "Second" }],
+        next_cursor: null,
+        total: 2,
+      } as never);
+
+    const { result } = renderHook(
+      () => useModelList({ material_type: ["PLA"] }, 1, "success-desc"),
+      { wrapper: wrapper() },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mocked.listModelPage).toHaveBeenCalledTimes(1);
+    expect(mocked.listModelPage).toHaveBeenNthCalledWith(1, {
+      material_type: ["PLA"],
+      limit: 1,
+      sort: "success-desc",
+      cursor: undefined,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(mocked.listModelPage).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    expect(mocked.listModelPage).toHaveBeenNthCalledWith(2, {
+      material_type: ["PLA"],
+      limit: 1,
+      sort: "success-desc",
+      cursor: "cursor-2",
+    });
+  });
+
+  it("does not request outliner leaves while disabled", async () => {
+    const { result } = renderHook(
+      () => useOutlinerModels({}, 500, { enabled: false }),
+      { wrapper: wrapper() },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(mocked.listOutlinerModels).not.toHaveBeenCalled();
   });
 });

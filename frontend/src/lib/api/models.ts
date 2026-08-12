@@ -17,25 +17,26 @@ import {
   ImportedPrintJobRead,
   IngestJobStatus,
   IngestResponse,
+  ListModelPageParams,
   ListModelsParams,
   ManualPrintJobCreate,
   ModelBatchResult,
   ModelListItem,
   ModelFacetsRead,
+  ModelPageRead,
   ModelPrinterFileRead,
   ModelPrintJobRead,
   ModelRead,
   ModelStarRead,
   ModelUpdate,
+  OutlinerModelRead,
   RevisionBatchResult,
   TrashPurgeRead,
   TrashedModelRead,
   VaultStatsRead,
 } from "@/types";
 
-export async function listModels(
-  params?: ListModelsParams,
-): Promise<ModelListItem[]> {
+function modelListSearch(params?: ListModelsParams): URLSearchParams {
   const search = new URLSearchParams();
   if (params?.collection) search.set("collection", params.collection);
   if (params?.direct) search.set("direct", "true");
@@ -55,8 +56,34 @@ export async function listModels(
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
 
-  const query = search.toString();
+  return search;
+}
+
+export async function listModels(
+  params?: ListModelsParams,
+): Promise<ModelListItem[]> {
+  const query = modelListSearch(params).toString();
   return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`);
+}
+
+export async function listModelPage(
+  params?: ListModelPageParams,
+): Promise<ModelPageRead> {
+  const search = modelListSearch(params);
+  if (params?.sort) search.set("sort", params.sort);
+  if (params?.cursor) search.set("cursor", params.cursor);
+  const query = search.toString();
+  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`);
+}
+
+export async function listOutlinerModels(
+  params?: Omit<ListModelsParams, "collection" | "direct" | "q" | "offset">,
+): Promise<OutlinerModelRead[]> {
+  const search = modelListSearch(params);
+  const query = search.toString();
+  return getJson<OutlinerModelRead[]>(
+    `/api/v1/models/outliner${query ? `?${query}` : ""}`,
+  );
 }
 
 export async function getModelFacets(

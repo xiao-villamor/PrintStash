@@ -67,10 +67,13 @@ from app.schemas.models import (
     ModelFacetsRead,
     ModelFilters,
     ModelListItem,
+    ModelPageRead,
     ModelPrinterFileRead,
     ModelPrintJobRead,
     ModelRead,
+    ModelSort,
     ModelUpdate,
+    OutlinerModelRead,
     PrintStatisticsRead,
     RevisionBatchLabels,
     RevisionBatchResult,
@@ -225,6 +228,128 @@ def list_models(
         filters=filters,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get(
+    "/page",
+    response_model=ModelPageRead,
+    summary="List a globally sorted cursor page of Models",
+)
+def page_models(
+    collection: Optional[str] = Query(None),
+    direct: bool = Query(False),
+    tag: Optional[List[str]] = Query(None),
+    q: Optional[str] = Query(None),
+    printer_id: Optional[int] = Query(None),
+    printer_presence: Optional[Literal["any", "none"]] = Query(None),
+    favorites: bool = Query(False),
+    file_type: Optional[List[FileType]] = Query(None),
+    material_type: Optional[List[str]] = Query(None),
+    slicer_name: Optional[List[str]] = Query(None),
+    printer_model: Optional[List[str]] = Query(None),
+    revision_status: Optional[List[FileRevisionStatus]] = Query(None),
+    printed: Optional[bool] = Query(None),
+    print_outcome: Optional[List[PrintJobState]] = Query(None),
+    storage_filter: Optional[List[Literal["vault", "external"]]] = Query(
+        None, alias="storage"
+    ),
+    uploaded_after: Optional[datetime] = Query(None),
+    uploaded_before: Optional[datetime] = Query(None),
+    sort: ModelSort = Query(ModelSort.DATE_DESC),
+    cursor: Optional[str] = Query(None, max_length=1024),
+    limit: int = Query(60, ge=1, le=200),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelPageRead:
+    if (
+        printer_id is not None or printer_presence is not None
+    ) and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="admin_required")
+    filters = ModelFilters(
+        collection=collection,
+        direct=direct,
+        tag=tag or [],
+        q=q,
+        printer_id=printer_id,
+        printer_presence=printer_presence,
+        favorites=favorites,
+        file_type=file_type or [],
+        material_type=material_type or [],
+        slicer_name=slicer_name or [],
+        printer_model=printer_model or [],
+        revision_status=revision_status or [],
+        printed=printed,
+        print_outcome=print_outcome or [],
+        storage=storage_filter or [],
+        uploaded_after=uploaded_after,
+        uploaded_before=uploaded_before,
+    )
+    try:
+        return model_views.page_items(
+            session,
+            current_user,
+            filters=filters,
+            sort=sort,
+            cursor=cursor,
+            limit=limit,
+        )
+    except ValueError as exc:
+        if str(exc) == "invalid_model_cursor":
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise
+
+
+@router.get(
+    "/outliner",
+    response_model=list[OutlinerModelRead],
+    summary="List lightweight Model leaves for the desktop outliner",
+)
+def outliner_models(
+    tag: Optional[List[str]] = Query(None),
+    printer_id: Optional[int] = Query(None),
+    printer_presence: Optional[Literal["any", "none"]] = Query(None),
+    favorites: bool = Query(False),
+    file_type: Optional[List[FileType]] = Query(None),
+    material_type: Optional[List[str]] = Query(None),
+    slicer_name: Optional[List[str]] = Query(None),
+    printer_model: Optional[List[str]] = Query(None),
+    revision_status: Optional[List[FileRevisionStatus]] = Query(None),
+    printed: Optional[bool] = Query(None),
+    print_outcome: Optional[List[PrintJobState]] = Query(None),
+    storage_filter: Optional[List[Literal["vault", "external"]]] = Query(
+        None, alias="storage"
+    ),
+    uploaded_after: Optional[datetime] = Query(None),
+    uploaded_before: Optional[datetime] = Query(None),
+    limit: int = Query(500, ge=1, le=500),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> list[OutlinerModelRead]:
+    if (
+        printer_id is not None or printer_presence is not None
+    ) and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="admin_required")
+    return model_views.outliner_items(
+        session,
+        current_user,
+        filters=ModelFilters(
+            tag=tag or [],
+            printer_id=printer_id,
+            printer_presence=printer_presence,
+            favorites=favorites,
+            file_type=file_type or [],
+            material_type=material_type or [],
+            slicer_name=slicer_name or [],
+            printer_model=printer_model or [],
+            revision_status=revision_status or [],
+            printed=printed,
+            print_outcome=print_outcome or [],
+            storage=storage_filter or [],
+            uploaded_after=uploaded_after,
+            uploaded_before=uploaded_before,
+        ),
+        limit=limit,
     )
 
 

@@ -10,15 +10,18 @@ per facet) — N+1 regressions are bugs in this module, testable without HTTP.
 
 from __future__ import annotations
 
+import base64
 import csv
+import hashlib
 import io
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic
 from typing import Any, List, Literal, Optional
 
-from sqlalchemy import case, func
+from sqlalchemy import Float, String, case, cast, func, literal, union_all
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -52,9 +55,12 @@ from app.schemas.models import (
     ModelFacetsRead,
     ModelFilters,
     ModelListItem,
+    ModelPageRead,
     ModelPrinterPresenceRead,
     ModelRead,
+    ModelSort,
     ModelStatRead,
+    OutlinerModelRead,
     PrinterStatRead,
     PrintStatisticsRead,
     PrintSummaryRead,
@@ -508,115 +514,143 @@ def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
 
 
 def facets(session: Session, user: User, filters: ModelFilters) -> ModelFacetsRead:
-    """Accessible live facet values for current filtered Model scope."""
-    filtered = _filtered_stmt(session, user, filters).with_only_columns(Model.id).subquery()
+    """Accessible live facet values in one database round-trip.
 
-    def values(column, *, metadata: bool = False) -> list[FacetValueRead]:
-        stmt = (
-            select(column, func.count(func.distinct(File.model_id)))
-            .select_from(File)
-            .join(filtered, filtered.c.id == File.model_id)
-            .where(live(File), column.is_not(None))
+    The union keeps each dimension independently grouped while avoiding the
+    row multiplication that a single wide File/Metadata/PrintJob join would
+    introduce. This matters on large libraries and preserves distinct-Model
+    counts for every value.
+    """
+    filtered = (
+        _filtered_stmt(session, user, filters)
+        .with_only_columns(Model.id)
+        .cte("facet_models")
+    )
+    files = (
+        select(
+            File.id.label("file_id"),
+            File.model_id,
+            File.file_type,
+            File.revision_status,
+            File.is_external,
         )
-        if metadata:
-            stmt = stmt.join(Metadata, Metadata.file_id == File.id)
-        rows = session.exec(stmt.group_by(column).order_by(column.asc())).all()  # type: ignore[attr-defined]
-        return [
-            FacetValueRead(
-                value=value.value if hasattr(value, "value") else str(value),
-                count=int(count),
-            )
-            for value, count in rows
-            if value not in (None, "")
-        ]
-
-    storage_rows = session.exec(
-        select(File.is_external, func.count(func.distinct(File.model_id)))
         .join(filtered, filtered.c.id == File.model_id)
         .where(live(File))
-        .group_by(File.is_external)
-    ).all()
-    total = int(session.exec(select(func.count()).select_from(filtered)).one())
-    printed_count = int(
-        session.exec(
-            select(func.count(func.distinct(PrintJob.model_id)))
-            .join(filtered, filtered.c.id == PrintJob.model_id)
-            .where(live(PrintJob))
-        ).one()
+        .cte("facet_files")
     )
-    outcome_rows = session.exec(
-        select(PrintJob.state, func.count(func.distinct(PrintJob.model_id)))
-        .join(filtered, filtered.c.id == PrintJob.model_id)
-        .where(
-            live(PrintJob),
-            PrintJob.state.in_(
-                [PrintJobState.COMPLETED, PrintJobState.FAILED, PrintJobState.CANCELLED]
-            ),
+    metadata = (
+        select(
+            files.c.model_id,
+            Metadata.material_type,
+            Metadata.slicer_name,
+            Metadata.printer_model,
         )
-        .group_by(PrintJob.state)
-        .order_by(PrintJob.state.asc())  # type: ignore[attr-defined]
+        .join(Metadata, Metadata.file_id == files.c.file_id)
+        .cte("facet_metadata")
+    )
+    jobs = (
+        select(PrintJob.model_id, PrintJob.state)
+        .join(filtered, filtered.c.id == PrintJob.model_id)
+        .where(live(PrintJob))
+        .cte("facet_jobs")
+    )
+
+    def grouped_branch(facet: str, value, model_id, *, where=()):
+        return (
+            select(
+                literal(facet).label("facet"),
+                cast(value, String).label("value"),
+                func.count(func.distinct(model_id)).label("count"),
+            )
+            .where(value.is_not(None), cast(value, String) != "", *where)
+            .group_by(value)
+        )
+
+    branches = [
+        grouped_branch("file_type", files.c.file_type, files.c.model_id),
+        grouped_branch("material_type", metadata.c.material_type, metadata.c.model_id),
+        grouped_branch("slicer_name", metadata.c.slicer_name, metadata.c.model_id),
+        grouped_branch("printer_model", metadata.c.printer_model, metadata.c.model_id),
+        grouped_branch(
+            "revision_status", files.c.revision_status, files.c.model_id
+        ),
+        grouped_branch(
+            "print_outcome",
+            jobs.c.state,
+            jobs.c.model_id,
+            where=(
+                jobs.c.state.in_(
+                    [
+                        PrintJobState.COMPLETED,
+                        PrintJobState.FAILED,
+                        PrintJobState.CANCELLED,
+                    ]
+                ),
+            ),
+        ),
+        grouped_branch(
+            "storage",
+            case((files.c.is_external.is_(True), "external"), else_="vault"),
+            files.c.model_id,
+        ),
+        select(
+            literal("printed").label("facet"),
+            literal("yes").label("value"),
+            func.count(func.distinct(jobs.c.model_id)).label("count"),
+        ),
+        select(
+            literal("printed_total").label("facet"),
+            literal("total").label("value"),
+            func.count(filtered.c.id).label("count"),
+        ),
+    ]
+    combined = union_all(*branches).subquery("facet_values")
+    rows = session.execute(
+        select(combined.c.facet, combined.c.value, combined.c.count).order_by(
+            combined.c.facet.asc(), combined.c.value.asc()
+        )
     ).all()
+
+    enum_values = {
+        "file_type": {member.name: member.value for member in FileType},
+        "revision_status": {
+            member.name: member.value for member in FileRevisionStatus
+        },
+        "print_outcome": {member.name: member.value for member in PrintJobState},
+    }
+    values: dict[str, list[FacetValueRead]] = defaultdict(list)
+    printed_count = 0
+    total = 0
+    for facet, raw_value, count in rows:
+        if facet == "printed_total":
+            total = int(count or 0)
+            continue
+        value = str(raw_value)
+        value = enum_values.get(str(facet), {}).get(value, value)
+        item = FacetValueRead(value=value, count=int(count or 0))
+        values[str(facet)].append(item)
+        if facet == "printed" and value == "yes":
+            printed_count = item.count
+    values["printed"].append(
+        FacetValueRead(value="no", count=max(0, total - printed_count))
+    )
+
     return ModelFacetsRead(
-        file_type=values(File.file_type),
-        material_type=values(Metadata.material_type, metadata=True),
-        slicer_name=values(Metadata.slicer_name, metadata=True),
-        printer_model=values(Metadata.printer_model, metadata=True),
-        revision_status=values(File.revision_status),
-        print_outcome=[
-            FacetValueRead(value=state.value, count=int(count))
-            for state, count in outcome_rows
-        ],
-        storage=[
-            FacetValueRead(value="external" if external else "vault", count=int(count))
-            for external, count in storage_rows
-        ],
-        printed=[
-            FacetValueRead(value="yes", count=printed_count),
-            FacetValueRead(value="no", count=max(0, total - printed_count)),
-        ],
+        file_type=values["file_type"],
+        material_type=values["material_type"],
+        slicer_name=values["slicer_name"],
+        printer_model=values["printer_model"],
+        revision_status=values["revision_status"],
+        print_outcome=values["print_outcome"],
+        storage=values["storage"],
+        printed=values["printed"],
     )
 
 
-def list_items(
-    session: Session,
-    user: User,
-    *,
-    collection: Optional[str] = None,
-    direct: bool = False,
-    tags: Optional[List[str]] = None,
-    q: Optional[str] = None,
-    printer_id: Optional[int] = None,
-    printer_presence: Optional[Literal["any", "none"]] = None,
-    favorites: bool = False,
-    filters: ModelFilters | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> List[ModelListItem]:
-    """Filtered, paginated library browse with batched per-model facets."""
-    # Exclude the external-job sentinel model — it's internal bookkeeping for
-    # print jobs that don't map to a real vault model and must never surface in
-    # the library grid (vault_stats/export already exclude it, which is why the
-    # header count and the grid would otherwise disagree).
-    filters = filters or ModelFilters(
-        collection=collection,
-        direct=direct,
-        tag=tags or [],
-        q=q,
-        printer_id=printer_id,
-        printer_presence=printer_presence,
-        favorites=favorites,
-    )
-    stmt = _filtered_stmt(session, user, filters)
-
-    # Model.id is the stable tiebreaker: without it, models sharing an
-    # updated_at (e.g. a batch ZIP import) sort non-deterministically, so
-    # pagination can repeat or skip rows across page boundaries.
-    stmt = (
-        stmt.order_by(Model.updated_at.desc(), Model.id.desc())  # type: ignore[attr-defined]
-        .offset(offset)
-        .limit(limit)
-    )
-    rows = session.exec(stmt).all()
+def _hydrate_list_rows(
+    session: Session, user: User, rows: list[Model]
+) -> list[ModelListItem]:
+    """Compose one already-ordered Model page with bounded batch queries."""
     model_ids = [m.id for m in rows if m.id is not None]
     if not model_ids:
         return []
@@ -629,17 +663,14 @@ def list_items(
         ).all()
     )
 
-    # Batch the per-model lookups: one grouped/IN query per facet instead of
-    # five queries per row (tags + collection already arrive via selectin).
     file_counts = dict(
         session.exec(
             select(File.model_id, func.count(File.id))
-            .where(File.model_id.in_(model_ids))  # type: ignore[union-attr]
+            .where(File.model_id.in_(model_ids), live(File))  # type: ignore[union-attr]
             .group_by(File.model_id)
         ).all()
     )
 
-    # Newest mesh file per model, for client-side 3D preview preloading.
     mesh_file_ids: dict[int, int] = {}
     for model_id, file_id in session.exec(
         select(File.model_id, File.id)
@@ -700,9 +731,10 @@ def list_items(
             File.file_type == FileType.GCODE,
             live(File),
         )
-        .order_by(File.model_id.asc(), File.uploaded_at.desc())  # type: ignore[attr-defined]
+        .order_by(
+            File.model_id.asc(), File.uploaded_at.desc(), File.id.desc()  # type: ignore[attr-defined]
+        )
     ).all():
-        # First row per model is the newest G-code file.
         if int(model_id) not in summaries:
             summaries[int(model_id)] = PrintSummaryRead(
                 layer_height_mm=md.layer_height_mm,
@@ -730,37 +762,325 @@ def list_items(
         summary.average_duration_s = float(average_duration) if average_duration is not None else None
         summary.total_cost = float(total_cost) if total_cost is not None else None
 
-    # One resolution for the whole page: per-row lookups cost two queries each.
     roles = rbac.effective_roles_for_collections(
         session, user, (m.collection_id for m in rows)
     )
-
-    out: List[ModelListItem] = []
-    for m in rows:
-        assert m.id is not None
-        rec_status, rec_label = recommended.get(m.id, (None, None))
+    out: list[ModelListItem] = []
+    for model in rows:
+        assert model.id is not None
+        rec_status, rec_label = recommended.get(model.id, (None, None))
         out.append(
             ModelListItem(
-                id=m.id,
-                name=m.name,
-                slug=m.slug,
-                collection=collection_name_for(m),
-                collection_id=m.collection_id,
-                source_url=m.source_url,
-                effective_role=roles.get(m.collection_id),
-                tags=sorted(t.name for t in m.tags),
-                thumbnail_url=thumb_url(m),
-                file_count=int(file_counts.get(m.id, 0)),
-                mesh_file_id=mesh_file_ids.get(m.id),
-                printer_presence=presence_by_model.get(m.id, []),
-                updated_at=m.updated_at,
-                print_summary=summaries.get(m.id),
+                id=model.id,
+                name=model.name,
+                slug=model.slug,
+                collection=collection_name_for(model),
+                collection_id=model.collection_id,
+                source_url=model.source_url,
+                effective_role=roles.get(model.collection_id),
+                tags=sorted(tag.name for tag in model.tags),
+                thumbnail_url=thumb_url(model),
+                file_count=int(file_counts.get(model.id, 0)),
+                mesh_file_id=mesh_file_ids.get(model.id),
+                printer_presence=presence_by_model.get(model.id, []),
+                updated_at=model.updated_at,
+                print_summary=summaries.get(model.id),
                 recommended_revision_status=rec_status,
                 recommended_revision_label=rec_label,
-                starred=m.id in starred_ids,
+                starred=model.id in starred_ids,
             )
         )
     return out
+
+
+def list_items(
+    session: Session,
+    user: User,
+    *,
+    collection: Optional[str] = None,
+    direct: bool = False,
+    tags: Optional[List[str]] = None,
+    q: Optional[str] = None,
+    printer_id: Optional[int] = None,
+    printer_presence: Optional[Literal["any", "none"]] = None,
+    favorites: bool = False,
+    filters: ModelFilters | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[ModelListItem]:
+    """Filtered, paginated library browse with batched per-model facets."""
+    # Exclude the external-job sentinel model — it's internal bookkeeping for
+    # print jobs that don't map to a real vault model and must never surface in
+    # the library grid (vault_stats/export already exclude it, which is why the
+    # header count and the grid would otherwise disagree).
+    filters = filters or ModelFilters(
+        collection=collection,
+        direct=direct,
+        tag=tags or [],
+        q=q,
+        printer_id=printer_id,
+        printer_presence=printer_presence,
+        favorites=favorites,
+    )
+    stmt = _filtered_stmt(session, user, filters)
+
+    # Model.id is the stable tiebreaker: without it, models sharing an
+    # updated_at (e.g. a batch ZIP import) sort non-deterministically, so
+    # pagination can repeat or skip rows across page boundaries.
+    stmt = (
+        stmt.order_by(Model.updated_at.desc(), Model.id.desc())  # type: ignore[attr-defined]
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = session.exec(stmt).all()
+    return _hydrate_list_rows(session, user, list(rows))
+
+
+def _job_sort_stats():
+    completed = func.sum(
+        case((PrintJob.state == PrintJobState.COMPLETED, 1), else_=0)
+    )
+    decided = func.sum(
+        case(
+            (
+                PrintJob.state.in_([PrintJobState.COMPLETED, PrintJobState.FAILED]),
+                1,
+            ),
+            else_=0,
+        )
+    )
+    return (
+        select(
+            PrintJob.model_id.label("model_id"),
+            (cast(completed, Float) / func.nullif(decided, 0)).label("success_rate"),
+            func.max(PrintJob.finished_at).label("last_printed_at"),
+            func.avg(PrintJob.actual_duration_s).label("average_duration_s"),
+            func.sum(PrintJob.cost).label("total_cost"),
+        )
+        .where(live(PrintJob))
+        .group_by(PrintJob.model_id)
+        .subquery("browse_job_stats")
+    )
+
+
+def _latest_gcode_metadata():
+    ranked = (
+        select(
+            File.model_id.label("model_id"),
+            Metadata.estimated_time_s.label("estimated_time_s"),
+            Metadata.filament_weight_g.label("filament_weight_g"),
+            func.row_number()
+            .over(
+                partition_by=File.model_id,
+                order_by=(File.uploaded_at.desc(), File.id.desc()),  # type: ignore[attr-defined]
+            )
+            .label("row_number"),
+        )
+        .join(Metadata, Metadata.file_id == File.id)
+        .where(File.file_type == FileType.GCODE, live(File))
+        .subquery("ranked_gcode_metadata")
+    )
+    return (
+        select(
+            ranked.c.model_id,
+            ranked.c.estimated_time_s,
+            ranked.c.filament_weight_g,
+        )
+        .where(ranked.c.row_number == 1)
+        .subquery("latest_gcode_metadata")
+    )
+
+
+def _sort_value_and_statement(stmt, sort: ModelSort):
+    if sort in (ModelSort.DATE_DESC, ModelSort.DATE_ASC):
+        return stmt, Model.updated_at
+    if sort in (ModelSort.NAME_ASC, ModelSort.NAME_DESC):
+        return stmt, func.lower(Model.name)
+    if sort == ModelSort.FILAMENT_ASC:
+        metadata = _latest_gcode_metadata()
+        return (
+            stmt.outerjoin(metadata, metadata.c.model_id == Model.id),
+            metadata.c.filament_weight_g,
+        )
+
+    jobs = _job_sort_stats()
+    stmt = stmt.outerjoin(jobs, jobs.c.model_id == Model.id)
+    if sort == ModelSort.SUCCESS_DESC:
+        return stmt, jobs.c.success_rate
+    if sort == ModelSort.PRINTED_DESC:
+        return stmt, jobs.c.last_printed_at
+    if sort == ModelSort.COST_ASC:
+        return stmt, jobs.c.total_cost
+
+    metadata = _latest_gcode_metadata()
+    stmt = stmt.outerjoin(metadata, metadata.c.model_id == Model.id)
+    if sort == ModelSort.DURATION_ASC:
+        return stmt, func.coalesce(
+            jobs.c.average_duration_s, metadata.c.estimated_time_s
+        )
+    raise ValueError(f"unsupported_model_sort:{sort}")
+
+
+def _encode_model_cursor(
+    sort: ModelSort,
+    value: object,
+    model_id: int,
+    total: int,
+    filter_key: str,
+) -> str:
+    encoded_value = value
+    if isinstance(value, datetime):
+        encoded_value = ensure_utc(value).isoformat()
+    payload = json.dumps(
+        {
+            "sort": sort.value,
+            "value": encoded_value,
+            "id": model_id,
+            "total": total,
+            "filters": filter_key,
+        },
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_model_cursor(
+    cursor: str, sort: ModelSort, filter_key: str
+) -> tuple[object, int, int]:
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(cursor + padding))
+        if payload.get("sort") != sort.value or payload.get("filters") != filter_key:
+            raise ValueError
+        value = payload["value"]
+        model_id = int(payload["id"])
+        total = int(payload["total"])
+        if model_id <= 0 or total < 0:
+            raise ValueError
+        if value is not None and sort in (
+            ModelSort.DATE_DESC,
+            ModelSort.DATE_ASC,
+            ModelSort.PRINTED_DESC,
+        ):
+            value = datetime.fromisoformat(str(value))
+        elif value is not None and sort not in (
+            ModelSort.NAME_ASC,
+            ModelSort.NAME_DESC,
+        ):
+            value = float(value)
+        return value, model_id, total
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_model_cursor") from exc
+
+
+def _model_filter_key(filters: ModelFilters, user: User) -> str:
+    payload = json.dumps(
+        {
+            "filters": filters.model_dump(mode="json"),
+            "user_id": user.id,
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def _apply_model_cursor(
+    stmt,
+    expression,
+    sort: ModelSort,
+    cursor: tuple[object, int, int] | None,
+):
+    descending = sort in (
+        ModelSort.DATE_DESC,
+        ModelSort.NAME_DESC,
+        ModelSort.SUCCESS_DESC,
+        ModelSort.PRINTED_DESC,
+    )
+    if cursor:
+        value, model_id, _total = cursor
+        id_after = Model.id < model_id if descending else Model.id > model_id
+        if value is None:
+            stmt = stmt.where(expression.is_(None), id_after)
+        else:
+            value_after = expression < value if descending else expression > value
+            stmt = stmt.where(
+                value_after
+                | ((expression == value) & id_after)
+                | expression.is_(None)
+            )
+    null_rank = case((expression.is_(None), 1), else_=0)
+    order_value = expression.desc() if descending else expression.asc()
+    order_id = Model.id.desc() if descending else Model.id.asc()  # type: ignore[attr-defined]
+    return stmt.order_by(null_rank.asc(), order_value, order_id)
+
+
+def page_items(
+    session: Session,
+    user: User,
+    *,
+    filters: ModelFilters,
+    sort: ModelSort = ModelSort.DATE_DESC,
+    cursor: str | None = None,
+    limit: int = 60,
+) -> ModelPageRead:
+    """Globally sorted keyset page; the browser never drains the full library."""
+    filtered = _filtered_stmt(session, user, filters)
+    filter_key = _model_filter_key(filters, user)
+    decoded_cursor = (
+        _decode_model_cursor(cursor, sort, filter_key) if cursor else None
+    )
+    if decoded_cursor is None:
+        total = int(
+            session.exec(
+                select(func.count()).select_from(
+                    filtered.with_only_columns(Model.id).subquery()
+                )
+            ).one()
+        )
+    else:
+        total = decoded_cursor[2]
+    stmt, sort_value = _sort_value_and_statement(filtered, sort)
+    stmt = _apply_model_cursor(stmt, sort_value, sort, decoded_cursor)
+    raw_rows = session.execute(stmt.add_columns(sort_value).limit(limit + 1)).all()
+    has_more = len(raw_rows) > limit
+    page_rows = raw_rows[:limit]
+    models = [row[0] for row in page_rows]
+    next_cursor = None
+    if has_more and page_rows:
+        last_model, last_value = page_rows[-1]
+        next_cursor = _encode_model_cursor(
+            sort, last_value, last_model.id, total, filter_key
+        )
+    return ModelPageRead(
+        items=_hydrate_list_rows(session, user, models),
+        next_cursor=next_cursor,
+        total=total,
+    )
+
+
+def outliner_items(
+    session: Session,
+    user: User,
+    *,
+    filters: ModelFilters,
+    limit: int = 500,
+) -> list[OutlinerModelRead]:
+    """Minimal desktop outliner rows; no Artifact/Metadata/print hydration."""
+    rows = session.exec(
+        _filtered_stmt(session, user, filters)
+        .order_by(func.lower(Model.name).asc(), Model.id.asc())  # type: ignore[attr-defined]
+        .limit(limit)
+    ).all()
+    return [
+        OutlinerModelRead(
+            id=model.id,
+            name=model.name,
+            collection=collection_name_for(model),
+            collection_id=model.collection_id,
+        )
+        for model in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1132,44 +1452,50 @@ def _cached_storage_usage() -> dict:
 
 def vault_stats(session: Session, user: User) -> VaultStatsRead:
     live_model_ids = select(Model.id).where(
-        live(Model),
-        Model.hash != SENTINEL_MODEL_HASH,
+        live(Model), Model.hash != SENTINEL_MODEL_HASH
     )
-    live_model_ids = _apply_model_access(live_model_ids, session, user)
-    live_files = (
-        select(File).where(live(File)).where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+    live_model_ids = _apply_model_access(live_model_ids, session, user).cte(
+        "vault_models"
     )
-
-    model_count = session.exec(
-        select(func.count()).select_from(live_model_ids.subquery())
-    ).one()
-    file_count = session.exec(
-        select(func.count()).select_from(live_files.subquery())
-    ).one()
-    indexed_size = session.exec(
-        select(func.coalesce(func.sum(File.size_bytes), 0))
+    file_stats = (
+        select(
+            func.count(File.id).label("file_count"),
+            func.coalesce(func.sum(File.size_bytes), 0).label("indexed_size"),
+            func.coalesce(
+                func.sum(case((File.file_type != FileType.GCODE, 1), else_=0)), 0
+            ).label("source_file_count"),
+            func.coalesce(
+                func.sum(case((File.file_type == FileType.GCODE, 1), else_=0)), 0
+            ).label("gcode_file_count"),
+        )
+        .join(live_model_ids, live_model_ids.c.id == File.model_id)
         .where(live(File))
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
+        .cte("vault_file_stats")
+    )
+    counts = session.execute(
+        select(
+            select(func.count()).select_from(live_model_ids).scalar_subquery(),
+            file_stats.c.file_count,
+            file_stats.c.indexed_size,
+            file_stats.c.source_file_count,
+            file_stats.c.gcode_file_count,
+            select(func.count(Collection.id))
+            .where(live(Collection))
+            .scalar_subquery(),
+            select(func.count(Tag.id)).where(live(Tag)).scalar_subquery(),
+            select(func.count(Printer.id)).where(live(Printer)).scalar_subquery(),
+        ).select_from(file_stats)
     ).one()
-    source_file_count = session.exec(
-        select(func.count(File.id))
-        .where(live(File))
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-        .where(File.file_type != FileType.GCODE)
-    ).one()
-    gcode_file_count = session.exec(
-        select(func.count(File.id))
-        .where(live(File))
-        .where(File.model_id.in_(live_model_ids))  # type: ignore[union-attr]
-        .where(File.file_type == FileType.GCODE)
-    ).one()
-    collection_count = session.exec(
-        select(func.count(Collection.id)).where(live(Collection))
-    ).one()
-    tag_count = session.exec(select(func.count(Tag.id)).where(live(Tag))).one()
-    printer_count = session.exec(
-        select(func.count(Printer.id)).where(live(Printer))
-    ).one()
+    (
+        model_count,
+        file_count,
+        indexed_size,
+        source_file_count,
+        gcode_file_count,
+        collection_count,
+        tag_count,
+        printer_count,
+    ) = counts
 
     try:
         storage_usage = StorageUsageRead(**_cached_storage_usage())

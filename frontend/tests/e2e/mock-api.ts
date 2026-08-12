@@ -410,6 +410,26 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, modelList);
     return;
   }
+  if (url.pathname === "/api/v1/models/page") {
+    sendJson(res, {
+      items: modelList,
+      next_cursor: null,
+      total: modelList.length,
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/models/outliner") {
+    sendJson(
+      res,
+      modelList.map(({ id, name, collection, collection_id }) => ({
+        id,
+        name,
+        collection,
+        collection_id,
+      })),
+    );
+    return;
+  }
   if (url.pathname === "/api/v1/models/facets") {
     sendJson(res, {
       file_type: [],

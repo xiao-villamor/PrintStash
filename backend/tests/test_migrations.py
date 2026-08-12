@@ -46,6 +46,26 @@ def test_alembic_upgrade_creates_expected_schema(tmp_path: Path, monkeypatch) ->
     file_indexes = {index["name"]: index for index in inspector.get_indexes("files")}
     assert bool(file_indexes["uq_files_model_version"]["unique"]) is True
     assert bool(file_indexes["uq_files_live_recommended_gcode"]["unique"]) is True
+    assert file_indexes["ix_files_model_deleted_type"]["column_names"] == [
+        "model_id",
+        "deleted_at",
+        "file_type",
+    ]
+    model_indexes = {
+        index["name"]: index for index in inspector.get_indexes("models")
+    }
+    assert model_indexes["ix_models_deleted_updated_id"]["column_names"] == [
+        "deleted_at",
+        "updated_at",
+        "id",
+    ]
+    background_job_indexes = {
+        index["name"]: index
+        for index in inspector.get_indexes("background_jobs")
+    }
+    assert background_job_indexes[
+        "ix_background_jobs_visible_state_owner_updated"
+    ]["column_names"] == ["visible", "state", "owner_user_id", "updated_at"]
 
     share_columns = {col["name"]: col for col in inspector.get_columns("share_links")}
     assert "model_id" in share_columns

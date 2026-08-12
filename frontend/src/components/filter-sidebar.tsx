@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
-import { CollectionRead, ModelListItem, PrinterRead, TagRead } from "@/types";
+import { CollectionRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
 import { Box, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
@@ -24,7 +24,7 @@ interface CollectionNode {
 }
 
 type DragPayload =
-  | { type: "model"; model: ModelListItem }
+  | { type: "model"; model: OutlinerModelRead }
   | { type: "collection"; collection: CollectionRead };
 
 function buildTree(cats: CollectionRead[]): CollectionNode[] {
@@ -51,7 +51,7 @@ function DraggableModelLeaf({
   model,
   isDraggingThisModel,
 }: {
-  model: ModelListItem;
+  model: OutlinerModelRead;
   isDraggingThisModel: boolean;
 }) {
   const router = useRouter();
@@ -99,7 +99,7 @@ function CollectionTreeRow({
   onSelect: (path: string | null) => void;
   expanded: Set<string>;
   toggle: (path: string) => void;
-  modelsByCollection: Map<string, ModelListItem[]>;
+  modelsByCollection: Map<string, OutlinerModelRead[]>;
   visibleIds?: Set<number> | null;
   visibleModelIds?: Set<number> | null;
   dragging: DragPayload | null;
@@ -267,7 +267,7 @@ function DroppableAllModels({
   onClick: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
-  rootModels: ModelListItem[];
+  rootModels: OutlinerModelRead[];
   dragging: DragPayload | null;
   visibleModelIds: Set<number> | null;
 }) {
@@ -408,7 +408,7 @@ export function FilterSidebarContent({
     : tree;
 
   const modelsByCollection = useMemo(() => {
-    const grouped = new Map<string, ModelListItem[]>();
+    const grouped = new Map<string, OutlinerModelRead[]>();
     for (const model of models) {
       if (!model.collection) continue;
       const current = grouped.get(model.collection) ?? [];
@@ -793,7 +793,7 @@ export function FilterSidebarContent({
 
 export interface FilterSidebarProps {
   collections: CollectionRead[];
-  models?: ModelListItem[];
+  models?: OutlinerModelRead[];
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;
