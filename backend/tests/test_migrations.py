@@ -173,6 +173,101 @@ def test_runner_rejects_incomplete_orphan_schema_without_stamping(
     assert "alembic_version" not in _table_names(url)
 
 
+def _rewrite_sqlite_table_definition(
+    url: str,
+    table_name: str,
+    old: str,
+    new: str,
+) -> None:
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            statement = connection.execute(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name = :name"
+                ),
+                {"name": table_name},
+            ).scalar_one()
+            assert old in statement
+            connection.exec_driver_sql("PRAGMA writable_schema=ON")
+            connection.execute(
+                text(
+                    "UPDATE sqlite_master SET sql = :sql "
+                    "WHERE type = 'table' AND name = :name"
+                ),
+                {"sql": statement.replace(old, new), "name": table_name},
+            )
+            schema_version = connection.exec_driver_sql(
+                "PRAGMA schema_version"
+            ).scalar_one()
+            connection.exec_driver_sql(f"PRAGMA schema_version={schema_version + 1}")
+            connection.exec_driver_sql("PRAGMA writable_schema=OFF")
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("table_name", "old", "new"),
+    [
+        ("users", "username VARCHAR(128) NOT NULL", "username INTEGER NOT NULL"),
+        (
+            "users",
+            "hashed_password VARCHAR(255) NOT NULL",
+            "hashed_password VARCHAR(255)",
+        ),
+        (
+            "users",
+            "oidc_managed BOOLEAN DEFAULT '0'",
+            "oidc_managed BOOLEAN DEFAULT '1'",
+        ),
+        (
+            "printer_permissions",
+            "FOREIGN KEY(user_id) REFERENCES users (id)",
+            "FOREIGN KEY(user_id) REFERENCES collections (id)",
+        ),
+    ],
+)
+def test_runner_rejects_structurally_divergent_orphan_schema(
+    tmp_path: Path,
+    table_name: str,
+    old: str,
+    new: str,
+) -> None:
+    url = _url(tmp_path, f"divergent-{table_name}-{abs(hash(old))}.sqlite")
+    engine = create_engine(url)
+    SQLModel.metadata.create_all(engine)
+    engine.dispose()
+    _rewrite_sqlite_table_definition(url, table_name, old, new)
+
+    with pytest.raises(migrate_mod.OrphanSchemaError, match="does not match"):
+        migrate_mod.run_migrations(url)
+
+    assert _current(url) is None
+
+
+def test_runner_rejects_orphan_with_wrong_partial_index_predicate(
+    tmp_path: Path,
+) -> None:
+    url = _url(tmp_path, "divergent-partial-index.sqlite")
+    engine = create_engine(url)
+    SQLModel.metadata.create_all(engine)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP INDEX uq_printers_live_default")
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX uq_printers_live_default "
+                "ON printers (is_default) WHERE is_default = 0"
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(migrate_mod.OrphanSchemaError, match="does not match"):
+        migrate_mod.run_migrations(url)
+
+    assert _current(url) is None
+
+
 def test_revision_uniqueness_migration_repairs_existing_duplicates(
     tmp_path: Path,
 ) -> None:
