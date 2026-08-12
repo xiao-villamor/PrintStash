@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import zipfile
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import HTTPException
@@ -195,14 +197,14 @@ def _managed_staging(item_id: int, source: Path) -> Path:
     return target
 
 
-async def resolve(item_id: int) -> None:
+def _begin_resolve(item_id: int) -> tuple[bool, str | None]:
     with get_session_factory().scoped_session() as session:
         row = session.get(InboxItem, item_id)
         if row is None or row.state not in {
             InboxItemState.CAPTURED,
             InboxItemState.FAILED,
         }:
-            return
+            return False, None
         row.state = InboxItemState.RESOLVING
         row.error_code = None
         row.retryable = False
@@ -210,8 +212,66 @@ async def resolve(item_id: int) -> None:
         row.updated_at = utcnow()
         session.add(row)
         session.commit()
-        source_url = row.source_url
+        return True, row.source_url
 
+
+def _finish_resolve(
+    item_id: int, manifest: dict[str, Any], managed: Path | None
+) -> None:
+    with get_session_factory().scoped_session() as session:
+        row = session.get(InboxItem, item_id)
+        if row is None:
+            return
+        row.manifest_json = json.dumps(manifest, separators=(",", ":"))
+        row.display_title = row.display_title or manifest.get("title")
+        if manifest.get("kind") == "archive" and managed is not None:
+            row.staging_key = str(managed)
+        row.state = InboxItemState.REVIEW
+        row.updated_at = utcnow()
+        session.add(row)
+        session.commit()
+
+
+def _fail_item(item_id: int, exc: Exception, fallback: str) -> None:
+    with get_session_factory().scoped_session() as session:
+        row = session.get(InboxItem, item_id)
+        if row is not None:
+            row.state = InboxItemState.FAILED
+            row.error_code = safe_error(str(exc)) or fallback
+            row.retryable = True
+            row.updated_at = utcnow()
+            session.add(row)
+            session.commit()
+
+
+def _prepare_archive(item_id: int, staged: Path, filename: str) -> tuple[dict, Path]:
+    entries = importer.inspect_archive(staged)
+    managed = _managed_staging(item_id, staged)
+    return (
+        {
+            "kind": "archive",
+            "title": safe_item(filename),
+            "entries": [
+                {
+                    "id": entry.name,
+                    "name": entry.name,
+                    "size": entry.size_bytes,
+                    "file_type": entry.file_type,
+                }
+                for entry in entries
+                if entry.file_type
+            ],
+        },
+        managed,
+    )
+
+
+async def resolve(item_id: int) -> None:
+    started, source_url = await asyncio.to_thread(_begin_resolve, item_id)
+    if not started:
+        return
+
+    managed: Path | None = None
     try:
         if not source_url:
             raise importer.ImportError_("url_required")
@@ -254,48 +314,16 @@ async def resolve(item_id: int) -> None:
                 staged, filename = await importer.download_to_staging(download_url)
                 suffix = Path(filename).suffix.lower()
                 if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-                    entries = importer.inspect_archive(staged)
-                    managed = _managed_staging(item_id, staged)
-                    manifest = {
-                        "kind": "archive",
-                        "title": safe_item(filename),
-                        "entries": [
-                            {
-                                "id": entry.name,
-                                "name": entry.name,
-                                "size": entry.size_bytes,
-                                "file_type": entry.file_type,
-                            }
-                            for entry in entries
-                            if entry.file_type
-                        ],
-                    }
+                    manifest, managed = await asyncio.to_thread(
+                        _prepare_archive, item_id, staged, filename
+                    )
                 else:
                     staged.unlink(missing_ok=True)
                     managed = None
                     manifest = {"kind": "direct", "title": safe_item(filename)}
-        with get_session_factory().scoped_session() as session:
-            row = session.get(InboxItem, item_id)
-            if row is None:
-                return
-            row.manifest_json = json.dumps(manifest, separators=(",", ":"))
-            row.display_title = row.display_title or manifest.get("title")
-            if manifest.get("kind") == "archive":
-                row.staging_key = str(managed)
-            row.state = InboxItemState.REVIEW
-            row.updated_at = utcnow()
-            session.add(row)
-            session.commit()
+        await asyncio.to_thread(_finish_resolve, item_id, manifest, managed)
     except Exception as exc:
-        with get_session_factory().scoped_session() as session:
-            row = session.get(InboxItem, item_id)
-            if row is not None:
-                row.state = InboxItemState.FAILED
-                row.error_code = safe_error(str(exc)) or "resolve_failed"
-                row.retryable = True
-                row.updated_at = utcnow()
-                session.add(row)
-                session.commit()
+        await asyncio.to_thread(_fail_item, item_id, exc, "resolve_failed")
 
 
 async def _download_assets(url: str) -> list[tuple[Path, str]]:
@@ -303,15 +331,78 @@ async def _download_assets(url: str) -> list[tuple[Path, str]]:
     staged, name = await importer.download_to_staging(download_url)
     suffix = Path(name).suffix.lower()
     if suffix == ".zip" or (zipfile.is_zipfile(staged) and suffix != ".3mf"):
-        entries = importer.inspect_archive(staged)
+        entries = await asyncio.to_thread(importer.inspect_archive, staged)
         selected = [entry.name for entry in entries if entry.file_type]
-        extracted = importer.extract_selected(staged, selected)
+        extracted = await asyncio.to_thread(importer.extract_selected, staged, selected)
         staged.unlink(missing_ok=True)
         return extracted
     return [(staged, name)]
 
 
 async def run_import(item_id: int, selected_ids: list[str], session_factory: SessionFactory) -> None:
+    context = await asyncio.to_thread(
+        _begin_import, item_id, selected_ids, session_factory
+    )
+    if context is None:
+        return
+    manifest = context["manifest"]
+    selected = context["selected"]
+    source_url = context["source_url"]
+    staging_key = context["staging_key"]
+    job_id = context["job_id"]
+
+    try:
+        assets: list[tuple[Path, str]] = []
+        kind = manifest.get("kind")
+        if kind == "archive":
+            entries = [entry.get("id") for entry in manifest.get("entries", [])]
+            wanted = [item for item in selected if item in entries] or entries
+            if not staging_key or not Path(staging_key).exists():
+                raise importer.ImportError_("staging_expired")
+            assets = await asyncio.to_thread(
+                importer.extract_selected, Path(staging_key), wanted
+            )
+        elif kind == "model_files":
+            files_by_id = {item["id"]: item for item in manifest.get("files", [])}
+            wanted = [item for item in selected if item in files_by_id] or list(files_by_id)
+            chosen = [
+                import_resolvers.ModelFile(
+                    file_id=item_id_value,
+                    name=files_by_id[item_id_value]["name"],
+                    file_type=files_by_id[item_id_value]["file_type"],
+                    size=files_by_id[item_id_value].get("size"),
+                )
+                for item_id_value in wanted
+            ]
+            links = await import_resolvers.resolve_selected_download(source_url, chosen)
+            for link in links:
+                assets.extend(await _download_assets(link))
+        elif kind == "collection":
+            members = {item["id"]: item for item in manifest.get("members", [])}
+            wanted = [item for item in selected if item in members] or list(members)
+            for member_id in wanted:
+                assets.extend(await _download_assets(members[member_id]["page_url"]))
+        else:
+            assets = await _download_assets(source_url)
+        await asyncio.to_thread(
+            importer.import_assets,
+            job_id=job_id,
+            staged_files=assets,
+            collection=context["collection_path"],
+            tags=context["tags"],
+            source_url=source_url,
+            actor_user_id=context["owner_id"],
+            session_factory=session_factory,
+        )
+        await asyncio.to_thread(_finish_import, item_id, job_id, session_factory)
+    except Exception as exc:
+        registry.update(job_id, state="failed", error=str(exc), retryable=True)
+        await asyncio.to_thread(_fail_import, item_id, exc, session_factory)
+
+
+def _begin_import(
+    item_id: int, selected_ids: list[str], session_factory: SessionFactory
+) -> dict[str, Any] | None:
     with session_factory.scoped_session() as session:
         row = session.get(InboxItem, item_id)
         if row is None or row.state != InboxItemState.REVIEW:
@@ -338,81 +429,55 @@ async def run_import(item_id: int, selected_ids: list[str], session_factory: Ses
         row.background_job_id = job_id
         session.add(row)
         session.commit()
-        source_url = row.source_url
-        owner_id = row.owner_user_id
-        staging_key = row.staging_key
+        return {
+            "manifest": manifest,
+            "selected": selected,
+            "source_url": row.source_url,
+            "staging_key": row.staging_key,
+            "job_id": job_id,
+            "collection_path": collection_path,
+            "tags": tags,
+            "owner_id": row.owner_user_id,
+        }
 
-    try:
-        assets: list[tuple[Path, str]] = []
-        kind = manifest.get("kind")
-        if kind == "archive":
-            entries = [entry.get("id") for entry in manifest.get("entries", [])]
-            wanted = [item for item in selected if item in entries] or entries
-            if not staging_key or not Path(staging_key).exists():
-                raise importer.ImportError_("staging_expired")
-            assets = importer.extract_selected(Path(staging_key), wanted)
-        elif kind == "model_files":
-            files_by_id = {item["id"]: item for item in manifest.get("files", [])}
-            wanted = [item for item in selected if item in files_by_id] or list(files_by_id)
-            chosen = [
-                import_resolvers.ModelFile(
-                    file_id=item_id_value,
-                    name=files_by_id[item_id_value]["name"],
-                    file_type=files_by_id[item_id_value]["file_type"],
-                    size=files_by_id[item_id_value].get("size"),
-                )
-                for item_id_value in wanted
-            ]
-            links = await import_resolvers.resolve_selected_download(source_url, chosen)
-            for link in links:
-                assets.extend(await _download_assets(link))
-        elif kind == "collection":
-            members = {item["id"]: item for item in manifest.get("members", [])}
-            wanted = [item for item in selected if item in members] or list(members)
-            for member_id in wanted:
-                assets.extend(await _download_assets(members[member_id]["page_url"]))
+
+def _finish_import(
+    item_id: int, job_id: str, session_factory: SessionFactory
+) -> None:
+    job = registry.get(job_id)
+    with session_factory.scoped_session() as session:
+        row = session.get(InboxItem, item_id)
+        if row is None:
+            return
+        if job and job.state == "completed" and job.model_id:
+            row.state = InboxItemState.COMPLETED
+            row.resulting_model_id = job.model_id
+            row.completed_at = utcnow()
+            row.retryable = False
+            if row.staging_key:
+                Path(row.staging_key).unlink(missing_ok=True)
+                row.staging_key = None
         else:
-            assets = await _download_assets(source_url)
-        importer.import_assets(
-            job_id=job_id,
-            staged_files=assets,
-            collection=collection_path,
-            tags=tags,
-            source_url=source_url,
-            actor_user_id=owner_id,
-            session_factory=session_factory,
-        )
-        job = registry.get(job_id)
-        with session_factory.scoped_session() as session:
-            row = session.get(InboxItem, item_id)
-            if row is None:
-                return
-            if job and job.state == "completed" and job.model_id:
-                row.state = InboxItemState.COMPLETED
-                row.resulting_model_id = job.model_id
-                row.completed_at = utcnow()
-                row.retryable = False
-                if row.staging_key:
-                    Path(row.staging_key).unlink(missing_ok=True)
-                    row.staging_key = None
-            else:
-                row.state = InboxItemState.FAILED
-                row.error_code = job.error if job else "import_failed"
-                row.retryable = True
+            row.state = InboxItemState.FAILED
+            row.error_code = job.error if job else "import_failed"
+            row.retryable = True
+        row.updated_at = utcnow()
+        session.add(row)
+        session.commit()
+
+
+def _fail_import(
+    item_id: int, exc: Exception, session_factory: SessionFactory
+) -> None:
+    with session_factory.scoped_session() as session:
+        row = session.get(InboxItem, item_id)
+        if row is not None:
+            row.state = InboxItemState.FAILED
+            row.error_code = safe_error(str(exc)) or "import_failed"
+            row.retryable = True
             row.updated_at = utcnow()
             session.add(row)
             session.commit()
-    except Exception as exc:
-        registry.update(job_id, state="failed", error=str(exc), retryable=True)
-        with session_factory.scoped_session() as session:
-            row = session.get(InboxItem, item_id)
-            if row is not None:
-                row.state = InboxItemState.FAILED
-                row.error_code = safe_error(str(exc)) or "import_failed"
-                row.retryable = True
-                row.updated_at = utcnow()
-                session.add(row)
-                session.commit()
 
 
 def retry(session: Session, row: InboxItem) -> InboxItem:

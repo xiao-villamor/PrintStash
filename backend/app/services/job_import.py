@@ -7,13 +7,15 @@ history feed into new ``PrintJob`` rows.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
-from typing import List
+from typing import Any, List
 
 from sqlmodel import Session, select
 
 from app.db.models import File, FileType, PrintJob, PrintJobState
 from app.db.scopes import live
+from app.db.session import get_session_factory
 from app.schemas.models import ImportedPrintJobRead
 from app.services import filament as filament_svc
 from app.services import print_results
@@ -32,7 +34,6 @@ def _ts(t: float | None) -> datetime | None:
 
 
 async def import_print_jobs_from_printer(
-    session: Session,
     *,
     model_id: int,
     printer_id: int,
@@ -46,6 +47,37 @@ async def import_print_jobs_from_printer(
     different casing across polls than what was originally uploaded, and a
     case-sensitive comparison would re-import the entire history.
     """
+    client = MoonrakerClient(moonraker_url, moonraker_api_key)
+    try:
+        history = await client.get_print_history(limit=100)
+    except MoonrakerError as exc:
+        raise MoonrakerError(str(exc)) from exc
+
+    return await asyncio.to_thread(
+        _import_history,
+        history,
+        model_id=model_id,
+        printer_id=printer_id,
+    )
+
+
+def _import_history(
+    history: list[dict[str, Any]], *, model_id: int, printer_id: int
+) -> List[ImportedPrintJobRead]:
+    """Persist fetched history in a worker-owned synchronous session."""
+    with get_session_factory().scoped_session() as session:
+        return _import_history_with_session(
+            session, history, model_id=model_id, printer_id=printer_id
+        )
+
+
+def _import_history_with_session(
+    session: Session,
+    history: list[dict[str, Any]],
+    *,
+    model_id: int,
+    printer_id: int,
+) -> List[ImportedPrintJobRead]:
     gcode_files = session.exec(
         select(File)
         .where(File.model_id == model_id)
@@ -54,12 +86,6 @@ async def import_print_jobs_from_printer(
         .order_by(File.version.asc())  # type: ignore[attr-defined]
     ).all()
     filenames_to_file = {f.original_filename.lower(): f for f in gcode_files}
-
-    client = MoonrakerClient(moonraker_url, moonraker_api_key)
-    try:
-        history = await client.get_print_history(limit=100)
-    except MoonrakerError as exc:
-        raise MoonrakerError(str(exc)) from exc
 
     existing_remote = {
         row.lower()

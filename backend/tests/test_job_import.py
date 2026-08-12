@@ -51,7 +51,6 @@ def _run_import(session: Session, *, model_id: int, printer_id: int, history: li
     ):
         return asyncio.run(
             job_import.import_print_jobs_from_printer(
-                session,
                 model_id=model_id,
                 printer_id=printer_id,
                 moonraker_url="http://10.0.0.1:7125",

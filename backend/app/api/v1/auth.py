@@ -6,6 +6,7 @@ Stage 4 will graft OAuth2 / multi-tenant onto the same surface.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from datetime import timedelta
 from urllib.parse import urlparse
@@ -18,7 +19,7 @@ from app.core.config import settings
 from app.core.ratelimit import rate_limit
 from app.core.security import oauth2_scheme, require_user
 from app.db.models import User
-from app.db.session import get_session
+from app.db.session import get_session, get_session_factory
 from app.schemas.auth import (
     ApiKeyCreateRequest,
     ApiKeyCreateResponse,
@@ -58,6 +59,12 @@ _OIDC_COOKIE_PATH = "/api/v1/auth/oidc"
 _OIDC_STATE_COOKIE = "printstash_oidc_state"
 _OIDC_NONCE_COOKIE = "printstash_oidc_nonce"
 _OIDC_VERIFIER_COOKIE = "printstash_oidc_verifier"
+
+
+def _provision_oidc_user(claims: dict) -> User:
+    """Provision an OIDC identity without blocking the async callback loop."""
+    with get_session_factory().scoped_session() as session:
+        return oidc.provision_user(session, claims)
 
 
 def _oidc_cookie(
@@ -117,7 +124,6 @@ async def oidc_callback(
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
-    session: Session = Depends(get_session),
 ) -> RedirectResponse:
     response = RedirectResponse("/login?oidc=success", status_code=302)
     expected_state = request.cookies.get(_OIDC_STATE_COOKIE, "")
@@ -143,7 +149,7 @@ async def oidc_callback(
             if not begin_mutating_operation():
                 raise oidc.OIDCError("restore_in_progress")
             try:
-                user = oidc.provision_user(session, claims)
+                user = await asyncio.to_thread(_provision_oidc_user, claims)
                 scope = "admin" if user.is_superuser else "write"
                 access_token = create_access_token(
                     user.id,

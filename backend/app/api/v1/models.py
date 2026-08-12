@@ -905,7 +905,6 @@ async def import_print_jobs_from_printer(
 
     try:
         return await job_import.import_print_jobs_from_printer(
-            session,
             model_id=model_id,
             printer_id=printer_id,
             moonraker_url=printer.moonraker_url,
