@@ -29,6 +29,17 @@ if (!backendVersionMatch) {
   throw new Error("could not find version in backend/pyproject.toml");
 }
 const backendVersion = backendVersionMatch[1];
+const backendConfig = readFileSync(
+  join(process.cwd(), "..", "backend", "app", "core", "config.py"),
+  "utf8",
+);
+const backendConfigVersionMatch = backendConfig.match(
+  /^\s*app_version: str = "([^"]+)"/m,
+);
+if (!backendConfigVersionMatch) {
+  throw new Error("could not find app_version in backend/app/core/config.py");
+}
+const backendConfigVersion = backendConfigVersionMatch[1];
 
 describe("changelog ↔ package.json", () => {
   it("APP_VERSION is the newest changelog entry", () => {
@@ -43,6 +54,10 @@ describe("changelog ↔ package.json", () => {
 
   it("frontend package.json matches backend/pyproject.toml", () => {
     expect(pkg.version).toBe(backendVersion);
+  });
+
+  it("the backend runtime version matches the package versions", () => {
+    expect(backendConfigVersion).toBe(pkg.version);
   });
 });
 

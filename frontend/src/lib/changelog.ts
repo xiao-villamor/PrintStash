@@ -22,6 +22,22 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.11.4",
+    date: "Aug 2026",
+    changes: [
+      "Large libraries now browse and sort globally with cursor pagination, SQL-backed metrics, lean desktop outliner data, and substantially fewer aggregate queries",
+      "Portable library archives now enforce round-trip size and entry limits, verify every Artifact while streaming, and keep blocking archive work off the event loop",
+      "Hard deletion preserves user-owned external/NAS bytes and consistently cleans vault-owned Artifacts, thumbnails, dependencies, Documents, and embedded images",
+      "Password resets, account deactivation/reactivation, privilege changes, and logout now invalidate every access and refresh session durably",
+      "Refresh-token rotation is atomic under concurrent requests, expired refresh tokens are pruned in bounded batches, and login rate-limit state has bounded memory",
+      "First-run setup now commits configuration and the initial administrator atomically, while concurrent administrator changes cannot remove the final active superuser",
+      "PrintStash now enforces and reports its supported single-process API topology instead of silently accepting unsafe multi-worker deployments",
+      "OIDC callbacks pause database provisioning during restore, and cookie-authenticated mutations now retain the correct actor in the audit log",
+      "Manual print history rejects trashed Artifacts and invalid states instead of silently recording them as completed",
+      "Background tasks are awaited during shutdown, the container uv toolchain is pinned by version and digest, and remote thumbnails support ETag revalidation",
+    ],
+  },
+  {
     version: "0.11.3",
     date: "Aug 2026",
     changes: [

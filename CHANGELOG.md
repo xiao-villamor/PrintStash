@@ -13,6 +13,23 @@
 - Portable library exports now enforce the same entry and uncompressed-size ceilings as imports, and verify every source Artifact while streaming, so PrintStash does not produce an archive it would reject on round-trip.
 - Remote thumbnails now expose storage ETags and honor `If-None-Match` with a bodyless `304`, matching local thumbnail cache revalidation.
 - Task Center synchronization now releases timers on cleanup, pauses while the tab is hidden, stops when idle, and backs off after transient errors.
+- Permanent deletion now preserves user-owned external/NAS bytes while consistently removing vault-owned Artifact blobs, thumbnails, dependent rows, Document files, and embedded Document images.
+- Password resets, account activation changes, role changes, and logout now invalidate all access and refresh sessions durably; refresh-token rotation is atomic under concurrent requests and expired rows are pruned in bounded batches.
+- First-run setup now commits its configuration, initial superuser, and completion marker in one transaction, so an interrupted request cannot leave a half-configured vault.
+- Concurrent administrator changes can no longer deactivate or demote the final active superuser.
+- OIDC callback provisioning now participates in backup-restore write quiescing, and cookie-authenticated mutations retain their actor in audit logs.
+- Manual print-history entries now reject trashed Artifacts and invalid states instead of silently treating bad state input as completed.
+- Document trash now supports listing, restore, permanent purge, and retention GC without leaking its binary or embedded-image blobs.
+- Rate-limit state now evicts expired or least-recently-used IP buckets at a fixed cardinality ceiling.
+- Shutdown now cancels and awaits every managed background loop before closing shared clients.
+
+### Changed
+
+- The supported deployment topology is explicitly one API process per vault. Startup claims a vault lock and fails fast when another API process is active; detailed health reports this topology.
+
+### Security
+
+- The container build now pins the `uv` toolchain image to version `0.12.1` and an immutable multi-architecture digest.
 
 ### Performance
 
