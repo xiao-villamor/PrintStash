@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
+
 from app.core.time import utcnow
+from app.db.models import BackgroundJob
+from app.db.session import get_session_factory
+from app.services import jobs as jobs_module
 from app.services.jobs import JobRegistry, reconcile_interrupted_jobs
 
 
@@ -46,13 +51,23 @@ def test_result_payload_stored() -> None:
     assert registry.get(job_id).result == {"rebuilt": [1, 2]}
 
 
-def test_finished_jobs_pruned_after_ttl() -> None:
+def test_finished_jobs_pruned_after_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    monotonic_now = 0.0
+    monkeypatch.setattr(jobs_module, "monotonic", lambda: monotonic_now)
     registry = JobRegistry()
     old_id = registry.create()
     registry.update(old_id, state="completed")
     # Age the finished job past the TTL, then trigger pruning via create().
-    registry.get(old_id).finished_at = utcnow() - timedelta(hours=2)
+    expired_at = utcnow() - timedelta(hours=2)
+    registry.get(old_id).finished_at = expired_at
+    with get_session_factory().scoped_session() as session:
+        row = session.get(BackgroundJob, old_id)
+        assert row is not None
+        row.finished_at = expired_at
+        session.add(row)
+        session.commit()
 
+    monotonic_now = 61.0
     fresh_id = registry.create()
 
     assert registry.get(old_id) is None
