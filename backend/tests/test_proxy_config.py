@@ -46,8 +46,8 @@ def test_frontend_sets_browser_security_headers() -> None:
 
     assert "Content-Security-Policy" in conf
     assert "frame-ancestors 'none'" in conf
-    assert "X-Content-Type-Options \"nosniff\"" in conf
-    assert "Referrer-Policy \"strict-origin-when-cross-origin\"" in conf
+    assert 'X-Content-Type-Options "nosniff"' in conf
+    assert 'Referrer-Policy "strict-origin-when-cross-origin"' in conf
     assert "Permissions-Policy" in conf
 
 
@@ -59,3 +59,14 @@ def test_runtime_images_use_unprivileged_users() -> None:
     assert "gosu printstash" in (root / "backend" / "docker-entrypoint.sh").read_text()
     assert "useradd" in backend
     assert "nginxinc/nginx-unprivileged:alpine" in frontend
+
+
+def test_backend_uv_toolchain_image_is_immutable() -> None:
+    dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+    assert "ghcr.io/astral-sh/uv:latest" not in dockerfile
+    assert (
+        "ghcr.io/astral-sh/uv:0.12.1@"
+        "sha256:cf4eedcaa81655197f625739489effcbe71b61ceb1506f332c3facae5deceded"
+        in dockerfile
+    )
