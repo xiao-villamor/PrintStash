@@ -101,6 +101,11 @@ def test_detailed_health_requires_admin_and_reports_release_components(
     body = response.json()
     assert body["name"] == "PrintStash"
     assert body["version"] == get_config().app_version
+    assert body["deployment"] == {
+        "mode": "single_process",
+        "processes": 1,
+        "distributed_coordination": False,
+    }
     assert body["components"]["database"]["ok"] is True
     assert body["components"]["storage"]["backend"] == "local"
     assert body["components"]["backup"]["s3_configured"] is False

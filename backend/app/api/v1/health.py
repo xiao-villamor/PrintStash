@@ -247,6 +247,11 @@ def health_details() -> dict:
         "status": "ok",
         "name": settings.app_name,
         "version": settings.app_version,
+        "deployment": {
+            "mode": "single_process",
+            "processes": 1,
+            "distributed_coordination": False,
+        },
     }
     components = {
         "database": _database_probe(),

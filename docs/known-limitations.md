@@ -42,6 +42,11 @@ manufacturing platform.
   installs.
 - Postgres, S3/R2 storage, MinIO, and cloud backup targets are optional and
   should be treated as larger-install paths.
+- One API process is the supported topology. Do not pass `--workers` greater
+  than one or run multiple API replicas against the same vault: scheduling,
+  rate limits, session coordination, and background registries are deliberately
+  process-local. Startup claims a vault lock and fails fast if another API
+  process is already active.
 - PrintStash is designed for trusted self-hosted networks. Do not expose it
   directly to the public internet without TLS, reverse proxy hardening, strong
   secrets, and network-level care.
@@ -85,9 +90,8 @@ manufacturing platform.
   install on a trusted network.
 - Delivery is at-least-once: a retried or recovered send can arrive more than
   once, so receivers should de-duplicate on the `Idempotency-Key` header.
-- The dispatcher is built for the default single-node deployment. It claims work
-  safely against Postgres if you run multiple instances, but PrintStash is not
-  otherwise designed or tested for horizontal scaling.
+- The dispatcher is built for the supported single-process deployment. Its
+  database claim remains defensive, but horizontal API scaling is not supported.
 - Message formatting is fixed (no per-channel templates), the event set is the
   four above, and there is no separate "printer back online" event.
 - An auto-disabled channel is not re-enabled automatically and does not raise a

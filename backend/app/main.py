@@ -30,6 +30,7 @@ from app.core.metrics import (
     printer_status,
 )
 from app.core.metrics import registry as _metrics_registry
+from app.core.topology import acquire_process_lock, release_process_lock
 from app.db.session import get_session_factory, init_db
 from app.services.audit import (
     clear_audit_context,
@@ -61,6 +62,8 @@ def _safe_db_url(value: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    process_lock = acquire_process_lock()
+    app.state.process_lock = process_lock
     logger.info("starting %s v%s", settings.app_name, settings.app_version)
     _app_info.info({"version": settings.app_version, "name": settings.app_name})
     # DB must exist before we can read the runtime overlay.
@@ -141,6 +144,7 @@ async def lifespan(app: FastAPI):
 
     await close_http_client()
     await close_browser()
+    release_process_lock(process_lock)
     logger.info("shutting down")
 
 
