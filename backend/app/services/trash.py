@@ -17,6 +17,7 @@ from app.core.time import utcnow
 from app.db.models import (
     Collection,
     File,
+    FileType,
     Metadata,
     Model,
     Printer,
@@ -25,7 +26,7 @@ from app.db.models import (
     Tag,
     User,
 )
-from app.db.scopes import trashed
+from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
 from app.services.storage_backend import get_backend
 from app.services.storage_utils import all_owned_blob_keys
@@ -73,34 +74,77 @@ def restore_model(session: Session, model: Model) -> None:
     session.commit()
 
 
+def hard_delete_file(
+    session: Session,
+    file_row: File,
+    *,
+    maintain_revision_invariant: bool = True,
+) -> None:
+    """Permanently remove one Artifact and every vault-owned dependent.
+
+    Linked external bytes belong to the user and are never deleted. The caller
+    owns the surrounding transaction and commit.
+    """
+    if file_row.id is None:
+        return
+
+    backend = get_backend()
+    file_id = int(file_row.id)
+    if not file_row.is_external:
+        backend.delete(file_row.path)
+    backend.delete(backend.thumbnail_key(file_id))
+    backend.delete(backend.legacy_thumbnail_key(file_id))
+
+    model = session.get(Model, file_row.model_id)
+    if model is not None and model.thumbnail_file_id == file_id:
+        model.thumbnail_file_id = None
+        model.thumbnail_path = None
+        model.updated_at = utcnow()
+        session.add(model)
+
+    was_live_recommended = (
+        maintain_revision_invariant
+        and file_row.file_type == FileType.GCODE
+        and file_row.deleted_at is None
+        and file_row.is_recommended
+    )
+    if was_live_recommended:
+        file_row.is_recommended = False
+        session.add(file_row)
+        session.flush()
+        replacement = session.exec(
+            select(File)
+            .where(
+                File.model_id == file_row.model_id,
+                File.id != file_id,
+                File.file_type == FileType.GCODE,
+                live(File),
+            )
+            .order_by(File.version.desc())  # type: ignore[attr-defined]
+        ).first()
+        if replacement is not None:
+            replacement.is_recommended = True
+            session.add(replacement)
+
+    session.exec(delete(PrinterFile).where(PrinterFile.file_id == file_id))
+    session.exec(delete(PrintJob).where(PrintJob.file_id == file_id))
+    session.exec(delete(Metadata).where(Metadata.file_id == file_id))
+    session.delete(file_row)
+
+
 def hard_delete_model(session: Session, model: Model) -> None:
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
         return
 
-    backend = get_backend()
     file_rows = session.exec(select(File).where(File.model_id == model.id)).all()
-    file_ids = [row.id for row in file_rows if row.id is not None]
-
-    for file_row in file_rows:
-        # External (NAS-linked) blobs are user-owned: never delete the original
-        # bytes — only the vault-owned thumbnails. The DB row is still removed.
-        if not file_row.is_external:
-            backend.delete(file_row.path)
-        if file_row.id is not None:
-            backend.delete(backend.thumbnail_key(file_row.id))
-            backend.delete(backend.legacy_thumbnail_key(file_row.id))
-
     model.thumbnail_file_id = None
     model.thumbnail_path = None
     session.add(model)
     session.flush()
-
-    if file_ids:
-        session.exec(delete(PrinterFile).where(PrinterFile.file_id.in_(file_ids)))  # type: ignore[call-overload, union-attr]
-        session.exec(delete(PrintJob).where(PrintJob.file_id.in_(file_ids)))  # type: ignore[call-overload, union-attr]
-        session.exec(delete(Metadata).where(Metadata.file_id.in_(file_ids)))  # type: ignore[call-overload, union-attr]
-        session.exec(delete(File).where(File.id.in_(file_ids)))  # type: ignore[call-overload, union-attr]
+    for file_row in file_rows:
+        hard_delete_file(session, file_row, maintain_revision_invariant=False)
+    session.flush()
 
     # Don't bulk-delete the tag links here: ``Model.tags`` is a link_model
     # (many-to-many) relationship, so deleting the model already removes its

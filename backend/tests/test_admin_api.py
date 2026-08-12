@@ -40,7 +40,9 @@ def _headers(user: User) -> dict[str, str]:
 
 
 class TestRequireSuperuser:
-    def test_non_superuser_blocked(self, client: TestClient, db_session: Session) -> None:
+    def test_non_superuser_blocked(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         user = _user(db_session, "regular", superuser=False)
         resp = client.get("/api/v1/admin/users", headers=_headers(user))
         assert resp.status_code == 403
@@ -48,7 +50,9 @@ class TestRequireSuperuser:
 
 
 class TestListUsers:
-    def test_list_excludes_deleted(self, client: TestClient, db_session: Session) -> None:
+    def test_list_excludes_deleted(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         admin = _user(db_session, "admin1")
         gone = _user(db_session, "gone", superuser=False)
         gone.deleted_at = utcnow()
@@ -97,12 +101,16 @@ class TestUpdateUser:
     def test_update_not_found(self, client: TestClient, db_session: Session) -> None:
         admin = _user(db_session, "admin4")
         resp = client.patch(
-            "/api/v1/admin/users/999", json={"email": "x@x.com"}, headers=_headers(admin)
+            "/api/v1/admin/users/999",
+            json={"email": "x@x.com"},
+            headers=_headers(admin),
         )
         assert resp.status_code == 404
         assert resp.json()["detail"] == "user_not_found"
 
-    def test_update_deleted_user_404(self, client: TestClient, db_session: Session) -> None:
+    def test_update_deleted_user_404(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         admin = _user(db_session, "admin5")
         target = _user(db_session, "deleted-target", superuser=False)
         target.deleted_at = utcnow()
@@ -224,7 +232,9 @@ class TestDeactivateUser:
         target.deleted_at = utcnow()
         db_session.add(target)
         db_session.commit()
-        resp = client.delete(f"/api/v1/admin/users/{target.id}", headers=_headers(admin))
+        resp = client.delete(
+            f"/api/v1/admin/users/{target.id}", headers=_headers(admin)
+        )
         assert resp.status_code == 404
 
     def test_deactivate_last_superuser_blocked(
@@ -238,14 +248,18 @@ class TestDeactivateUser:
     def test_deactivate_success(self, client: TestClient, db_session: Session) -> None:
         admin = _user(db_session, "admin-i")
         target = _user(db_session, "deactivate-me", superuser=False)
-        resp = client.delete(f"/api/v1/admin/users/{target.id}", headers=_headers(admin))
+        resp = client.delete(
+            f"/api/v1/admin/users/{target.id}", headers=_headers(admin)
+        )
         assert resp.status_code == 204
         db_session.refresh(target)
         assert target.is_active is False
 
 
 class TestAdminDeleteResource:
-    def test_unknown_resource_404(self, client: TestClient, db_session: Session) -> None:
+    def test_unknown_resource_404(
+        self, client: TestClient, db_session: Session
+    ) -> None:
         admin = _user(db_session, "admin-j")
         resp = client.delete("/api/v1/admin/bogus/1", headers=_headers(admin))
         assert resp.status_code == 404
@@ -324,6 +338,42 @@ class TestAdminDeleteResource:
         assert not backend.exists(key)
         db_session.expire_all()
         assert db_session.get(File, file_id) is None
+
+    def test_hard_delete_external_file_preserves_nas_bytes(
+        self, client: TestClient, db_session: Session, tmp_path
+    ) -> None:
+        admin = _user(db_session, "admin-external-file")
+        nas_path = tmp_path / "linked-model.stl"
+        original = b"user-owned-nas-bytes"
+        nas_path.write_bytes(original)
+
+        model = Model(name="linked", slug="linked", hash="8" * 64)
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+        file_row = File(
+            model_id=model.id,
+            path=str(nas_path),
+            original_filename=nas_path.name,
+            file_type=FileType.STL,
+            size_bytes=len(original),
+            sha256="1" * 64,
+            is_external=True,
+        )
+        db_session.add(file_row)
+        db_session.commit()
+        db_session.refresh(file_row)
+        file_id = file_row.id
+
+        response = client.delete(
+            f"/api/v1/admin/files/{file_id}?hard=true",
+            headers=_headers(admin),
+        )
+
+        assert response.status_code == 204
+        db_session.expire_all()
+        assert db_session.get(File, file_id) is None
+        assert nas_path.read_bytes() == original
 
 
 class TestRestoreResource:

@@ -19,8 +19,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.schemas.auth import UserCreate, UserPasswordUpdate, UserRead, UserUpdate
 from app.services.auth import get_user_by_username, hash_password
-from app.services.storage_backend import get_backend
-from app.services.trash import gc_soft_deleted
+from app.services.trash import gc_soft_deleted, hard_delete_file
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)]
@@ -170,8 +169,9 @@ def admin_delete_resource(
         raise HTTPException(status_code=404, detail="resource_id_not_found")
     if hard:
         if isinstance(row, File):
-            get_backend().delete(row.path)
-        session.delete(row)
+            hard_delete_file(session, row)
+        else:
+            session.delete(row)
     else:
         row.deleted_at = utcnow()
         session.add(row)
