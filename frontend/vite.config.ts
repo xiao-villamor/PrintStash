@@ -1,14 +1,16 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 const API_TARGET = process.env.VITE_API_URL || "http://localhost:8000";
 
 // Client SPA. Dev-server proxy replaces the old next.config rewrites; in prod
 // the built `dist/` is served behind the same reverse proxy as the API.
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [react()],
+  resolve: {
+    tsconfigPaths: true,
+  },
   // The 3D/G-code viewers (`stl-viewer`, `gcode-viewer`) are lazy-loaded, so
   // their heavy `three` stack isn't reachable from the initial entry. Without
   // this, Vite only discovers these deps the *first* time a model is opened,
