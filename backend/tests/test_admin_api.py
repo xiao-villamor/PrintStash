@@ -215,6 +215,48 @@ class TestResetPassword:
         )
         assert resp.status_code == 200
 
+    def test_reset_password_invalidates_existing_access_and_refresh_tokens(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = _user(db_session, "admin-reset-sessions")
+        target = _user(db_session, "reset-sessions", superuser=False)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "reset-sessions", "password": "Password123"},
+        ).json()
+
+        response = client.post(
+            f"/api/v1/admin/users/{target.id}/password",
+            json={"password": "NewPassword123"},
+            headers=_headers(admin),
+        )
+
+        assert response.status_code == 200
+        assert (
+            client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {login['access_token']}"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": login["refresh_token"]},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={
+                    "username": "reset-sessions",
+                    "password": "NewPassword123",
+                },
+            ).status_code
+            == 200
+        )
+
 
 class TestDeactivateUser:
     def test_deactivate_not_found(
@@ -254,6 +296,49 @@ class TestDeactivateUser:
         assert resp.status_code == 204
         db_session.refresh(target)
         assert target.is_active is False
+
+    def test_deactivate_invalidates_existing_access_and_refresh_tokens(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = _user(db_session, "admin-deactivate-sessions")
+        target = _user(db_session, "deactivate-sessions", superuser=False)
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": target.username, "password": "Password123"},
+        ).json()
+
+        response = client.delete(
+            f"/api/v1/admin/users/{target.id}", headers=_headers(admin)
+        )
+
+        assert response.status_code == 204
+        assert (
+            client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {login['access_token']}"},
+            ).status_code
+            == 401
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": login["refresh_token"]},
+            ).status_code
+            == 401
+        )
+        reactivated = client.patch(
+            f"/api/v1/admin/users/{target.id}",
+            json={"is_active": True},
+            headers=_headers(admin),
+        )
+        assert reactivated.status_code == 200
+        assert (
+            client.post(
+                "/api/v1/auth/refresh",
+                json={"refresh_token": login["refresh_token"]},
+            ).status_code
+            == 401
+        )
 
 
 class TestAdminDeleteResource:

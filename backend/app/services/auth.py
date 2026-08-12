@@ -9,6 +9,7 @@ import bcrypt
 import jwt
 from fastapi import Response
 from jwt import InvalidTokenError
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -200,6 +201,27 @@ def revoke_all_refresh_tokens(session: Session, user_id: int) -> None:
         record.revoked_at = now
         session.add(record)
     session.commit()
+
+
+def invalidate_user_sessions(session: Session, user: User) -> None:
+    """Stage durable invalidation of every access and refresh session.
+
+    The caller owns the transaction so a credential or account-state change
+    and its session invalidation can never be committed separately.
+    """
+    if user.id is None:
+        raise ValueError("cannot invalidate sessions for an unpersisted user")
+    now = utcnow()
+    user.auth_version += 1
+    session.add(user)
+    session.exec(
+        update(RefreshToken)
+        .where(
+            RefreshToken.user_id == user.id,
+            RefreshToken.revoked == False,  # noqa: E712
+        )
+        .values(revoked=True, revoked_at=now)
+    )
 
 
 def get_user_by_username(session: Session, username: str) -> Optional[User]:

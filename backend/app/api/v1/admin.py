@@ -18,7 +18,11 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.schemas.auth import UserCreate, UserPasswordUpdate, UserRead, UserUpdate
-from app.services.auth import get_user_by_username, hash_password
+from app.services.auth import (
+    get_user_by_username,
+    hash_password,
+    invalidate_user_sessions,
+)
 from app.services.trash import gc_soft_deleted, hard_delete_file
 
 router = APIRouter(
@@ -111,6 +115,13 @@ def update_user(
         next_is_superuser=payload.is_superuser,
         next_is_active=payload.is_active,
     )
+    changes_security_context = (
+        payload.is_active is not None and payload.is_active != user.is_active
+    ) or (
+        payload.is_superuser is not None and payload.is_superuser != user.is_superuser
+    )
+    if changes_security_context:
+        invalidate_user_sessions(session, user)
     if "email" in payload.model_fields_set:
         user.email = payload.email
     if payload.is_superuser is not None:
@@ -133,6 +144,7 @@ def reset_user_password(
     user = session.get(User, user_id)
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="user_not_found")
+    invalidate_user_sessions(session, user)
     user.hashed_password = hash_password(payload.password)
     user.updated_at = utcnow()
     session.add(user)
@@ -147,6 +159,7 @@ def deactivate_user(user_id: int, session: Session = Depends(get_session)) -> Re
     if user is None or user.deleted_at is not None:
         raise HTTPException(status_code=404, detail="user_not_found")
     _prevent_last_superuser_lockout(session, user, next_is_active=False)
+    invalidate_user_sessions(session, user)
     user.is_active = False
     user.updated_at = utcnow()
     session.add(user)
