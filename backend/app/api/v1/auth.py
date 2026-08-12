@@ -38,11 +38,10 @@ from app.services.auth import (
     create_access_token,
     create_api_key,
     create_refresh_token,
+    invalidate_user_sessions,
     list_active_api_keys,
     revoke_access_token,
-    revoke_all_refresh_tokens,
     revoke_api_key,
-    revoke_refresh_token,
     rotate_refresh_token,
     set_session_cookie,
 )
@@ -230,14 +229,17 @@ def refresh(
     session: Session = Depends(get_session),
 ) -> TokenResponse:
     """Exchange a valid refresh token for a new access+refresh token pair."""
-    old_token = rotate_refresh_token(session, body.refresh_token)
-    if old_token is None:
+    user_id = rotate_refresh_token(session, body.refresh_token, commit=False)
+    if user_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid_refresh_token",
         )
-    user = session.get(User, old_token.user_id)
-    if user is None or not user.is_active:
+    user = session.get(User, user_id)
+    if user is None or not user.is_active or user.deleted_at is not None:
+        # Keep the presented token consumed even if its account can no longer
+        # authenticate; reactivation must not resurrect an old credential.
+        session.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="invalid_refresh_token",
@@ -246,7 +248,8 @@ def refresh(
     access_token = create_access_token(
         user.id, user.username, scope=scope, auth_version=user.auth_version
     )
-    refresh_token = create_refresh_token(session, user_id=user.id)
+    refresh_token = create_refresh_token(session, user_id=user.id, commit=False)
+    session.commit()
     set_session_cookie(response, access_token)
     return TokenResponse(
         access_token=access_token,
@@ -266,12 +269,8 @@ def logout(
     """Invalidate access token and optionally revoke refresh token."""
     if token:
         revoke_access_token(token)
-    if body and body.refresh_token:
-        revoke_refresh_token(session, body.refresh_token)
-    current_user.auth_version += 1
-    session.add(current_user)
+    invalidate_user_sessions(session, current_user)
     session.commit()
-    revoke_all_refresh_tokens(session, current_user.id)
     clear_session_cookie(response)
     return {"ok": True}
 

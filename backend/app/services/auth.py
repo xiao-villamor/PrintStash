@@ -144,7 +144,11 @@ def revoke_access_token(token: str) -> None:
 
 
 def create_refresh_token(
-    session: Session, user_id: int, minutes: int = 60 * 24 * 14
+    session: Session,
+    user_id: int,
+    minutes: int = 60 * 24 * 14,
+    *,
+    commit: bool = True,
 ) -> str:
     raw_token = secrets.token_urlsafe(48)
     expires_at = utcnow() + timedelta(minutes=minutes)
@@ -155,22 +159,35 @@ def create_refresh_token(
         revoked=False,
     )
     session.add(record)
-    session.commit()
+    if commit:
+        session.commit()
     return raw_token
 
 
-def rotate_refresh_token(session: Session, raw_token: str) -> Optional[RefreshToken]:
-    token_hash = _token_hash(raw_token)
+def rotate_refresh_token(
+    session: Session, raw_token: str, *, commit: bool = True
+) -> Optional[int]:
+    """Atomically consume one live refresh token.
+
+    A conditional UPDATE is the compare-and-swap boundary: concurrent callers
+    cannot both transition the same row from live to revoked.
+    """
+    now = utcnow()
     record = session.exec(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        update(RefreshToken)
+        .where(
+            RefreshToken.token_hash == _token_hash(raw_token),
+            RefreshToken.revoked == False,  # noqa: E712
+            RefreshToken.expires_at > now,
+        )
+        .values(revoked=True, revoked_at=now)
+        .returning(RefreshToken.user_id)
     ).first()
-    if record is None or record.revoked or _as_utc(record.expires_at) <= utcnow():
+    if record is None:
         return None
-    record.revoked = True
-    record.revoked_at = utcnow()
-    session.add(record)
-    session.commit()
-    return record
+    if commit:
+        session.commit()
+    return int(record[0])
 
 
 def revoke_refresh_token(session: Session, raw_token: str) -> bool:

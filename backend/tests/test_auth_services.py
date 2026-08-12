@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sqlmodel import Session
+import threading
+
+from sqlalchemy.sql.dml import Update
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.db.models import User
 from app.services.auth import (
@@ -58,3 +61,52 @@ def test_expired_refresh_token_does_not_rotate(db_session: Session) -> None:
     raw_token = create_refresh_token(db_session, user.id, minutes=-1)
 
     assert rotate_refresh_token(db_session, raw_token) is None
+
+
+def test_refresh_token_can_only_be_rotated_once_under_concurrency(
+    tmp_path, monkeypatch
+) -> None:
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'refresh-race.db'}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        user = _user(session, "refresh-race")
+        raw_token = create_refresh_token(session, user.id)
+
+    start = threading.Barrier(3)
+    both_selects_complete = threading.Barrier(2)
+    original_exec = Session.exec
+
+    def synchronize_legacy_read(session, statement, *args, **kwargs):
+        result = original_exec(session, statement, *args, **kwargs)
+        # This hook makes the old read-then-write implementation lose the
+        # race deterministically. The fixed implementation issues one atomic
+        # conditional UPDATE and never enters this branch.
+        if not isinstance(statement, Update) and "refresh_tokens" in str(statement):
+            both_selects_complete.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(Session, "exec", synchronize_legacy_read)
+    outcomes: list[bool] = []
+    errors: list[BaseException] = []
+
+    def rotate() -> None:
+        try:
+            with Session(engine) as session:
+                start.wait(timeout=5)
+                outcomes.append(rotate_refresh_token(session, raw_token) is not None)
+        except BaseException as exc:  # pragma: no cover - assertion reports it
+            errors.append(exc)
+
+    threads = [threading.Thread(target=rotate) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.wait(timeout=5)
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert outcomes.count(True) == 1
+    assert outcomes.count(False) == 1
