@@ -77,9 +77,11 @@ def test_superuser_can_configure_oidc_without_secret_disclosure(
     stored = db_session.get(SystemConfig, 1)
     assert stored is not None
     assert stored.oidc_client_secret == "super-secret-client-value"
-    raw_secret = db_session.connection().exec_driver_sql(
-        "SELECT oidc_client_secret FROM system_config WHERE id = 1"
-    ).scalar_one()
+    raw_secret = (
+        db_session.connection()
+        .exec_driver_sql("SELECT oidc_client_secret FROM system_config WHERE id = 1")
+        .scalar_one()
+    )
     assert "super-secret-client-value" not in raw_secret
 
     disabled = client.put(
@@ -263,7 +265,10 @@ def test_exchange_rejects_multi_audience_token_for_another_authorized_party(
     with pytest.raises(oidc.OIDCError, match="oidc_invalid_authorized_party"):
         asyncio.run(
             oidc.exchange_code(
-                "code", "https://stash.example.test/callback", "verifier", "expected-nonce"
+                "code",
+                "https://stash.example.test/callback",
+                "verifier",
+                "expected-nonce",
             )
         )
 
@@ -320,6 +325,50 @@ def test_oidc_callback_jit_provisions_admin_and_sets_session(
     assert client.get("/api/v1/auth/me").json()["username"] == "julia"
     assert db_session.exec(select(RefreshToken)).all() == []
     assert "Max-Age=" in callback.headers["set-cookie"]
+
+
+def test_oidc_callback_does_not_provision_during_restore(
+    client: TestClient,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _enable_oidc()
+
+    async def begin_login(_redirect_uri: str) -> oidc.OIDCLogin:
+        return oidc.OIDCLogin(
+            authorization_url="https://id.example.test/authorize",
+            state="restore-state",
+            nonce="restore-nonce",
+            code_verifier="restore-verifier",
+        )
+
+    async def exchange_code(*_args) -> dict:
+        return {
+            "iss": _overlay["oidc_issuer_url"],
+            "sub": "must-not-be-created",
+            "preferred_username": "restore-racer",
+        }
+
+    monkeypatch.setattr(oidc, "begin_login", begin_login)
+    monkeypatch.setattr(oidc, "exchange_code", exchange_code)
+    monkeypatch.setattr(
+        "app.api.v1.auth.begin_mutating_operation", lambda: False, raising=False
+    )
+
+    client.get("/api/v1/auth/oidc/login", follow_redirects=False)
+    callback = client.get(
+        "/api/v1/auth/oidc/callback?code=provider-code&state=restore-state",
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/login?oidc_error=restore_in_progress"
+    assert (
+        db_session.exec(
+            select(User).where(User.oidc_subject == "must-not-be-created")
+        ).first()
+        is None
+    )
 
 
 def test_oidc_jit_does_not_link_colliding_local_username(
@@ -436,7 +485,10 @@ def test_discovery_rejects_document_missing_required_endpoints(monkeypatch) -> N
     _enable_oidc()
 
     async def get_json(_url: str) -> dict:
-        return {"issuer": _overlay["oidc_issuer_url"], "authorization_endpoint": "https://id.example.test/authorize"}
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "https://id.example.test/authorize",
+        }
 
     monkeypatch.setattr(oidc, "_get_json", get_json)
 
@@ -460,7 +512,9 @@ def test_discovery_rejects_insecure_endpoints(monkeypatch) -> None:
         asyncio.run(oidc._discovery())  # noqa: SLF001
 
 
-def test_discovery_allows_http_endpoints_only_in_explicit_insecure_mode(monkeypatch) -> None:
+def test_discovery_allows_http_endpoints_only_in_explicit_insecure_mode(
+    monkeypatch,
+) -> None:
     _enable_oidc()
     _overlay["oidc_allow_insecure_http"] = True
 
@@ -516,7 +570,9 @@ def test_signing_key_raises_when_jwks_keys_not_a_list() -> None:
     # _signing_key only reads the unverified header, so a hand-built token
     # (valid base64url structure, no real signature) is enough — the
     # algorithm check happens before any signature is ever checked.
-    header = base64.urlsafe_b64encode(json.dumps({"alg": "RS256", "kid": "a"}).encode()).rstrip(b"=")
+    header = base64.urlsafe_b64encode(
+        json.dumps({"alg": "RS256", "kid": "a"}).encode()
+    ).rstrip(b"=")
     fake_token = f"{header.decode()}.e30.sig"
 
     with pytest.raises(oidc.OIDCError, match="oidc_invalid_jwks"):
@@ -525,7 +581,9 @@ def test_signing_key_raises_when_jwks_keys_not_a_list() -> None:
 
 def test_signing_key_raises_when_no_matching_kid() -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk["kid"] = "the-real-key"
     token = jwt.encode(
         {"sub": "x"}, private_key, algorithm="RS256", headers={"kid": "some-other-kid"}
@@ -537,12 +595,19 @@ def test_signing_key_raises_when_no_matching_kid() -> None:
 
 def test_signing_key_skips_key_that_fails_to_parse() -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk["kid"] = "matching-kid"
     token = jwt.encode(
         {"sub": "x"}, private_key, algorithm="RS256", headers={"kid": "matching-kid"}
     )
-    broken_jwk = {"kty": "RSA", "kid": "matching-kid", "n": "not-valid-base64!!", "e": "AQAB"}
+    broken_jwk = {
+        "kty": "RSA",
+        "kid": "matching-kid",
+        "n": "not-valid-base64!!",
+        "e": "AQAB",
+    }
 
     key = oidc._signing_key({"keys": [broken_jwk, public_jwk]}, token)  # noqa: SLF001
     assert key is not None
@@ -566,13 +631,19 @@ def test_exchange_code_raises_when_id_token_missing(monkeypatch) -> None:
     monkeypatch.setattr(oidc, "_post_token", post_token)
 
     with pytest.raises(oidc.OIDCError, match="oidc_missing_id_token"):
-        asyncio.run(oidc.exchange_code("code", "https://stash.example.test/callback", "verifier", "nonce"))
+        asyncio.run(
+            oidc.exchange_code(
+                "code", "https://stash.example.test/callback", "verifier", "nonce"
+            )
+        )
 
 
 def test_exchange_code_raises_on_expired_token(monkeypatch) -> None:
     _enable_oidc()
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_jwk = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
     public_jwk["kid"] = "signing-key"
     now = datetime.now(timezone.utc)
     expired_token = jwt.encode(
@@ -610,7 +681,10 @@ def test_exchange_code_raises_on_expired_token(monkeypatch) -> None:
     with pytest.raises(oidc.OIDCError, match="oidc_invalid_id_token"):
         asyncio.run(
             oidc.exchange_code(
-                "code", "https://stash.example.test/callback", "verifier", "expected-nonce"
+                "code",
+                "https://stash.example.test/callback",
+                "verifier",
+                "expected-nonce",
             )
         )
 
@@ -638,7 +712,9 @@ def test_exchange_code_wraps_unexpected_failure(monkeypatch) -> None:
 
     with pytest.raises(oidc.OIDCError, match="oidc_token_exchange_failed"):
         asyncio.run(
-            oidc.exchange_code("code", "https://stash.example.test/callback", "verifier", "nonce")
+            oidc.exchange_code(
+                "code", "https://stash.example.test/callback", "verifier", "nonce"
+            )
         )
 
 
@@ -683,11 +759,17 @@ def test_provision_user_without_username_or_email_falls_back_to_subject(
     assert user.username == "bare-subject-123"
 
 
-def test_provision_user_missing_group_claim_is_not_superuser(db_session: Session) -> None:
+def test_provision_user_missing_group_claim_is_not_superuser(
+    db_session: Session,
+) -> None:
     _enable_oidc()
     user = oidc.provision_user(
         db_session,
-        {"iss": _overlay["oidc_issuer_url"], "sub": "no-groups", "preferred_username": "plainuser"},
+        {
+            "iss": _overlay["oidc_issuer_url"],
+            "sub": "no-groups",
+            "preferred_username": "plainuser",
+        },
     )
     assert user.is_superuser is False
 
@@ -709,7 +791,11 @@ def test_provision_user_rejects_inactive_existing_user(db_session: Session) -> N
     with pytest.raises(oidc.OIDCError, match="oidc_user_inactive"):
         oidc.provision_user(
             db_session,
-            {"iss": _overlay["oidc_issuer_url"], "sub": "deactivated-subject", "groups": []},
+            {
+                "iss": _overlay["oidc_issuer_url"],
+                "sub": "deactivated-subject",
+                "groups": [],
+            },
         )
 
 

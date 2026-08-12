@@ -45,6 +45,7 @@ from app.services.auth import (
     rotate_refresh_token,
     set_session_cookie,
 )
+from app.services.backup import begin_mutating_operation, end_mutating_operation
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -139,24 +140,31 @@ async def oidc_callback(
         redirect_uri = oidc.callback_uri(str(request.url_for("oidc_callback")))
         try:
             claims = await oidc.exchange_code(code, redirect_uri, verifier, nonce)
-            user = oidc.provision_user(session, claims)
-            scope = "admin" if user.is_superuser else "write"
-            access_token = create_access_token(
-                user.id,
-                user.username,
-                scope=scope,
-                expires_delta=timedelta(days=settings.remember_me_days),
-                auth_version=user.auth_version,
-            )
-            set_session_cookie(
-                response,
-                access_token,
-                max_age=int(timedelta(days=settings.remember_me_days).total_seconds()),
-                secure=bool(
-                    settings.session_cookie_secure
-                    or urlparse(redirect_uri).scheme == "https"
-                ),
-            )
+            if not begin_mutating_operation():
+                raise oidc.OIDCError("restore_in_progress")
+            try:
+                user = oidc.provision_user(session, claims)
+                scope = "admin" if user.is_superuser else "write"
+                access_token = create_access_token(
+                    user.id,
+                    user.username,
+                    scope=scope,
+                    expires_delta=timedelta(days=settings.remember_me_days),
+                    auth_version=user.auth_version,
+                )
+                set_session_cookie(
+                    response,
+                    access_token,
+                    max_age=int(
+                        timedelta(days=settings.remember_me_days).total_seconds()
+                    ),
+                    secure=bool(
+                        settings.session_cookie_secure
+                        or urlparse(redirect_uri).scheme == "https"
+                    ),
+                )
+            finally:
+                end_mutating_operation()
         except oidc.OIDCError as exc:
             response = RedirectResponse(
                 f"/login?oidc_error={exc.code}", status_code=302
