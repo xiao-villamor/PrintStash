@@ -10,6 +10,7 @@ from app.core.time import utcnow
 from app.db.models import (
     AuditLog,
     Collection,
+    Document,
     File,
     Model,
     Printer,
@@ -25,7 +26,7 @@ from app.services.auth import (
     hash_password,
     invalidate_user_sessions,
 )
-from app.services.trash import gc_soft_deleted, hard_delete_file
+from app.services.trash import gc_soft_deleted, hard_delete_document, hard_delete_file
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)]
@@ -41,6 +42,7 @@ _RESOURCE_MODEL = {
     "users": User,
     "tags": Tag,
     "collections": Collection,
+    "documents": Document,
 }
 
 
@@ -203,6 +205,8 @@ def admin_delete_resource(
     if hard:
         if isinstance(row, File):
             hard_delete_file(session, row)
+        elif isinstance(row, Document):
+            hard_delete_document(session, row)
         else:
             session.delete(row)
     else:

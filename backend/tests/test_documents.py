@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.config import _overlay
-from app.db.models import CollectionPermission, CollectionRole, User
+from app.db.models import CollectionPermission, CollectionRole, Document, User
 from app.services import taxonomy
 from app.services.auth import create_access_token, hash_password
 
@@ -114,6 +114,65 @@ def test_pdf_upload_serves_blob(
     served = client.get(f"/api/v1/documents/{doc_id}/file", headers=h)
     assert served.status_code == 200
     assert served.content == b"%PDF-1.4 hi"
+
+
+def test_binary_document_trash_restore_and_permanent_delete_removes_blobs(
+    db_session: Session, client: TestClient, tmp_path: Path
+) -> None:
+    _overlay["thumb_dir"] = tmp_path / "thumbs"
+    _overlay["data_dir"] = tmp_path / "files"
+    superuser = _user(db_session, "document-trash-admin", superuser=True)
+    headers = _headers(superuser)
+    uploaded = client.post(
+        "/api/v1/documents/upload",
+        files={"file": ("manual.pdf", b"%PDF-1.4 hi", "application/pdf")},
+        headers=headers,
+    ).json()
+    document_id = uploaded["id"]
+
+    from app.services.storage_backend import get_backend
+
+    backend = get_backend()
+    file_key = backend.document_file_key(document_id, uploaded["filename"])
+    image_name = f"{'a' * 64}.png"
+    image_key = backend.document_image_key(document_id, image_name)
+    backend.write_bytes(_PNG, image_key)
+    document = db_session.get(Document, document_id)
+    document.body = f"![image](/api/v1/documents/{document_id}/images/{image_name})"
+    db_session.add(document)
+    db_session.commit()
+
+    assert (
+        client.delete(f"/api/v1/documents/{document_id}", headers=headers).status_code
+        == 204
+    )
+    assert [
+        row["id"]
+        for row in client.get("/api/v1/documents/trash", headers=headers).json()
+    ] == [document_id]
+    assert (
+        client.post(
+            f"/api/v1/documents/{document_id}/restore", headers=headers
+        ).status_code
+        == 200
+    )
+    assert (
+        client.get(f"/api/v1/documents/{document_id}", headers=headers).status_code
+        == 200
+    )
+    assert (
+        client.delete(f"/api/v1/documents/{document_id}", headers=headers).status_code
+        == 204
+    )
+
+    purged = client.delete(
+        f"/api/v1/documents/{document_id}/permanent", headers=headers
+    )
+    assert purged.status_code == 204
+    assert not backend.exists(file_key)
+    assert not backend.exists(image_key)
+    db_session.expire_all()
+    assert db_session.get(Document, document_id) is None
 
 
 def test_document_rbac(db_session: Session, client: TestClient, tmp_path: Path) -> None:

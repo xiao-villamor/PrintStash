@@ -6,6 +6,7 @@ all live here. Query-side filtering uses ``app.db.scopes.live/trashed``.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import Iterable
 
@@ -16,6 +17,7 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
     Collection,
+    Document,
     File,
     FileType,
     Metadata,
@@ -32,6 +34,9 @@ from app.services.storage_backend import get_backend
 from app.services.storage_utils import all_owned_blob_keys
 
 logger = get_logger(__name__)
+_DOCUMENT_IMAGE_RE = re.compile(
+    r"/api/v1/documents/(\d+)/images/([0-9a-f]{64}\.(?:png|jpe?g|gif|webp))"
+)
 
 
 def trash_expires_at(
@@ -132,6 +137,26 @@ def hard_delete_file(
     session.delete(file_row)
 
 
+def hard_delete_document(session: Session, document: Document) -> None:
+    """Permanently remove a Document row and every vault-owned blob."""
+    if document.id is None:
+        return
+    backend = get_backend()
+    if document.filename:
+        backend.delete(backend.document_file_key(document.id, document.filename))
+    for document_id, name in _DOCUMENT_IMAGE_RE.findall(document.body or ""):
+        if int(document_id) == document.id:
+            backend.delete(backend.document_image_key(document.id, name))
+    session.delete(document)
+
+
+def restore_document(session: Session, document: Document) -> None:
+    document.deleted_at = None
+    document.deleted_by = None
+    document.updated_at = utcnow()
+    session.add(document)
+
+
 def hard_delete_model(session: Session, model: Model) -> None:
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
@@ -210,6 +235,15 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
     with get_session_factory().scoped_session() as session:
         purged_model_ids = hard_delete_expired_models(session, effective_retention)
         purged["rows"] += len(purged_model_ids)
+        expired_documents = session.exec(
+            select(Document).where(
+                trashed(Document),
+                Document.deleted_at < cutoff,  # type: ignore[operator]
+            )
+        ).all()
+        for document in expired_documents:
+            hard_delete_document(session, document)
+        purged["rows"] += len(expired_documents)
         for model in (File, Tag, Collection, Printer, User):
             result = session.exec(
                 delete(model).where(

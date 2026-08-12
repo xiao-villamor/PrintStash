@@ -16,7 +16,7 @@ from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import Document, DocumentKind, File, FileType, Model
 from app.services.storage_backend import get_backend
-from app.services.trash import _cleanup_orphan_blobs
+from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
 
 
 @pytest.fixture
@@ -125,9 +125,7 @@ def test_gc_deletes_actual_orphans(db_session: Session, storage) -> None:
     assert removed == 2
 
 
-def test_gc_deletes_blob_of_hard_deleted_document(
-    db_session: Session, storage
-) -> None:
+def test_gc_deletes_blob_of_hard_deleted_document(db_session: Session, storage) -> None:
     doc = _binary_document(db_session, storage)
     key = storage.document_file_key(doc.id, doc.filename)
     db_session.delete(doc)
@@ -145,3 +143,21 @@ def test_gc_ignores_markdown_documents(db_session: Session, storage) -> None:
     db_session.commit()
 
     assert _cleanup_orphan_blobs(db_session) == 0
+
+
+def test_gc_hard_deletes_expired_document_and_its_blob(
+    db_session: Session, storage
+) -> None:
+    doc = _binary_document(db_session, storage)
+    document_id = doc.id
+    key = storage.document_file_key(doc.id, doc.filename)
+    doc.deleted_at = utcnow()
+    db_session.add(doc)
+    db_session.commit()
+
+    result = gc_soft_deleted(retention_days=0)
+
+    assert result["rows"] >= 1
+    assert not Path(key).exists()
+    db_session.expire_all()
+    assert db_session.get(Document, document_id) is None

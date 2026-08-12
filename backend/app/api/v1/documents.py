@@ -32,10 +32,10 @@ from sqlmodel import Session, select
 from app.api.v1.files import _serve_file
 from app.core.config import settings
 from app.core.http import get_or_404
-from app.core.security import require_auth, require_user
+from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import Collection, CollectionRole, Document, DocumentKind, User
-from app.db.scopes import live
+from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.schemas.documents import (
     DocumentCreate,
@@ -46,6 +46,7 @@ from app.schemas.documents import (
 )
 from app.services import rbac
 from app.services.storage_backend import get_backend
+from app.services.trash import hard_delete_document, restore_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -187,6 +188,64 @@ def create_document(
     session.commit()
     session.refresh(doc)
     return _read(session, current_user, doc)
+
+
+@router.get(
+    "/trash", response_model=List[DocumentListItem], summary="List trashed documents"
+)
+def list_document_trash(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> List[DocumentListItem]:
+    stmt = select(Document).where(trashed(Document))
+    if not current_user.is_superuser:
+        accessible = rbac.accessible_collection_ids(session, current_user)
+        if not accessible:
+            return []
+        stmt = stmt.where(Document.collection_id.in_(accessible))  # type: ignore[union-attr]
+    documents = session.exec(stmt.order_by(Document.deleted_at.desc())).all()  # type: ignore[union-attr]
+    return [_item(session, current_user, document) for document in documents]
+
+
+@router.post("/{document_id}/restore", response_model=DocumentRead)
+def restore_trashed_document(
+    document_id: int,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
+    session: Session = Depends(get_session),
+) -> DocumentRead:
+    document = session.exec(
+        select(Document).where(Document.id == document_id, trashed(Document))
+    ).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    rbac.require_collection_role(
+        session, current_user, document.collection_id, CollectionRole.EDIT
+    )
+    restore_document(session, document)
+    session.commit()
+    session.refresh(document)
+    return _read(session, current_user, document)
+
+
+@router.delete(
+    "/{document_id}/permanent",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+def permanently_delete_document(
+    document_id: int,
+    _current_user: User = Depends(require_superuser),
+    session: Session = Depends(get_session),
+) -> Response:
+    document = session.exec(
+        select(Document).where(Document.id == document_id, trashed(Document))
+    ).first()
+    if document is None:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    hard_delete_document(session, document)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
