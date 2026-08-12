@@ -174,11 +174,19 @@ def list_queue_page(
     *,
     history_limit: int = 20,
     history_offset: int = 0,
+    visible_printer_ids: set[int] | None = None,
 ) -> list[PrintJob]:
+    if visible_printer_ids is not None and not visible_printer_ids:
+        return []
+    visibility = (
+        PrintJob.printer_id.in_(visible_printer_ids)  # type: ignore[union-attr]
+        if visible_printer_ids is not None
+        else True
+    )
     active = list(
         session.exec(
             select(PrintJob)
-            .where(PrintJob.state.in_(_ACTIVE_STATES))
+            .where(PrintJob.state.in_(_ACTIVE_STATES), visibility)
             .order_by(
                 PrintJob.queue_position,
                 PrintJob.created_at,
@@ -189,7 +197,10 @@ def list_queue_page(
     terminal = list(
         session.exec(
             select(PrintJob)
-            .where(PrintJob.state.notin_(_ACTIVE_STATES))  # type: ignore[union-attr]
+            .where(
+                PrintJob.state.notin_(_ACTIVE_STATES),  # type: ignore[union-attr]
+                visibility,
+            )
             .order_by(
                 PrintJob.finished_at.desc(),  # type: ignore[union-attr]
                 PrintJob.created_at.desc(),  # type: ignore[attr-defined]

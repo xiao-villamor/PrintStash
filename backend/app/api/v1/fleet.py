@@ -50,13 +50,13 @@ def get_queue(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> list[PrintJobRead]:
+    visible_ids = printer_rbac.accessible_printer_ids(session, current_user)
     rows = fleet.list_queue_page(
         session,
         history_limit=history_limit,
         history_offset=history_offset,
+        visible_printer_ids=visible_ids,
     )
-    visible_ids = printer_rbac.accessible_printer_ids(session, current_user)
-    rows = [job for job in rows if job.printer_id in visible_ids]
     return [PrintJobRead(**job.model_dump()) for job in rows]
 
 
