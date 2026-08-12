@@ -28,7 +28,7 @@ file only routes and adds the checklist.
 
 ```bash
 cd frontend
-pnpm lint          # eslint — two intentional warnings documented in docs/release-validation.md
+pnpm lint          # eslint — report the exact error/warning count from the run
 pnpm typecheck     # tsc --noEmit
 pnpm test          # vitest, when logic changed
 ```

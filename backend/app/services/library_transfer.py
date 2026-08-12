@@ -32,8 +32,13 @@ from app.services import ingestion, model_views, taxonomy
 from app.services.storage_backend import get_backend
 
 FORMAT = "printstash-library-v1"
-MAX_ENTRIES = 20_000
+# A portable archive contains one entry per Artifact plus manifest.json. The
+# previous 20k ceiling let PrintStash export a library that the same version
+# could not import. Keep a zip-bomb ceiling, but make it large enough for the
+# reference large-library target and preflight exports against the same limits.
+MAX_ENTRIES = 250_000
 MAX_UNCOMPRESSED = 100 * 1024 * 1024 * 1024
+_HASH_CHUNK_SIZE = 1024 * 1024
 
 
 def _json_value(value: object) -> object:
@@ -45,50 +50,54 @@ def _json_value(value: object) -> object:
 
 
 def create_archive(session: Session, user: User) -> Path:
-    visible_ids = {
-        row["id"] for row in model_views.export_payload(session, user)["models"]
-    }
+    visible_ids = model_views.accessible_live_model_ids_stmt(session, user)
     models = session.exec(
-        select(Model).where(Model.id.in_(visible_ids), live(Model))
+        select(Model)
+        .where(Model.id.in_(visible_ids))  # type: ignore[union-attr]
+        .order_by(Model.id.asc())  # type: ignore[attr-defined]
     ).all()
-    collection_ids = {
-        row.collection_id for row in models if row.collection_id is not None
+    collection_paths = {
+        row.id: row.path
+        for row in session.exec(
+            select(Collection)
+            .join(Model, Model.collection_id == Collection.id)  # type: ignore[arg-type]
+            .where(Model.id.in_(visible_ids))  # type: ignore[union-attr]
+            .distinct()
+        ).all()
     }
-    collection_paths = (
-        {
-            row.id: row.path
-            for row in session.exec(
-                select(Collection).where(Collection.id.in_(collection_ids))
-            ).all()
-        }
-        if collection_ids
-        else {}
-    )
     files = session.exec(
-        select(File).where(File.model_id.in_(visible_ids), live(File))
+        select(File)
+        .where(File.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
+        .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
     ).all()
-    file_ids = [row.id for row in files]
     metadata = {
         row.file_id: row
         for row in session.exec(
-            select(Metadata).where(Metadata.file_id.in_(file_ids))
+            select(Metadata)
+            .join(File, File.id == Metadata.file_id)  # type: ignore[arg-type]
+            .where(File.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
         ).all()
     }
-    tags = {row.id: row for row in session.exec(select(Tag).where(live(Tag))).all()}
-    links = session.exec(
-        select(ModelTagLink).where(ModelTagLink.model_id.in_(visible_ids))
-    ).all()
     tags_by_model: dict[int, list[str]] = {}
-    for link in links:
-        tag = tags.get(link.tag_id)
-        if tag and link.model_id is not None:
-            tags_by_model.setdefault(link.model_id, []).append(tag.name)
+    for model_id, tag_name in session.exec(
+        select(ModelTagLink.model_id, Tag.name)
+        .join(Tag, Tag.id == ModelTagLink.tag_id)
+        .where(ModelTagLink.model_id.in_(visible_ids), live(Tag))  # type: ignore[union-attr]
+        .order_by(ModelTagLink.model_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+    ).all():
+        if model_id is not None:
+            tags_by_model.setdefault(int(model_id), []).append(tag_name)
     jobs = session.exec(
-        select(PrintJob).where(PrintJob.model_id.in_(visible_ids), live(PrintJob))
+        select(PrintJob)
+        .where(PrintJob.model_id.in_(visible_ids), live(PrintJob))  # type: ignore[union-attr]
+        .order_by(PrintJob.id.asc())  # type: ignore[attr-defined]
     ).all()
     stars = set(
         session.exec(
-            select(ModelStar.model_id).where(ModelStar.user_id == user.id)
+            select(ModelStar.model_id).where(
+                ModelStar.user_id == user.id,
+                ModelStar.model_id.in_(visible_ids),  # type: ignore[union-attr]
+            )
         ).all()
     )
     saved = session.exec(select(SavedView).where(SavedView.user_id == user.id)).all()
@@ -106,84 +115,112 @@ def create_archive(session: Session, user: User) -> Path:
     for row in files:
         files_by_model.setdefault(row.model_id, []).append(row)
 
+    file_entries: list[tuple[File, str]] = []
+    for model in models:
+        artifacts = []
+        for artifact in files_by_model.get(model.id, []):
+            entry = (
+                f"blobs/{model.hash}/{artifact.version}-{artifact.id}-"
+                f"{Path(artifact.original_filename).name}"
+            )
+            file_entries.append((artifact, entry))
+            md = metadata.get(artifact.id)
+            artifacts.append(
+                {
+                    "source_id": artifact.id,
+                    "entry": entry,
+                    "original_filename": artifact.original_filename,
+                    "file_type": artifact.file_type.value,
+                    "version": artifact.version,
+                    "size_bytes": artifact.size_bytes,
+                    "sha256": artifact.sha256,
+                    "revision_label": artifact.revision_label,
+                    "revision_status": _json_value(artifact.revision_status),
+                    "revision_notes": artifact.revision_notes,
+                    "is_recommended": artifact.is_recommended,
+                    "metadata": {
+                        key: _json_value(value)
+                        for key, value in md.model_dump(
+                            # created_at is set fresh by Metadata's
+                            # default_factory on import — carrying the source
+                            # instance's ISO string through crashes Artifact
+                            # persistence's SQLite datetime write.
+                            exclude={"id", "file_id", "created_at"}
+                        ).items()
+                    }
+                    if md
+                    else {},
+                }
+            )
+        manifest["models"].append(  # type: ignore[union-attr]
+            {
+                "source_id": model.id,
+                "name": model.name,
+                "slug": model.slug,
+                "hash": model.hash,
+                "description": model.description,
+                "source_url": model.source_url,
+                "collection": collection_paths.get(model.collection_id),
+                "tags": tags_by_model.get(model.id or 0, []),
+                "starred": model.id in stars,
+                "artifacts": artifacts,
+            }
+        )
+    for job in jobs:
+        manifest["print_jobs"].append(  # type: ignore[union-attr]
+            {
+                "source_id": job.id,
+                "model_source_id": job.model_id,
+                "file_source_id": job.file_id,
+                "remote_filename": job.remote_filename,
+                "printer_name": job.printer_name,
+                "state": job.state.value,
+                "source": job.source,
+                "filament_used_g": job.filament_used_g,
+                "actual_duration_s": job.actual_duration_s,
+                "cost": job.cost,
+                "filament_g_effective": job.filament_g_effective,
+                "started_at": _json_value(job.started_at),
+                "finished_at": _json_value(job.finished_at),
+            }
+        )
+
+    manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+    expected_size = len(manifest_bytes) + sum(row.size_bytes for row, _ in file_entries)
+    if len(file_entries) + 1 > MAX_ENTRIES or expected_size > MAX_UNCOMPRESSED:
+        raise ValueError("archive_too_large")
+
     fd, filename = tempfile.mkstemp(suffix=".printstash.zip")
     Path(filename).unlink(missing_ok=True)
     try:
         with zipfile.ZipFile(
             filename, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
         ) as archive:
-            for model in models:
-                artifacts = []
-                for artifact in sorted(
-                    files_by_model.get(model.id, []), key=lambda item: item.version
+            backend = get_backend()
+            actual_size = len(manifest_bytes)
+            for artifact, entry in file_entries:
+                with backend.local_path(artifact.path) as source:
+                    digest = hashlib.sha256()
+                    artifact_size = 0
+                    with (
+                        source.open("rb") as source_file,
+                        archive.open(entry, "w", force_zip64=True) as archive_entry,
+                    ):
+                        while chunk := source_file.read(_HASH_CHUNK_SIZE):
+                            artifact_size += len(chunk)
+                            if actual_size + artifact_size > MAX_UNCOMPRESSED:
+                                raise ValueError("archive_too_large")
+                            digest.update(chunk)
+                            archive_entry.write(chunk)
+                if (
+                    artifact_size != artifact.size_bytes
+                    or digest.hexdigest() != artifact.sha256.lower()
                 ):
-                    entry = f"blobs/{model.hash}/{artifact.version}-{artifact.id}-{Path(artifact.original_filename).name}"
-                    backend = get_backend()
-                    with backend.local_path(artifact.path) as source:
-                        archive.write(source, entry)
-                    md = metadata.get(artifact.id)
-                    artifacts.append(
-                        {
-                            "source_id": artifact.id,
-                            "entry": entry,
-                            "original_filename": artifact.original_filename,
-                            "file_type": artifact.file_type.value,
-                            "version": artifact.version,
-                            "size_bytes": artifact.size_bytes,
-                            "sha256": artifact.sha256,
-                            "revision_label": artifact.revision_label,
-                            "revision_status": _json_value(artifact.revision_status),
-                            "revision_notes": artifact.revision_notes,
-                            "is_recommended": artifact.is_recommended,
-                            "metadata": {
-                                key: _json_value(value)
-                                for key, value in md.model_dump(
-                                    # created_at is set fresh by Metadata's
-                                    # default_factory on import — carrying the
-                                    # source instance's ISO string through
-                                    # crashes ingestion.persist_artifact's
-                                    # write (SQLite datetime columns require a
-                                    # real datetime, not a string).
-                                    exclude={"id", "file_id", "created_at"}
-                                ).items()
-                            }
-                            if md
-                            else {},
-                        }
-                    )
-                manifest["models"].append(
-                    {  # type: ignore[union-attr]
-                        "source_id": model.id,
-                        "name": model.name,
-                        "slug": model.slug,
-                        "hash": model.hash,
-                        "description": model.description,
-                        "source_url": model.source_url,
-                        "collection": collection_paths.get(model.collection_id),
-                        "tags": sorted(tags_by_model.get(model.id, [])),
-                        "starred": model.id in stars,
-                        "artifacts": artifacts,
-                    }
-                )
-            for job in jobs:
-                manifest["print_jobs"].append(
-                    {  # type: ignore[union-attr]
-                        "source_id": job.id,
-                        "model_source_id": job.model_id,
-                        "file_source_id": job.file_id,
-                        "remote_filename": job.remote_filename,
-                        "printer_name": job.printer_name,
-                        "state": job.state.value,
-                        "source": job.source,
-                        "filament_used_g": job.filament_used_g,
-                        "actual_duration_s": job.actual_duration_s,
-                        "cost": job.cost,
-                        "filament_g_effective": job.filament_g_effective,
-                        "started_at": _json_value(job.started_at),
-                        "finished_at": _json_value(job.finished_at),
-                    }
-                )
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+                    raise ValueError("archive_blob_hash_mismatch")
+                actual_size += artifact_size
+                if actual_size > MAX_UNCOMPRESSED:
+                    raise ValueError("archive_too_large")
+            archive.writestr("manifest.json", manifest_bytes)
         return Path(filename)
     except Exception:
         Path(filename).unlink(missing_ok=True)
@@ -200,6 +237,33 @@ def create_archive(session: Session, user: User) -> Path:
 def _safe_entry(name: str) -> bool:
     path = PurePosixPath(name)
     return not path.is_absolute() and ".." not in path.parts and "\\" not in name
+
+
+def _validate_artifact_member(archive: zipfile.ZipFile, artifact: dict) -> None:
+    """Validate one Artifact member without materializing its bytes in memory."""
+    try:
+        entry = str(artifact["entry"])
+        expected_size = int(artifact["size_bytes"])
+        expected_sha256 = str(artifact["sha256"]).lower()
+        info = archive.getinfo(entry)
+    except KeyError as exc:
+        raise ValueError("archive_blob_missing") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_manifest") from exc
+
+    if info.is_dir() or info.file_size != expected_size:
+        raise ValueError("archive_blob_hash_mismatch")
+
+    digest = hashlib.sha256()
+    actual_size = 0
+    with archive.open(info) as source:
+        while chunk := source.read(_HASH_CHUNK_SIZE):
+            actual_size += len(chunk)
+            if actual_size > expected_size:
+                raise ValueError("archive_blob_hash_mismatch")
+            digest.update(chunk)
+    if actual_size != expected_size or digest.hexdigest() != expected_sha256:
+        raise ValueError("archive_blob_hash_mismatch")
 
 
 def import_archive(session: Session, archive_path: Path, user: User) -> dict[str, int]:
@@ -224,15 +288,7 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
         # Validate every blob before first database/storage write.
         for model_data in manifest["models"]:
             for artifact in model_data.get("artifacts", []):
-                try:
-                    payload = archive.read(artifact["entry"])
-                except KeyError as exc:
-                    raise ValueError("archive_blob_missing") from exc
-                if (
-                    len(payload) != artifact["size_bytes"]
-                    or hashlib.sha256(payload).hexdigest() != artifact["sha256"]
-                ):
-                    raise ValueError("archive_blob_hash_mismatch")
+                _validate_artifact_member(archive, artifact)
 
         created_models = created_files = skipped_files = 0
         source_models: dict[int, Model] = {}

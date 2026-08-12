@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.4
+
+### Fixed
+
+- Portable library exports now enforce the same entry and uncompressed-size ceilings as imports, and verify every source Artifact while streaming, so PrintStash does not produce an archive it would reject on round-trip.
+
+### Performance
+
+- Portable archive export now scopes accessible Models directly in SQL instead of first materializing the full metadata export, keeps large ID sets inside SQL subqueries, and hashes Artifact data in bounded chunks.
+- Portable archive import validates Artifact members in bounded chunks and runs blocking upload, ZIP, filesystem, and database work outside the async event loop.
+
 ## 0.11.3
 
 **This patch-version release is an explicit exception to normal 0.x patch policy: it adds two user-facing features and an append-only database migration. Back up before upgrading.**

@@ -14,8 +14,8 @@ Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
 <!-- Update this block when a release ships. -->
 Latest shipped: v0.11.3 (Centauri Carbon upload beta, spool safeguards,
 ingestion fixes, and data-integrity hardening), merged to `main` and tagged.
-Next: 0.12 (`docs/roadmap.md`). Private plans
-live in gitignored `reports/` — start with
+Next: 0.12 (`docs/roadmap.md`). Private plans, when present in the local
+checkout, live in gitignored `reports/` — start with
 `reports/14-implementation-plan-to-1.0.0.md` (OSS) and
 `reports/15-cloud-implementation-plan.md` (cloud); never commit or quote them.
 
@@ -41,7 +41,7 @@ live in gitignored `reports/` — start with
 | Backend, DB migration, testing, config | [references/backend.md](references/backend.md) |
 | Frontend / UI change | [references/frontend.md](references/frontend.md) |
 | Printer providers (new or changed) | [references/providers.md](references/providers.md) |
-| "What's next" / roadmap planning | `reports/14-implementation-plan-to-1.0.0.md` (read only the needed section) |
+| "What's next" / roadmap planning | `reports/14-implementation-plan-to-1.0.0.md` when present (read only the needed section); otherwise `docs/roadmap.md` + `CHANGELOG.md` |
 
 ## Workflow for any change
 

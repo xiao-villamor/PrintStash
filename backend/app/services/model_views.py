@@ -163,6 +163,20 @@ def _apply_model_access(stmt, session: Session, user: User):
     return stmt.where(Model.collection_id.in_(collection_ids))  # type: ignore[union-attr]
 
 
+def accessible_live_model_ids_stmt(session: Session, user: User):
+    """Reusable SQL scope for accessible live library Models.
+
+    Large exports must keep this as a subquery instead of first materializing
+    every Model response (or a Python ID list). That keeps RBAC identical to the
+    normal read models without paying for their Artifact/Metadata composition.
+    """
+    stmt = select(Model.id).where(
+        live(Model),
+        Model.hash != SENTINEL_MODEL_HASH,
+    )
+    return _apply_model_access(stmt, session, user)
+
+
 def _effective_model_role(
     session: Session,
     user: User,

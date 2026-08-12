@@ -369,7 +369,21 @@ def export_library_archive(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> FileResponse:
-    path = library_transfer.create_archive(session, current_user)
+    try:
+        path = library_transfer.create_archive(session, current_user)
+    except ValueError as exc:
+        detail = str(exc)
+        if detail == "archive_too_large":
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=detail,
+            ) from exc
+        if detail == "archive_blob_hash_mismatch":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=detail,
+            ) from exc
+        raise
     return FileResponse(
         path,
         media_type="application/zip",
@@ -383,7 +397,7 @@ def export_library_archive(
     dependencies=[Depends(require_superuser)],
     summary="Import a portable full-library archive",
 )
-async def import_library_archive(
+def import_library_archive(
     file: UploadFile = UploadFileParam(...),
     current_user: User = Depends(require_superuser),
     session: Session = Depends(get_session),

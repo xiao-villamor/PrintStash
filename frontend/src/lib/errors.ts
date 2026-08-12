@@ -127,12 +127,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   login_expired: "The login attempt expired. Start again.",
   login_failed: "MakerWorld login failed. Try again later.",
   network_error: "Couldn't reach MakerWorld. Check your connection and try again.",
-  // Archive / ZIP import
+  // Portable archive / ZIP import
   archive_invalid: "That file isn't a valid .zip archive.",
   archive_not_found: "This archive is no longer available — re-upload it.",
   archive_too_many_entries: "The archive has too many files.",
   archive_entry_too_large: "A file inside the archive is too large.",
   archive_too_large: "The archive's contents exceed the size limit.",
+  archive_blob_hash_mismatch:
+    "An Artifact changed or failed its integrity check. Run a Vault audit, then try again.",
   archive_unsafe_entry: "The archive contains an unsafe file path.",
   // Collection import
   collection_import_failed:

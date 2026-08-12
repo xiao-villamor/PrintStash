@@ -75,6 +75,7 @@ describe("getErrorMessage / userMessage", () => {
       "Invalid username or password.",
     );
     expect(getErrorMessage("collection_not_empty")).toMatch(/still has models/);
+    expect(getErrorMessage("archive_blob_hash_mismatch")).toMatch(/Vault audit/);
   });
 
   it("humanises unknown codes as sentence-case messages", () => {

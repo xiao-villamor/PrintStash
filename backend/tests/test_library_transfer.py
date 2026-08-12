@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import zipfile
 from pathlib import Path
@@ -78,6 +79,88 @@ def test_library_archive_manifest_blobs_and_idempotent_import(
         archive_path.unlink(missing_ok=True)
 
 
+def test_library_archive_export_does_not_build_metadata_export_first(
+    db_session: Session,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, _, _ = _seed(db_session, tmp_path)
+
+    def _unexpected_export(*_args, **_kwargs):
+        raise AssertionError("portable export must not materialize export_payload")
+
+    monkeypatch.setattr(
+        library_transfer.model_views, "export_payload", _unexpected_export
+    )
+    archive_path = library_transfer.create_archive(db_session, user)
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            assert archive.getinfo("manifest.json").file_size > 0
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+
+def test_library_archive_export_preflights_import_entry_limit(
+    db_session: Session,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, _, _ = _seed(db_session, tmp_path)
+    monkeypatch.setattr(library_transfer, "MAX_ENTRIES", 1)
+
+    with pytest.raises(ValueError, match="archive_too_large"):
+        library_transfer.create_archive(db_session, user)
+
+
+def test_library_archive_limit_covers_large_library_reference() -> None:
+    assert library_transfer.MAX_ENTRIES >= 25_001
+
+
+def test_library_archive_export_rejects_changed_source_blob(
+    db_session: Session,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+) -> None:
+    user, _, file_row = _seed(db_session, tmp_path)
+    source = Path(file_row.path)
+    source.write_bytes(b"x" * file_row.size_bytes)
+
+    with pytest.raises(ValueError, match="archive_blob_hash_mismatch"):
+        library_transfer.create_archive(db_session, user)
+
+
+def test_library_import_hashes_artifact_members_without_zipfile_read(
+    db_session: Session,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, _, _ = _seed(db_session, tmp_path)
+    archive_path = library_transfer.create_archive(db_session, user)
+    original_read = zipfile.ZipFile.read
+
+    def _guarded_read(self, name, *args, **kwargs):
+        filename = name.filename if isinstance(name, zipfile.ZipInfo) else str(name)
+        if filename.startswith("blobs/"):
+            raise AssertionError("Artifact validation must stream ZIP members")
+        return original_read(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(zipfile.ZipFile, "read", _guarded_read)
+    try:
+        result = library_transfer.import_archive(db_session, archive_path, user)
+        assert result["skipped_files"] == 1
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+
+def test_library_import_api_runs_blocking_work_in_fastapi_threadpool() -> None:
+    from app.api.v1 import models as models_api
+
+    assert not inspect.iscoroutinefunction(models_api.import_library_archive)
+
+
 def test_library_import_rejects_corrupt_blob(
     db_session: Session, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
@@ -109,6 +192,27 @@ def test_library_archive_api_downloads_zip(
     downloaded.write_bytes(response.content)
     with zipfile.ZipFile(downloaded) as archive:
         assert json.loads(archive.read("manifest.json"))["format"] == "printstash-library-v1"
+
+
+@pytest.mark.parametrize(
+    ("detail", "status_code"),
+    [("archive_too_large", 413), ("archive_blob_hash_mismatch", 409)],
+)
+def test_library_archive_api_reports_preflight_failure(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    detail: str,
+    status_code: int,
+) -> None:
+    def _reject_export(*_args, **_kwargs):
+        raise ValueError(detail)
+
+    monkeypatch.setattr(library_transfer, "create_archive", _reject_export)
+    response = client.get("/api/v1/models/library-archive", headers=auth_headers)
+
+    assert response.status_code == status_code
+    assert response.json() == {"detail": detail}
 
 
 def _rewrite_manifest(archive_path: Path, mutate) -> Path:
