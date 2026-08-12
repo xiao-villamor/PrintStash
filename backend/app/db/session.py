@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from contextvars import ContextVar
 from typing import AsyncGenerator, Generator, Iterator, Protocol, runtime_checkable
 
@@ -105,7 +105,7 @@ class SessionFactory(Protocol):
 
     def session(self) -> Session: ...
     def async_session(self) -> AsyncSession: ...
-    def scoped_session(self) -> Generator[Session, None, None]: ...
+    def scoped_session(self) -> AbstractContextManager[Session]: ...
     def dispose(self) -> None: ...
 
 
@@ -135,9 +135,10 @@ class SQLiteSessionFactory:
             session.close()
 
 
+_default_factory: SessionFactory = SQLiteSessionFactory(_engine)
 _factory_ctx: ContextVar[SessionFactory] = ContextVar(
     "session_factory",
-    default=SQLiteSessionFactory(_engine),  # noqa: B039
+    default=_default_factory,  # noqa: B039
 )
 
 
@@ -216,6 +217,7 @@ def _ensure_sentinel_rows() -> None:
             session.add(sentinel_model)
             session.commit()
             session.refresh(sentinel_model)
+        assert sentinel_model.id is not None
 
         sentinel_file = session.exec(
             select(File).where(File.sha256 == SENTINEL_FILE_HASH)

@@ -51,6 +51,9 @@ jobs:
       - name: Lint backend
         run: uv run ruff check app/ tests/
 
+      - name: Typecheck critical backend modules
+        run: uv run pyright
+
       - name: Test backend
         run: uv run pytest tests -v --cov=app --cov-report=term-missing --cov-fail-under=95
 

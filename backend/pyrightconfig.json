@@ -1,0 +1,17 @@
+{
+  "include": [
+    "app/core/config.py",
+    "app/core/security.py",
+    "app/core/topology.py",
+    "app/db/migrate.py",
+    "app/db/session.py",
+    "app/core/ratelimit.py",
+    "app/services/realtime.py",
+    "app/services/storage_backend.py",
+    "app/services/storage_utils.py",
+    "app/services/task_queue.py"
+  ],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false
+}
