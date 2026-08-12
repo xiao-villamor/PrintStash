@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -348,9 +349,13 @@ def test_scheduler_candidate_batch_has_a_fixed_query_budget(
     from app.services.printer_jobs import _claim_next_sync
 
     statements: list[str] = []
+    measured_thread = threading.get_ident()
 
     def _record(*args) -> None:  # noqa: ANN002
-        statements.append(args[2])
+        # The engine is process-wide in the suite. Ignore unrelated provider
+        # pollers that may still be finishing a worker-thread transaction.
+        if threading.get_ident() == measured_thread:
+            statements.append(args[2])
 
     engine = db_session.get_bind()
     event.listen(engine, "before_cursor_execute", _record)
