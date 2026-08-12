@@ -1462,7 +1462,7 @@ def test_manual_print_job_with_registered_printer(
     assert resp.json()["printer_name"] == "Ender"
 
 
-def test_manual_print_job_invalid_state_falls_back_to_completed(
+def test_manual_print_job_invalid_state_is_rejected(
     client: TestClient, auth_headers: dict[str, str], db_session: Session
 ) -> None:
     model = _model(db_session)
@@ -1476,8 +1476,26 @@ def test_manual_print_job_invalid_state_falls_back_to_completed(
         },
         headers=auth_headers,
     )
-    assert resp.status_code == 200
-    assert resp.json()["state"] == "completed"
+    assert resp.status_code == 422
+
+
+def test_manual_print_job_rejects_trashed_file(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session)
+    file_row = _file(db_session, model)
+    file_row.deleted_at = utcnow()
+    db_session.add(file_row)
+    db_session.commit()
+
+    response = client.post(
+        f"/api/v1/models/{model.id}/print-jobs",
+        json={"file_id": file_row.id, "printer_name": "Bench"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "file_not_found"
 
 
 def test_batch_move_root_model_denied_for_non_superuser(

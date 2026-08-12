@@ -111,9 +111,7 @@ _GCODE_SUFFIXES = {".gcode", ".g", ".gco", ".bgcode"}
 def _stage_gcode_upload(upload: UploadFile, suffix: str) -> Path:
     staged = settings.incoming_dir / f"{uuid.uuid4().hex}{suffix}"
     try:
-        storage.stream_to_path(
-            upload.file, staged, max_bytes=settings.max_upload_bytes
-        )
+        storage.stream_to_path(upload.file, staged, max_bytes=settings.max_upload_bytes)
     except storage.UploadTooLarge as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -817,8 +815,14 @@ def create_manual_print_job(
 ) -> ModelPrintJobRead:
     _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
 
-    file_row = session.get(File, payload.file_id)
-    if file_row is None or file_row.model_id != model_id:
+    file_row = session.exec(
+        select(File).where(
+            File.id == payload.file_id,
+            File.model_id == model_id,
+            live(File),
+        )
+    ).first()
+    if file_row is None:
         raise HTTPException(status_code=404, detail={"code": "file_not_found"})
 
     # Either a registered printer (by id) or an ad-hoc free-text printer name.
@@ -832,10 +836,7 @@ def create_manual_print_job(
     elif not printer_name:
         raise HTTPException(status_code=422, detail={"code": "printer_required"})
 
-    try:
-        state = PrintJobState(payload.state)
-    except ValueError:
-        state = PrintJobState.COMPLETED
+    state = payload.state
 
     job = PrintJob(
         printer_id=payload.printer_id,

@@ -405,7 +405,7 @@ class ManualPrintJobCreate(BaseModel):
     printer_id: Optional[int] = None
     printer_name: Optional[str] = Field(default=None, max_length=128)
     file_id: int
-    state: str = Field(default="completed", max_length=32)
+    state: PrintJobState = PrintJobState.COMPLETED
     spool_id: Optional[int] = None
     spool_name: Optional[str] = Field(default=None, max_length=256)
     spool_filament_id: Optional[int] = None
