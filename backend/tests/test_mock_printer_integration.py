@@ -12,6 +12,7 @@ import time
 
 import httpx
 import pytest
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.db.models import File, FileType, Model, Printer, PrintJob, PrintJobState
@@ -132,10 +133,14 @@ async def _wait_job_state(
     """Poll the DB until the job reaches one of ``states`` (or fail loudly)."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        with get_session_factory().session() as s:
-            job = s.get(PrintJob, job_id)
-            if job is not None and job.state in states:
-                return job.state
+        try:
+            with get_session_factory().session() as s:
+                job = s.get(PrintJob, job_id)
+                if job is not None and job.state in states:
+                    return job.state
+        except OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
         await asyncio.sleep(0.1)
     raise AssertionError(f"job {job_id} never reached {states}")
 
