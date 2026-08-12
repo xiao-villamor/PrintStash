@@ -210,31 +210,46 @@ def download_direct(
 )
 def file_thumbnail(
     file_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
     _accessible_file(session, file_id, current_user)
-    return thumbnail_response(file_id)
+    return thumbnail_response(file_id, request)
 
 
-def thumbnail_response(file_id: int):
+def _etag_matches(request: Request | None, etag: str) -> bool:
+    if request is None:
+        return False
+    candidates = request.headers.get("if-none-match", "").split(",")
+    return any(candidate.strip().removeprefix("W/") in ("*", etag) for candidate in candidates)
+
+
+def thumbnail_response(file_id: int, request: Request | None = None):
     """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
     thumb_key = backend.thumbnail_key(file_id)
     filename, media_type = f"{file_id}.webp", "image/webp"
-    if not backend.exists(thumb_key):
+    info = backend.object_info(thumb_key)
+    if info is None:
         # Thumbnails written before the WebP switch are still PNG on disk.
         thumb_key = backend.legacy_thumbnail_key(file_id)
         filename, media_type = f"{file_id}.png", "image/png"
-        if not backend.exists(thumb_key):
+        info = backend.object_info(thumb_key)
+        if info is None:
             raise HTTPException(status_code=404, detail="thumbnail_not_found")
     # Thumbnails only change on explicit rebuilds; let the browser cache them
     # so the library grid doesn't re-request every image on each visit.
+    headers = {"Cache-Control": "public, max-age=3600"}
+    if info.etag:
+        headers["ETag"] = info.etag
+        if _etag_matches(request, info.etag):
+            return Response(status_code=304, headers=headers)
     return _serve_file(
         thumb_key,
         filename,
         media_type,
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers=headers,
     )
 
 

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
@@ -14,6 +15,12 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class StorageObjectInfo:
+    size: int
+    etag: str | None = None
 
 
 class StorageBackend(ABC):
@@ -73,6 +80,12 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def stat_size(self, key: str) -> int: ...
+
+    def object_info(self, key: str) -> StorageObjectInfo | None:
+        """Return existence, size, and a cache validator through one seam."""
+        if not self.exists(key):
+            return None
+        return StorageObjectInfo(size=self.stat_size(key))
 
     @abstractmethod
     def read_bytes(self, key: str) -> bytes: ...
@@ -215,6 +228,16 @@ class LocalStorageBackend(StorageBackend):
 
     def stat_size(self, key: str) -> int:
         return Path(key).stat().st_size
+
+    def object_info(self, key: str) -> StorageObjectInfo | None:
+        try:
+            stat = Path(key).stat()
+        except FileNotFoundError:
+            return None
+        return StorageObjectInfo(
+            size=stat.st_size,
+            etag=f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"',
+        )
 
     def read_bytes(self, key: str) -> bytes:
         return Path(key).read_bytes()
@@ -400,11 +423,13 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
         return f"{self._prefix()}document-images/{document_id}/{name}"
 
     def exists(self, key: str) -> bool:
+        return self.object_info(key) is not None
+
+    def object_info(self, key: str) -> StorageObjectInfo | None:
         import botocore.exceptions
 
         try:
-            self._client.head_object(Bucket=self._bucket, Key=key)
-            return True
+            response = self._client.head_object(Bucket=self._bucket, Key=key)
         except botocore.exceptions.ClientError as exc:
             # Only a genuine "not there" is False. Credential, permission and
             # network errors must raise: swallowing them tells the orphan-blob
@@ -414,8 +439,15 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
                 "NoSuchKey",
                 "NotFound",
             ):
-                return False
+                return None
             raise
+        etag = response.get("ETag")
+        if etag and not str(etag).startswith('"'):
+            etag = f'"{etag}"'
+        return StorageObjectInfo(
+            size=int(response.get("ContentLength", 0) or 0),
+            etag=str(etag) if etag else None,
+        )
 
     def write_stream(self, src: BinaryIO, key: str) -> int:
         from boto3.s3.transfer import TransferConfig

@@ -147,6 +147,22 @@ def test_s3_exists_raises_on_auth_error(code: str) -> None:
         _s3_backend_raising(code).exists("some/key")
 
 
+def test_s3_object_info_exposes_remote_etag_and_size() -> None:
+    class _Client:
+        def head_object(self, **_kwargs):
+            return {"ContentLength": 42, "ETag": '"remote-etag"'}
+
+    backend = object.__new__(S3StorageBackend)
+    backend._client = _Client()  # type: ignore[attr-defined]
+    backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+
+    info = backend.object_info("thumb.webp")
+
+    assert info is not None
+    assert info.size == 42
+    assert info.etag == '"remote-etag"'
+
+
 # ---------------------------------------------------------------------------
 # S3 _ensure_bucket(): create-if-missing on startup
 # ---------------------------------------------------------------------------

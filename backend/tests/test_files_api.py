@@ -4,6 +4,7 @@ tests/test_slicer_download.py."""
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
@@ -156,6 +157,78 @@ class TestDownloadDirect:
 
 
 class TestThumbnail:
+    def test_etag_revalidation_and_rebuild_change(
+        self, client: TestClient, db_session: Session, auth_headers
+    ) -> None:
+        model = _make_model(db_session, slug="thumb-etag", hash_="81" * 32)
+        f = _make_file(db_session, model)
+        backend = get_backend()
+        key = backend.thumbnail_key(f.id)
+        backend.write_bytes(b"first-thumbnail", key)
+
+        first = client.get(f"/api/v1/files/{f.id}/thumbnail", headers=auth_headers)
+        assert first.status_code == 200
+        etag = first.headers["etag"]
+
+        cached = client.get(
+            f"/api/v1/files/{f.id}/thumbnail",
+            headers={**auth_headers, "if-none-match": etag},
+        )
+        assert cached.status_code == 304
+        assert cached.content == b""
+
+        backend.write_bytes(b"second-thumbnail-is-different", key)
+        rebuilt = client.get(
+            f"/api/v1/files/{f.id}/thumbnail",
+            headers={**auth_headers, "if-none-match": etag},
+        )
+        assert rebuilt.status_code == 200
+        assert rebuilt.headers["etag"] != etag
+
+    def test_remote_thumbnail_uses_storage_etag_without_body_on_304(
+        self,
+        client: TestClient,
+        db_session: Session,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.api.v1 import files as files_api
+        from app.services.storage_backend import StorageObjectInfo
+
+        model = _make_model(db_session, slug="remote-thumb", hash_="82" * 32)
+        f = _make_file(db_session, model)
+
+        class RemoteThumbnailBackend:
+            streamed = 0
+
+            def thumbnail_key(self, file_id: int) -> str:
+                return f"thumbs/{file_id}.webp"
+
+            def legacy_thumbnail_key(self, file_id: int) -> str:
+                return f"thumbs/{file_id}.png"
+
+            def object_info(self, key: str) -> StorageObjectInfo | None:
+                return StorageObjectInfo(size=6, etag='"remote-thumb-v1"')
+
+            def direct_path(self, key: str):
+                return None
+
+            def stream_chunks(self, key: str):
+                self.streamed += 1
+                yield b"remote"
+
+        remote = RemoteThumbnailBackend()
+        monkeypatch.setattr(files_api, "get_backend", lambda: remote)
+
+        response = client.get(
+            f"/api/v1/files/{f.id}/thumbnail",
+            headers={**auth_headers, "if-none-match": '"remote-thumb-v1"'},
+        )
+
+        assert response.status_code == 304
+        assert response.headers["etag"] == '"remote-thumb-v1"'
+        assert remote.streamed == 0
+
     def test_legacy_png_fallback(
         self, client: TestClient, db_session: Session, auth_headers
     ) -> None:

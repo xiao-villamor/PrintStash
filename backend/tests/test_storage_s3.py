@@ -69,6 +69,10 @@ def test_round_trips_bytes(s3_backend: S3StorageBackend):
     assert s3_backend.exists(key)
     assert s3_backend.stat_size(key) == len(b"hello minio")
     assert s3_backend.read_bytes(key) == b"hello minio"
+    info = s3_backend.object_info(key)
+    assert info is not None
+    assert info.size == len(b"hello minio")
+    assert info.etag
 
 
 def test_upload_file_then_download_to_path(s3_backend: S3StorageBackend, tmp_path: Path):

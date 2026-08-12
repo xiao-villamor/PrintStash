@@ -46,12 +46,16 @@ def get_shared_model(token: str, session: Session = Depends(get_session)):
 
 
 @router.get("/{token}/thumbnail", summary="Thumbnail of a shared model")
-def get_shared_thumbnail(token: str, session: Session = Depends(get_session)):
+def get_shared_thumbnail(
+    token: str,
+    request: Request,
+    session: Session = Depends(get_session),
+):
     link = share.resolve_share(session, token)
     model = session.get(Model, link.model_id)
     if model is None or model.thumbnail_file_id is None:
         raise HTTPException(status_code=404, detail="not_found")
-    return thumbnail_response(model.thumbnail_file_id)
+    return thumbnail_response(model.thumbnail_file_id, request)
 
 
 @router.get(
