@@ -223,6 +223,7 @@ def _claim_next_sync() -> int | None:
         )
 
         candidate: PrintJob | None = None
+        pending_updates: list[dict[str, object]] = []
         for row, printer, blocked_reason in resolved:
             requester = users.get(int(row.requested_by)) if row.requested_by else None
             artifact = artifacts.get(int(row.file_id))
@@ -261,14 +262,23 @@ def _claim_next_sync() -> int | None:
                 blocked_reason = "collection_access_revoked"
             assigned_id = printer.id if printer else None
             if row.printer_id != assigned_id or row.blocked_reason != blocked_reason:
-                row.printer_id = assigned_id
-                row.printer_name = printer.name if printer else None
-                row.blocked_reason = blocked_reason
-                row.updated_at = utcnow()
-                session.add(row)
+                pending_updates.append(
+                    {
+                        "id": row.id,
+                        "printer_id": assigned_id,
+                        "printer_name": printer.name if printer else None,
+                        "blocked_reason": blocked_reason,
+                        "updated_at": claimed_at,
+                    }
+                )
             if blocked_reason is None and printer is not None:
                 candidate = row
                 break
+        if pending_updates:
+            # ORM dirty flushing can degrade to one UPDATE per row depending on
+            # dialect/session state. Primary-key bulk mappings preserve a fixed
+            # round-trip budget for the bounded scheduler batch.
+            session.execute(update(PrintJob), pending_updates)
         session.commit()
         if candidate is None or candidate.id is None:
             return None
