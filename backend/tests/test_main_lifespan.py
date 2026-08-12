@@ -9,6 +9,7 @@ This starts it for real via Starlette's TestClient context-manager protocol.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -36,7 +37,13 @@ def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(storage_backend, "_backend", None)
     yield
-    for field in ("storage_backend", "data_dir", "thumb_dir", "backup_dir", "staging_dir"):
+    for field in (
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "backup_dir",
+        "staging_dir",
+    ):
         _overlay.pop(field, None)
 
 
@@ -107,10 +114,29 @@ def test_parse_cors_origins_accepts_list_and_filters_blanks() -> None:
     assert app_main._parse_cors_origins(42) == []
 
 
-def _fake_request(path: str = "/x", headers: dict[str, str] | None = None) -> StarletteRequest:
-    raw_headers = [
-        (k.lower().encode(), v.encode()) for k, v in (headers or {}).items()
-    ]
+@pytest.mark.asyncio
+async def test_cancel_tasks_awaits_cleanup_and_consumes_cancellation() -> None:
+    cleaned_up = asyncio.Event()
+
+    async def worker() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned_up.set()
+
+    task = asyncio.create_task(worker())
+    await asyncio.sleep(0)
+
+    await app_main._cancel_tasks(task)
+
+    assert cleaned_up.is_set()
+    assert task.cancelled()
+
+
+def _fake_request(
+    path: str = "/x", headers: dict[str, str] | None = None
+) -> StarletteRequest:
+    raw_headers = [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]
     scope = {
         "type": "http",
         "method": "GET",
@@ -130,7 +156,9 @@ async def test_unhandled_exception_handler_logs_traceback_in_debug(
     try:
         request = _fake_request(path="/boom")
         with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
-            response = await app_main.unhandled_exception_handler(request, ValueError("boom"))
+            response = await app_main.unhandled_exception_handler(
+                request, ValueError("boom")
+            )
     finally:
         _overlay.pop("log_level", None)
     assert response.status_code == 500
@@ -147,7 +175,9 @@ async def test_unhandled_exception_handler_logs_summary_outside_debug(
     try:
         request = _fake_request(path="/boom")
         with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
-            response = await app_main.unhandled_exception_handler(request, ValueError("boom"))
+            response = await app_main.unhandled_exception_handler(
+                request, ValueError("boom")
+            )
     finally:
         _overlay.pop("log_level", None)
     assert response.status_code == 500
@@ -220,7 +250,9 @@ def test_refresh_printer_gauge_survives_db_error(
     monkeypatch.setattr(app_main, "get_session_factory", _boom)
     with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
         app_main._refresh_printer_gauge()  # must not raise
-    assert any("failed to refresh printer gauge" in r.getMessage() for r in caplog.records)
+    assert any(
+        "failed to refresh printer gauge" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_refresh_fleet_gauges_survives_db_error(
@@ -232,13 +264,19 @@ def test_refresh_fleet_gauges_survives_db_error(
     monkeypatch.setattr(app_main, "get_session_factory", _boom)
     with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
         app_main._refresh_fleet_gauges()  # must not raise
-    assert any("failed to refresh fleet gauges" in r.getMessage() for r in caplog.records)
+    assert any(
+        "failed to refresh fleet gauges" in r.getMessage() for r in caplog.records
+    )
 
 
-def test_run_due_external_scans_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_due_external_scans_noop_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from app.services import external_library, runtime_config
 
-    monkeypatch.setattr(runtime_config, "external_libraries_enabled", lambda _session: False)
+    monkeypatch.setattr(
+        runtime_config, "external_libraries_enabled", lambda _session: False
+    )
     called = {"scan": False}
     monkeypatch.setattr(
         external_library, "scan_library", lambda _id: called.__setitem__("scan", True)
@@ -254,7 +292,9 @@ def test_run_due_external_scans_logs_and_continues_on_scan_failure(
 ) -> None:
     from app.services import external_library, runtime_config
 
-    monkeypatch.setattr(runtime_config, "external_libraries_enabled", lambda _session: True)
+    monkeypatch.setattr(
+        runtime_config, "external_libraries_enabled", lambda _session: True
+    )
     monkeypatch.setattr(
         external_library, "libraries_due_for_scan", lambda _session: [1, 2]
     )
@@ -272,7 +312,9 @@ def test_run_due_external_scans_logs_and_continues_on_scan_failure(
 
     # Both libraries are attempted even though the first raised.
     assert scanned == [1, 2]
-    assert any("scheduled scan failed for library 1" in r.getMessage() for r in caplog.records)
+    assert any(
+        "scheduled scan failed for library 1" in r.getMessage() for r in caplog.records
+    )
 
 
 def test_lifespan_logs_reconciliation_warnings_and_survives_watcher_failure(
@@ -289,9 +331,7 @@ def test_lifespan_logs_reconciliation_warnings_and_survives_watcher_failure(
     monkeypatch.setattr(jobs, "reconcile_interrupted_jobs", lambda: 3)
     monkeypatch.setattr(vault_audit, "reconcile_interrupted_runs", lambda: 4)
     monkeypatch.setattr(inbox, "reconcile_interrupted_items", lambda: 5)
-    monkeypatch.setattr(
-        app_main, "reconcile_stranded_dispatches", lambda: 6
-    )
+    monkeypatch.setattr(app_main, "reconcile_stranded_dispatches", lambda: 6)
 
     async def _boom_start_all(self):
         raise RuntimeError("watcher init failed")
@@ -339,7 +379,9 @@ async def test_gc_loop_logs_and_continues_past_each_task_failure(
     from app.services import inbox, notifications
 
     monkeypatch.setattr(
-        app_main, "gc_soft_deleted", lambda: (_ for _ in ()).throw(RuntimeError("gc fail"))
+        app_main,
+        "gc_soft_deleted",
+        lambda: (_ for _ in ()).throw(RuntimeError("gc fail")),
     )
     monkeypatch.setattr(
         notifications,
@@ -406,9 +448,7 @@ async def test_external_scan_loop_skips_during_restore_then_logs_scan_failure(
         calls["scan_calls"] += 1
         raise RuntimeError("scan tick blew up")
 
-    monkeypatch.setattr(
-        app_main, "begin_mutating_operation", _begin_mutating_operation
-    )
+    monkeypatch.setattr(app_main, "begin_mutating_operation", _begin_mutating_operation)
     monkeypatch.setattr(app_main, "end_mutating_operation", _end_mutating_operation)
     monkeypatch.setattr(app_main, "_run_due_external_scans", _run_due_external_scans)
 
@@ -424,4 +464,6 @@ async def test_external_scan_loop_skips_during_restore_then_logs_scan_failure(
     assert calls["admission_checks"] >= 2
     assert calls["scan_calls"] >= 1
     assert calls["mutation_ends"] == calls["scan_calls"]
-    assert any("external library scan tick failed" in r.getMessage() for r in caplog.records)
+    assert any(
+        "external library scan tick failed" in r.getMessage() for r in caplog.records
+    )

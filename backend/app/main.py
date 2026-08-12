@@ -53,6 +53,13 @@ from app.services.trash import gc_soft_deleted
 logger = get_logger(__name__)
 
 
+async def _cancel_tasks(*tasks: asyncio.Task) -> None:
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def _safe_db_url(value: str) -> str:
     try:
         return make_url(value).render_as_string(hide_password=True)
@@ -133,10 +140,12 @@ async def lifespan(app: FastAPI):
         logger.exception("library watcher failed to start; scheduled scans still run")
     yield
     logger.info("shutting down printer hub")
-    app.state.gc_task.cancel()
-    app.state.external_scan_task.cancel()
-    app.state.notification_task.cancel()
-    app.state.fleet_scheduler_task.cancel()
+    await _cancel_tasks(
+        app.state.gc_task,
+        app.state.external_scan_task,
+        app.state.notification_task,
+        app.state.fleet_scheduler_task,
+    )
     await watcher.stop_all()
     await hub.stop_all()
     from app.services.browser_fetch import close_browser
