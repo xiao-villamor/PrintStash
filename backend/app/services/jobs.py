@@ -11,7 +11,11 @@ import re
 import threading
 import uuid
 from datetime import timedelta
+from time import monotonic
 from typing import Any, Dict, Optional
+
+from sqlalchemy import delete, func, or_
+from sqlmodel import select
 
 from app.core.time import utcnow
 from app.db.models import BackgroundJob
@@ -28,6 +32,10 @@ from app.schemas.ingest import (
 # state, then dropped so the registry cannot grow without bound.
 _FINISHED_TTL = timedelta(hours=1)
 _MAX_JOBS = 1000
+_DEFAULT_TERMINAL_HISTORY = 20
+_PERSISTED_PRUNE_INTERVAL_S = 60.0
+_ACTIVE_STATES = ("pending", "running")
+_TERMINAL_STATES = ("completed", "failed")
 _SECRET_QUERY = re.compile(
     r"(?i)(token|key|secret|password|cookie|signature|credential)=([^&\s]+)"
 )
@@ -79,6 +87,7 @@ class JobRegistry:
     def __init__(self) -> None:
         self._jobs: Dict[str, IngestJobStatus] = {}
         self._lock = threading.Lock()
+        self._last_persisted_prune_at = float("-inf")
 
     @staticmethod
     def _status_payload(job: IngestJobStatus) -> str:
@@ -122,13 +131,45 @@ class JobRegistry:
                 **payload,
             )
 
-    def _load_all(self) -> list[IngestJobStatus]:
-        from sqlmodel import select
-
+    def _load_for_user(
+        self,
+        user_id: int,
+        *,
+        is_superuser: bool,
+        terminal_limit: int,
+    ) -> list[IngestJobStatus]:
         with get_session_factory().scoped_session() as session:
-            rows = session.exec(
-                select(BackgroundJob).order_by(BackgroundJob.created_at)
+            terminal_cutoff = utcnow() - _FINISHED_TTL
+            scope = [BackgroundJob.visible == True]  # noqa: E712
+            if not is_superuser:
+                scope.append(
+                    or_(
+                        BackgroundJob.owner_user_id.is_(None),  # type: ignore[union-attr]
+                        BackgroundJob.owner_user_id == user_id,
+                    )
+                )
+            active = session.exec(
+                select(BackgroundJob)
+                .where(*scope, BackgroundJob.state.in_(_ACTIVE_STATES))  # type: ignore[union-attr]
+                .order_by(BackgroundJob.updated_at.desc())  # type: ignore[attr-defined]
+                .limit(_MAX_JOBS)
             ).all()
+            terminal = session.exec(
+                select(BackgroundJob)
+                .where(
+                    *scope,
+                    BackgroundJob.state.in_(_TERMINAL_STATES),  # type: ignore[union-attr]
+                    or_(
+                        BackgroundJob.finished_at.is_(None),  # type: ignore[union-attr]
+                        BackgroundJob.finished_at >= terminal_cutoff,
+                    ),
+                )
+                .order_by(BackgroundJob.updated_at.desc())  # type: ignore[attr-defined]
+                .limit(terminal_limit)
+            ).all()
+            rows = sorted(
+                [*active, *terminal], key=lambda row: row.updated_at, reverse=True
+            )
             return [
                 IngestJobStatus(
                     job_id=row.id,
@@ -139,15 +180,33 @@ class JobRegistry:
                 for row in rows
             ]
 
-    def _delete_persisted(self, job_id: str) -> None:
+    def _persisted_counts(self) -> dict[str, int]:
         with get_session_factory().scoped_session() as session:
-            row = session.get(BackgroundJob, job_id)
-            if row is not None:
-                session.delete(row)
-                session.commit()
+            rows = session.exec(
+                select(BackgroundJob.state, func.count(BackgroundJob.id)).group_by(
+                    BackgroundJob.state
+                )
+            ).all()
+        counts = {str(state): int(count) for state, count in rows}
+        counts["total"] = sum(counts.values())
+        return counts
+
+    def _prune_persisted_finished(self, cutoff) -> None:
+        with get_session_factory().scoped_session() as session:
+            session.exec(
+                delete(BackgroundJob).where(
+                    BackgroundJob.finished_at.is_not(None),  # type: ignore[union-attr]
+                    BackgroundJob.finished_at < cutoff,
+                )
+            )
+            session.commit()
 
     def _prune_locked(self) -> None:
         cutoff = utcnow() - _FINISHED_TTL
+        now = monotonic()
+        if now - self._last_persisted_prune_at >= _PERSISTED_PRUNE_INTERVAL_S:
+            self._prune_persisted_finished(cutoff)
+            self._last_persisted_prune_at = now
         stale = [
             job_id
             for job_id, job in self._jobs.items()
@@ -155,7 +214,6 @@ class JobRegistry:
         ]
         for job_id in stale:
             del self._jobs[job_id]
-            self._delete_persisted(job_id)
         if len(self._jobs) > _MAX_JOBS:
             # Oldest finished jobs first; dict preserves insertion order.
             finished = [
@@ -303,31 +361,28 @@ class JobRegistry:
             return persisted
 
     def list_for_user(
-        self, user_id: int, *, is_superuser: bool = False
+        self,
+        user_id: int,
+        *,
+        is_superuser: bool = False,
+        terminal_limit: int = _DEFAULT_TERMINAL_HISTORY,
     ) -> list[IngestJobStatus]:
         with self._lock:
-            persisted = self._load_all()
-            persisted_ids = {job.job_id for job in persisted}
-            self._jobs = {
-                job_id: job
-                for job_id, job in self._jobs.items()
-                if job_id in persisted_ids
-            }
+            persisted = self._load_for_user(
+                user_id,
+                is_superuser=is_superuser,
+                terminal_limit=max(0, min(100, terminal_limit)),
+            )
             for job in persisted:
-                self._jobs.setdefault(job.job_id, job)
+                self._jobs[job.job_id] = job
             self._prune_locked()
-            return [
-                job
-                for job in reversed(self._jobs.values())
-                if job.visible
-                and (is_superuser or job.owner_user_id in (None, user_id))
-            ]
+            return persisted
 
     def snapshot_counts(self) -> Dict[str, int]:
         """Return a count of tracked jobs by state, plus a total.
 
-        Informational snapshot for the health probe; the registry is in-memory
-        and is wiped on restart, so this reflects only the current process.
+        Informational snapshot for the health probe, grouped in SQL without
+        deserializing every persisted status document.
         """
         counts: Dict[str, int] = {
             "pending": 0,
@@ -336,25 +391,14 @@ class JobRegistry:
             "failed": 0,
         }
         with self._lock:
-            persisted = self._load_all()
-            persisted_ids = {job.job_id for job in persisted}
-            self._jobs = {
-                job_id: job
-                for job_id, job in self._jobs.items()
-                if job_id in persisted_ids
-            }
-            for job in persisted:
-                self._jobs.setdefault(job.job_id, job)
-            for job in self._jobs.values():
-                counts[job.state] = counts.get(job.state, 0) + 1
-            counts["total"] = len(self._jobs)
+            self._prune_locked()
+            persisted = self._persisted_counts()
+            counts.update(persisted)
         return counts
 
 
 def reconcile_interrupted_jobs() -> int:
     """Resolve work stranded in RUNNING by an unclean process shutdown."""
-    from sqlmodel import select
-
     with get_session_factory().scoped_session() as session:
         rows = list(
             session.exec(

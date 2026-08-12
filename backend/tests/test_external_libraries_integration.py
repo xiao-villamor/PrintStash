@@ -45,6 +45,32 @@ from app.services import external_library, runtime_config, taxonomy, trash
 from app.services.ingestion import add_gcode_revision_to_model, ingest_orca_gcode
 from app.services.jobs import registry
 
+
+def test_scan_progress_coalescer_bounds_unchanged_large_scan_writes() -> None:
+    coalescer = external_library._ScanProgressCoalescer(  # noqa: SLF001
+        total=50_000,
+        last_flush_at=0.0,
+    )
+
+    flushed = [
+        processed
+        for processed in range(1, 50_001)
+        if coalescer.should_flush(processed, now=0.0)
+    ]
+
+    assert len(flushed) == 100
+    assert flushed[-1] == 50_000
+
+
+def test_scan_progress_coalescer_flushes_slow_work_by_time() -> None:
+    coalescer = external_library._ScanProgressCoalescer(  # noqa: SLF001
+        total=50_000,
+        last_flush_at=0.0,
+    )
+
+    assert coalescer.should_flush(1, now=0.24) is False
+    assert coalescer.should_flush(2, now=0.25) is True
+
 FIXTURE_GCODE = Path(__file__).parent / "fixtures" / "sample.gcode"
 
 # A small but valid ASCII-STL cube (a real mesh trimesh can parse + thumbnail).

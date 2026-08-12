@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -10,7 +12,8 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.config import _overlay
-from app.db.models import ExternalLibrary, User
+from app.core.time import utcnow
+from app.db.models import BackgroundJob, ExternalLibrary, User
 from app.schemas.ingest import IngestJobStatus
 from app.services import runtime_config
 from app.services.auth import create_access_token, hash_password
@@ -99,6 +102,66 @@ def test_reconnect_listing_respects_owner_permissions() -> None:
         other,
     }
     assert jobs.get(own).state == "pending"  # type: ignore[union-attr]
+
+
+def test_reconnect_listing_scopes_before_status_deserialization(
+    db_session: Session,
+) -> None:
+    db_session.add(
+        BackgroundJob(
+            id="other-corrupt",
+            owner_user_id=8,
+            visible=True,
+            state="completed",
+            status_json="not-json",
+        )
+    )
+    db_session.add(
+        BackgroundJob(
+            id="mine-valid",
+            owner_user_id=7,
+            visible=True,
+            state="running",
+            status_json=json.dumps({"state": "running"}),
+        )
+    )
+    db_session.commit()
+
+    listed = JobRegistry().list_for_user(7)
+
+    assert [job.job_id for job in listed] == ["mine-valid"]
+
+
+def test_reconnect_listing_keeps_active_and_bounds_terminal_history(
+    db_session: Session,
+) -> None:
+    now = utcnow()
+    db_session.add(
+        BackgroundJob(
+            id="active",
+            owner_user_id=7,
+            visible=True,
+            state="running",
+            status_json=json.dumps({"state": "running"}),
+            updated_at=now,
+        )
+    )
+    for index in range(5):
+        db_session.add(
+            BackgroundJob(
+                id=f"done-{index}",
+                owner_user_id=7,
+                visible=True,
+                state="completed",
+                status_json=json.dumps({"state": "completed"}),
+                updated_at=now - timedelta(seconds=index + 1),
+            )
+        )
+    db_session.commit()
+
+    listed = JobRegistry().list_for_user(7, terminal_limit=2)
+
+    assert {job.job_id for job in listed} == {"active", "done-0", "done-1"}
 
 
 def test_display_sanitizers_hide_paths_credentials_and_control_characters() -> None:

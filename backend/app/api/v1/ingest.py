@@ -16,6 +16,7 @@ from fastapi import (
     Depends,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     status,
 )
@@ -983,9 +984,16 @@ async def select_collection_members(
     response_model=list[IngestJobStatus],
     summary="List reconnectable ingestion jobs for the current user",
 )
-def list_jobs(current_user: User = Depends(require_user)) -> list[IngestJobStatus]:
+def list_jobs(
+    terminal_limit: int = Query(20, ge=0, le=100),
+    current_user: User = Depends(require_user),
+) -> list[IngestJobStatus]:
     assert current_user.id is not None
-    return registry.list_for_user(current_user.id)
+    return registry.list_for_user(
+        current_user.id,
+        is_superuser=current_user.is_superuser,
+        terminal_limit=terminal_limit,
+    )
 
 
 @router.get(

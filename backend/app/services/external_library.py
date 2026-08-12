@@ -18,6 +18,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from time import monotonic
 from typing import Literal, Optional
 
 from croniter import croniter
@@ -59,6 +60,32 @@ logger = get_logger(__name__)
 # the hash compare in _reindex_changed still catches any genuine edit on the
 # next size change, so this only trades a re-hash storm for the cheap skip.
 _MTIME_TOLERANCE_S = 2.0
+_PROGRESS_FLUSH_INTERVAL_S = 0.25
+_PROGRESS_PERCENT_STEP = 1
+
+
+@dataclass
+class _ScanProgressCoalescer:
+    """Bound progress writes by time or percentage while always flushing final."""
+
+    total: int
+    last_flush_at: float = field(default_factory=monotonic)
+    last_percent: int = 0
+
+    def should_flush(self, processed: int, *, now: float | None = None) -> bool:
+        if self.total <= 0:
+            return processed > 0
+        current = monotonic() if now is None else now
+        percent = min(100, int(processed * 100 / self.total))
+        if (
+            processed >= self.total
+            or percent >= self.last_percent + _PROGRESS_PERCENT_STEP
+            or current - self.last_flush_at >= _PROGRESS_FLUSH_INTERVAL_S
+        ):
+            self.last_percent = percent
+            self.last_flush_at = current
+            return True
+        return False
 
 FsKind = Literal["local", "network", "unknown"]
 
@@ -459,9 +486,10 @@ def scan_library(
                     total_steps=len(disk) or 1,
                     total=len(disk),
                 )
+            progress_updates = _ScanProgressCoalescer(total=len(disk))
 
             for index, (path, (size, mtime)) in enumerate(disk.items(), start=1):
-                if job_id:
+                if job_id and progress_updates.should_flush(index):
                     registry.update(
                         job_id,
                         step=index,

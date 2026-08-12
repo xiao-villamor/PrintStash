@@ -213,3 +213,62 @@ describe("subscribeTasks", () => {
     expect(cb).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("adaptive import-job synchronization", () => {
+  it("stops polling after the initial sync when the server is idle", async () => {
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("polls active jobs and cleanup releases the timer", async () => {
+    listIngestJobs.mockResolvedValue([
+      {
+        job_id: "active-job",
+        state: "running",
+        model_id: null,
+        file_id: null,
+        error: null,
+        started_at: null,
+        finished_at: null,
+      },
+    ]);
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(listIngestJobs).toHaveBeenCalledTimes(2);
+    stop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(listIngestJobs).toHaveBeenCalledTimes(2);
+  });
+
+  it("wakes an idle synchronizer when a new server job is tracked", async () => {
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+
+    tc.trackImportJob("new-job", "Scan library");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listIngestJobs).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("backs off after a failed sync even without a local task record", async () => {
+    listIngestJobs.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(listIngestJobs).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listIngestJobs).toHaveBeenCalledTimes(2);
+    stop();
+  });
+});

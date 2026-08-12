@@ -34,7 +34,11 @@ const DISMISSED_JOBS_KEY = "printstash:dismissed-import-jobs:v1";
 let tasks: TaskItem[] = loadTasks();
 const dismissedJobIds = loadDismissedJobIds();
 let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
-let syncTimer: ReturnType<typeof setInterval> | null = null;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let syncSubscribers = 0;
+let syncFailures = 0;
+let syncInFlight = false;
+let syncWakePending = false;
 
 function loadTasks(): TaskItem[] {
   if (typeof window === "undefined") return [];
@@ -179,6 +183,7 @@ export function linkTaskToJob(taskId: string, jobId: string): void {
   dismissedJobIds.delete(jobId);
   persistDismissedJobIds();
   updateTask(taskId, { jobIds });
+  wakeImportJobSync();
 }
 
 export function clearCompletedTasks(): void {
@@ -278,16 +283,18 @@ function applyGroupedJobs(task: TaskItem, jobs: IngestJobStatus[]): void {
 export function trackImportJob(jobId: string, title: string): string {
   const existing = tasks.find((task) => task.jobId === jobId);
   if (existing) return existing.id;
-  return createTask({
+  const taskId = createTask({
     title,
     detail: "Queued · continues in background",
     status: "pending",
     progress: 0,
     jobId,
   });
+  wakeImportJobSync();
+  return taskId;
 }
 
-export async function syncImportJobs(): Promise<void> {
+export async function syncImportJobs(): Promise<boolean> {
   const jobs = (await listIngestJobs()).filter(
     (job) => !dismissedJobIds.has(job.job_id),
   );
@@ -304,14 +311,98 @@ export async function syncImportJobs(): Promise<void> {
   }
 
   jobs.filter((job) => !claimedJobIds.has(job.job_id)).forEach(applyJob);
+  return jobs.some((job) => job.state === "pending" || job.state === "running");
+}
+
+function hasTrackedActiveJobs(): boolean {
+  return tasks.some(
+    (task) =>
+      (task.status === "pending" || task.status === "running") &&
+      (!!task.jobId || !!task.jobIds?.length),
+  );
+}
+
+function clearSyncTimer(): void {
+  if (syncTimer !== null) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+}
+
+function scheduleImportJobSync(delay: number): void {
+  if (
+    typeof window === "undefined" ||
+    syncSubscribers === 0 ||
+    document.visibilityState === "hidden"
+  ) {
+    return;
+  }
+  clearSyncTimer();
+  syncTimer = setTimeout(() => {
+    syncTimer = null;
+    void pollImportJobs();
+  }, delay);
+}
+
+async function pollImportJobs(): Promise<void> {
+  if (syncInFlight || syncSubscribers === 0 || document.visibilityState === "hidden") {
+    return;
+  }
+  syncInFlight = true;
+  try {
+    const serverHasActiveJobs = await syncImportJobs();
+    syncFailures = 0;
+    if (serverHasActiveJobs || hasTrackedActiveJobs()) {
+      scheduleImportJobSync(1_000);
+    }
+  } catch {
+    syncFailures += 1;
+    // We could not learn whether the server has active work. Retry at a
+    // bounded backoff even when this browser has no local task record.
+    scheduleImportJobSync(
+      Math.min(30_000, 1_000 * 2 ** Math.max(0, syncFailures - 1)),
+    );
+  } finally {
+    syncInFlight = false;
+    if (syncWakePending) {
+      syncWakePending = false;
+      scheduleImportJobSync(0);
+    }
+  }
+}
+
+function wakeImportJobSync(): void {
+  if (syncSubscribers === 0) return;
+  if (syncInFlight) {
+    syncWakePending = true;
+    return;
+  }
+  scheduleImportJobSync(0);
+}
+
+function onVisibilityChange(): void {
+  if (document.visibilityState === "hidden") clearSyncTimer();
+  else scheduleImportJobSync(0);
 }
 
 export function startImportJobSync(): () => void {
-  void syncImportJobs().catch(() => undefined);
-  if (syncTimer === null && typeof window !== "undefined") {
-    syncTimer = setInterval(() => void syncImportJobs().catch(() => undefined), 1_000);
+  if (typeof window === "undefined") return () => {};
+  syncSubscribers += 1;
+  if (syncSubscribers === 1) {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    scheduleImportJobSync(0);
   }
-  return () => {};
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    syncSubscribers = Math.max(0, syncSubscribers - 1);
+    if (syncSubscribers === 0) {
+      clearSyncTimer();
+      syncWakePending = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
+  };
 }
 
 export function subscribeTasks(callback: () => void): () => void {
