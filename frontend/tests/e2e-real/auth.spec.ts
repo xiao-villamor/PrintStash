@@ -31,7 +31,12 @@ test("a username + API key authenticates, and stops once revoked", async ({ page
 
   await page.getByLabel("Key name").fill(keyName);
   await page.getByRole("button", { name: "Generate" }).click();
-  const secret = (await page.locator("code").first().innerText()).trim();
+  // The panel always contains documentation <code> elements. Wait for and
+  // select the generated credential itself instead of racing those static
+  // nodes while React renders the API response.
+  const secret = (
+    await page.locator("code").filter({ hasText: /^psk_/ }).innerText()
+  ).trim();
   expect(secret.length).toBeGreaterThan(10);
 
   // The key exchanges for a JWT at /auth/login (proxied through the frontend).
