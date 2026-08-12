@@ -28,6 +28,7 @@ from functools import wraps
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterator, ParamSpec, TypeVar
 
+from sqlalchemy.engine.url import make_url
 from sqlmodel import Session, create_engine
 
 from app.core.config import settings
@@ -57,6 +58,35 @@ _R = TypeVar("_R")
 
 class RestoreConflictError(Exception):
     """Raised when a restore is refused because ingestion work is in flight."""
+
+
+class DatabaseBackupNotSupportedError(RuntimeError):
+    """Raised when the configured database has no integrated snapshot adapter."""
+
+
+@dataclass(frozen=True)
+class DatabaseBackupCapability:
+    database_backend: str
+    create_supported: bool
+    restore_supported: bool
+
+
+def database_backup_capability() -> DatabaseBackupCapability:
+    """Describe the integrated database snapshot contract without exposing its URL."""
+    backend = make_url(settings.db_url).get_backend_name()
+    supported = backend == "sqlite" and _db_path() is not None
+    return DatabaseBackupCapability(
+        database_backend=backend,
+        create_supported=supported,
+        restore_supported=supported,
+    )
+
+
+def _require_database_backup_support(*, restore: bool = False) -> None:
+    capability = database_backup_capability()
+    supported = capability.restore_supported if restore else capability.create_supported
+    if not supported:
+        raise DatabaseBackupNotSupportedError("database_backup_not_supported")
 
 
 def restore_in_progress() -> bool:
@@ -114,6 +144,7 @@ def _exclusive_backup_operation(func: Callable[_P, _R]) -> Callable[_P, _R]:
             return func(*args, **kwargs)
 
     return serialized
+
 
 MANIFEST_VERSION = "1"
 _BACKUP_S3_PREFIX = "printstash-backups/"
@@ -303,6 +334,7 @@ def create_backup() -> BackupMeta:
     Always writes locally first. If ``backup_s3_bucket`` is configured,
     the archive is also uploaded to the S3 bucket.
     """
+    _require_database_backup_support()
     backup_id = uuid.uuid4().hex[:12]
     timestamp = utcnow()
     ts = timestamp.isoformat()
@@ -530,9 +562,7 @@ def _read_manifest(archive_path: Path) -> BackupMeta | None:
                         # ``.stem`` only strips ``.gz`` from ``*.tar.gz`` and
                         # would leave a ``.tar`` suffix on the id, so the id here
                         # would not match the one ``create_backup`` returns.
-                        id=archive_path.name.removesuffix(".tar.gz").rsplit("-", 1)[
-                            -1
-                        ],
+                        id=archive_path.name.removesuffix(".tar.gz").rsplit("-", 1)[-1],
                         created_at=manifest["created_at"],
                         size_bytes=archive_path.stat().st_size,
                         storage_backend=manifest.get("storage_backend", "local"),
@@ -580,11 +610,15 @@ def verify_backup(backup_id: str) -> BackupVerification:
                     )
             manifests = [member for member in members if member.name == "manifest.json"]
             if len(manifests) != 1:
-                findings.append({"code": "backup_manifest_invalid", "member": "manifest.json"})
+                findings.append(
+                    {"code": "backup_manifest_invalid", "member": "manifest.json"}
+                )
             else:
                 stream = tar.extractfile(manifests[0])
                 try:
-                    parsed = json.loads(stream.read().decode("utf-8")) if stream else None
+                    parsed = (
+                        json.loads(stream.read().decode("utf-8")) if stream else None
+                    )
                 except (ValueError, UnicodeDecodeError):
                     parsed = None
                 if isinstance(parsed, dict):
@@ -594,7 +628,9 @@ def verify_backup(backup_id: str) -> BackupVerification:
                         {"code": "backup_manifest_invalid", "member": "manifest.json"}
                     )
             if sum(member.name == "db.sqlite3" for member in members) != 1:
-                findings.append({"code": "backup_member_missing", "member": "db.sqlite3"})
+                findings.append(
+                    {"code": "backup_member_missing", "member": "db.sqlite3"}
+                )
             if manifest is not None:
                 expected_entries = manifest.get("files")
                 if not isinstance(expected_entries, list):
@@ -606,7 +642,9 @@ def verify_backup(backup_id: str) -> BackupVerification:
                     for member in members:
                         by_name.setdefault(member.name, []).append(member)
                     for entry in expected_entries:
-                        if not isinstance(entry, dict) or not isinstance(entry.get("arc"), str):
+                        if not isinstance(entry, dict) or not isinstance(
+                            entry.get("arc"), str
+                        ):
                             findings.append(
                                 {"code": "backup_manifest_invalid", "member": "files"}
                             )
@@ -614,10 +652,15 @@ def verify_backup(backup_id: str) -> BackupVerification:
                         arc = entry["arc"]
                         matches = by_name.get(arc, [])
                         if len(matches) != 1:
-                            findings.append({"code": "backup_member_missing", "member": arc[:255]})
+                            findings.append(
+                                {"code": "backup_member_missing", "member": arc[:255]}
+                            )
                             continue
                         expected_size = entry.get("size")
-                        if isinstance(expected_size, int) and matches[0].size != expected_size:
+                        if (
+                            isinstance(expected_size, int)
+                            and matches[0].size != expected_size
+                        ):
                             findings.append(
                                 {
                                     "code": "backup_member_size_mismatch",
@@ -646,7 +689,11 @@ def verify_backup(backup_id: str) -> BackupVerification:
             session,
             action="backup.verify",
             resource_type="backup",
-            diff={"backup_id": backup_id, "valid": result.valid, "findings": len(findings)},
+            diff={
+                "backup_id": backup_id,
+                "valid": result.valid,
+                "findings": len(findings),
+            },
         )
     return result
 
@@ -860,6 +907,7 @@ def restore_backup(backup_id: str) -> dict:
     ``RestoreConflictError`` if ingestion work is still running after a short
     grace period, rather than restoring underneath it.
     """
+    _require_database_backup_support(restore=True)
     meta = get_backup(backup_id)
     if meta is None:
         raise FileNotFoundError(f"backup {backup_id} not found")
@@ -929,7 +977,9 @@ def restore_backup(backup_id: str) -> dict:
                         diff={"backup_id": backup_id, "reason": "restore_error"},
                     )
             except Exception:
-                logger.exception("restore %s failed and audit recording also failed", backup_id)
+                logger.exception(
+                    "restore %s failed and audit recording also failed", backup_id
+                )
             raise
     finally:
         _end_restore_maintenance()

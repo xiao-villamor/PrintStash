@@ -353,7 +353,9 @@ def test_restore_replaces_live_wal_state_without_replay(backup_env: BackupEnv):
     live = sqlite3.connect(backup_env.db_file)
     try:
         assert live.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
-        live.execute("UPDATE models SET name = 'Post Backup State' WHERE name = 'Widget'")
+        live.execute(
+            "UPDATE models SET name = 'Post Backup State' WHERE name = 'Widget'"
+        )
         live.commit()
         assert live.execute("SELECT name FROM models").fetchone() == (
             "Post Backup State",
@@ -543,7 +545,9 @@ def test_failed_blob_restore_rolls_back_files_and_keeps_database(
     Path(first_key).write_bytes(b"current-first")
     Path(second_key).write_bytes(b"current-second")
     with backup_env.new_session() as session:
-        session.exec(select(Model).where(Model.name == "First")).one().name = "Current First"
+        session.exec(
+            select(Model).where(Model.name == "First")
+        ).one().name = "Current First"
         session.commit()
 
     real_write = backup._write_staged_blob
@@ -812,7 +816,9 @@ def test_create_backup_fails_if_blob_vanishes_mid_write(
     with caplog.at_level("ERROR"), pytest.raises(OSError, match="vanished"):
         backup.create_backup()
 
-    assert any("failed while streaming owned blobs" in r.message for r in caplog.records)
+    assert any(
+        "failed while streaming owned blobs" in r.message for r in caplog.records
+    )
     assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
 
@@ -919,7 +925,9 @@ def test_backup_s3_key_prefixes_archive_name():
 
 
 def test_create_backup_raises_when_blob_size_changes_mid_archive(
-    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    backup_env: BackupEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     """If the recorded size for a censused blob no longer matches what actually
     gets streamed into the tar, the archive must not be reported as complete."""
@@ -932,10 +940,15 @@ def test_create_backup_raises_when_blob_size_changes_mid_archive(
 
     monkeypatch.setattr(backup, "_find_blobs", _wrong_size)
 
-    with caplog.at_level("ERROR"), pytest.raises(RuntimeError, match="backup_blob_size_changed"):
+    with (
+        caplog.at_level("ERROR"),
+        pytest.raises(RuntimeError, match="backup_blob_size_changed"),
+    ):
         backup.create_backup()
 
-    assert any("failed while streaming owned blobs" in r.message for r in caplog.records)
+    assert any(
+        "failed while streaming owned blobs" in r.message for r in caplog.records
+    )
     # The partial archive must not be left behind as if it were valid.
     assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
@@ -1349,6 +1362,58 @@ def test_list_backups_endpoint(client: TestClient, backup_env: BackupEnv):
     assert resp.status_code == 200, resp.text
     ids = {row["backup_id"] for row in resp.json()}
     assert meta.id in ids
+
+
+def test_database_backup_capability_reports_sqlite_support(
+    client: TestClient, backup_env: BackupEnv
+):
+    headers = _auth_headers(backup_env)
+
+    response = client.get(
+        "/api/v1/backups/capabilities/database",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "database_backend": "sqlite",
+        "create_supported": True,
+        "restore_supported": True,
+    }
+
+
+def test_postgres_backup_capability_fails_before_creating_or_restoring(
+    client: TestClient,
+    backup_env: BackupEnv,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from app.core.config import _overlay
+
+    monkeypatch.setitem(
+        _overlay,
+        "db_url",
+        "postgresql://printstash:secret@database/printstash",
+    )
+    headers = _auth_headers(backup_env)
+
+    capability = client.get(
+        "/api/v1/backups/capabilities/database",
+        headers=headers,
+    )
+    create = client.post("/api/v1/backups", headers=headers)
+    restore = client.post("/api/v1/backups/any-id/restore", headers=headers)
+
+    assert capability.status_code == 200
+    assert capability.json() == {
+        "database_backend": "postgresql",
+        "create_supported": False,
+        "restore_supported": False,
+    }
+    assert create.status_code == 501
+    assert create.json()["detail"] == "database_backup_not_supported"
+    assert restore.status_code == 501
+    assert restore.json()["detail"] == "database_backup_not_supported"
+    assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
 
 def test_get_backup_endpoint_returns_metadata(

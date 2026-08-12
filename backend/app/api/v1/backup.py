@@ -28,7 +28,13 @@ router = APIRouter(prefix="/backups", tags=["backups"])
 def create_backup(
     background_tasks: BackgroundTasks,
 ) -> dict:
-    meta = backup.create_backup()
+    try:
+        meta = backup.create_backup()
+    except backup.DatabaseBackupNotSupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     background_tasks.add_task(backup.purge_old_backups)
     return {
         "backup_id": meta.id,
@@ -61,6 +67,20 @@ def list_backups() -> list[dict]:
         }
         for m in metas
     ]
+
+
+@router.get(
+    "/capabilities/database",
+    dependencies=[Depends(require_superuser)],
+    summary="Get database backup capabilities",
+)
+def get_database_backup_capabilities() -> dict[str, str | bool]:
+    capability = backup.database_backup_capability()
+    return {
+        "database_backend": capability.database_backend,
+        "create_supported": capability.create_supported,
+        "restore_supported": capability.restore_supported,
+    }
 
 
 @router.get(
@@ -149,6 +169,11 @@ def delete_backup(backup_id: str) -> dict:
 def restore_backup(backup_id: str) -> dict:
     try:
         result = backup.restore_backup(backup_id)
+    except backup.DatabaseBackupNotSupportedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="backup_not_found") from exc
     except backup.RestoreConflictError as exc:
