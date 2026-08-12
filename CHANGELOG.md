@@ -2,14 +2,27 @@
 
 ## 0.11.4
 
+**This patch-version release is an explicit exception to normal 0.x patch policy: it adds cursor pagination endpoints and an append-only index migration. Back up before upgrading.**
+
+### Added
+
+- Model browsing now has globally sorted cursor pagination for date, name, print success, last print, duration, filament, and cost, plus a lightweight desktop-outliner endpoint.
+
 ### Fixed
 
 - Portable library exports now enforce the same entry and uncompressed-size ceilings as imports, and verify every source Artifact while streaming, so PrintStash does not produce an archive it would reject on round-trip.
+- Remote thumbnails now expose storage ETags and honor `If-None-Match` with a bodyless `304`, matching local thumbnail cache revalidation.
+- Task Center synchronization now releases timers on cleanup, pauses while the tab is hidden, stops when idle, and backs off after transient errors.
 
 ### Performance
 
 - Portable archive export now scopes accessible Models directly in SQL instead of first materializing the full metadata export, keeps large ID sets inside SQL subqueries, and hashes Artifact data in bounded chunks.
 - Portable archive import validates Artifact members in bounded chunks and runs blocking upload, ZIP, filesystem, and database work outside the async event loop.
+- Model metric sorts now run in SQL across the complete filtered library instead of draining every frontend page; mobile skips outliner leaves and desktop receives only its minimal tree fields.
+- Background-job reconnect reads filter and bound persisted history in SQL before deserialization, while active polling runs only while work exists.
+- External-library scans coalesce progress persistence to 250 ms or one-percent steps instead of committing once per unchanged Artifact.
+- Model facets and vault counters now each use one aggregate database round-trip, backed by composite indexes for live Artifact, Model cursor, and background-job lookup paths.
+- Initial font CSS is limited to the Latin subset, and Vite's native TypeScript path resolver replaces the redundant plugin.
 
 ## 0.11.3
 
