@@ -60,6 +60,34 @@ def effective_roles_for_printers(
     return roles
 
 
+def effective_roles_for_user_printer_pairs(
+    session: Session,
+    user_ids: Iterable[int],
+    printer_ids: Iterable[int],
+) -> dict[tuple[int, int], PrinterRole]:
+    """Load direct printer grants for many scheduler candidates in one query."""
+    users = {int(user_id) for user_id in user_ids}
+    printers = {int(printer_id) for printer_id in printer_ids}
+    if not users or not printers:
+        return {}
+    return {
+        (int(user_id), int(printer_id)): role
+        for user_id, printer_id, role in session.exec(
+            select(
+                PrinterPermission.user_id,
+                PrinterPermission.printer_id,
+                PrinterPermission.role,
+            )
+            .join(Printer, Printer.id == PrinterPermission.printer_id)  # type: ignore[arg-type]
+            .where(
+                PrinterPermission.user_id.in_(users),  # type: ignore[union-attr]
+                PrinterPermission.printer_id.in_(printers),  # type: ignore[union-attr]
+                live(Printer),
+            )
+        ).all()
+    }
+
+
 def accessible_printer_ids(
     session: Session,
     user: User,

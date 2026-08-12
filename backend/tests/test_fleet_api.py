@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -22,6 +24,7 @@ from app.db.models import (
     PrinterStatus,
     PrintJob,
     PrintJobState,
+    RoutingStrategy,
     User,
 )
 from app.services import fleet
@@ -316,6 +319,84 @@ def test_scheduler_rechecks_drain_before_dispatch(
     )
     assert job["state"] == "queued"
     assert job["blocked_reason"] == "printer_unavailable"
+
+
+def test_scheduler_candidate_batch_has_a_fixed_query_budget(
+    db_session: Session,
+) -> None:
+    printer = Printer(
+        name="Offline batch",
+        moonraker_url="http://offline-batch",
+        status=PrinterStatus.OFFLINE,
+    )
+    db_session.add(printer)
+    db_session.commit()
+    artifact = _gcode(db_session)
+    for index in range(120):
+        db_session.add(
+            PrintJob(
+                printer_id=printer.id,
+                file_id=artifact.id,
+                model_id=artifact.model_id,
+                remote_filename=f"batch-{index}.gcode",
+                state=PrintJobState.QUEUED,
+                routing_strategy=RoutingStrategy.MANUAL,
+                queue_position=index + 1,
+            )
+        )
+    db_session.commit()
+    from app.services.printer_jobs import _claim_next_sync
+
+    statements: list[str] = []
+
+    def _record(*args) -> None:  # noqa: ANN002
+        statements.append(args[2])
+
+    engine = db_session.get_bind()
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        assert _claim_next_sync() is None
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+    db_session.expire_all()
+    blocked = db_session.exec(
+        select(PrintJob).where(PrintJob.blocked_reason == "printer_unavailable")
+    ).all()
+    assert len(blocked) == 100
+    assert len(statements) <= 14
+
+    # Previously blocked rows sort after untouched rows, so later ticks cannot
+    # starve candidates beyond the bounded first page.
+    assert _claim_next_sync() is None
+    db_session.expire_all()
+    assert (
+        len(
+            db_session.exec(
+                select(PrintJob).where(PrintJob.blocked_reason == "printer_unavailable")
+            ).all()
+        )
+        == 120
+    )
+
+
+def test_dispatch_sql_does_not_block_the_event_loop(monkeypatch) -> None:
+    from app.services import printer_jobs
+
+    def _slow_claim() -> None:
+        time.sleep(0.2)
+        return None
+
+    monkeypatch.setattr(printer_jobs, "_claim_next_sync", _slow_claim)
+
+    async def _run() -> None:
+        dispatch = asyncio.create_task(printer_jobs.dispatch_next())
+        started = time.monotonic()
+        await asyncio.sleep(0.02)
+        assert time.monotonic() - started < 0.1
+        assert await dispatch is None
+
+    asyncio.run(_run())
 
 
 def test_fleet_summary_counts_queue_drain_and_maintenance(

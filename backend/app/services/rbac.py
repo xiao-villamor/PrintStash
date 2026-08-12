@@ -172,6 +172,53 @@ def effective_roles_for_collections(
     return out
 
 
+def effective_roles_for_user_collection_pairs(
+    session: Session,
+    user_ids: Iterable[int],
+    collection_ids: Iterable[int],
+) -> dict[tuple[int, int], CollectionRole]:
+    """Resolve inherited collection grants for many users and targets at once."""
+    users = {int(user_id) for user_id in user_ids}
+    collections = {int(collection_id) for collection_id in collection_ids}
+    if not users or not collections:
+        return {}
+    target_paths = {
+        int(collection_id): path
+        for collection_id, path in session.exec(
+            select(Collection.id, Collection.path).where(
+                Collection.id.in_(collections),  # type: ignore[union-attr]
+                live(Collection),
+            )
+        ).all()
+    }
+    grants: dict[int, list[tuple[str, CollectionRole]]] = {}
+    for user_id, path, role in session.exec(
+        select(
+            CollectionPermission.user_id,
+            Collection.path,
+            CollectionPermission.role,
+        )
+        .join(Collection, Collection.id == CollectionPermission.collection_id)  # type: ignore[arg-type]
+        .where(
+            CollectionPermission.user_id.in_(users),  # type: ignore[union-attr]
+            live(Collection),
+        )
+    ).all():
+        grants.setdefault(int(user_id), []).append((path, role))
+
+    result: dict[tuple[int, int], CollectionRole] = {}
+    for user_id in users:
+        for collection_id, path in target_paths.items():
+            best: CollectionRole | None = None
+            for granted_path, role in grants.get(user_id, []):
+                inherited = path == granted_path or path.startswith(granted_path + "/")
+                if inherited and ROLE_ORDER[role] > ROLE_ORDER.get(best, 0):
+                    best = role
+            if best is not None:
+                result[(user_id, collection_id)] = best
+    return result
+
+
 def require_model_collection_role(
     session: Session,
     user: User,

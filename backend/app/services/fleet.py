@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -48,6 +50,53 @@ _ACTIVE_STATES = {
 }
 
 
+@dataclass(frozen=True)
+class RoutingSnapshot:
+    printers: tuple[Printer, ...]
+    active_maintenance_ids: frozenset[int]
+    active_counts: dict[int, int]
+
+
+def build_routing_snapshot(session: Session) -> RoutingSnapshot:
+    now = utcnow()
+    printers = tuple(
+        session.exec(select(Printer).where(live(Printer)).order_by(Printer.id)).all()
+    )
+    printer_ids = {int(row.id) for row in printers if row.id is not None}
+    maintenance_ids = (
+        {
+            int(printer_id)
+            for printer_id in session.exec(
+                select(PrinterMaintenanceWindow.printer_id).where(
+                    PrinterMaintenanceWindow.printer_id.in_(printer_ids),  # type: ignore[union-attr]
+                    live(PrinterMaintenanceWindow),
+                    PrinterMaintenanceWindow.starts_at <= now,
+                    PrinterMaintenanceWindow.ends_at > now,
+                )
+            ).all()
+        }
+        if printer_ids
+        else set()
+    )
+    counts = {
+        int(printer_id): int(count)
+        for printer_id, count in session.exec(
+            select(PrintJob.printer_id, func.count(PrintJob.id))
+            .where(
+                PrintJob.printer_id.in_(printer_ids),  # type: ignore[union-attr]
+                PrintJob.state.in_(_ACTIVE_STATES),
+            )
+            .group_by(PrintJob.printer_id)
+        ).all()
+        if printer_id is not None
+    }
+    return RoutingSnapshot(
+        printers=printers,
+        active_maintenance_ids=frozenset(maintenance_ids),
+        active_counts=counts,
+    )
+
+
 def _active_maintenance(session: Session, printer_id: int) -> bool:
     now = utcnow()
     return (
@@ -63,36 +112,52 @@ def _active_maintenance(session: Session, printer_id: int) -> bool:
     )
 
 
-def _eligible(session: Session, printer: Printer) -> bool:
+def _eligible(
+    session: Session,
+    printer: Printer,
+    snapshot: RoutingSnapshot | None = None,
+) -> bool:
     caps = capabilities_for_provider(printer.provider)
+    maintained = (
+        int(printer.id or 0) in snapshot.active_maintenance_ids
+        if snapshot is not None
+        else _active_maintenance(session, printer.id or 0)
+    )
     return (
         printer.deleted_at is None
         and not printer.drain_mode
         and printer.status == PrinterStatus.READY
         and caps.can_upload
         and caps.can_start
-        and not _active_maintenance(session, printer.id or 0)
+        and not maintained
     )
 
 
 def _active_counts(session: Session) -> dict[int, int]:
-    counts: dict[int, int] = {}
-    rows = session.exec(
-        select(PrintJob).where(PrintJob.state.in_(_ACTIVE_STATES))
-    ).all()
-    for row in rows:
-        if row.printer_id is not None:
-            counts[row.printer_id] = counts.get(row.printer_id, 0) + 1
-    return counts
+    return {
+        int(printer_id): int(count)
+        for printer_id, count in session.exec(
+            select(PrintJob.printer_id, func.count(PrintJob.id))
+            .where(PrintJob.state.in_(_ACTIVE_STATES))
+            .group_by(PrintJob.printer_id)
+        ).all()
+        if printer_id is not None
+    }
 
 
 def choose_printer(
     session: Session,
     strategy: RoutingStrategy,
     requested_printer_id: int | None,
+    *,
+    snapshot: RoutingSnapshot | None = None,
 ) -> tuple[Printer | None, str | None]:
     printers = list(
-        session.exec(select(Printer).where(live(Printer)).order_by(Printer.id)).all()
+        snapshot.printers
+        if snapshot is not None
+        else session.exec(
+            select(Printer).where(live(Printer)).order_by(Printer.id)
+        ).all()
     )
     if strategy == RoutingStrategy.MANUAL:
         printer = next(
@@ -100,19 +165,25 @@ def choose_printer(
         )
         if printer is None:
             raise FleetError("printer_not_found")
-        return printer, None if _eligible(session, printer) else "printer_unavailable"
+        return (
+            printer,
+            None if _eligible(session, printer, snapshot) else "printer_unavailable",
+        )
     if strategy == RoutingStrategy.DEFAULT:
         printer = next((row for row in printers if row.is_default), None)
         if printer is None:
             return None, "default_printer_missing"
-        return printer, None if _eligible(
-            session, printer
-        ) else "default_printer_unavailable"
+        return (
+            printer,
+            None
+            if _eligible(session, printer, snapshot)
+            else "default_printer_unavailable",
+        )
 
-    eligible = [row for row in printers if _eligible(session, row)]
+    eligible = [row for row in printers if _eligible(session, row, snapshot)]
     if not eligible:
         return None, "no_eligible_printer"
-    counts = _active_counts(session)
+    counts = snapshot.active_counts if snapshot is not None else _active_counts(session)
     oldest = datetime.min
     eligible.sort(
         key=lambda row: (

@@ -41,6 +41,7 @@ class FleetSchedulerStatus:
 
 
 scheduler_status = FleetSchedulerStatus()
+_CANDIDATE_BATCH_SIZE = 100
 
 
 def scheduler_snapshot() -> dict[str, object]:
@@ -135,31 +136,97 @@ def reconcile_stranded_dispatches() -> int:
         return len(rows)
 
 
-async def dispatch_next() -> int | None:
-    """Atomically claim and dispatch oldest eligible assigned fleet job."""
+def _claim_next_sync() -> int | None:
+    """Resolve and claim one job using a bounded, fixed-query scheduler batch."""
     claimed_at = utcnow()
     with get_session_factory().scoped_session() as session:
-        candidates = session.exec(
-            select(PrintJob)
-            .where(
-                PrintJob.state == PrintJobState.QUEUED,
-                PrintJob.dispatch_claimed_at.is_(None),  # type: ignore[union-attr]
-            )
-            .order_by(PrintJob.queue_position, PrintJob.created_at, PrintJob.id)
-        ).all()
-        candidate: PrintJob | None = None
+        candidates = list(
+            session.exec(
+                select(PrintJob)
+                .where(
+                    PrintJob.state == PrintJobState.QUEUED,
+                    PrintJob.dispatch_claimed_at.is_(None),  # type: ignore[union-attr]
+                )
+                .order_by(
+                    PrintJob.blocked_reason.is_not(None),  # type: ignore[union-attr]
+                    PrintJob.queue_position,
+                    PrintJob.created_at,
+                    PrintJob.id,
+                )
+                .limit(_CANDIDATE_BATCH_SIZE)
+            ).all()
+        )
+        if not candidates:
+            return None
+
+        routing = fleet.build_routing_snapshot(session)
+        requester_ids = {
+            int(row.requested_by) for row in candidates if row.requested_by is not None
+        }
+        file_ids = {int(row.file_id) for row in candidates}
+        model_ids = {int(row.model_id) for row in candidates}
+        users = {
+            int(row.id): row
+            for row in session.exec(
+                select(User).where(User.id.in_(requester_ids))  # type: ignore[union-attr]
+            ).all()
+            if row.id is not None
+        }
+        artifacts = {
+            int(row.id): row
+            for row in session.exec(
+                select(File).where(File.id.in_(file_ids))  # type: ignore[union-attr]
+            ).all()
+            if row.id is not None
+        }
+        models = {
+            int(row.id): row
+            for row in session.exec(
+                select(Model).where(Model.id.in_(model_ids))  # type: ignore[union-attr]
+            ).all()
+            if row.id is not None
+        }
+
+        resolved: list[tuple[PrintJob, Printer | None, str | None]] = []
+        selected_printer_ids: set[int] = set()
         for row in candidates:
             requested_printer_id = (
                 row.printer_id if row.routing_strategy.value == "manual" else None
             )
-            printer, blocked_reason = fleet.choose_printer(
-                session, row.routing_strategy, requested_printer_id
-            )
-            requester = (
-                session.get(User, row.requested_by) if row.requested_by else None
-            )
-            artifact = session.get(File, row.file_id)
-            model = session.get(Model, row.model_id)
+            try:
+                printer, blocked_reason = fleet.choose_printer(
+                    session,
+                    row.routing_strategy,
+                    requested_printer_id,
+                    snapshot=routing,
+                )
+            except fleet.FleetError as exc:
+                printer, blocked_reason = None, exc.code
+            if printer is not None and printer.id is not None:
+                selected_printer_ids.add(int(printer.id))
+            resolved.append((row, printer, blocked_reason))
+
+        printer_roles = printer_rbac.effective_roles_for_user_printer_pairs(
+            session,
+            requester_ids,
+            selected_printer_ids,
+        )
+        collection_ids = {
+            int(model.collection_id)
+            for model in models.values()
+            if model.collection_id is not None
+        }
+        collection_roles = rbac.effective_roles_for_user_collection_pairs(
+            session,
+            requester_ids,
+            collection_ids,
+        )
+
+        candidate: PrintJob | None = None
+        for row, printer, blocked_reason in resolved:
+            requester = users.get(int(row.requested_by)) if row.requested_by else None
+            artifact = artifacts.get(int(row.file_id))
+            model = models.get(int(row.model_id))
             if row.requested_by is not None and (
                 requester is None
                 or not requester.is_active
@@ -170,9 +237,9 @@ async def dispatch_next() -> int | None:
                 requester is not None
                 and printer is not None
                 and not printer_rbac.role_allows(
-                    printer_rbac.effective_printer_role(
-                        session, requester, int(printer.id)
-                    ),
+                    PrinterRole.ADMIN
+                    if requester.is_superuser
+                    else printer_roles.get((int(requester.id), int(printer.id))),
                     PrinterRole.PRINT,
                 )
             ):
@@ -181,9 +248,13 @@ async def dispatch_next() -> int | None:
                 artifact is None
                 or model is None
                 or not rbac.role_allows(
-                    rbac.effective_collection_role(
-                        session, requester, model.collection_id if model else None
-                    ),
+                    CollectionRole.ADMIN
+                    if requester.is_superuser
+                    else collection_roles.get(
+                        (int(requester.id), int(model.collection_id))
+                    )
+                    if model.collection_id is not None
+                    else None,
                     CollectionRole.EDIT,
                 )
             ):
@@ -218,7 +289,14 @@ async def dispatch_next() -> int | None:
         session.commit()
         if result.rowcount != 1:  # type: ignore[attr-defined]
             return None
-        job_id = candidate.id
+        return int(candidate.id)
+
+
+async def dispatch_next() -> int | None:
+    """Atomically claim and dispatch oldest eligible assigned fleet job."""
+    job_id = await asyncio.to_thread(_claim_next_sync)
+    if job_id is None:
+        return None
 
     try:
         await _dispatch_claimed(job_id)
@@ -231,20 +309,18 @@ async def dispatch_next() -> int | None:
         )
         logger.warning("fleet dispatch failed job=%s code=%s", job_id, code)
         record_fleet_dispatch("failed")
-        with get_session_factory().scoped_session() as session:
-            job = session.get(PrintJob, job_id)
-            if job is not None:
-                job.state = PrintJobState.FAILED
-                job.error = code
-                job.retryable = code != "dispatch_outcome_unknown"
-                job.finished_at = utcnow()
-                job.updated_at = utcnow()
-                session.add(job)
-                session.commit()
+        await asyncio.to_thread(_mark_dispatch_failed, job_id, code)
     return job_id
 
 
-async def _dispatch_claimed(job_id: int) -> None:
+@dataclass(frozen=True)
+class DispatchContext:
+    printer: Printer
+    artifact: File
+    remote_filename: str
+
+
+def _load_dispatch_context(job_id: int) -> DispatchContext:
     with get_session_factory().scoped_session() as session:
         job = session.get(PrintJob, job_id)
         if job is None or job.printer_id is None:
@@ -253,11 +329,55 @@ async def _dispatch_claimed(job_id: int) -> None:
         artifact = session.get(File, job.file_id)
         if printer is None or artifact is None:
             raise RuntimeError("queue_dependency_missing")
-        printer_id = printer.id
-        remote_filename = job.remote_filename
-        artifact_id = artifact.id
-        artifact_size = artifact.size_bytes
-        artifact_sha = artifact.sha256
+        return DispatchContext(
+            printer=printer,
+            artifact=artifact,
+            remote_filename=job.remote_filename,
+        )
+
+
+def _mark_dispatch_failed(job_id: int, code: str) -> None:
+    with get_session_factory().scoped_session() as session:
+        job = session.get(PrintJob, job_id)
+        if job is not None:
+            job.state = PrintJobState.FAILED
+            job.error = code
+            job.retryable = code != "dispatch_outcome_unknown"
+            job.finished_at = utcnow()
+            job.updated_at = utcnow()
+            session.add(job)
+            session.commit()
+
+
+def _mark_dispatch_started(job_id: int, context: DispatchContext) -> None:
+    with get_session_factory().scoped_session() as session:
+        job = session.get(PrintJob, job_id)
+        if job is None:
+            return
+        job.state = PrintJobState.STARTED
+        job.started_at = utcnow()
+        job.error = None
+        job.retryable = False
+        job.blocked_reason = None
+        job.updated_at = utcnow()
+        session.add(job)
+        session.commit()
+        upsert_printer_file(
+            session,
+            printer_id=int(context.printer.id),
+            file_id=int(context.artifact.id),
+            remote_filename=context.remote_filename,
+            size_bytes=context.artifact.size_bytes,
+            sha256=context.artifact.sha256,
+            matched_by="upload_history",
+        )
+
+
+async def _dispatch_claimed(job_id: int) -> None:
+    context = await asyncio.to_thread(_load_dispatch_context, job_id)
+    printer = context.printer
+    artifact = context.artifact
+    remote_filename = context.remote_filename
 
     provider = get_provider_client(printer)
     if not provider.capabilities.can_upload or not provider.capabilities.can_start:
@@ -285,27 +405,7 @@ async def _dispatch_claimed(job_id: int) -> None:
         mark_outcome_unknown=True,
     )
 
-    with get_session_factory().scoped_session() as session:
-        job = session.get(PrintJob, job_id)
-        if job is None:
-            return
-        job.state = PrintJobState.STARTED
-        job.started_at = utcnow()
-        job.error = None
-        job.retryable = False
-        job.blocked_reason = None
-        job.updated_at = utcnow()
-        session.add(job)
-        session.commit()
-        upsert_printer_file(
-            session,
-            printer_id=printer_id,  # type: ignore[arg-type]
-            file_id=artifact_id,  # type: ignore[arg-type]
-            remote_filename=remote_filename,
-            size_bytes=artifact_size,
-            sha256=artifact_sha,
-            matched_by="upload_history",
-        )
+    await asyncio.to_thread(_mark_dispatch_started, job_id, context)
 
 
 async def run_fleet_scheduler() -> None:
