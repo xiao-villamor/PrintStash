@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
 from app.db.models import SystemConfig, User
+from app.services import runtime_config
 from app.services.setup_token import current_setup_token
 
 
@@ -111,3 +113,35 @@ class TestFirstRunSetup:
         assert response.status_code == 403
         assert response.json()["detail"] == "invalid_setup_token"
         assert db_session.exec(select(User)).first() is None
+
+    def test_setup_rolls_back_config_and_user_when_finalization_fails(
+        self,
+        client: TestClient,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        overlay_before = dict(_overlay)
+
+        def fail_finalization(*_args, **_kwargs):
+            raise RuntimeError("injected setup failure")
+
+        monkeypatch.setattr(runtime_config, "mark_configured", fail_finalization)
+
+        with pytest.raises(RuntimeError, match="injected setup failure"):
+            client.post(
+                "/api/v1/setup",
+                json={
+                    "setup_token": current_setup_token(),
+                    "username": "admin",
+                    "password": "Password123",
+                    "storage_backend": "s3",
+                    "s3_bucket": "must-rollback",
+                },
+            )
+
+        db_session.expire_all()
+        assert db_session.exec(select(User)).first() is None
+        assert db_session.get(SystemConfig, 1) is None
+        assert _overlay == overlay_before

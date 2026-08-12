@@ -26,14 +26,15 @@ logger = get_logger(__name__)
 _UNSET: Any = object()
 
 
-def get_or_create(session: Session) -> SystemConfig:
+def get_or_create(session: Session, *, commit: bool = True) -> SystemConfig:
     """Return the singleton config row, creating an empty one if missing."""
     config = session.get(SystemConfig, 1)
     if config is None:
         config = SystemConfig(id=1)
         session.add(config)
-        session.commit()
-        session.refresh(config)
+        if commit:
+            session.commit()
+            session.refresh(config)
     return config
 
 
@@ -54,18 +55,7 @@ def is_configured(session: Session) -> bool:
     return has_user
 
 
-def apply_overlay(session: Session) -> None:
-    """Copy persisted overrides from ``system_config`` into the shared overlay dict.
-
-    Safe to call on every startup. If the row doesn't exist yet, we no-op
-    rather than create one (the wizard will create it on completion).
-    """
-    config = session.get(SystemConfig, 1)
-    if config is None:
-        return
-
-    _overlay.clear()
-
+def _merge_config_overlay(config: SystemConfig) -> None:
     def _set(key: str, value) -> None:
         if value is not None and value != "":
             _overlay[key] = value
@@ -106,6 +96,21 @@ def apply_overlay(session: Session) -> None:
     # the importer's existing cookie path picks it up (see makerworld_auth).
     if config.makerworld_token:
         _overlay["makerworld_cookie"] = f"token={config.makerworld_token}"
+
+
+def apply_overlay(session: Session) -> None:
+    """Replace runtime overrides with values persisted in ``system_config``."""
+    config = session.get(SystemConfig, 1)
+    if config is None:
+        return
+    _overlay.clear()
+    _merge_config_overlay(config)
+
+
+def activate_config(config: SystemConfig) -> None:
+    """Merge a newly committed config into live runtime state."""
+    _merge_config_overlay(config)
+    ensure_dirs()
 
 
 def ensure_jwt_secret(session: Session) -> None:
@@ -211,13 +216,16 @@ def update_config(
     oidc_display_name: Optional[str] = None,
     oidc_redirect_uri: Optional[str] = None,
     oidc_allow_insecure_http: Optional[bool] = None,
+    commit: bool = True,
+    apply_runtime: bool = True,
 ) -> SystemConfig:
     """Persist config overrides into DB + overlay dict.
 
     Pass ``None`` for a field to leave it unchanged. Pass an empty string to
     clear the override (fall back to env/default). Pass a value to set.
     """
-    config = get_or_create(session)
+    config = get_or_create(session, commit=commit)
+    pending_overlay: dict[str, object] = {}
 
     def _apply_str(field_name: str, value: Optional[str]) -> None:
         if value is None:
@@ -229,7 +237,7 @@ def update_config(
         )
         if field_name in ("data_dir", "thumb_dir") and effective:
             effective = Path(str(effective))
-        _overlay[field_name] = effective
+        pending_overlay[field_name] = effective
 
     def _apply_int(field_name: str, value: Optional[int]) -> None:
         if value is None:
@@ -237,19 +245,19 @@ def update_config(
         db_val = value if value != -1 else None
         setattr(config, field_name, db_val)
         if db_val is not None:
-            _overlay[field_name] = db_val
+            pending_overlay[field_name] = db_val
         else:
             fallback = _env_or_default(field_name)
             try:
-                _overlay[field_name] = int(fallback or 0)
+                pending_overlay[field_name] = int(fallback or 0)
             except (ValueError, TypeError):
-                _overlay[field_name] = 30
+                pending_overlay[field_name] = 30
 
     def _apply_bool(field_name: str, value: Optional[bool]) -> None:
         if value is None:
             return
         setattr(config, field_name, value)
-        _overlay[field_name] = value
+        pending_overlay[field_name] = value
 
     _apply_str("storage_backend", storage_backend)
     _apply_str("data_dir", data_dir)
@@ -280,9 +288,16 @@ def update_config(
 
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
-    if any(value is not None for value in (storage_backend, data_dir, thumb_dir)):
+    if commit:
+        session.commit()
+        session.refresh(config)
+    if apply_runtime:
+        _overlay.update(pending_overlay)
+    if (
+        commit
+        and apply_runtime
+        and any(value is not None for value in (storage_backend, data_dir, thumb_dir))
+    ):
         ensure_dirs()
 
     logger.info("runtime config updated")
@@ -470,14 +485,15 @@ def makerworld_status(session: Session) -> dict:
     }
 
 
-def mark_configured(session: Session) -> SystemConfig:
-    config = get_or_create(session)
+def mark_configured(session: Session, *, commit: bool = True) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     if config.configured_at is None:
         config.configured_at = utcnow()
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 

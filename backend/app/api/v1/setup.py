@@ -114,7 +114,11 @@ def complete_setup(
     session: Session = Depends(get_session),
 ) -> SetupResponse:
     with _setup_lock:
-        result = _complete_setup(body, session)
+        try:
+            result = _complete_setup(body, session)
+        except Exception:
+            session.rollback()
+            raise
         set_session_cookie(response, result.access_token)
         return result
 
@@ -185,6 +189,8 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         backup_s3_region=body.backup_s3_region,
         backup_s3_access_key=body.backup_s3_access_key,
         backup_s3_secret_key=body.backup_s3_secret_key,
+        commit=False,
+        apply_runtime=False,
     )
 
     # 3. Create the superuser.
@@ -196,11 +202,13 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         is_active=True,
     )
     session.add(user)
-    session.commit()
-    session.refresh(user)
 
     # 4. Stamp the config as completed.
-    runtime_config.mark_configured(session)
+    config = runtime_config.mark_configured(session, commit=False)
+    session.commit()
+    session.refresh(user)
+    # Runtime state changes only after the DB transaction has committed.
+    runtime_config.activate_config(config)
 
     logger.info(
         "first-run setup complete: user=%s data_dir=%s thumb_dir=%s",
