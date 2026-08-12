@@ -93,7 +93,9 @@ async def lifespan(app: FastAPI):
 
     interrupted_imports = reconcile_interrupted_items()
     if interrupted_imports:
-        logger.warning("reconciled %d interrupted pending import(s)", interrupted_imports)
+        logger.warning(
+            "reconciled %d interrupted pending import(s)", interrupted_imports
+        )
     stranded_dispatches = reconcile_stranded_dispatches()
     if stranded_dispatches:
         logger.warning("reconciled %d stranded fleet dispatch(es)", stranded_dispatches)
@@ -168,6 +170,12 @@ async def _gc_loop() -> None:
                 await asyncio.to_thread(prune_history)
             except Exception:
                 logger.exception("pending import history pruning failed")
+            try:
+                from app.services.auth import prune_expired_refresh_tokens
+
+                await asyncio.to_thread(prune_expired_refresh_tokens)
+            except Exception:
+                logger.exception("expired refresh-token pruning failed")
         finally:
             end_mutating_operation()
         await asyncio.sleep(3600)

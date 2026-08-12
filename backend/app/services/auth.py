@@ -9,13 +9,13 @@ import bcrypt
 import jwt
 from fastapi import Response
 from jwt import InvalidTokenError
-from sqlalchemy import update
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select, update
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import ApiKey, RefreshToken, User
+from app.db.session import get_session_factory
 
 logger = get_logger(__name__)
 ACCESS_BLOCKLIST: set[str] = set()
@@ -239,6 +239,28 @@ def invalidate_user_sessions(session: Session, user: User) -> None:
         )
         .values(revoked=True, revoked_at=now)
     )
+
+
+def prune_expired_refresh_tokens(*, batch_size: int = 1000) -> int:
+    """Delete at most one bounded batch of expired refresh-token rows."""
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    with get_session_factory().scoped_session() as session:
+        expired_ids = list(
+            session.exec(
+                select(RefreshToken.id)
+                .where(RefreshToken.expires_at <= utcnow())
+                .order_by(RefreshToken.expires_at)
+                .limit(batch_size)
+            )
+        )
+        if not expired_ids:
+            return 0
+        result = session.exec(
+            delete(RefreshToken).where(RefreshToken.id.in_(expired_ids))  # type: ignore[union-attr]
+        )
+        session.commit()
+        return int(result.rowcount or 0)
 
 
 def get_user_by_username(session: Session, username: str) -> Optional[User]:

@@ -3,15 +3,17 @@ from __future__ import annotations
 import threading
 
 from sqlalchemy.sql.dml import Update
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.db.models import User
+from app.core.time import utcnow
+from app.db.models import RefreshToken, User
 from app.services.auth import (
     authenticate_api_key,
     authenticate_user,
     create_api_key,
     create_refresh_token,
     hash_password,
+    prune_expired_refresh_tokens,
     rotate_refresh_token,
 )
 
@@ -110,3 +112,20 @@ def test_refresh_token_can_only_be_rotated_once_under_concurrency(
     assert errors == []
     assert outcomes.count(True) == 1
     assert outcomes.count(False) == 1
+
+
+def test_prune_expired_refresh_tokens_is_bounded_and_preserves_live_tokens(
+    db_session: Session,
+) -> None:
+    user = _user(db_session, "refresh-prune")
+    expired = [create_refresh_token(db_session, user.id, minutes=-1) for _ in range(3)]
+    live = create_refresh_token(db_session, user.id, minutes=60)
+
+    assert prune_expired_refresh_tokens(batch_size=2) == 2
+    assert prune_expired_refresh_tokens(batch_size=2) == 1
+    assert prune_expired_refresh_tokens(batch_size=2) == 0
+
+    remaining = db_session.exec(select(RefreshToken)).all()
+    assert len(remaining) == 1
+    assert remaining[0].expires_at > utcnow().replace(tzinfo=None)
+    assert live not in expired
