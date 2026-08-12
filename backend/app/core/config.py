@@ -10,6 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine.url import make_url
 
@@ -51,10 +52,11 @@ class Settings(BaseSettings):
     s3_region: str = "auto"
     s3_access_key: str = ""
     s3_secret_key: str = ""
-    s3_presigned_url_expire_seconds: int = 900
-    s3_multipart_threshold_mb: int = 50
-    s3_lifecycle_expiration_days: int = 0
-    s3_lifecycle_transition_days: int = 0
+    s3_presigned_url_expire_seconds: int = Field(default=900, gt=0)
+    s3_multipart_threshold_mb: int = Field(default=50, gt=0)
+    # Zero disables the corresponding lifecycle action.
+    s3_lifecycle_expiration_days: int = Field(default=0, ge=0)
+    s3_lifecycle_transition_days: int = Field(default=0, ge=0)
     s3_transition_storage_class: str = "STANDARD_IA"
 
     db_url: str = "sqlite:////data/db/printstash.sqlite"
@@ -69,11 +71,11 @@ class Settings(BaseSettings):
     secrets_key_file: Path = Path("/data/db/.printstash-secrets-key")
     session_cookie_secure: bool = False
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = Field(default=60, gt=0)
     # "Remember me" login lifetime. Kept short because the access token is a
     # stateless JWT that can't be revoked before it expires; operators who want
     # longer sessions can raise VAULT_REMEMBER_ME_DAYS.
-    remember_me_days: int = 2
+    remember_me_days: int = Field(default=2, gt=0)
     # Generic OpenID Connect login. Disabled by default so local username/password
     # remains the zero-configuration, local-first path.
     oidc_enabled: bool = False
@@ -89,10 +91,10 @@ class Settings(BaseSettings):
     oidc_allow_insecure_http: bool = False
     # Short-lived token embedded in slicer ("Open in slicer") download URLs so an
     # external slicer process can fetch the file without the user's login session.
-    slicer_download_token_expire_minutes: int = 15
+    slicer_download_token_expire_minutes: int = Field(default=15, gt=0)
     cors_origins: str = ""
 
-    max_upload_mb: int = 512
+    max_upload_mb: int = Field(default=512, gt=0)
     log_level: str = "INFO"
 
     # Static ceiling on mesh density for geometry extraction + thumbnail
@@ -103,7 +105,7 @@ class Settings(BaseSettings):
     # the mesh is not loaded; the file is still indexed, and 3MF still gets its
     # embedded slicer preview. This is the hard ceiling; the RAM-aware cap below
     # tightens it further on small hosts.
-    mesh_max_render_triangles: int = 2_000_000
+    mesh_max_render_triangles: int = Field(default=2_000_000, gt=0)
 
     # Fraction of detected available RAM that a single mesh load+render may peak
     # to. The effective triangle cap is derived from this (per format, using the
@@ -116,7 +118,7 @@ class Settings(BaseSettings):
     # leaves headroom for the rest of the app and the OS while still rendering
     # typical detailed models; 0.30–0.35 is safer for production / self-hosted
     # setups that run other workloads alongside the scan.
-    mesh_memory_budget_fraction: float = 0.5
+    mesh_memory_budget_fraction: float = Field(default=0.5, ge=0, le=1)
 
     # Maximum number of mesh load+render jobs allowed to run at once. Ingestion
     # runs in FastAPI's background-task threadpool, so a bulk/folder upload (#26)
@@ -125,8 +127,8 @@ class Settings(BaseSettings):
     # semaphore caps how many renders run simultaneously, and the RAM-aware
     # triangle cap divides its budget by this count so each concurrent job stays
     # within its share. 1 (serialised) is the safe default; raise it on hosts with
-    # RAM headroom. Values <= 0 are treated as 1.
-    max_render_jobs: int = 1
+    # RAM headroom. Zero is the supported sentinel for serial execution.
+    max_render_jobs: int = Field(default=1, ge=0)
 
     # Number of faces processed per chunk in the software rasteriser. The renderer
     # builds its per-face geometry/shading arrays (each O(faces)) one chunk at a
@@ -134,7 +136,7 @@ class Settings(BaseSettings):
     # rather than O(total_faces) — a million-triangle mesh no longer materialises
     # ~70 MB float32 arrays all at once (#29). Lower it to shrink peak RSS further
     # on tiny containers; raise it for marginally less Python-loop overhead.
-    mesh_render_face_chunk_size: int = 200_000
+    mesh_render_face_chunk_size: int = Field(default=200_000, gt=0)
 
     # For large 3MF files, prefer the slicer-embedded preview before handing the
     # archive to trimesh, whose XML loader is the dominant memory cost. When on
@@ -152,24 +154,24 @@ class Settings(BaseSettings):
     # mesh and OOM-kills the scan (issue #29). This byte cap is the format-blind
     # backstop: above it the mesh is never loaded — the file is still indexed and
     # a 3MF still gets its embedded slicer preview. 0 disables the size guard.
-    mesh_max_load_mb: int = 200
+    mesh_max_load_mb: int = Field(default=200, ge=0)
 
     # Optional static bearer token guarding the Prometheus /metrics endpoint.
     # Empty = open on the trusted internal network (see docs/known-limitations).
     metrics_token: str = ""
 
     # URL + ZIP import (see services/importer.py).
-    url_import_max_redirects: int = 5
-    max_archive_entries: int = 500
-    max_archive_entry_mb: int = 512
-    max_archive_uncompressed_mb: int = 2048
+    url_import_max_redirects: int = Field(default=5, ge=0)
+    max_archive_entries: int = Field(default=500, gt=0)
+    max_archive_entry_mb: int = Field(default=512, gt=0)
+    max_archive_uncompressed_mb: int = Field(default=2048, gt=0)
 
     # Headless-browser fallback for Cloudflare-gated imports (MakerWorld). When
     # enabled, pages that return the bot challenge are re-fetched with Chromium
     # which solves the challenge automatically. See services/browser_fetch.py.
     makerworld_browser_enabled: bool = True
     makerworld_browser_headless: bool = True
-    browser_fetch_timeout_seconds: int = 45
+    browser_fetch_timeout_seconds: int = Field(default=45, gt=0)
 
     # Instance-level MakerWorld session cookie. MakerWorld auth-gates file
     # downloads, so anonymous URL import can list a collection but never fetch its
@@ -180,8 +182,9 @@ class Settings(BaseSettings):
     makerworld_cookie: str = ""
 
     backup_dir: Path = Path("/data/backups")
-    backup_retention_days: int = 30
-    trash_retention_days: int = 30
+    # Zero means eligible for cleanup immediately; negative retention is invalid.
+    backup_retention_days: int = Field(default=30, ge=0)
+    trash_retention_days: int = Field(default=30, ge=0)
 
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
@@ -191,6 +194,23 @@ class Settings(BaseSettings):
 
     app_name: str = "PrintStash"
     app_version: str = "0.11.4"
+
+    @model_validator(mode="after")
+    def validate_numeric_relationships(self) -> Settings:
+        if self.max_archive_entry_mb > self.max_archive_uncompressed_mb:
+            raise ValueError(
+                "max_archive_entry_mb must not exceed max_archive_uncompressed_mb"
+            )
+        if (
+            self.s3_lifecycle_expiration_days
+            and self.s3_lifecycle_transition_days
+            and self.s3_lifecycle_transition_days >= self.s3_lifecycle_expiration_days
+        ):
+            raise ValueError(
+                "s3_lifecycle_transition_days must be lower than "
+                "s3_lifecycle_expiration_days"
+            )
+        return self
 
     @property
     def incoming_dir(self) -> Path:
