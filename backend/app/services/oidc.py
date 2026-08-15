@@ -178,7 +178,8 @@ async def exchange_code(
     }
     methods = document.get("token_endpoint_auth_methods_supported")
     if methods is not None and (
-        not isinstance(methods, list) or not all(isinstance(value, str) for value in methods)
+        not isinstance(methods, list)
+        or not all(isinstance(value, str) for value in methods)
     ):
         raise OIDCError("oidc_invalid_discovery")
     use_basic_auth = bool(
@@ -207,7 +208,6 @@ async def exchange_code(
             key.key,
             algorithms=[key.algorithm_name],
             audience=settings.oidc_client_id,
-            issuer=_issuer(),
             options={"require": ["exp", "iat", "iss", "sub", "aud"]},
         )
     except OIDCError:
@@ -216,6 +216,16 @@ async def exchange_code(
         raise OIDCError("oidc_invalid_id_token") from exc
     except Exception as exc:
         raise OIDCError("oidc_token_exchange_failed") from exc
+    # Issuer is checked manually (normalized on both sides) rather than via
+    # PyJWT's `issuer=` kwarg, which does an exact string match with no
+    # trailing-slash normalization. IdPs using a per-application issuer URL
+    # (e.g. Authentik's PER_PROVIDER issuer mode) commonly emit `iss` with a
+    # trailing slash, while `_issuer()` strips it -- so the built-in check
+    # never matches regardless of how VAULT_OIDC_ISSUER_URL is configured.
+    # This mirrors the normalization already applied to the discovery
+    # document's issuer above.
+    if str(claims.get("iss", "")).rstrip("/") != _issuer():
+        raise OIDCError("oidc_issuer_mismatch")
     if not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
         raise OIDCError("oidc_nonce_mismatch")
     audiences = claims.get("aud")
