@@ -23,6 +23,7 @@ from enum import StrEnum
 from ftplib import FTP_TLS  # nosec B402 - Bambu LAN's implicit-TLS FTPS, not plaintext
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional, Protocol, runtime_checkable
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import paho.mqtt.client as mqtt
@@ -597,7 +598,9 @@ class BambuLanProvider(BaseProvider):
                 "bambu MQTT TLS socket unavailable", code="provider_transport_error"
             )
         certificate = peer_socket.getpeercert()
-        subjects = certificate.get("subject", ()) if isinstance(certificate, dict) else ()
+        subjects = (
+            certificate.get("subject", ()) if isinstance(certificate, dict) else ()
+        )
         common_names = {
             value
             for subject in subjects
@@ -622,8 +625,16 @@ class BambuLanProvider(BaseProvider):
         received = threading.Event()
         connection_error: list[str] = []
 
+        def connection_failed(reason_code: object) -> bool:
+            """Handle both Paho callback API v2 ReasonCode and test integers."""
+
+            is_failure = getattr(reason_code, "is_failure", None)
+            if isinstance(is_failure, bool):
+                return is_failure
+            return reason_code != 0
+
         def on_connect(client, _userdata, _flags, reason_code, _properties=None):  # noqa: ANN001
-            if int(reason_code) != 0:
+            if connection_failed(reason_code):
                 connection_error.append(f"mqtt connection refused: {reason_code}")
                 connected.set()
                 return
@@ -660,8 +671,12 @@ class BambuLanProvider(BaseProvider):
             info = client.publish(
                 self._request_topic, json.dumps(payload), qos=1, retain=False
             )
-            info.wait_for_publish(timeout=timeout)
-            if not info.is_published():
+            # ``rc`` reports whether Paho accepted the command locally.  Do not
+            # require a PUBACK before accepting the printer's correlated
+            # application response: some Bambu firmware responds even when the
+            # QoS 1 acknowledgement is not observable by the client (#69).
+            publish_rc = getattr(info, "rc", mqtt.MQTT_ERR_SUCCESS)
+            if isinstance(publish_rc, int) and publish_rc != mqtt.MQTT_ERR_SUCCESS:
                 raise ProviderError(
                     "bambu_command_not_published", code="provider_transport_error"
                 )
@@ -669,8 +684,13 @@ class BambuLanProvider(BaseProvider):
                 raise ProviderError("bambu_response_timeout", code="provider_timeout")
             return response
         finally:
-            client.loop_stop()
-            client.disconnect()
+            # Disconnect first so Paho's network thread has a reason to exit.
+            # loop_stop() joins that thread and can otherwise block forever
+            # while a QoS 1 publish remains unacknowledged (#69).
+            try:
+                client.disconnect()
+            finally:
+                client.loop_stop()
 
     async def _send_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = payload.get("print", {})
@@ -730,6 +750,59 @@ class BambuLanProvider(BaseProvider):
                 except Exception:  # noqa: BLE001 - best effort socket cleanup
                     pass
 
+    def _download_via_ftps(
+        self, remote_path: str, local_path: Path, *, max_bytes: int
+    ) -> None:
+        """Recover a cached G-code/project archive without trusting MQTT paths."""
+
+        parsed = urlparse(remote_path)
+        if parsed.scheme not in ("", "ftp", "ftps"):
+            raise ProviderError("invalid_bambu_artifact_path", code="provider_error")
+        if parsed.hostname and parsed.hostname not in {self.host, self.serial}:
+            raise ProviderError("invalid_bambu_artifact_host", code="provider_error")
+        raw_path = unquote(parsed.path).replace("\\", "/")
+        parts = [part for part in raw_path.split("/") if part]
+        if not parts or any(part in (".", "..") for part in parts):
+            raise ProviderError("invalid_bambu_artifact_path", code="provider_error")
+        if len(parts) == 1:
+            parts.insert(0, "cache")
+        if parts[0] != "cache":
+            raise ProviderError("invalid_bambu_artifact_path", code="provider_error")
+        remote_name = "/".join(parts)
+        lowered = remote_name.lower()
+        if not lowered.endswith((".gcode", ".g", ".gco", ".bgcode", ".3mf")):
+            raise ProviderError("unsupported_bambu_artifact", code="provider_error")
+
+        ftp = self._ftps_client()
+        written = 0
+        try:
+            ftp.connect(self.host, 990)
+            ftp.login("bblp", self.access_code)
+            ftp.prot_p()
+            remote_size = ftp.size(remote_name)
+            if remote_size is not None and remote_size > max_bytes:
+                raise ProviderError("bambu_artifact_too_large", code="provider_error")
+            with local_path.open("wb") as destination:
+
+                def write_chunk(chunk: bytes) -> None:
+                    nonlocal written
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ProviderError(
+                            "bambu_artifact_too_large", code="provider_error"
+                        )
+                    destination.write(chunk)
+
+                ftp.retrbinary(f"RETR {remote_name}", write_chunk)
+        finally:
+            try:
+                ftp.quit()
+            except Exception:  # noqa: BLE001 - best-effort transport cleanup
+                try:
+                    ftp.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
     @staticmethod
     def _ftps_client() -> FTP_TLS:
         context = ssl.create_default_context()
@@ -743,6 +816,21 @@ class BambuLanProvider(BaseProvider):
         try:
             await asyncio.to_thread(self._upload_via_ftps, local_path, remote_filename)
             return {"ok": True, "remote_filename": remote_filename}
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(str(exc), code="provider_transport_error") from exc
+
+    async def download_artifact(
+        self, remote_path: str, local_path: Path, *, max_bytes: int
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                self._download_via_ftps,
+                remote_path,
+                local_path,
+                max_bytes=max_bytes,
+            )
         except ProviderError:
             raise
         except Exception as exc:
@@ -765,20 +853,73 @@ class BambuLanProvider(BaseProvider):
 
     def _normalize_status(self, report: dict[str, Any]) -> dict[str, Any]:
         print_report = report.get("print", {})
-        raw_state = str(print_report.get("gcode_state", "")).lower()
-        gcode_state = self._STATE_TO_MOONRAKER.get(raw_state, raw_state)
-        progress = float(print_report.get("mc_percent", 0.0) or 0.0) / 100.0
-        filename = print_report.get("subtask_name") or print_report.get("project_id")
-        return {
-            "print_stats": {
-                "state": gcode_state,
-                "filename": filename,
-                "message": print_report.get("print_error") or "",
-            },
-            "virtual_sdcard": {
-                "progress": max(0.0, min(1.0, progress)),
-            },
+        status: dict[str, Any] = {}
+        print_stats: dict[str, Any] = {}
+        if print_report.get("gcode_state") not in (None, ""):
+            raw_state = str(print_report["gcode_state"]).lower()
+            print_stats["state"] = self._STATE_TO_MOONRAKER.get(raw_state, raw_state)
+        gcode_file = print_report.get("gcode_file")
+        filename = (
+            Path(str(gcode_file).replace("\\", "/")).name
+            if gcode_file
+            else print_report.get("subtask_name") or print_report.get("project_id")
+        )
+        if filename:
+            print_stats["filename"] = str(filename)
+        if "print_error" in print_report:
+            print_stats["message"] = print_report.get("print_error") or ""
+        if print_stats:
+            status["print_stats"] = print_stats
+        if print_report.get("mc_percent") is not None:
+            try:
+                progress = float(print_report["mc_percent"]) / 100.0
+            except (TypeError, ValueError):
+                pass
+            else:
+                status["virtual_sdcard"] = {"progress": max(0.0, min(1.0, progress))}
+
+        # Preserve only fields Bambu actually reports.  These are evidence for
+        # an externally-started job, not reconstructed slicer settings (#70).
+        metadata_fields = {
+            "subtask_name": "external_display_name",
+            "task_id": "external_task_id",
+            "subtask_id": "external_subtask_id",
+            "project_id": "external_project_id",
+            "profile_id": "external_profile_id",
+            "gcode_file": "external_gcode_file",
+            "plate_num": "external_plate_index",
+            "layer_num": "external_current_layer",
+            "total_layer_num": "external_total_layers",
+            "nozzle_diameter": "external_nozzle_diameter",
         }
+        for source, target in metadata_fields.items():
+            value = print_report.get(source)
+            if value is not None and value != "":
+                print_stats[target] = value
+        if print_stats:
+            status["print_stats"] = print_stats
+        return status
+
+    def _normalize_project_request(self, report: dict[str, Any]) -> dict[str, Any]:
+        """Extract a best-effort FTPS capture hint from project_file traffic."""
+
+        print_request = report.get("print", {})
+        if (
+            not isinstance(print_request, dict)
+            or print_request.get("command") != "project_file"
+        ):
+            return {}
+        candidate = (
+            print_request.get("url")
+            or print_request.get("file")
+            or print_request.get("gcode_file")
+        )
+        normalized = self._normalize_status(report)
+        if candidate:
+            normalized.setdefault("print_stats", {})["external_artifact_path"] = str(
+                candidate
+            )
+        return normalized
 
     async def info(self) -> dict[str, Any]:
         return {
@@ -803,7 +944,17 @@ class BambuLanProvider(BaseProvider):
             body = await asyncio.to_thread(
                 self._mqtt_request,
                 payload,
-                accepts=lambda report: isinstance(report.get("print"), dict),
+                accepts=lambda report: bool(
+                    isinstance(report.get("print"), dict)
+                    and {
+                        "gcode_state",
+                        "mc_percent",
+                        "subtask_name",
+                        "project_id",
+                        "gcode_file",
+                        "print_error",
+                    }.intersection(report["print"])
+                ),
             )
         except ProviderError:
             raise
@@ -853,18 +1004,27 @@ class BambuLanProvider(BaseProvider):
         if stop_event is not None and stop_event.is_set():
             return
         loop = asyncio.get_running_loop()
-        connected = threading.Event()
+        connected = asyncio.Event()
         first_status = asyncio.Event()
         connection_error: list[str] = []
 
+        def connection_failed(reason_code: object) -> bool:
+            is_failure = getattr(reason_code, "is_failure", None)
+            if isinstance(is_failure, bool):
+                return is_failure
+            return reason_code != 0
+
         def on_connect(client, _userdata, _flags, reason_code, _properties=None):  # noqa: ANN001
-            if int(reason_code) != 0:
+            if connection_failed(reason_code):
                 connection_error.append(f"mqtt connection refused: {reason_code}")
-                connected.set()
+                loop.call_soon_threadsafe(connected.set)
                 return
             try:
                 self._validate_mqtt_peer(client)
                 client.subscribe(self._report_topic, qos=1)
+                # Observing project_file requests from Bambu Studio gives us a
+                # short-lived archive path that status reports often omit.
+                client.subscribe(self._request_topic, qos=1)
                 payload = {
                     "pushing": {
                         "sequence_id": uuid4().hex,
@@ -878,7 +1038,7 @@ class BambuLanProvider(BaseProvider):
                 )
             except ProviderError as exc:
                 connection_error.append(exc.detail)
-            connected.set()
+            loop.call_soon_threadsafe(connected.set)
 
         def on_message(_client, _userdata, message):  # noqa: ANN001
             try:
@@ -887,13 +1047,23 @@ class BambuLanProvider(BaseProvider):
                 return
             if not isinstance(body.get("print"), dict):
                 return
-            future = asyncio.run_coroutine_threadsafe(
-                on_status(self._normalize_status(body)), loop
+            topic = str(getattr(message, "topic", ""))
+            normalized = (
+                self._normalize_project_request(body)
+                if topic == self._request_topic
+                else self._normalize_status(body)
             )
+            if not normalized:
+                return
+            future = asyncio.run_coroutine_threadsafe(on_status(normalized), loop)
             future.add_done_callback(
-                lambda result: loop.call_soon_threadsafe(first_status.set)
-                if result.exception() is None
-                else logger.warning("bambu status callback failed: %s", result.exception())
+                lambda result: (
+                    loop.call_soon_threadsafe(first_status.set)
+                    if result.exception() is None
+                    else logger.warning(
+                        "bambu status callback failed: %s", result.exception()
+                    )
+                )
             )
 
         client = self._mqtt_client()
@@ -902,8 +1072,12 @@ class BambuLanProvider(BaseProvider):
         try:
             client.connect(self.host, 8883, keepalive=30)
             client.loop_start()
-            if not await asyncio.to_thread(connected.wait, 10.0):
-                raise ProviderError("bambu_mqtt_connect_timeout", code="provider_timeout")
+            try:
+                await asyncio.wait_for(connected.wait(), timeout=10.0)
+            except TimeoutError:
+                raise ProviderError(
+                    "bambu_mqtt_connect_timeout", code="provider_timeout"
+                ) from None
             if connection_error:
                 raise ProviderError(
                     connection_error[0], code="provider_authentication_failed"
@@ -913,8 +1087,10 @@ class BambuLanProvider(BaseProvider):
                 return
             await stop_event.wait()
         finally:
-            client.loop_stop()
-            client.disconnect()
+            try:
+                client.disconnect()
+            finally:
+                client.loop_stop()
 
 
 @register

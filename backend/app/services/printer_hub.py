@@ -11,15 +11,20 @@ The hub is intentionally simple — Stage 4 will likely replace it with Redis pu
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import time
+from pathlib import Path
 from typing import Any, Dict
+from urllib.parse import unquote, urlparse
 
 from fastapi import Request, WebSocket
 from sqlmodel import Session, select
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
+    FileType,
     NotificationEventType,
     Printer,
     PrinterStatus,
@@ -29,8 +34,15 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.services import filament as filament_svc
-from app.services import notifications, print_results
+from app.services import (
+    gcode_parser,
+    ingestion,
+    notifications,
+    print_results,
+    thumbnail,
+)
 from app.services.backup import begin_mutating_operation, end_mutating_operation
+from app.services.hashing import sha256_file
 from app.services.printer_provider import ProviderError, get_provider_client
 from app.services.realtime import InProcessBus, RealtimeBus
 from app.services.runtime_config import auto_mark_known_good_enabled
@@ -102,6 +114,24 @@ _JOB_SYNC_BREAKER_THRESHOLD = 3
 _JOB_SYNC_BREAKER_MAX_DELAY_S = 300.0
 
 
+def _reported_text(value: Any) -> str | None:
+    return str(value) if value is not None and value != "" else None
+
+
+def _reported_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _reported_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None and value != "" else None
+    except (TypeError, ValueError):
+        return None
+
+
 class PrinterHub:
     def __init__(self, bus: RealtimeBus | None = None) -> None:
         self.snapshots: Dict[int, Dict[str, Any]] = {}
@@ -120,6 +150,7 @@ class PrinterHub:
         self._job_sync_breakers: Dict[int, tuple[int, float]] = {}
         # printer_id -> (filename, state, progress, monotonic time) for DB write coalescing
         self._last_job_sync_write: Dict[int, tuple[str, str, float, float]] = {}
+        self._capture_tasks: Dict[tuple[int, int], asyncio.Task] = {}
 
     @staticmethod
     def _channel(printer_id: int) -> str:
@@ -165,6 +196,11 @@ class PrinterHub:
             self._last_status_write.pop(printer_id, None)
             self._job_sync_breakers.pop(printer_id, None)
             self._last_job_sync_write.pop(printer_id, None)
+            capture_tasks = [
+                self._capture_tasks.pop(key)
+                for key in list(self._capture_tasks)
+                if key[0] == printer_id
+            ]
         if stop:
             stop.set()
         if task:
@@ -175,6 +211,10 @@ class PrinterHub:
                 pass
             except Exception:
                 logger.exception("printer hub: worker exit error for %s", printer_id)
+        for capture_task in capture_tasks:
+            capture_task.cancel()
+        if capture_tasks:
+            await asyncio.gather(*capture_tasks, return_exceptions=True)
 
     async def restart_printer(self, printer_id: int) -> None:
         await self.remove_printer(printer_id)
@@ -221,8 +261,10 @@ class PrinterHub:
                     reconnect_delay = min(reconnect_delay * 2, 30.0)
                     continue
 
-            async def on_status(status: Dict[str, Any]) -> None:
-                await self._handle_status(printer_id, status)
+            async def on_status(
+                status: Dict[str, Any], provider_client: Any = client
+            ) -> None:
+                await self._handle_status(printer_id, status, client=provider_client)
 
             # Bootstrap with a one-shot status query so we can:
             # 1) seed current state quickly on startup/reconfigure
@@ -231,7 +273,7 @@ class PrinterHub:
                 initial = await client.query_status()
                 initial_status = initial.get("result", {}).get("status", {})
                 if isinstance(initial_status, dict) and initial_status:
-                    await self._handle_status(printer_id, initial_status)
+                    await self._handle_status(printer_id, initial_status, client=client)
             except Exception as exc:  # noqa: BLE001 - provider-specific failures
                 await self._mark_status(
                     printer_id, PrinterStatus.OFFLINE, error=str(exc)
@@ -258,7 +300,9 @@ class PrinterHub:
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30.0)
 
-    async def _handle_status(self, printer_id: int, status: Dict[str, Any]) -> None:
+    async def _handle_status(
+        self, printer_id: int, status: Dict[str, Any], *, client: Any | None = None
+    ) -> None:
         # Merge into in-memory snapshot.
         snap = self.snapshots.setdefault(printer_id, {})
         for obj_name, fields in status.items():
@@ -269,14 +313,41 @@ class PrinterHub:
 
         # Compute coarse PrinterStatus + filename for DB writeback.
         print_stats = snap.get("print_stats", {})
+        sync_print_stats = dict(print_stats)
+        if (
+            client is not None
+            and hasattr(client, "download_artifact")
+            and settings.bambu_external_capture_max_mb > 0
+        ):
+            sync_print_stats["_capture_available"] = True
         ms_state, vault_status = _derive_printer_status(snap)
         progress = float(snap.get("virtual_sdcard", {}).get("progress") or 0.0)
         filename = print_stats.get("filename") or None
 
         await self._mark_status(printer_id, vault_status, error=None)
-        await self._sync_active_job(
-            printer_id, ms_state, filename, progress, print_stats
+        capture = await self._sync_active_job(
+            printer_id, ms_state, filename, progress, sync_print_stats
         )
+        if (
+            capture is not None
+            and client is not None
+            and hasattr(client, "download_artifact")
+        ):
+            job_id, remote_path = capture
+            key = (printer_id, job_id)
+            if key not in self._capture_tasks:
+                task = asyncio.create_task(
+                    self._capture_external_artifact(
+                        printer_id, job_id, remote_path, client
+                    ),
+                    name=f"bambu-capture-{printer_id}-{job_id}",
+                )
+                self._capture_tasks[key] = task
+                task.add_done_callback(
+                    lambda _task, capture_key=key: self._capture_tasks.pop(
+                        capture_key, None
+                    )
+                )
 
         await self._broadcast(
             printer_id,
@@ -305,7 +376,9 @@ class PrinterHub:
             try:
                 await asyncio.to_thread(self._mark_status_db, printer_id, status, error)
             except Exception:
-                logger.exception("printer hub: failed to mark status for %s", printer_id)
+                logger.exception(
+                    "printer hub: failed to mark status for %s", printer_id
+                )
         finally:
             end_mutating_operation()
 
@@ -327,9 +400,9 @@ class PrinterHub:
             # OFFLINE from a previously-live status. Skipping UNKNOWN avoids
             # spurious alerts on startup/first-connect, and equality skips the
             # heartbeat re-write path that re-persists an unchanged status.
-            if (
-                status == PrinterStatus.OFFLINE
-                and prev_status not in (PrinterStatus.OFFLINE, PrinterStatus.UNKNOWN)
+            if status == PrinterStatus.OFFLINE and prev_status not in (
+                PrinterStatus.OFFLINE,
+                PrinterStatus.UNKNOWN,
             ):
                 notifications.enqueue_for_event(
                     session,
@@ -345,7 +418,7 @@ class PrinterHub:
         filename: str | None,
         progress: float,
         print_stats: Dict[str, Any],
-    ) -> None:
+    ) -> tuple[int, str] | None:
         """Reflect Moonraker state onto the most-recent matching PrintJob row.
 
         If no matching PrintJob exists and the printer is actively printing
@@ -353,23 +426,24 @@ class PrinterHub:
         externally-initiated jobs are captured in the vault history.
         """
         if not filename:
-            return
+            return None
         now = time.monotonic()
         breaker = self._job_sync_breakers.get(printer_id)
         if breaker is not None and now < breaker[1]:
-            return
+            return None
         last = self._last_job_sync_write.get(printer_id)
         if (
             last is not None
             and last[0] == filename
             and last[1] == ms_state
             and now - last[3] < _JOB_PROGRESS_WRITE_INTERVAL_S
+            and not print_stats.get("external_artifact_path")
         ):
-            return
+            return None
         if not begin_mutating_operation():
-            return
+            return None
         try:
-            await asyncio.to_thread(
+            capture = await asyncio.to_thread(
                 self._sync_active_job_db,
                 printer_id,
                 ms_state,
@@ -384,6 +458,7 @@ class PrinterHub:
                 progress,
                 now,
             )
+            return capture
         except Exception:
             failures = (breaker[0] if breaker is not None else 0) + 1
             delay = 0.0
@@ -394,6 +469,7 @@ class PrinterHub:
                 )
             self._job_sync_breakers[printer_id] = (failures, now + delay)
             logger.exception("printer hub: job sync failed for printer %s", printer_id)
+            return None
         finally:
             end_mutating_operation()
 
@@ -404,21 +480,33 @@ class PrinterHub:
         filename: str,
         progress: float,
         print_stats: Dict[str, Any],
-    ) -> None:
+    ) -> tuple[int, str] | None:
         with get_session_factory().session() as session:
             job = None
+            provider_job_id = next(
+                (
+                    text
+                    for value in (
+                        print_stats.get("external_task_id"),
+                        print_stats.get("external_subtask_id"),
+                        print_stats.get("external_project_id"),
+                    )
+                    if (text := _reported_text(value)) not in (None, "0")
+                ),
+                None,
+            )
             cached = self._active_job_cache.get(printer_id)
             if cached is not None and cached[0] == filename:
                 job = session.get(PrintJob, cached[1])
 
             if job is None:
+                query = select(PrintJob).where(PrintJob.printer_id == printer_id)
+                if provider_job_id:
+                    query = query.where(PrintJob.provider_job_id == provider_job_id)
+                else:
+                    query = query.where(PrintJob.remote_filename == filename)
                 job = session.exec(
-                    select(PrintJob)
-                    .where(
-                        PrintJob.printer_id == printer_id,
-                        PrintJob.remote_filename == filename,
-                    )
-                    .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
+                    query.order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
                 ).first()
 
             # A finished job is history, not the live print — its state never
@@ -431,7 +519,7 @@ class PrinterHub:
             # should ever flip a job's state back off of a terminal one.
             if job is not None and job.finished_at is not None:
                 if ms_state not in ("printing", "paused"):
-                    return
+                    return None
                 job = None
                 self._active_job_cache.pop(printer_id, None)
 
@@ -451,6 +539,8 @@ class PrinterHub:
                         model_id=sentinel_model_id,
                         remote_filename=filename,
                         source="external",
+                        provider_job_id=provider_job_id,
+                        artifact_evidence="metadata_only",
                     )
                     session.add(job)
                     session.commit()
@@ -462,7 +552,7 @@ class PrinterHub:
                         ms_state,
                     )
                 else:
-                    return
+                    return None
 
             self._active_job_cache[printer_id] = (filename, job.id)
 
@@ -483,6 +573,62 @@ class PrinterHub:
                 new_state = job.state
 
             changed = False
+            reported_fields = {
+                "external_display_name": _reported_text(
+                    print_stats.get("external_display_name")
+                ),
+                "external_task_id": _reported_text(print_stats.get("external_task_id")),
+                "external_subtask_id": _reported_text(
+                    print_stats.get("external_subtask_id")
+                ),
+                "external_project_id": _reported_text(
+                    print_stats.get("external_project_id")
+                ),
+                "external_profile_id": _reported_text(
+                    print_stats.get("external_profile_id")
+                ),
+                "external_gcode_file": _reported_text(
+                    print_stats.get("external_gcode_file")
+                ),
+                "external_plate_index": _reported_int(
+                    print_stats.get("external_plate_index")
+                ),
+                "external_current_layer": _reported_int(
+                    print_stats.get("external_current_layer")
+                ),
+                "external_total_layers": _reported_int(
+                    print_stats.get("external_total_layers")
+                ),
+                "external_nozzle_diameter": _reported_float(
+                    print_stats.get("external_nozzle_diameter")
+                ),
+            }
+            for field_name, value in reported_fields.items():
+                if value is not None and getattr(job, field_name) != value:
+                    setattr(job, field_name, value)
+                    changed = True
+            if provider_job_id and job.provider_job_id != provider_job_id:
+                job.provider_job_id = provider_job_id
+                changed = True
+            capture_path = _reported_text(
+                print_stats.get("external_artifact_path")
+                or print_stats.get("external_gcode_file")
+            )
+            capture: tuple[int, str] | None = None
+            if (
+                job.source == "external"
+                and capture_path
+                and print_stats.get("_capture_available") is True
+                and job.artifact_evidence in ("metadata_only", "capture_failed")
+                and (
+                    job.artifact_evidence != "capture_failed"
+                    or print_stats.get("external_artifact_path")
+                )
+            ):
+                job.artifact_evidence = "capture_pending"
+                job.artifact_capture_error = None
+                changed = True
+                capture = (int(job.id), capture_path)
             if new_state != job.state:
                 job.state = new_state
                 changed = True
@@ -572,6 +718,105 @@ class PrinterHub:
             # after the job is committed so a Spoolman outage never blocks it.
             if just_finished and new_state == PrintJobState.COMPLETED:
                 print_results.record_spool_usage(session, job)
+            return capture
+
+    async def _capture_external_artifact(
+        self, printer_id: int, job_id: int, remote_path: str, client: Any
+    ) -> None:
+        """Best-effort Bambu cache recovery, outside the MQTT callback thread."""
+
+        max_mb = settings.bambu_external_capture_max_mb
+        if max_mb <= 0:
+            await asyncio.to_thread(
+                self._mark_capture_failed, job_id, "external_artifact_capture_disabled"
+            )
+            return
+        try:
+            with tempfile.TemporaryDirectory(prefix="printstash-bambu-") as tmp:
+                leaf = Path(unquote(urlparse(remote_path).path)).name or "external.3mf"
+                staged = Path(tmp) / leaf
+                await client.download_artifact(
+                    remote_path, staged, max_bytes=max_mb * 1024 * 1024
+                )
+                await asyncio.to_thread(
+                    self._persist_external_artifact, job_id, staged, leaf
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - metadata-only is a valid outcome
+            detail = (
+                exc.code
+                if isinstance(exc, ProviderError)
+                else "artifact_capture_failed"
+            )
+            logger.info(
+                "external artifact capture unavailable for printer=%s job=%s: %s",
+                printer_id,
+                job_id,
+                detail,
+            )
+            await asyncio.to_thread(self._mark_capture_failed, job_id, detail)
+
+    @staticmethod
+    def _persist_external_artifact(job_id: int, staged: Path, filename: str) -> None:
+        lowered = filename.lower()
+        file_type = FileType.THREE_MF if lowered.endswith(".3mf") else FileType.GCODE
+        blob_hash = sha256_file(staged)
+        meta = gcode_parser.parse(staged) if file_type == FileType.GCODE else {}
+        thumb_bytes = thumbnail.extract(staged) if file_type == FileType.GCODE else None
+        with get_session_factory().session() as session:
+            job = session.get(PrintJob, job_id)
+            if job is None or job.source != "external":
+                return
+            display = (
+                job.external_display_name or Path(filename).stem or "External print"
+            )
+            model, _created = ingestion.resolve_or_create_model(
+                session,
+                dedup_hash=blob_hash,
+                model_name=display,
+            )
+            file_row = ingestion.persist_artifact(
+                session,
+                model=model,
+                staged_path=staged,
+                original_filename=filename,
+                file_type=file_type,
+                blob_hash=blob_hash,
+                meta=meta,
+                thumb_bytes=thumb_bytes,
+                overwrite_thumbnail=False,
+                ingestion_key=f"bambu-job-{job_id}",
+            )
+            job = session.get(PrintJob, job_id)
+            if job is None:
+                return
+            job.file_id = int(file_row.id)
+            job.model_id = file_row.model_id
+            job.artifact_evidence = (
+                "project_archived"
+                if file_type == FileType.THREE_MF
+                else "gcode_archived"
+            )
+            job.artifact_capture_error = None
+            job.updated_at = utcnow()
+            session.add(job)
+            session.commit()
+
+    @staticmethod
+    def _mark_capture_failed(job_id: int, error: str) -> None:
+        with get_session_factory().session() as session:
+            job = session.get(PrintJob, job_id)
+            if job is None or job.artifact_evidence not in (
+                "capture_pending",
+                "capture_failed",
+            ):
+                return
+            job.artifact_evidence = "capture_failed"
+            job.artifact_capture_error = error[:1024]
+            job.updated_at = utcnow()
+            session.add(job)
+            session.commit()
 
 
 def get_hub(request: Request) -> PrinterHub:

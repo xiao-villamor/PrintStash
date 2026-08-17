@@ -98,7 +98,8 @@ are welcome in
 - Print history import pulls measured filament use, actual duration, and
   per-print cost from Moonraker.
 - Provider diagnostics cover capabilities, configuration, and connectivity.
-- Bambu LAN status and pause/resume/cancel, in beta.
+- Bambu LAN status and pause/resume/cancel, plus evidence-labelled history and
+  best-effort artifact capture for externally-started prints, in beta.
 - Optional [Spoolman](https://github.com/Donkie/Spoolman) integration (OFF by
   default): show spool inventory, pick a spool per print, and decrement it by the
   real grams used on a Moonraker-measured completion — with double-count

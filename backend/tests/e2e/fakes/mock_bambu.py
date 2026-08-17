@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
+
 from .print_sim import PrintSim
 
 # -- Bambu print.gcode_state <-> PrintSim.state, mirrors
@@ -46,6 +49,7 @@ def _status_report(sim: PrintSim) -> dict[str, Any]:
 class _FakePublishInfo:
     def __init__(self, published: bool) -> None:
         self._published = published
+        self.rc = 0
 
     def wait_for_publish(self, timeout: float | None = None) -> None:
         return None
@@ -86,12 +90,12 @@ class FakeMqttClient:
         return None
 
     def connect(self, host: str, port: int = 8883, keepalive: int = 30) -> None:
-        reason_code = 0
+        reason_code = ReasonCode(PacketTypes.CONNACK, identifier=0)
         if (
             self.expected_access_code is not None
             and self.password != self.expected_access_code
         ):
-            reason_code = 5
+            reason_code = ReasonCode(PacketTypes.CONNACK, identifier=135)
         if self.on_connect is not None:
             self.on_connect(self, None, {}, reason_code, None)
 

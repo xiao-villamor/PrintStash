@@ -863,6 +863,10 @@ def get_model_print_jobs(
                 else (job.printer_name or "Unknown printer")
             ),
             file_id=job.file_id,
+            remote_filename=job.remote_filename,
+            source=job.source,
+            external_display_name=job.external_display_name,
+            artifact_evidence=job.artifact_evidence,
             gcode_revision_number=revision_numbers.get(job.file_id),
             revision_label=file.revision_label,
             state=job.state,
@@ -970,6 +974,10 @@ def create_manual_print_job(
             printer.name if printer is not None else (printer_name or "Unknown printer")
         ),
         file_id=job.file_id,
+        remote_filename=job.remote_filename,
+        source=job.source,
+        external_display_name=job.external_display_name,
+        artifact_evidence=job.artifact_evidence,
         gcode_revision_number=revision_numbers.get(job.file_id),
         revision_label=file_row.revision_label,
         state=job.state,

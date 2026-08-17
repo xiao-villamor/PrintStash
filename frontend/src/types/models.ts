@@ -99,6 +99,10 @@ export interface ModelPrintJobRead {
   printer_id: number | null;
   printer_name: string;
   file_id: number;
+  remote_filename: string;
+  source: string;
+  external_display_name: string | null;
+  artifact_evidence: string;
   gcode_revision_number: number | null;
   revision_label: string | null;
   state: PrintJobState;

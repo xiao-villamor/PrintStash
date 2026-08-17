@@ -945,6 +945,52 @@ def test_load_mesh_renders_real_step_fixture() -> None:
     assert thumbnail.startswith(mesh_processing._PNG_MAGIC)
 
 
+def test_step_tessellation_is_killed_when_child_exceeds_rss_budget(
+    tmp_path: Path, monkeypatch
+) -> None:
+    path = tmp_path / "complex.step"
+    path.write_text("ISO-10303-21;")
+
+    class MemoryHungryProcess:
+        pid = 4242
+        returncode = None
+        killed = False
+
+        def poll(self):
+            return -9 if self.killed else None
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+        def communicate(self):
+            return b"", b""
+
+    process = MemoryHungryProcess()
+    monkeypatch.setattr(mesh_processing.subprocess, "Popen", lambda *a, **k: process)
+    monkeypatch.setattr(mesh_processing, "_step_memory_budget_bytes", lambda: 1024)
+    monkeypatch.setattr(mesh_processing, "_process_rss_bytes", lambda _pid: 2048)
+
+    assert mesh_processing._load_step_mesh_isolated(path) is None
+    assert process.killed is True
+
+
+def test_step_worker_rejects_tessellation_above_triangle_cap(monkeypatch) -> None:
+    from app.services import step_worker
+
+    path = Path(__file__).parent / "fixtures" / "cascadio_material.stp"
+    output = path.parent / ".step-worker-over-cap.glb"
+    monkeypatch.setenv("PRINTSTASH_STEP_TRIANGLE_LIMIT", "1")
+    monkeypatch.setattr(
+        step_worker.sys, "argv", ["step_worker", str(path), str(output)]
+    )
+    try:
+        assert step_worker.main() == 3
+        assert not output.exists()
+    finally:
+        output.unlink(missing_ok=True)
+
+
 def test_load_mesh_returns_none_for_unrecognised_extension(tmp_path: Path) -> None:
     # trimesh can't even pick a loader for an unknown extension, so this raises
     # inside trimesh.load_mesh — exercising _load_mesh's broad except-and-log path.

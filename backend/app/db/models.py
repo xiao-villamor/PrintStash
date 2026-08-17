@@ -1026,6 +1026,22 @@ class PrintJob(SQLModel, table=True):
     # Distinguishes vault-initiated jobs from those detected on the printer.
     source: str = Field(default="vault", max_length=16)  # "vault" or "external"
 
+    # Provider-side identity and evidence for prints started outside PrintStash.
+    # These fields intentionally describe what the printer reported; they do
+    # not pretend that slicer settings absent from MQTT can be reconstructed.
+    external_display_name: Optional[str] = Field(default=None, max_length=512)
+    external_task_id: Optional[str] = Field(default=None, max_length=255, index=True)
+    external_subtask_id: Optional[str] = Field(default=None, max_length=255)
+    external_project_id: Optional[str] = Field(default=None, max_length=255)
+    external_profile_id: Optional[str] = Field(default=None, max_length=255)
+    external_gcode_file: Optional[str] = Field(default=None, max_length=1024)
+    external_plate_index: Optional[int] = None
+    external_current_layer: Optional[int] = None
+    external_total_layers: Optional[int] = None
+    external_nozzle_diameter: Optional[float] = None
+    artifact_evidence: str = Field(default="vault", max_length=32, index=True)
+    artifact_capture_error: Optional[str] = Field(default=None, max_length=1024)
+
     # Measured outcome, captured from Moonraker when the print finishes.
     # filament in mm (raw from print_stats) and grams (derived when a matching
     # filament profile is known); duration in seconds. Null when unknown

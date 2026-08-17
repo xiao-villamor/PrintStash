@@ -15,8 +15,13 @@ import ctypes
 import ctypes.util
 import gc
 import io
+import os
 import struct
+import subprocess  # nosec B404 - fixed interpreter/module invocation only
+import sys
+import tempfile
 import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
@@ -332,9 +337,103 @@ def _exceeds_cap(path: Path) -> bool:
 _3MF_THUMBNAIL_DIRS = ("metadata/", "3d/thumbnails/", "thumbnails/")
 
 
+def _process_rss_bytes(pid: int) -> int | None:
+    """Read one Linux process's resident set; unavailable platforms return None."""
+
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def _step_memory_budget_bytes() -> int | None:
+    limit = _detect_memory_limit_bytes()
+    fraction = settings.mesh_memory_budget_fraction
+    if limit is None or fraction <= 0:
+        return None
+    return max(int(limit * fraction / _render_jobs_limit()), 1)
+
+
+def _load_step_mesh_isolated(path: Path):
+    """Tessellate unknown-complexity STEP in a monitored child process (#72)."""
+
+    import trimesh
+
+    with tempfile.TemporaryDirectory(prefix="printstash-step-") as tmp:
+        output = Path(tmp) / "mesh.glb"
+        env = os.environ.copy()
+        static_cap = int(settings.mesh_max_render_triangles)
+        ram_cap = _ram_triangle_cap(path.suffix.lower())
+        env["PRINTSTASH_STEP_TRIANGLE_LIMIT"] = str(
+            min(static_cap, ram_cap) if ram_cap is not None else static_cap
+        )
+        command = [
+            sys.executable,
+            "-m",
+            "app.services.step_worker",
+            str(path),
+            str(output),
+        ]
+        process = subprocess.Popen(  # nosec B603 - argv is fixed; no shell
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            cwd=Path(__file__).resolve().parents[2],
+        )
+        deadline = time.monotonic() + settings.mesh_step_timeout_seconds
+        memory_budget = _step_memory_budget_bytes()
+        failure = ""
+        while process.poll() is None:
+            if time.monotonic() >= deadline:
+                failure = "timeout"
+                process.kill()
+                break
+            rss = _process_rss_bytes(process.pid)
+            if memory_budget is not None and rss is not None and rss > memory_budget:
+                failure = "memory budget"
+                process.kill()
+                break
+            time.sleep(0.05)
+        _stdout, stderr = process.communicate()
+        if failure or process.returncode != 0 or not output.is_file():
+            logger.warning(
+                "mesh_processing: isolated STEP tessellation failed for %s (%s%s)",
+                path.name,
+                failure or f"exit {process.returncode}",
+                f": {stderr.decode(errors='replace')[-300:]}" if stderr else "",
+            )
+            return None
+        try:
+            loaded = trimesh.load_mesh(str(output), process=False)
+        except Exception:
+            logger.warning(
+                "mesh_processing: failed to load isolated STEP result for %s",
+                path.name,
+                exc_info=True,
+            )
+            return None
+        if isinstance(loaded, trimesh.Trimesh):
+            return loaded
+        if isinstance(loaded, trimesh.Scene):
+            meshes = [
+                geometry
+                for geometry in loaded.geometry.values()
+                if isinstance(geometry, trimesh.Trimesh)
+            ]
+            return trimesh.util.concatenate(meshes) if meshes else None
+        return None
+
+
 def _load_mesh(path: Path):
     """Return a single `trimesh.Trimesh` for *path*, or None on failure."""
     import trimesh
+
+    if path.suffix.lower() in (".step", ".stp"):
+        return _load_step_mesh_isolated(path)
 
     try:
         # process=False skips trimesh's vertex-merge + adjacency build, which we

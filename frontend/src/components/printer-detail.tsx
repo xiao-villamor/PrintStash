@@ -926,13 +926,28 @@ export function PrinterDetailPage({
                       {new Date(j.created_at).toLocaleString()}
                     </td>
                     <td className="py-3 px-4 max-w-[260px] truncate">
-                      <Link
-                        href={`/models/${j.model_id}`}
-                        className="font-mono text-xs text-foreground hover:text-primary hover:underline"
-                        title={j.remote_filename}
-                      >
-                        {j.remote_filename}
-                      </Link>
+                      {j.artifact_evidence === "vault" ||
+                      j.artifact_evidence.endsWith("_archived") ? (
+                        <Link
+                          href={`/models/${j.model_id}`}
+                          className="font-mono text-xs text-foreground hover:text-primary hover:underline"
+                          title={j.external_display_name ?? j.remote_filename}
+                        >
+                          {j.external_display_name ?? j.remote_filename}
+                        </Link>
+                      ) : (
+                        <span
+                          className="font-mono text-xs text-foreground"
+                          title={j.external_gcode_file ?? j.remote_filename}
+                        >
+                          {j.external_display_name ?? j.remote_filename}
+                        </span>
+                      )}
+                      {j.source === "external" && (
+                        <span className="mt-1 block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                          {j.artifact_evidence.replaceAll("_", " ")}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4">
                       <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">

@@ -66,7 +66,17 @@ manufacturing platform.
 - Images are published for `linux/amd64` and `linux/arm64` (Raspberry Pi 4/5,
   ARM NAS, Apple-silicon VMs). Cascadio 0.1.1 provides OpenCASCADE wheels for
   both targets, so the full image can preview and thumbnail STEP/STP files on
-  either architecture.
+  either architecture. CI now tessellates a real STEP fixture in an ARM64 image
+  under QEMU. Native Raspberry Pi and representative 1 GB hardware validation
+  are still outstanding, so this is runtime compatibility evidence rather than
+  a physical-device performance claim.
+- STEP tessellation runs in a disposable child process. Its resident-memory
+  ceiling uses the existing cgroup-aware mesh memory budget and it has a 90 s
+  timeout; an over-budget or overly complex file is stored without geometry or
+  a generated preview instead of risking the API process. The generic 200 MiB
+  mesh input cap still applies first and is format-blind. Operators can adjust
+  the deadline with `VAULT_MESH_STEP_TIMEOUT_SECONDS`; memory continues to use
+  `VAULT_MESH_MEMORY_BUDGET_FRACTION` rather than a STEP-only byte guess.
 - The lite image intentionally omits browser-assisted imports and STEP/STP
   tessellation. It still includes NumPy, Pillow, and Trimesh, so STL/OBJ/3MF
   thumbnail generation does not depend on Chromium, OpenGL, or Cascadio.
@@ -77,6 +87,9 @@ manufacturing platform.
   PrusaSlicer, Bambu Studio, Cura, and Klipper/Orca-style profiles.
 - Slicer metadata comments vary by slicer and profile; missing fields are
   expected and should be reported with safe sample files.
+- Externally-started Bambu jobs preserve only fields supplied by printer MQTT.
+  Exact G-code/project recovery is best-effort while the FTPS cache entry is
+  available; cloud-only, evicted, or ambiguous jobs remain metadata-only.
 - Metadata export is intentionally metadata-only. It does not include raw
   STL/3MF/G-code blobs, secrets, API keys, or printer credentials.
 - Full backup/restore is available separately for moving or recovering an

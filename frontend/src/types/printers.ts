@@ -213,6 +213,18 @@ export interface PrintJobRead {
   state: PrintJobState;
   progress: number;
   source: string;
+  external_display_name: string | null;
+  external_task_id: string | null;
+  external_subtask_id: string | null;
+  external_project_id: string | null;
+  external_profile_id: string | null;
+  external_gcode_file: string | null;
+  external_plate_index: number | null;
+  external_current_layer: number | null;
+  external_total_layers: number | null;
+  external_nozzle_diameter: number | null;
+  artifact_evidence: "vault" | "metadata_only" | "capture_pending" | "gcode_archived" | "project_archived" | "capture_failed";
+  artifact_capture_error: string | null;
   error: string | null;
   routing_strategy: RoutingStrategy;
   queue_position: number;

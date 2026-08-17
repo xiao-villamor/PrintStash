@@ -107,6 +107,10 @@ class ModelPrintJobRead(BaseModel):
     printer_id: Optional[int] = None
     printer_name: str
     file_id: int
+    remote_filename: str
+    source: str = "vault"
+    external_display_name: Optional[str] = None
+    artifact_evidence: str = "vault"
     gcode_revision_number: Optional[int] = None
     revision_label: Optional[str] = None
     state: PrintJobState

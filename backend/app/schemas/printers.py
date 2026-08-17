@@ -291,6 +291,18 @@ class PrintJobRead(BaseModel):
     state: PrintJobState
     progress: float
     source: str = "vault"
+    external_display_name: Optional[str] = None
+    external_task_id: Optional[str] = None
+    external_subtask_id: Optional[str] = None
+    external_project_id: Optional[str] = None
+    external_profile_id: Optional[str] = None
+    external_gcode_file: Optional[str] = None
+    external_plate_index: Optional[int] = None
+    external_current_layer: Optional[int] = None
+    external_total_layers: Optional[int] = None
+    external_nozzle_diameter: Optional[float] = None
+    artifact_evidence: str = "vault"
+    artifact_capture_error: Optional[str] = None
     error: Optional[str] = None
     routing_strategy: RoutingStrategy = RoutingStrategy.MANUAL
     queue_position: int = 0

@@ -380,7 +380,9 @@ export function PrintHistorySection({
                       }`}
                     />
                     <span className="font-mono text-[13px] text-on-surface truncate">
-                      Rev {job.gcode_revision_number ?? "—"} · {job.printer_name}
+                      {job.source === "external"
+                        ? job.external_display_name ?? job.remote_filename
+                        : `Rev ${job.gcode_revision_number ?? "—"}`} · {job.printer_name}
                     </span>
                   </div>
                   <span className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${printJobToneClass(present.tone)}`}>
@@ -391,6 +393,11 @@ export function PrintHistorySection({
                   {job.material_type ? `${job.material_type} · ` : ""}
                   {timeAgo(job.created_at)}
                 </p>
+                {job.source === "external" && (
+                  <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
+                    {job.artifact_evidence.replaceAll("_", " ")}
+                  </p>
+                )}
                 {(job.actual_duration_s != null ||
                   job.filament_used_g != null) && (
                   <p className="font-mono text-2xs text-on-surface-variant">

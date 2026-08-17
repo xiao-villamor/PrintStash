@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     staging_min_free_gb: int = Field(default=1, ge=0)
     ingest_worker_count: int = Field(default=2, gt=0)
     media_worker_timeout_seconds: int = Field(default=180, gt=0)
+    # Best-effort archive ceiling for files recovered from a Bambu printer's
+    # short-lived FTPS cache. Zero disables automatic external-job capture.
+    bambu_external_capture_max_mb: int = Field(default=256, ge=0)
     log_level: str = "INFO"
 
     # Static ceiling on mesh density for geometry extraction + thumbnail
@@ -169,6 +172,12 @@ class Settings(BaseSettings):
     # backstop: above it the mesh is never loaded — the file is still indexed and
     # a 3MF still gets its embedded slicer preview. 0 disables the size guard.
     mesh_max_load_mb: int = Field(default=200, ge=0)
+
+    # STEP tessellation runs in a disposable child process because its triangle
+    # count is unknowable before Cascadio loads it. The child is killed on this
+    # deadline; its RSS budget is derived from mesh_memory_budget_fraction and
+    # the detected cgroup/host limit, just like other mesh work.
+    mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
     # Optional static bearer token guarding the Prometheus /metrics endpoint.
     # Empty = open on the trusted internal network (see docs/known-limitations).

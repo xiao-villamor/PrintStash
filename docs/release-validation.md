@@ -87,6 +87,11 @@ The publish workflows build both images for `linux/amd64` and `linux/arm64`.
 The lite image must be at least 700 MiB smaller than full and may not start more
 than 10% slower at the median.
 
+CI also builds a loadable full ARM64 API image and tessellates the checked-in
+valid STEP fixture under QEMU. Record native Raspberry Pi/ARM hardware and 1 GB
+measurements separately; the emulated smoke proves wheel/import/runtime wiring,
+not real-device performance.
+
 Current intentional lint warnings:
 
 - model thumbnails use plain `<img>` because authenticated/local API thumbnail

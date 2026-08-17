@@ -35,6 +35,11 @@ Current behavior:
 - upload plain-text Vault G-code over LAN FTPS
 - explicitly start a just-uploaded G-code file; upload alone never starts it
 - pause, resume, and cancel controls
+- record externally-started jobs with the task, subtask, project, profile,
+  plate, layer, nozzle, and G-code identity fields the printer actually reports
+- best-effort archive of an external G-code or project 3MF while it remains in
+  the printer's FTPS cache; the history labels whether the exact artifact was
+  archived or only printer-reported metadata is available
 
 Safety rules:
 
@@ -50,6 +55,16 @@ Not supported:
 - raw G-code controls
 - measured filament consumption
 - cloud printer control
+
+External-job recovery is deliberately evidence-based. MQTT does not provide a
+complete slicer profile, so PrintStash never invents scale, orientation, wall,
+infill, or support settings. Cache entries can disappear before retrieval, and
+cloud-originated jobs may not expose a LAN path at all; those jobs remain useful
+metadata-only history. FTPS cache capture is bounded by
+`VAULT_BAMBU_EXTERNAL_CAPTURE_MAX_MB` (256 MiB by default; `0` disables it). Bambu's
+FTPS endpoint uses a device-local self-signed certificate, so the stored SHA-256
+proves the captured bytes stay unchanged after ingestion, not the authenticity
+of their transport.
 
 The API exposes this through provider capabilities and diagnostics. The UI labels
 Bambu LAN as beta and disables unsupported actions.
@@ -150,6 +165,9 @@ Before tagging a release that touches a provider, either add a row here from
 a real test or carry forward the "still needs real-world hardware
 validation" note in `docs/known-limitations.md` — don't leave it silently
 implied as done.
+
+The issue #69 MQTT fixes and issue #70 external-artifact capture still need a
+real Bambu firmware validation entry before either can be described as stable.
 
 ## Diagnostics
 

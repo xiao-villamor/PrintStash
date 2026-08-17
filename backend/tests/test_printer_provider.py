@@ -6,6 +6,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from paho.mqtt import client as mqtt
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from app.db.models import Printer, PrinterProvider
 from app.services.printer_provider import (
@@ -289,12 +292,15 @@ class TestBambuLanProvider:
             ]["progress"]
             == 1.0
         )
-        assert (
-            provider._normalize_status({"print": {"mc_percent": None}})[
-                "virtual_sdcard"
-            ]["progress"]
-            == 0.0
-        )
+
+    def test_normalize_status_does_not_erase_fields_missing_from_partial_report(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+
+        assert provider._normalize_status({"print": {"mc_percent": 50}}) == {
+            "virtual_sdcard": {"progress": 0.5}
+        }
+        assert provider._normalize_status({"print": {"wifi_signal": "-45dBm"}}) == {}
+        assert provider._normalize_status({"print": {"mc_percent": None}}) == {}
 
     def test_normalized_bambu_states_are_known_to_status_map(self):
         # Every translated state must resolve to a concrete (non-UNKNOWN)
@@ -386,6 +392,44 @@ class TestBambuLanProvider:
             with pytest.raises(ProviderError, match="bambu_upload_size_mismatch"):
                 provider._upload_via_ftps(source, "cube.gcode")
 
+    def test_ftps_download_retrieves_only_bounded_cache_artifacts(self, tmp_path: Path):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        destination = tmp_path / "cube.gcode"
+        ftp = MagicMock()
+        ftp.size.return_value = 4
+
+        def retrieve(command, callback):
+            assert command == "RETR cache/cube.gcode"
+            callback(b"G28\n")
+
+        ftp.retrbinary.side_effect = retrieve
+        with patch.object(provider, "_ftps_client", return_value=ftp):
+            provider._download_via_ftps(
+                "ftps://192.168.1.50/cache/cube.gcode",
+                destination,
+                max_bytes=1024,
+            )
+
+        assert destination.read_bytes() == b"G28\n"
+
+    @pytest.mark.parametrize(
+        "remote_path",
+        [
+            "https://example.com/cache/cube.gcode",
+            "ftps://evil.example/cache/cube.gcode",
+            "/cache/../secrets.gcode",
+            "/config/printer.cfg",
+        ],
+    )
+    def test_ftps_download_rejects_untrusted_paths(
+        self, tmp_path: Path, remote_path: str
+    ):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        with pytest.raises(ProviderError):
+            provider._download_via_ftps(
+                remote_path, tmp_path / "capture.gcode", max_bytes=1024
+            )
+
     def test_upload_wraps_ftps_provider_error(self, tmp_path: Path):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
         source = tmp_path / "cube.gcode"
@@ -452,7 +496,7 @@ class TestBambuLanProvider:
 
         client.connect.side_effect = fake_connect
         publish_info = MagicMock()
-        publish_info.is_published.return_value = False
+        publish_info.rc = mqtt.MQTT_ERR_NO_CONN
         client.publish.return_value = publish_info
         with patch.object(provider, "_mqtt_client", return_value=client):
             with pytest.raises(ProviderError) as exc:
@@ -460,6 +504,62 @@ class TestBambuLanProvider:
                     {"print": {}}, accepts=lambda _b: True, timeout=0.2
                 )
         assert "not_published" in exc.value.detail
+
+    def test_mqtt_request_accepts_paho_v2_reason_code_and_response_without_puback(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+        publish_info = MagicMock()
+        publish_info.rc = mqtt.MQTT_ERR_SUCCESS
+        publish_info.is_published.return_value = False
+
+        def fake_connect(host, port, keepalive=30):
+            reason = ReasonCode(PacketTypes.CONNACK, identifier=0)
+            client.on_connect(client, None, {}, reason, None)
+
+        def fake_publish(topic, payload, qos=1, retain=False):
+            message = MagicMock()
+            message.payload = json.dumps({"print": {"gcode_state": "IDLE"}}).encode()
+            client.on_message(client, None, message)
+            return publish_info
+
+        client.connect.side_effect = fake_connect
+        client.publish.side_effect = fake_publish
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            result = provider._mqtt_request(
+                {"pushing": {}},
+                accepts=lambda body: body.get("print", {}).get("gcode_state") == "IDLE",
+                timeout=0.2,
+            )
+
+        assert result["print"]["gcode_state"] == "IDLE"
+        publish_info.wait_for_publish.assert_not_called()
+
+    def test_mqtt_request_disconnects_before_stopping_network_loop(self):
+        provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
+        client = _fake_mqtt_client()
+        cleanup: list[str] = []
+
+        def fake_connect(host, port, keepalive=30):
+            client.on_connect(client, None, {}, 0, None)
+
+        def fake_publish(topic, payload, qos=1, retain=False):
+            message = MagicMock()
+            message.payload = json.dumps({"print": {"ok": True}}).encode()
+            client.on_message(client, None, message)
+            info = MagicMock()
+            info.rc = mqtt.MQTT_ERR_SUCCESS
+            return info
+
+        client.connect.side_effect = fake_connect
+        client.publish.side_effect = fake_publish
+        client.disconnect.side_effect = lambda: cleanup.append("disconnect")
+        client.loop_stop.side_effect = lambda: cleanup.append("loop_stop")
+        with patch.object(provider, "_mqtt_client", return_value=client):
+            provider._mqtt_request(
+                {"print": {}}, accepts=lambda body: "print" in body, timeout=0.2
+            )
+
+        assert cleanup == ["disconnect", "loop_stop"]
 
     def test_mqtt_request_response_timeout(self):
         provider = BambuLanProvider("192.168.1.50", "SN123", "acc")
