@@ -25,7 +25,7 @@ print history.
 ![Vite](https://img.shields.io/badge/vite-8-646CFF?logo=vite&style=flat-square)
 ![Status: beta](https://img.shields.io/badge/status-beta%20%C2%B7%20self--hosted-f59e0b?style=flat-square)
 
-[**Quick Start**](#quick-start) · [**Features**](#features) · [**Comparison**](#printstash-vs-a-simple-model-vault) · [**Wiki / Docs**](https://xiao-villamor.github.io/PrintStash) · [**Limitations**](#known-limitations--beta-notes) · [**Security**](#security)
+[**Quick Start**](#quick-start) · [**Features**](#features) · [**Comparison**](#printstash-vs-a-simple-model-vault) · [**Wiki / Docs**](https://www.printstash.org/docs/) · [**Limitations**](#known-limitations--beta-notes) · [**Security**](#security)
 
 </div>
 
@@ -139,8 +139,9 @@ are welcome in
 > [!WARNING]
 > **Run PrintStash only on a trusted self-hosted network.** Do not expose it
 > directly to the public internet. If you need remote access, put it behind a
-> reverse proxy with TLS and your own authentication, and change
-> `VAULT_JWT_SECRET` from its placeholder default first.
+> reverse proxy with TLS and your own authentication, and use
+> `docker-compose.prod.yml`, which keeps the API off the host and requires you to
+> set your own `VAULT_JWT_SECRET`.
 > See [Security](#security).
 
 Requirements: Docker and Docker Compose. Prebuilt images are published for
@@ -166,10 +167,22 @@ The default `docker-compose.yml` pulls prebuilt images from GHCR — no build st
 git clone https://github.com/xiao-villamor/PrintStash.git
 cd PrintStash
 
-cp .env.example .env
-# Edit .env and set a strong, random value for VAULT_JWT_SECRET,
-# e.g. `openssl rand -hex 32`.
+docker compose up -d
+```
 
+There is nothing to edit before that first start. Every variable in the Compose
+file has a working default, so `.env` is optional; copy `.env.example` to `.env`
+when you actually want to change something. In particular you do **not** need to
+invent a JWT secret: the placeholder in the Compose file is public, so the API
+refuses to sign with it and instead generates a real secret on first boot and
+stores it in its own database (see 0.8.4 in the [changelog](CHANGELOG.md)). Set
+`VAULT_JWT_SECRET` yourself only when you want to own that value.
+
+If you only want to run it, the Compose file is the single file you need:
+
+```bash
+mkdir printstash && cd printstash
+curl -O https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml
 docker compose up -d
 ```
 
@@ -182,9 +195,12 @@ docker compose -f docker-compose.light.yml up -d
 ```
 
 For a hardened production setup (API kept internal, frontend bound to localhost
-behind your own TLS reverse proxy), use the production compose instead:
+behind your own TLS reverse proxy), use the production compose instead. That file
+declares `VAULT_JWT_SECRET` as required and refuses to start without it, on the
+grounds that a deliberately exposed host should not run on a secret nobody chose:
 
 ```bash
+echo "VAULT_JWT_SECRET=$(openssl rand -hex 32)" >> .env
 docker compose -f docker-compose.prod.yml up -d
 ```
 
@@ -199,17 +215,40 @@ echo "PRINTSTASH_VERSION=0.9.0" >> .env   # pin latest shipped release; omit to 
 ```
 
 By default the compose files track `latest`. Pin `PRINTSTASH_VERSION` when you
-want deliberate upgrades. See [Upgrading](https://xiao-villamor.github.io/PrintStash/guides/upgrading/).
+want deliberate upgrades. See [Upgrading](https://www.printstash.org/docs/guides/upgrading/).
 
 Open:
 
 | Service | URL |
 | --- | --- |
 | Web UI | http://localhost:3000 |
-| API docs | http://localhost:8000/docs |
-| Health check | http://localhost:8000/api/v1/health |
+| Health check | http://localhost:3000/api/v1/health |
 
-On first launch, the web UI creates the first admin account. There is no default
+The `api` service only exposes port 8000 on the internal Compose network, so it
+is not reachable from the host. The frontend's nginx proxies `/api/v1` to it, which
+is why the health check answers on port 3000. The Swagger and ReDoc pages are not
+proxied, so seeing them means publishing the port yourself from a
+`docker-compose.override.yml`:
+
+```yaml
+services:
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+```
+
+On first launch the web UI creates the first admin account, gated by a **setup
+token**, because the endpoint that creates the very first account cannot require a
+login. With `VAULT_SETUP_TOKEN` unset, the API generates one per process and logs
+it while the vault is unconfigured:
+
+```bash
+docker compose logs api | grep "setup token"
+```
+
+Paste that into the wizard at `http://localhost:3000/setup`. The token is
+per process, so restarting the `api` container before you finish invalidates it;
+set `VAULT_SETUP_TOKEN` in `.env` if you want a stable one. There is no default
 username or password.
 
 ## Screenshots
@@ -281,7 +320,7 @@ PrintStash is designed for trusted self-hosted networks; do not expose it
 directly to the public internet without a reverse proxy, TLS, and your own
 access controls. The production compose (`docker-compose.prod.yml`) binds only
 the frontend to `127.0.0.1`; copy-pasteable Caddy / Traefik / nginx examples are
-in [Reverse proxy with TLS](https://xiao-villamor.github.io/PrintStash/getting-started/installation/#reverse-proxy-with-tls).
+in [Reverse proxy with TLS](https://www.printstash.org/docs/getting-started/installation/#reverse-proxy-with-tls).
 
 ## License
 

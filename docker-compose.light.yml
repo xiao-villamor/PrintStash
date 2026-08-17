@@ -32,9 +32,12 @@ services:
       VAULT_BACKUP_DIR: /data/backups
       # DB path must always point at the persistent volume (see docker-compose.yml).
       VAULT_DB_URL: sqlite:////data/db/printstash.sqlite
-      # CHANGE THIS: generate a strong secret with `openssl rand -hex 32`, then set
-      # VAULT_JWT_SECRET in a .env file or your shell. The default is public, so
-      # leaving it unchanged lets anyone forge admin login tokens.
+      # Optional. The placeholder below is public, so the API never signs with it:
+      # on first boot it generates a real secret and persists it (see 0.8.4). Set
+      # this explicitly (`openssl rand -hex 32`) only to manage the value
+      # yourself, e.g. to keep it across a rebuild of the database.
+      # Do not set it to an empty string; that is taken as a deliberate choice
+      # and skips the generated secret.
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-changeme_jwt_secret_please_change}
       VAULT_SETUP_TOKEN: ${VAULT_SETUP_TOKEN:-}
       VAULT_SECRETS_KEY: ${VAULT_SECRETS_KEY:-}

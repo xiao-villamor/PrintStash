@@ -191,6 +191,7 @@
 
 ### Security
 
+- **First-run setup is gated by a setup token.** The endpoint that creates the initial superuser cannot require a login, so it now requires `VAULT_SETUP_TOKEN` and returns `403 invalid_setup_token` without it. When the variable is unset the API generates a token per process and logs it while the vault is unconfigured, so a fresh install reads it with `docker compose logs api | grep "setup token"` and pastes it into the wizard. Restarting the API before finishing setup invalidates the logged token; set the variable for a stable one.
 - Portable imports reject path traversal, missing blobs, unsupported manifests, oversized archives, and SHA-256 mismatches before database or storage writes.
 
 ### Changed

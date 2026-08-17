@@ -31,7 +31,11 @@ are running.
 
 ## Deployment Notes
 
-- Change `VAULT_JWT_SECRET` before use.
+- `VAULT_JWT_SECRET` does not have to be set: the shipped placeholder is public,
+  so the API replaces it with a generated secret on first boot. Set your own to
+  manage the value, and note that `docker-compose.prod.yml` requires it. Never set
+  it to an empty string, which is treated as a chosen value and bypasses the
+  generated one.
 - Prefer a reverse proxy with TLS if the UI is reachable outside your LAN.
 - Do not publish printer access codes, Moonraker API keys, database files, or
   backups.
