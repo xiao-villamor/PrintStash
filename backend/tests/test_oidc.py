@@ -219,6 +219,120 @@ def test_exchange_validates_signature_audience_issuer_and_nonce(monkeypatch) -> 
         )
 
 
+def test_exchange_accepts_id_token_issuer_with_trailing_slash(monkeypatch) -> None:
+    """Regression test: some IdPs (e.g. Authentik in PER_PROVIDER issuer mode)
+    always emit `iss` with a trailing slash even when the configured
+    VAULT_OIDC_ISSUER_URL has none. PyJWT's `issuer=` kwarg does an exact
+    string match with no normalization, so without normalizing both sides
+    ourselves, every login from such an IdP fails with oidc_invalid_id_token
+    regardless of how the issuer URL is configured.
+    """
+    _enable_oidc()
+    assert not _overlay["oidc_issuer_url"].endswith("/")
+    issuer_with_slash = _overlay["oidc_issuer_url"] + "/"
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
+    public_jwk["kid"] = "signing-key"
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "iss": issuer_with_slash,
+            "sub": "trailing-slash-user",
+            "aud": "printstash",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+            "nonce": "expected-nonce",
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "signing-key"},
+    )
+
+    async def discovery() -> dict:
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "https://id.example.test/authorize",
+            "token_endpoint": "https://id.example.test/token",
+            "jwks_uri": "https://id.example.test/jwks",
+        }
+
+    async def post_token(_url: str, payload: dict[str, str], **kwargs) -> dict:
+        return {"id_token": token}
+
+    async def get_json(url: str) -> dict:
+        return {"keys": [public_jwk]}
+
+    monkeypatch.setattr(oidc, "_discovery", discovery)
+    monkeypatch.setattr(oidc, "_post_token", post_token)
+    monkeypatch.setattr(oidc, "_get_json", get_json)
+
+    claims = asyncio.run(
+        oidc.exchange_code(
+            "code", "https://stash.example.test/callback", "verifier", "expected-nonce"
+        )
+    )
+    assert claims["sub"] == "trailing-slash-user"
+    assert claims["iss"] == issuer_with_slash
+
+
+def test_exchange_rejects_id_token_from_wrong_issuer(monkeypatch) -> None:
+    """The manual issuer check added for trailing-slash tolerance must still
+    reject a token whose issuer genuinely does not match, not just normalize
+    away a trailing slash.
+    """
+    _enable_oidc()
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_jwk = json.loads(
+        jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key())
+    )
+    public_jwk["kid"] = "signing-key"
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {
+            "iss": "https://not-the-configured-issuer.example.test",
+            "sub": "attacker-controlled-user",
+            "aud": "printstash",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+            "nonce": "expected-nonce",
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "signing-key"},
+    )
+
+    async def discovery() -> dict:
+        return {
+            "issuer": _overlay["oidc_issuer_url"],
+            "authorization_endpoint": "https://id.example.test/authorize",
+            "token_endpoint": "https://id.example.test/token",
+            "jwks_uri": "https://id.example.test/jwks",
+        }
+
+    async def post_token(_url: str, payload: dict[str, str], **kwargs) -> dict:
+        return {"id_token": token}
+
+    async def get_json(url: str) -> dict:
+        return {"keys": [public_jwk]}
+
+    monkeypatch.setattr(oidc, "_discovery", discovery)
+    monkeypatch.setattr(oidc, "_post_token", post_token)
+    monkeypatch.setattr(oidc, "_get_json", get_json)
+
+    with pytest.raises(oidc.OIDCError, match="oidc_issuer_mismatch"):
+        asyncio.run(
+            oidc.exchange_code(
+                "code",
+                "https://stash.example.test/callback",
+                "verifier",
+                "expected-nonce",
+            )
+        )
+
+
 def test_exchange_rejects_multi_audience_token_for_another_authorized_party(
     monkeypatch,
 ) -> None:
