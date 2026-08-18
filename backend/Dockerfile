@@ -34,7 +34,7 @@ RUN case "$PRINTSTASH_VARIANT" in \
 # stored at $PLAYWRIGHT_BROWSERS_PATH so the runtime finds it. This is the bulk
 # of the image size. See app/services/browser_fetch.py.
 RUN if [ "$PRINTSTASH_VARIANT" = "full" ]; then \
-      uv run patchright install --with-deps chromium; \
+      uv run --no-sync patchright install --with-deps chromium; \
     fi
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin printstash \

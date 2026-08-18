@@ -17,7 +17,6 @@ dependencies = [
     "networkx>=3.6,<4",
     "numpy>=2,<3",
     "orjson>=3.11,<4",
-    "paho-mqtt>=2.1",
     "pillow>=12.3,<13",
     "prometheus-client>=0.26,<1",
     "pydantic>=2.13,<3",
@@ -32,7 +31,6 @@ dependencies = [
     "trimesh>=5,<6",
     "uvicorn[standard]>=0.52,<1",
     "watchfiles>=1.2,<2",
-    "websockets>=17,<18",
     "pycentauri==0.9.1",
 ]
 

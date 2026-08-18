@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from ftplib import FTP_TLS
 from typing import Any
 
 from printstash_core.printers.bambu import BambuClient
@@ -42,7 +41,7 @@ class BambuLanProvider(BambuClient):
         BambuClient.__init__(instance, config)
         return instance
 
-    def _ftps_client(self: BambuLanProvider | None = None) -> FTP_TLS:
+    def _ftps_client(self: BambuLanProvider | None = None) -> Any:
         """Retain the historical instance and class-level test seam."""
 
         if self is not None:

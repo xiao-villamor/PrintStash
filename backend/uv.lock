@@ -1749,7 +1749,6 @@ dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "orjson" },
-    { name = "paho-mqtt" },
     { name = "pillow" },
     { name = "printstash-core", extra = ["printers-all"] },
     { name = "prometheus-client" },
@@ -1766,7 +1765,6 @@ dependencies = [
     { name = "trimesh" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "watchfiles" },
-    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -1815,7 +1813,6 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.6,<4" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "orjson", specifier = ">=3.11,<4" },
-    { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "patchright", marker = "extra == 'browser'", specifier = ">=1.49" },
     { name = "patchright", marker = "extra == 'full'", specifier = ">=1.49" },
     { name = "pillow", specifier = ">=12.3,<13" },
@@ -1841,7 +1838,6 @@ requires-dist = [
     { name = "trimesh", specifier = ">=5,<6" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52,<1" },
     { name = "watchfiles", specifier = ">=1.2,<2" },
-    { name = "websockets", specifier = ">=17,<18" },
     { name = "wsproto", marker = "extra == 'dev'", specifier = ">=1.3,<2" },
 ]
 provides-extras = ["async-db", "browser", "step", "full", "dev"]
