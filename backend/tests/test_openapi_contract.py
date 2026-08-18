@@ -13,6 +13,17 @@ CONTRACT_PATH = Path(__file__).parent / "fixtures" / "openapi_contract.json"
 def _canonical_contract() -> str:
     document = copy.deepcopy(app.openapi())
 
+    # Some tests install deliberately failing, test-only routes on the shared
+    # FastAPI instance. They are not part of the product contract and pytest's
+    # randomized order must not make the snapshot depend on when they ran.
+    paths = document.get("paths")
+    if isinstance(paths, dict):
+        document["paths"] = {
+            path: operations
+            for path, operations in paths.items()
+            if not path.startswith("/__test__/")
+        }
+
     # Release metadata changes independently of endpoint compatibility.
     info = document.get("info")
     if isinstance(info, dict):

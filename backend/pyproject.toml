@@ -4,6 +4,7 @@ version = "0.11.4"
 description = "PrintStash — self-hosted 3D printing asset manager"
 requires-python = ">=3.11"
 dependencies = [
+    "printstash-core[printers-all]",
     "cryptography>=50,<51",
     "alembic>=1.19,<2",
     "boto3>=1.43,<2",
@@ -91,3 +92,9 @@ DEP002 = [
     "python-multipart",
     "uvicorn",
 ]
+
+[tool.uv.sources]
+printstash-core = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/printstash-core"]

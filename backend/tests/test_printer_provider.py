@@ -21,9 +21,11 @@ from app.services.printer_provider import (
     ProviderCapabilities,
     ProviderError,
     PrusaLinkProvider,
+    build_provider_registry,
     capabilities_for_provider,
     detect_printer_model,
     get_provider_client,
+    printer_config_from_model,
 )
 
 
@@ -110,6 +112,39 @@ class TestDetectPrinterModel:
 
 
 class TestProviderFactory:
+    def test_product_registry_is_instance_owned(self):
+        first = build_provider_registry()
+        second = build_provider_registry()
+
+        assert first is not second
+        assert {provider.value for provider in first.providers} == {
+            provider.value for provider in PrinterProvider
+        }
+
+    def test_orm_record_is_copied_to_neutral_config(self):
+        p = Printer(
+            name="mk",
+            provider=PrinterProvider.MOONRAKER,
+            moonraker_url="http://10.0.0.1:7125",
+            api_key="secret",
+        )
+
+        config = printer_config_from_model(p)
+
+        assert config.base_url == "http://10.0.0.1:7125"
+        assert config.api_key == "secret"
+
+    def test_get_provider_uses_injected_registry(self):
+        p = Printer(
+            name="mk",
+            provider=PrinterProvider.MOONRAKER,
+            moonraker_url="http://10.0.0.1:7125",
+        )
+
+        client = get_provider_client(p, registry=build_provider_registry())
+
+        assert isinstance(client, MoonrakerProvider)
+
     def test_get_moonraker_provider(self):
         p = Printer(
             name="mk",

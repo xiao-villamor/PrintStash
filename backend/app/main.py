@@ -5,6 +5,7 @@ import hmac
 import time
 import uuid
 from contextlib import asynccontextmanager
+from functools import partial
 
 from fastapi import FastAPI, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -48,6 +49,7 @@ from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
 from app.services.printer_hub import PrinterHub
 from app.services.printer_jobs import reconcile_stranded_dispatches, run_fleet_scheduler
+from app.services.printer_provider import build_provider_registry, get_provider_client
 from app.services.runtime_config import apply_overlay, ensure_jwt_secret, is_configured
 from app.services.setup_token import current_setup_token
 from app.services.storage_backend import init_backend
@@ -135,7 +137,13 @@ async def lifespan(app: FastAPI):
         _safe_db_url(settings.db_url),
     )
     install_audit_listeners()
-    hub = PrinterHub()
+    printer_provider_registry = build_provider_registry()
+    app.state.printer_provider_registry = printer_provider_registry
+    hub = PrinterHub(
+        provider_builder=partial(
+            get_provider_client, registry=printer_provider_registry
+        )
+    )
     app.state.printer_hub = hub
     watcher = LibraryWatcher()
     app.state.library_watcher = watcher

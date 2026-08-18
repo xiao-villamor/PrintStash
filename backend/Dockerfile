@@ -19,6 +19,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0644 pyproject.toml uv.lock ./
+COPY --chmod=0644 packages/printstash-core/pyproject.toml ./packages/printstash-core/pyproject.toml
+COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
 RUN case "$PRINTSTASH_VARIANT" in \
       full) uv sync --frozen --no-dev --no-editable --extra full ;; \
       lite) uv sync --frozen --no-dev --no-editable ;; \

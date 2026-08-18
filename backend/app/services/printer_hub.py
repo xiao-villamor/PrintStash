@@ -14,10 +14,11 @@ import asyncio
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 from urllib.parse import unquote, urlparse
 
 from fastapi import Request, WebSocket
+from printstash_core.printers import ArtifactCaptureClient
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -43,7 +44,11 @@ from app.services import (
 )
 from app.services.backup import begin_mutating_operation, end_mutating_operation
 from app.services.hashing import sha256_file
-from app.services.printer_provider import ProviderError, get_provider_client
+from app.services.printer_provider import (
+    PrinterProviderClient,
+    ProviderError,
+    get_provider_client,
+)
 from app.services.realtime import InProcessBus, RealtimeBus
 from app.services.runtime_config import auto_mark_known_good_enabled
 
@@ -133,9 +138,15 @@ def _reported_float(value: Any) -> float | None:
 
 
 class PrinterHub:
-    def __init__(self, bus: RealtimeBus | None = None) -> None:
+    def __init__(
+        self,
+        bus: RealtimeBus | None = None,
+        *,
+        provider_builder: Callable[[Printer], PrinterProviderClient] | None = None,
+    ) -> None:
         self.snapshots: Dict[int, Dict[str, Any]] = {}
         self.bus: RealtimeBus = bus if bus is not None else InProcessBus()
+        self._provider_builder = provider_builder
         self.tasks: Dict[int, asyncio.Task] = {}
         self.stop_events: Dict[int, asyncio.Event] = {}
         self._lock = asyncio.Lock()
@@ -250,7 +261,11 @@ class PrinterHub:
                     logger.info("printer worker[%s] gone; exiting", printer_id)
                     return
                 try:
-                    client = get_provider_client(printer)
+                    client = (
+                        self._provider_builder(printer)
+                        if self._provider_builder is not None
+                        else get_provider_client(printer)
+                    )
                 except ProviderError as exc:
                     await self._mark_status(
                         printer_id,
@@ -316,7 +331,7 @@ class PrinterHub:
         sync_print_stats = dict(print_stats)
         if (
             client is not None
-            and hasattr(client, "download_artifact")
+            and isinstance(client, ArtifactCaptureClient)
             and settings.bambu_external_capture_max_mb > 0
         ):
             sync_print_stats["_capture_available"] = True
@@ -331,7 +346,7 @@ class PrinterHub:
         if (
             capture is not None
             and client is not None
-            and hasattr(client, "download_artifact")
+            and isinstance(client, ArtifactCaptureClient)
         ):
             job_id, remote_path = capture
             key = (printer_id, job_id)
@@ -554,6 +569,7 @@ class PrinterHub:
                 else:
                     return None
 
+            assert job.id is not None
             self._active_job_cache[printer_id] = (filename, job.id)
 
             new_state: PrintJobState
@@ -628,7 +644,8 @@ class PrinterHub:
                 job.artifact_evidence = "capture_pending"
                 job.artifact_capture_error = None
                 changed = True
-                capture = (int(job.id), capture_path)
+                assert job.id is not None
+                capture = (job.id, capture_path)
             if new_state != job.state:
                 job.state = new_state
                 changed = True
@@ -744,11 +761,7 @@ class PrinterHub:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - metadata-only is a valid outcome
-            detail = (
-                exc.code
-                if isinstance(exc, ProviderError)
-                else "artifact_capture_failed"
-            )
+            detail = getattr(exc, "code", "artifact_capture_failed")
             logger.info(
                 "external artifact capture unavailable for printer=%s job=%s: %s",
                 printer_id,
@@ -791,7 +804,8 @@ class PrinterHub:
             job = session.get(PrintJob, job_id)
             if job is None:
                 return
-            job.file_id = int(file_row.id)
+            assert file_row.id is not None
+            job.file_id = file_row.id
             job.model_id = file_row.model_id
             job.artifact_evidence = (
                 "project_archived"
@@ -849,6 +863,7 @@ def _get_sentinel_ids(session: Session) -> tuple[int, int]:
         session.add(model)
         session.commit()
         session.refresh(model)
+    assert model.id is not None
 
     f = session.exec(select(File).where(File.sha256 == SENTINEL_FILE_HASH)).first()
     if f is None:
@@ -865,4 +880,5 @@ def _get_sentinel_ids(session: Session) -> tuple[int, int]:
         session.commit()
         session.refresh(f)
 
-    return int(f.id), int(model.id)
+    assert f.id is not None
+    return f.id, model.id

@@ -12,6 +12,8 @@
     "app/services/task_queue.py"
   ],
   "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
   "typeCheckingMode": "basic",
   "reportMissingTypeStubs": false
 }
