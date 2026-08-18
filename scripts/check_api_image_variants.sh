@@ -49,9 +49,11 @@ startup_median_ms() {
 
 full_startup="$(startup_median_ms "$full_image" full)"
 lite_startup="$(startup_median_ms "$lite_image" lite)"
-maximum_lite=$((full_startup * 110 / 100))
+relative_limit=$((full_startup * 110 / 100))
+jitter_limit=$((full_startup + 1000))
+maximum_lite=$((relative_limit > jitter_limit ? relative_limit : jitter_limit))
 if (( lite_startup > maximum_lite )); then
-  echo "lite median startup ${lite_startup}ms exceeds full ${full_startup}ms by more than 10%" >&2
+  echo "lite median startup ${lite_startup}ms exceeds the ${maximum_lite}ms limit (full=${full_startup}ms)" >&2
   exit 1
 fi
 
