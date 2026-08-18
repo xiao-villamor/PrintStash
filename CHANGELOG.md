@@ -1,14 +1,15 @@
 # Changelog
 
-## Unreleased (target: 0.12.0)
+## 0.12.0
 
-**This entry describes the pending 0.12.0 branch. No 0.12.0 image, tag, or release has been published yet. Back up before upgrading once it is released.**
+**Back up before upgrading. This release includes additive database migrations and deployment/dependency changes; PostgreSQL, MinIO, and lite-image users should review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
 - Preview settings now control interactive 3D/G-code render sharpness, downloaded screenshot resolution, and generated Model image resolution, with a background action to recreate existing Model previews.
 - Import jobs now publish durable completion metadata, explicit complete/partial outcomes, thumbnail status and stable reasons, restart recovery, monotonic progress, structured metrics/logs, and no-store polling.
 - A memory-bounded streaming STL fallback generates 640×480 WebP thumbnails for oversized or otherwise unrasterizable meshes, including Vault Maintenance repair and Bulk upload flows ([#67](https://github.com/xiao-villamor/PrintStash/issues/67)).
+- Bambu LAN beta now records externally started prints using the identity fields reported by the printer and makes a best-effort capture of exact G-code or project files while they remain in the printer's FTPS cache, clearly labelling metadata-only history when no Artifact can be recovered.
 - Separate `printstash-api` full and `printstash-api-lite` images expose browser, STEP, and thumbnail capabilities through authenticated health details; lite retains NumPy/Pillow/Trimesh thumbnailing without Chromium or OpenCASCADE.
 - A transitional, idempotent MinIO-to-SeaweedFS helper copies objects without deletion and verifies their downloaded content with a digest-pinned rclone image.
 
@@ -27,6 +28,8 @@
 - Task Center is now the single import-job transition owner, emits one terminal event per job, rejects stale/out-of-order polling responses, resumes active work after reload/connectivity changes, and coordinates one post-Bulk refresh.
 - Import jobs cannot report completion before Model, Artifact, Metadata, primary storage, and expected thumbnail outputs are visible from a fresh session.
 - Oversized valid STL uploads no longer silently finish without thumbnails, and partial thumbnail outcomes remain visible and repairable instead of masquerading as complete success ([#67](https://github.com/xiao-villamor/PrintStash/issues/67)).
+- STEP tessellation now runs in a disposable child process with a cgroup-aware memory budget and timeout, so an overly complex file degrades without taking down the API process.
+- OIDC login now accepts issuer URLs that differ only by a trailing slash, fixing Authentik `PER_PROVIDER` configurations while continuing to reject genuinely mismatched issuers ([#71](https://github.com/xiao-villamor/PrintStash/issues/71)).
 
 ### Security
 
