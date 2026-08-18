@@ -4,8 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "printstash-core"
-version = "0.1.0"
+version = "0.0.0"
 description = "Framework-neutral contracts for PrintStash integrations"
+license = "AGPL-3.0-only"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -49,3 +50,11 @@ select = ["E4", "E7", "E9", "F", "I", "B"]
 include = ["src"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
+venvPath = "."
+venv = ".venv"
+# Provider payloads and optional transport libraries expose intentionally
+# untyped JSON/dynamic APIs. Keep strict checking for the core contracts while
+# allowing those values to be validated at the protocol boundary.
+reportUnknownArgumentType = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
