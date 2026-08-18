@@ -4,9 +4,9 @@ import {
   PRINTER_SETUP_OPTIONS,
   providerLabel,
   setupProviderFields,
-  type PrinterSetupKind,
 } from "../printer-providers";
 import type { PrinterProvider } from "@/types";
+import type { PrinterVariant } from "@/types/printers";
 
 const EXPECTED_SETUP_CATALOG = [
   ["moonraker", "Moonraker / Klipper", "moonraker", null, "Moonraker"],
@@ -67,7 +67,7 @@ describe("printer provider public contract", () => {
       expect(
         providerLabel({
           provider: provider as PrinterProvider,
-          provider_variant: variant as PrinterSetupKind | null,
+          provider_variant: variant as PrinterVariant | null,
         }),
       ).toBe(displayLabel);
     },

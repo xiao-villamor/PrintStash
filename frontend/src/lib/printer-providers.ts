@@ -1,55 +1,22 @@
 import type { PrinterCreate, PrinterProvider, PrinterRead } from "@/types";
+import { SHARED_PRINTER_CONTRACT } from "@/generated/printer-contracts";
 
 export type PrinterSetupKind =
-  | "moonraker"
-  | "elegoo_neptune4"
-  | "elegoo_centauri_carbon"
-  | "elegoo_centauri_carbon_2"
-  | "prusalink"
-  | "octoprint"
-  | "bambu_lan";
+  (typeof SHARED_PRINTER_CONTRACT.setupOptions)[number]["value"];
+
+const SETUP_DESCRIPTION_OVERLAY: Partial<Record<PrinterSetupKind, string>> = {
+  prusalink: "Local Prusa FDM connection; Prusa Connect cloud is not used.",
+};
 
 export const PRINTER_SETUP_OPTIONS: Array<{
   value: PrinterSetupKind;
   label: string;
   description: string;
-}> = [
-  {
-    value: "moonraker",
-    label: "Moonraker / Klipper",
-    description: "Generic Klipper printer using Moonraker.",
-  },
-  {
-    value: "elegoo_neptune4",
-    label: "Elegoo Neptune 4 family",
-    description: "Neptune 4, Pro, Plus, or Max using its Moonraker service.",
-  },
-  {
-    value: "prusalink",
-    label: "PrusaLink (beta)",
-    description: "Local Prusa FDM connection; Prusa Connect cloud is not used.",
-  },
-  {
-    value: "octoprint",
-    label: "OctoPrint (beta)",
-    description: "Local OctoPrint/OctoPi instance using an API key.",
-  },
-  {
-    value: "elegoo_centauri_carbon",
-    label: "Elegoo Centauri Carbon (beta)",
-    description: "Local SDCP monitoring and controls; file upload is not available.",
-  },
-  {
-    value: "elegoo_centauri_carbon_2",
-    label: "Elegoo Centauri Carbon 2 (beta)",
-    description: "Local MQTT monitoring and controls; enable LAN Only on printer first.",
-  },
-  {
-    value: "bambu_lan",
-    label: "Bambu LAN (beta)",
-    description: "Local-network connection using serial and access code.",
-  },
-];
+}> = SHARED_PRINTER_CONTRACT.setupOptions.map(({ value, label, description }) => ({
+  value,
+  label,
+  description: SETUP_DESCRIPTION_OVERLAY[value] ?? description,
+}));
 
 // Curated so the model picker on the printer card is a select, not free text
 // (avoids typos). Not exhaustive — "Other" in the picker covers anything
@@ -174,11 +141,9 @@ export function setupProviderFields(kind: PrinterSetupKind): Pick<
   PrinterCreate,
   "provider" | "provider_variant"
 > {
-  if (kind === "elegoo_neptune4") {
-    return { provider: "moonraker", provider_variant: "elegoo_neptune4" };
-  }
-  if (kind === "elegoo_centauri_carbon" || kind === "elegoo_centauri_carbon_2") {
-    return { provider: "elegoo_centauri", provider_variant: kind };
-  }
-  return { provider: kind };
+  const option = SHARED_PRINTER_CONTRACT.setupOptions.find(({ value }) => value === kind);
+  if (!option) throw new Error(`Unknown printer setup kind: ${kind}`);
+  return option.variant
+    ? { provider: option.provider, provider_variant: option.variant }
+    : { provider: option.provider };
 }
