@@ -284,7 +284,11 @@ jobs:
         run: uv run bandit -ll -r app/
 
       - name: Dependency audit (pip-audit)
-        run: uv run pip-audit --strict
+        run: |
+          uv export --frozen --no-dev --no-emit-local --no-hashes \
+            --output-file "${RUNNER_TEMP}/printstash-audit-requirements.txt"
+          uv run --no-sync pip-audit --strict \
+            --requirement "${RUNNER_TEMP}/printstash-audit-requirements.txt"
 
   migration-upgrade:
     name: Migration upgrade (oldest supported release -> head)
