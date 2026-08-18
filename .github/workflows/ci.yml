@@ -25,6 +25,53 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  printer-core:
+    name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+        resolution: ["lowest-direct", "highest"]
+    defaults:
+      run:
+        working-directory: backend/packages/printstash-core
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install autonomous package
+        run: |
+          uv venv --python ${{ matrix.python }}
+          uv pip install --python .venv/bin/python \
+            --resolution ${{ matrix.resolution }} \
+            --editable ".[dev,printers-all]"
+
+      - name: Test autonomous package
+        run: .venv/bin/pytest tests -q
+
+      - name: Lint autonomous package
+        run: .venv/bin/ruff check src tests
+
+      - name: Typecheck autonomous package
+        run: .venv/bin/pyright -p pyproject.toml
+
+      - name: Verify generated frontend contract
+        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        run: >-
+          .venv/bin/python -m printstash_core.printers.codegen
+          --output ../../../frontend/src/generated/printer-contracts.ts --check
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
