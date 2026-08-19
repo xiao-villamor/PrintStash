@@ -51,6 +51,13 @@ def test_lifespan_starts_background_tasks_and_shuts_down_cleanly(
     _local_storage: None, db_session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.main import app
+    from app.services import printer_jobs
+    from app.services.task_queue import LocalTaskQueue
+
+    # The production queue is process-wide and may already be bound to an
+    # event loop used by an earlier scheduler test. Give this real lifespan a
+    # fresh local queue so its scheduler can bind and shut down on this loop.
+    monkeypatch.setattr(printer_jobs, "task_queue", LocalTaskQueue())
 
     user = User(
         username="lifespan-admin",

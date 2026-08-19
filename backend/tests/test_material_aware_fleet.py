@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -22,7 +24,13 @@ from app.db.models import (
     RoutingStrategy,
     User,
 )
-from app.schemas.fleet import BatchCreate, FleetSummary, QueueJobCreate, QueueJobUpdate
+from app.schemas.fleet import (
+    BatchCreate,
+    FleetSummary,
+    MaintenanceWindowCreate,
+    QueueJobCreate,
+    QueueJobUpdate,
+)
 from app.schemas.materials import (
     ManualMaterialStateUpdate,
     MaterialSlotWrite,
@@ -30,6 +38,25 @@ from app.schemas.materials import (
 )
 from app.services import fleet, materials
 from tests.test_fleet_api import _gcode
+
+
+def test_material_and_fleet_schema_validation_edges() -> None:
+    assert MaterialSlotWrite(slot_key="feed", label="Feed", color_hex=" ").color_hex is None
+    assert (
+        MaterialSlotWrite(slot_key="feed", label="Feed", color_hex="a1b2c3").color_hex
+        == "#A1B2C3"
+    )
+    with pytest.raises(ValueError, match="material_color_invalid"):
+        MaterialSlotWrite(slot_key="feed", label="Feed", color_hex="not-a-color")
+    with pytest.raises(ValueError, match="printer_id_required"):
+        QueueJobCreate(file_id=1)
+    with pytest.raises(ValueError, match="printer_id_required"):
+        BatchCreate(file_id=1, quantity=1, strategy=RoutingStrategy.MANUAL)
+    with pytest.raises(ValueError, match="automatic_batch_spool_not_allowed"):
+        BatchCreate(file_id=1, quantity=1, spool_id=1)
+    now = datetime.now(timezone.utc)
+    with pytest.raises(ValueError, match="maintenance_window_invalid"):
+        MaintenanceWindowCreate(starts_at=now, ends_at=now)
 
 
 def _user(session: Session) -> User:
