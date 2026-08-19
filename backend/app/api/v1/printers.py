@@ -24,6 +24,7 @@ from app.core.security import require_superuser, require_user
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
+    CompatibilityPolicy,
     File,
     FileType,
     Model,
@@ -38,6 +39,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.db.session import get_session
+from app.schemas.materials import ManualMaterialStateUpdate, PrinterMaterialStateRead
 from app.schemas.printers import (
     HomeAxes,
     MoonrakerConfigRead,
@@ -53,7 +55,7 @@ from app.schemas.printers import (
     SetTemperature,
     StartPrinterFile,
 )
-from app.services import printer_rbac, rbac, ws_tickets
+from app.services import materials, printer_rbac, rbac, ws_tickets
 from app.services.auth import get_user_by_id, verify_access_token
 from app.services.printer_files import (
     build_traceable_remote_filename,
@@ -176,6 +178,8 @@ def _to_read(p: Printer, role: PrinterRole = PrinterRole.ADMIN) -> PrinterRead:
         drain_mode=p.drain_mode,
         drain_reason=p.drain_reason,
         drain_updated_at=p.drain_updated_at,
+        provider_material_sync_enabled=p.provider_material_sync_enabled,
+        operator_release_required=p.operator_release_required,
         status=p.status,
         last_seen_at=p.last_seen_at,
         last_error=p.last_error,
@@ -519,6 +523,50 @@ def get_printer(
     return _to_read(p, role)
 
 
+@router.get(
+    "/{printer_id}/material-state",
+    response_model=PrinterMaterialStateRead,
+    summary="Read effective tools and loaded material slots",
+)
+def get_printer_material_state(
+    printer_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> PrinterMaterialStateRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.VIEW
+    )
+    try:
+        return materials.read_material_state(session, printer_id)
+    except materials.MaterialStateError as exc:
+        raise HTTPException(status_code=404, detail=exc.code) from exc
+
+
+@router.put(
+    "/{printer_id}/material-state/manual",
+    response_model=PrinterMaterialStateRead,
+    summary="Replace operator-maintained tools and loaded material slots",
+)
+def put_printer_manual_material_state(
+    printer_id: int,
+    payload: ManualMaterialStateUpdate,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> PrinterMaterialStateRead:
+    printer_rbac.require_printer_role(
+        session, current_user, printer_id, PrinterRole.PRINT
+    )
+    try:
+        return materials.replace_manual_state(
+            session, printer_id, payload, current_user
+        )
+    except materials.MaterialStateError as exc:
+        status_code = 409 if exc.code == "material_state_changed" else 400
+        if exc.code == "printer_not_found":
+            status_code = 404
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
+
+
 @router.post(
     "",
     response_model=PrinterRead,
@@ -553,6 +601,8 @@ async def create_printer(
         model_name=payload.model_name.strip() if payload.model_name else None,
         notes=payload.notes,
         group=payload.group.strip() if payload.group else None,
+        provider_material_sync_enabled=payload.provider_material_sync_enabled,
+        operator_release_required=payload.operator_release_required,
     )
     _validate_provider_config(p)
     p.detected_model = detect_printer_model(p)
@@ -624,6 +674,10 @@ async def update_printer(
         p.notes = payload.notes
     if payload.group is not None:
         p.group = payload.group.strip() or None
+    if payload.provider_material_sync_enabled is not None:
+        p.provider_material_sync_enabled = payload.provider_material_sync_enabled
+    if payload.operator_release_required is not None:
+        p.operator_release_required = payload.operator_release_required
     _validate_provider_config(p)
     p.detected_model = detect_printer_model(p)
     p.updated_at = utcnow()
@@ -816,6 +870,20 @@ async def send_to_printer(
     if Path(f.original_filename).suffix.lower() == ".bgcode":
         raise HTTPException(status_code=400, detail="binary_gcode_not_printable")
     _require_file_role(session, current_user, f, CollectionRole.EDIT)
+    if payload.start_print:
+        try:
+            compatibility = materials.compatibility_for_printer(
+                session, int(f.id), printer_id
+            )
+        except materials.MaterialStateError as exc:
+            raise HTTPException(status_code=404, detail=exc.code) from exc
+        if (
+            compatibility.verdict == "mismatch"
+            and payload.compatibility_policy == CompatibilityPolicy.SAFE
+        ):
+            raise HTTPException(
+                status_code=409, detail="material_mismatch_confirmation_required"
+            )
     backend = get_backend()
     blob_exists = await run_in_threadpool(backend.exists, f.path)
     if not blob_exists:
@@ -837,6 +905,17 @@ async def send_to_printer(
         spool_id=payload.spool_id,
         spool_name=payload.spool_name,
         spool_filament_id=payload.spool_filament_id,
+        compatibility_policy=payload.compatibility_policy,
+        material_override_by=(
+            current_user.id
+            if payload.compatibility_policy == CompatibilityPolicy.ALLOW_MISMATCH
+            else None
+        ),
+        material_override_at=(
+            utcnow()
+            if payload.compatibility_policy == CompatibilityPolicy.ALLOW_MISMATCH
+            else None
+        ),
     )
     session.add(job)
     session.commit()

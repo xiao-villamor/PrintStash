@@ -89,9 +89,7 @@ class MoonrakerClient:
         self.api_key = config.api_key
         self.timeout = timeout
         self._http_client = (http_client_factory or httpx.AsyncClient)()
-        self._websocket_connector = (
-            websocket_connector or _default_websocket_connector
-        )
+        self._websocket_connector = websocket_connector or _default_websocket_connector
         self._logger = logger or logging.getLogger(__name__)
 
     async def aclose(self) -> None:
@@ -137,7 +135,41 @@ class MoonrakerClient:
             (f"{name}={','.join(fields)}" if fields else name)
             for name, fields in SUBSCRIPTIONS.items()
         )
-        return await self._request("GET", f"/printer/objects/query?{params}")
+        status = await self._request("GET", f"/printer/objects/query?{params}")
+        try:
+            spool = await self._request("GET", "/server/spoolman/spool_id")
+        except MoonrakerError:
+            spool_id = None
+        else:
+            result = spool.get("result")
+            spool_id = result.get("spool_id") if isinstance(result, Mapping) else result
+        material_slots = self._spoolman_material_slots(spool_id)
+        status_result = status.get("result")
+        if isinstance(status_result, dict) and isinstance(
+            status_result.get("status"), dict
+        ):
+            status_result["status"]["material_slots"] = material_slots
+        return status
+
+    @staticmethod
+    def _spoolman_material_slots(spool_id: object) -> list[dict[str, Any]]:
+        if isinstance(spool_id, bool):
+            spool_id = None
+        try:
+            normalized = (
+                int(spool_id) if isinstance(spool_id, (str, int, float)) else None
+            )
+        except (TypeError, ValueError):
+            normalized = None
+        return [
+            {
+                "slot_key": "tool0",
+                "label": "Moonraker active spool",
+                "tool_key": "tool0",
+                "state": "loaded" if normalized is not None else "unknown",
+                "external_spool_id": normalized,
+            }
+        ]
 
     async def query_snapshot(self) -> PrinterSnapshot:
         return PrinterSnapshot.from_legacy_payload(await self.query_status())
@@ -176,9 +208,7 @@ class MoonrakerClient:
         url = f"{self.base_url}/server/files/upload"
         data = {"root": "gcodes", "print": "true" if start_print else "false"}
         with local_path.open("rb") as handle:
-            files = {
-                "file": (remote_filename, handle, "application/octet-stream")
-            }
+            files = {"file": (remote_filename, handle, "application/octet-stream")}
             try:
                 response = await self._http_client.post(
                     url,
@@ -195,12 +225,8 @@ class MoonrakerClient:
             )
         return cast(dict[str, Any], response.json())
 
-    async def upload(
-        self, local_path: Path, remote_filename: str
-    ) -> dict[str, Any]:
-        return await self.upload_gcode(
-            local_path, remote_filename, start_print=False
-        )
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
+        return await self.upload_gcode(local_path, remote_filename, start_print=False)
 
     async def start_print(self, remote_filename: str) -> dict[str, Any]:
         return await self._request(
@@ -302,8 +328,7 @@ class MoonrakerClient:
                                 else "authentication failed"
                             )
                             raise MoonrakerError(
-                                "moonraker websocket authentication failed: "
-                                f"{detail}"
+                                f"moonraker websocket authentication failed: {detail}"
                             )
 
                     request_id += 1
@@ -320,9 +345,7 @@ class MoonrakerClient:
                         if stop_event is not None and stop_event.is_set():
                             return
                         try:
-                            raw = await asyncio.wait_for(
-                                websocket.recv(), timeout=60.0
-                            )
+                            raw = await asyncio.wait_for(websocket.recv(), timeout=60.0)
                         except asyncio.TimeoutError:
                             await websocket.ping()
                             continue
@@ -348,6 +371,21 @@ class MoonrakerClient:
                                 status = params[0]
                                 if isinstance(status, Mapping):
                                     await on_status(dict(status))
+                            continue
+                        if message.get("method") == "notify_active_spool_set":
+                            params = message.get("params") or []
+                            spool_id = (
+                                params[0]
+                                if isinstance(params, list) and params
+                                else None
+                            )
+                            await on_status(
+                                {
+                                    "material_slots": self._spoolman_material_slots(
+                                        spool_id
+                                    )
+                                }
+                            )
                             continue
             except (WebSocketException, OSError) as exc:
                 self._logger.warning(

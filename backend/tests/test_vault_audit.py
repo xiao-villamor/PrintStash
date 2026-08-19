@@ -50,6 +50,57 @@ def test_quick_audit_persists_missing_owned_blob_finding(db_session: Session) ->
     assert all("/" not in item.resource_identifier for item in result.findings)
 
 
+def test_read_run_counts_actual_findings_instead_of_stale_run_totals(
+    db_session: Session,
+) -> None:
+    user = User(username="count-auditor", hashed_password="x", is_superuser=True)
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    run = VaultAuditRun(
+        requested_by=user.id,
+        mode=VaultAuditMode.QUICK,
+        critical_count=0,
+        warning_count=99,
+        info_count=7,
+    )
+    db_session.add(run)
+    db_session.commit()
+    db_session.refresh(run)
+    db_session.add_all(
+        [
+            VaultAuditFinding(
+                run_id=run.id,
+                code="owned_blob_missing",
+                severity=VaultAuditSeverity.CRITICAL,
+                resource_type="file",
+                resource_identifier="one.stl",
+            ),
+            VaultAuditFinding(
+                run_id=run.id,
+                code="owned_blob_missing",
+                severity=VaultAuditSeverity.CRITICAL,
+                resource_type="file",
+                resource_identifier="two.stl",
+            ),
+            VaultAuditFinding(
+                run_id=run.id,
+                code="metadata_missing",
+                severity=VaultAuditSeverity.WARNING,
+                resource_type="file",
+                resource_identifier="three.gcode",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    result = vault_audit.read_run(db_session, run)
+
+    assert result.critical_count == 2
+    assert result.warning_count == 1
+    assert result.info_count == 0
+
+
 def test_concurrent_audit_start_returns_active_run(db_session: Session) -> None:
     user = User(username="auditor-2", hashed_password="x", is_superuser=True)
     db_session.add(user)

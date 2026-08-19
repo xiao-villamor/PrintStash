@@ -136,6 +136,7 @@ class BambuClient:
                 Capability.CANCEL,
                 Capability.LIVE_STATUS,
                 Capability.UPLOAD,
+                Capability.MATERIAL_STATE,
             }
         ),
         support_level="beta",
@@ -190,6 +191,7 @@ class BambuClient:
         self._logger = logger or logging.getLogger(__name__)
         self._request_topic = f"device/{self.serial}/request"
         self._report_topic = f"device/{self.serial}/report"
+        self._material_slots: dict[str, dict[str, Any]] = {}
 
     def _next_sequence_id(self) -> str:
         if self._sequence_id_factory is not None:
@@ -411,7 +413,9 @@ class BambuClient:
         if parts[0] != "cache":
             raise ProviderError("invalid_bambu_artifact_path", code="provider_error")
         remote_name = "/".join(parts)
-        if not remote_name.lower().endswith((".gcode", ".g", ".gco", ".bgcode", ".3mf")):
+        if not remote_name.lower().endswith(
+            (".gcode", ".g", ".gco", ".bgcode", ".3mf")
+        ):
             raise ProviderError("unsupported_bambu_artifact", code="provider_error")
 
         ftp = self._ftps_client()
@@ -477,9 +481,7 @@ class BambuClient:
             except (TypeError, ValueError):
                 pass
             else:
-                status["virtual_sdcard"] = {
-                    "progress": max(0.0, min(1.0, progress))
-                }
+                status["virtual_sdcard"] = {"progress": max(0.0, min(1.0, progress))}
 
         metadata_fields = {
             "subtask_name": "external_display_name",
@@ -499,7 +501,73 @@ class BambuClient:
                 print_stats[target] = value
         if print_stats:
             status["print_stats"] = print_stats
+        if isinstance(print_report, dict) and (
+            "ams" in print_report or "vt_tray" in print_report
+        ):
+            for slot in self._normalize_ams_slots(print_report):
+                self._material_slots[str(slot["slot_key"])] = slot
+        if self._material_slots:
+            status["material_slots"] = list(self._material_slots.values())
+        nozzle = print_report.get("nozzle_diameter")
+        try:
+            nozzle_diameter = float(nozzle) if nozzle is not None else None
+        except (TypeError, ValueError):
+            nozzle_diameter = None
+        if nozzle_diameter is not None and nozzle_diameter > 0:
+            status["material_tools"] = [
+                {
+                    "tool_key": "tool0",
+                    "label": "Tool 0",
+                    "nozzle_diameter_mm": nozzle_diameter,
+                }
+            ]
         return status
+
+    @staticmethod
+    def _normalize_ams_slots(print_report: dict[str, Any]) -> list[dict[str, Any]]:
+        slots: list[dict[str, Any]] = []
+        ams_root = print_report.get("ams")
+        units = ams_root.get("ams", []) if isinstance(ams_root, dict) else []
+        if isinstance(units, list):
+            for unit in units:
+                if not isinstance(unit, dict):
+                    continue
+                unit_id = str(unit.get("id", len(slots)))
+                trays = unit.get("tray", [])
+                if not isinstance(trays, list):
+                    continue
+                for tray in trays:
+                    if not isinstance(tray, dict):
+                        continue
+                    tray_id = str(tray.get("id", len(slots)))
+                    material = str(tray.get("tray_type") or "").strip() or None
+                    color = str(tray.get("tray_color") or "").strip().upper()
+                    color_hex = f"#{color[:6]}" if len(color) >= 6 else None
+                    slots.append(
+                        {
+                            "slot_key": f"ams:{unit_id}:{tray_id}",
+                            "label": f"AMS {unit_id} tray {tray_id}",
+                            "tool_key": "tool0",
+                            "state": "loaded" if material else "empty",
+                            "material_type": material,
+                            "color_hex": color_hex,
+                        }
+                    )
+        virtual = print_report.get("vt_tray")
+        if isinstance(virtual, dict):
+            material = str(virtual.get("tray_type") or "").strip() or None
+            color = str(virtual.get("tray_color") or "").strip().upper()
+            slots.append(
+                {
+                    "slot_key": "external",
+                    "label": "External spool",
+                    "tool_key": "tool0",
+                    "state": "loaded" if material else "empty",
+                    "material_type": material,
+                    "color_hex": f"#{color[:6]}" if len(color) >= 6 else None,
+                }
+            )
+        return slots
 
     def _normalize_project_request(self, report: dict[str, Any]) -> dict[str, Any]:
         """Extract a best-effort FTPS capture hint from project_file traffic."""
@@ -568,6 +636,8 @@ class BambuClient:
                         "project_id",
                         "gcode_file",
                         "print_error",
+                        "ams",
+                        "vt_tray",
                     }.intersection(report["print"])
                 ),
             )

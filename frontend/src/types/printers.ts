@@ -29,6 +29,9 @@ export type PrintJobState =
   | "cancelled"
   | "failed";
 export type RoutingStrategy = "manual" | "default" | "least_busy";
+export type JobPriority = "low" | "normal" | "rush";
+export type CompatibilityPolicy = "safe" | "allow_mismatch";
+export type CompatibilityVerdict = "compatible" | "mismatch" | "unknown";
 export type PrinterRole = "view" | "print" | "control" | "admin";
 
 export interface PrinterAccess {
@@ -79,6 +82,8 @@ export interface PrinterRead {
   drain_mode: boolean;
   drain_reason: string | null;
   drain_updated_at: string | null;
+  provider_material_sync_enabled?: boolean;
+  operator_release_required?: boolean;
   status: PrinterStatus;
   last_seen_at: string | null;
   last_error: string | null;
@@ -96,6 +101,7 @@ export interface PrinterCapabilities {
   can_list_files: boolean;
   can_send_gcode: boolean;
   can_measure_consumption: boolean;
+  can_report_material_state?: boolean;
   support_level: "stable" | "beta" | string;
   support_notes: string[];
   unsupported_actions: string[];
@@ -178,6 +184,8 @@ export interface PrinterCreate {
   model_name?: string;
   notes?: string;
   group?: string;
+  provider_material_sync_enabled?: boolean;
+  operator_release_required?: boolean;
 }
 
 export interface PrinterUpdate {
@@ -202,6 +210,8 @@ export interface PrinterUpdate {
   model_name?: string;
   notes?: string;
   group?: string;
+  provider_material_sync_enabled?: boolean;
+  operator_release_required?: boolean;
 }
 
 export interface PrintJobRead {
@@ -234,6 +244,16 @@ export interface PrintJobRead {
   dispatch_attempts: number;
   retryable: boolean;
   requested_by: number | null;
+  batch_id?: number | null;
+  copy_index?: number | null;
+  priority?: JobPriority;
+  target_group?: string | null;
+  compatibility_policy?: CompatibilityPolicy;
+  material_override_by?: number | null;
+  material_override_at?: string | null;
+  operator_gate_state?: "not_required" | "pending" | "released" | "held";
+  operator_decided_by?: number | null;
+  operator_decided_at?: string | null;
   spool_id: number | null;
   spool_name: string | null;
   started_at: string | null;
@@ -249,6 +269,7 @@ export interface SendToPrinter {
   spool_id?: number | null;
   spool_name?: string | null;
   spool_filament_id?: number | null;
+  compatibility_policy?: CompatibilityPolicy;
 }
 
 export interface StartPrinterFile {
@@ -301,6 +322,24 @@ export interface FleetSummary {
   draining_printers: number;
   maintenance_printers: number;
   attention_jobs: number;
+  printers?: Array<{
+    printer_id: number;
+    name: string;
+    status: string;
+    progress: number | null;
+    group: string | null;
+    loaded_slots: string[];
+    nozzle_diameter_mm: number | null;
+    current_job_id: number | null;
+    current_job_name: string | null;
+    current_priority: JobPriority | null;
+    next_job_id: number | null;
+    next_job_name: string | null;
+    next_priority: JobPriority | null;
+    drain_mode: boolean;
+    maintenance: boolean;
+    pending_operator_release: boolean;
+  }>;
 }
 
 export interface QueueJobCreate {
@@ -310,6 +349,9 @@ export interface QueueJobCreate {
   spool_id?: number | null;
   spool_name?: string | null;
   spool_filament_id?: number | null;
+  priority?: JobPriority;
+  target_group?: string | null;
+  compatibility_policy?: CompatibilityPolicy;
 }
 
 export interface QueueJobUpdate {
@@ -317,6 +359,92 @@ export interface QueueJobUpdate {
   printer_id?: number | null;
   queue_position?: number;
   expected_updated_at?: string;
+  priority?: JobPriority;
+  target_group?: string | null;
+  compatibility_policy?: CompatibilityPolicy;
+}
+
+export interface MaterialToolRead {
+  tool_key: string;
+  label: string;
+  nozzle_diameter_mm: number | null;
+  source: "manual" | "bambu_ams" | "moonraker_spoolman";
+  observed_at: string | null;
+  stale: boolean;
+}
+
+export interface MaterialSlotRead {
+  slot_key: string;
+  label: string;
+  tool_key: string | null;
+  state: "loaded" | "empty" | "unknown";
+  source: "manual" | "bambu_ams" | "moonraker_spoolman";
+  confidence: "operator_set" | "provider_reported" | "externally_tracked";
+  material_type: string | null;
+  material_brand: string | null;
+  color_hex: string | null;
+  spool_id: number | null;
+  spool_name: string | null;
+  spool_filament_id: number | null;
+  observed_at: string | null;
+  stale: boolean;
+}
+
+export interface PrinterMaterialStateRead {
+  printer_id: number;
+  updated_at: string;
+  provider_sync_enabled: boolean;
+  tools: MaterialToolRead[];
+  slots: MaterialSlotRead[];
+}
+
+export interface ManualMaterialStateUpdate {
+  expected_updated_at?: string;
+  tools: Array<{ tool_key: string; label: string; nozzle_diameter_mm?: number | null }>;
+  slots: Array<{
+    slot_key: string;
+    label: string;
+    tool_key?: string | null;
+    state: "loaded" | "empty" | "unknown";
+    material_type?: string | null;
+    material_brand?: string | null;
+    color_hex?: string | null;
+    spool_id?: number | null;
+    spool_name?: string | null;
+    spool_filament_id?: number | null;
+  }>;
+}
+
+export interface CompatibilityRead {
+  file_id: number;
+  requirements: Array<{ tool_index: number; material_type: string | null; color_hex: string | null }>;
+  nozzle_diameter_mm: number | null;
+  printers: Array<{
+    printer_id: number;
+    verdict: CompatibilityVerdict;
+    reasons: string[];
+    missing_materials: string[];
+    color_advisories: string[];
+  }>;
+}
+
+export interface BatchCreate extends QueueJobCreate {
+  quantity: number;
+}
+
+export interface PrintBatchRead {
+  id: number;
+  file_id: number;
+  model_id: number;
+  quantity: number;
+  routing_strategy: RoutingStrategy;
+  priority: JobPriority;
+  target_group: string | null;
+  compatibility_policy: CompatibilityPolicy;
+  requested_by: number | null;
+  created_at: string;
+  updated_at: string;
+  jobs: PrintJobRead[];
 }
 
 export interface PrinterRoutingUpdate {

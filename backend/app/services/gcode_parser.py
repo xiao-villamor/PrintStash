@@ -112,8 +112,8 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*filament cost\s*=\s*([\d.]+)", re.IGNORECASE),
     ),
     "material_type": (
-        re.compile(r";\s*filament_type\s*=\s*([^\n;]+)", re.IGNORECASE),
-        re.compile(r";\s*filament type\s*[:=]\s*([^\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_type\s*=\s*([^\r\n]+)", re.IGNORECASE),
+        re.compile(r";\s*filament type\s*[:=]\s*([^\r\n]+)", re.IGNORECASE),
     ),
     "material_brand": (
         re.compile(r";\s*filament_brand\s*=\s*([^\n;]+)", re.IGNORECASE),
@@ -121,6 +121,11 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*filament_settings_id\s*=\s*([^\n;]+)", re.IGNORECASE),
     ),
 }
+
+_FILAMENT_COLOR_PATTERNS = (
+    re.compile(r";\s*filament_colou?r\s*=\s*([^\r\n]+)", re.IGNORECASE),
+    re.compile(r";\s*filament colou?r\s*[:=]\s*([^\r\n]+)", re.IGNORECASE),
+)
 
 # Values may be fractional ("1.5h"); matching only the integer part would turn
 # "1.5h" into "5h". Capture the whole number and scale as a float.
@@ -191,6 +196,21 @@ def _normalise_material(value: str) -> str:
     return value.split(";", 1)[0].split(",", 1)[0].strip()
 
 
+def _split_slicer_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [part.strip() for part in re.split(r"[;,]", value) if part.strip()]
+
+
+def _normalise_color(value: str) -> str | None:
+    cleaned = value.strip().upper()
+    if re.fullmatch(r"#[0-9A-F]{6}(?:[0-9A-F]{2})?", cleaned):
+        return cleaned[:7]
+    if re.fullmatch(r"[0-9A-F]{6}(?:[0-9A-F]{2})?", cleaned):
+        return f"#{cleaned[:6]}"
+    return None
+
+
 def _to_int(value: str) -> int | None:
     try:
         return int(float(value.split(",", 1)[0].strip()))
@@ -229,6 +249,7 @@ def parse(path: Path) -> Dict[str, Any]:
         "filament_cost": None,
         "material_type": None,
         "material_brand": None,
+        "material_requirements": None,
         "printer_preset_name": None,
     }
 
@@ -289,5 +310,19 @@ def parse(path: Path) -> Dict[str, Any]:
             out[key] = _normalise_material(value)
         else:
             out[key] = value
+
+    material_values = _split_slicer_list(_first_match(text, _PATTERNS["material_type"]))
+    color_values = _split_slicer_list(_first_match(text, _FILAMENT_COLOR_PATTERNS))
+    if material_values:
+        out["material_requirements"] = [
+            {
+                "tool_index": index,
+                "material_type": material,
+                "color_hex": _normalise_color(color_values[index])
+                if index < len(color_values)
+                else None,
+            }
+            for index, material in enumerate(material_values)
+        ]
 
     return out

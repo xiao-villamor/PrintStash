@@ -36,6 +36,7 @@ class Capability(StrEnum):
     SERVER_INFO = "server_info"
     SERVER_CONFIG = "server_config"
     PRINTER_CONFIG = "printer_config"
+    MATERIAL_STATE = "material_state"
 
 
 class ProviderError(RuntimeError):
@@ -110,6 +111,10 @@ class ProviderCapabilities:
         return self.supports(Capability.MEASURED_CONSUMPTION)
 
     @property
+    def can_report_material_state(self) -> bool:
+        return self.supports(Capability.MATERIAL_STATE)
+
+    @property
     def unsupported_actions(self) -> tuple[str, ...]:
         return tuple(
             capability.value
@@ -128,6 +133,7 @@ class ProviderCapabilities:
             "can_list_files": self.can_list_files,
             "can_send_gcode": self.can_send_gcode,
             "can_measure_consumption": self.can_measure_consumption,
+            "can_report_material_state": self.can_report_material_state,
         }
 
     def as_api_dict(self) -> dict[str, object]:
@@ -355,6 +361,29 @@ class PrintSnapshot:
 
 
 @dataclass(frozen=True)
+class MaterialSlotSnapshot:
+    """One provider-reported material feed or tray."""
+
+    slot_key: str
+    label: str
+    state: str
+    material_type: str | None = None
+    material_brand: str | None = None
+    color_hex: str | None = None
+    external_spool_id: int | None = None
+    tool_key: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolSnapshot:
+    """One provider-reported tool and its currently installed nozzle."""
+
+    tool_key: str
+    label: str
+    nozzle_diameter_mm: int | float | None = None
+
+
+@dataclass(frozen=True)
 class PrinterSnapshot:
     """Immutable printer state independent of a provider wire protocol."""
 
@@ -364,6 +393,8 @@ class PrinterSnapshot:
     homed_axes: str | None = None
     webhook_state: str | None = None
     webhook_message: str | None = None
+    material_slots: tuple[MaterialSlotSnapshot, ...] = ()
+    material_tools: tuple[ToolSnapshot, ...] = ()
     extra: Mapping[str, FrozenValue] = field(default_factory=dict)
     toolhead_extra: Mapping[str, FrozenValue] = field(default_factory=dict)
     webhook_extra: Mapping[str, FrozenValue] = field(default_factory=dict)
@@ -374,6 +405,8 @@ class PrinterSnapshot:
     def __post_init__(self) -> None:
         frozen_temperatures = MappingProxyType(dict(self.temperatures))
         object.__setattr__(self, "temperatures", frozen_temperatures)
+        object.__setattr__(self, "material_slots", tuple(self.material_slots))
+        object.__setattr__(self, "material_tools", tuple(self.material_tools))
         if self.position is not None:
             object.__setattr__(self, "position", tuple(self.position))
         object.__setattr__(self, "extra", _freeze_mapping(self.extra))
@@ -426,6 +459,46 @@ class PrinterSnapshot:
         storage = _mapping(status.get("virtual_sdcard"))
         toolhead = _mapping(status.get("toolhead"))
         webhooks = _mapping(status.get("webhooks"))
+        raw_material_slots = status.get("material_slots")
+        material_slots: list[MaterialSlotSnapshot] = []
+        if isinstance(raw_material_slots, (list, tuple)):
+            for item in raw_material_slots:
+                source = _mapping(item)
+                slot_key = _optional_str(source.get("slot_key"))
+                label = _optional_str(source.get("label"))
+                state = _optional_str(source.get("state"))
+                if slot_key and label and state:
+                    material_slots.append(
+                        MaterialSlotSnapshot(
+                            slot_key=slot_key,
+                            label=label,
+                            state=state,
+                            material_type=_optional_str(source.get("material_type")),
+                            material_brand=_optional_str(source.get("material_brand")),
+                            color_hex=_optional_str(source.get("color_hex")),
+                            external_spool_id=_optional_int(
+                                source.get("external_spool_id")
+                            ),
+                            tool_key=_optional_str(source.get("tool_key")),
+                        )
+                    )
+        raw_material_tools = status.get("material_tools")
+        material_tools: list[ToolSnapshot] = []
+        if isinstance(raw_material_tools, (list, tuple)):
+            for item in raw_material_tools:
+                source = _mapping(item)
+                tool_key = _optional_str(source.get("tool_key"))
+                label = _optional_str(source.get("label"))
+                if tool_key and label:
+                    material_tools.append(
+                        ToolSnapshot(
+                            tool_key=tool_key,
+                            label=label,
+                            nozzle_diameter_mm=_optional_number(
+                                source.get("nozzle_diameter_mm")
+                            ),
+                        )
+                    )
 
         print_snapshot = PrintSnapshot(
             state=_optional_str(print_stats.get("state")),
@@ -483,6 +556,8 @@ class PrinterSnapshot:
                 "virtual_sdcard",
                 "toolhead",
                 "webhooks",
+                "material_slots",
+                "material_tools",
                 *temperature_keys,
             }
         )
@@ -493,6 +568,8 @@ class PrinterSnapshot:
             homed_axes=_optional_str(toolhead.get("homed_axes")),
             webhook_state=_optional_str(webhooks.get("state")),
             webhook_message=_optional_str(webhooks.get("state_message")),
+            material_slots=tuple(material_slots),
+            material_tools=tuple(material_tools),
             extra=_extra(status, known_top_level),
             toolhead_extra=_extra(toolhead, _TOOLHEAD_FIELDS),
             webhook_extra=_extra(webhooks, _WEBHOOK_FIELDS),
@@ -567,6 +644,37 @@ class PrinterSnapshot:
         )
         if webhooks:
             status["webhooks"] = webhooks
+        if self.material_slots:
+            status["material_slots"] = [
+                {
+                    key: value
+                    for key, value in {
+                        "slot_key": row.slot_key,
+                        "label": row.label,
+                        "state": row.state,
+                        "material_type": row.material_type,
+                        "material_brand": row.material_brand,
+                        "color_hex": row.color_hex,
+                        "external_spool_id": row.external_spool_id,
+                        "tool_key": row.tool_key,
+                    }.items()
+                    if value is not None
+                }
+                for row in self.material_slots
+            ]
+        if self.material_tools:
+            status["material_tools"] = [
+                {
+                    key: value
+                    for key, value in {
+                        "tool_key": row.tool_key,
+                        "label": row.label,
+                        "nozzle_diameter_mm": row.nozzle_diameter_mm,
+                    }.items()
+                    if value is not None
+                }
+                for row in self.material_tools
+            ]
         return status
 
 

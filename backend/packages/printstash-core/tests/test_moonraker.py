@@ -18,9 +18,7 @@ from printstash_core.printers.moonraker import (
 )
 
 
-def _client(
-    handler: Any, *, api_key: str | None = "secret"
-) -> MoonrakerClient:
+def _client(handler: Any, *, api_key: str | None = "secret") -> MoonrakerClient:
     transport = httpx.MockTransport(handler)
     return MoonrakerClient(
         MoonrakerConfig("http://printer.local:7125/", api_key),
@@ -42,19 +40,47 @@ async def test_typed_config_preserves_query_wire_shape_and_snapshot() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
+        if request.url.path == "/server/spoolman/spool_id":
+            return httpx.Response(200, json={"result": {"spool_id": 42}})
         return httpx.Response(200, json=payload)
 
     client = _client(handler)
     try:
-        assert await client.query_status() == payload
+        status = await client.query_status()
         snapshot = await client.query_snapshot()
     finally:
         await client.aclose()
 
-    assert snapshot == PrinterSnapshot.from_legacy_payload(payload)
+    assert (
+        status["result"]["status"]["print_stats"]
+        == payload["result"]["status"]["print_stats"]
+    )
+    assert snapshot == PrinterSnapshot.from_legacy_payload(status)
     assert seen[0].headers["X-Api-Key"] == "secret"
     assert seen[0].url.path == "/printer/objects/query"
     assert set(seen[0].url.params) == set(SUBSCRIPTIONS)
+    assert snapshot.material_slots[0].external_spool_id == 42
+    assert snapshot.material_slots[0].state == "loaded"
+
+
+@pytest.mark.asyncio
+async def test_missing_spoolman_integration_reports_unknown_material_state() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/server/spoolman/spool_id":
+            return httpx.Response(404, json={"error": "not configured"})
+        return httpx.Response(
+            200,
+            json={"result": {"status": {"print_stats": {"state": "standby"}}}},
+        )
+
+    client = _client(handler)
+    try:
+        snapshot = await client.query_snapshot()
+    finally:
+        await client.aclose()
+
+    assert snapshot.material_slots[0].state == "unknown"
+    assert snapshot.material_slots[0].external_spool_id is None
 
 
 @pytest.mark.asyncio

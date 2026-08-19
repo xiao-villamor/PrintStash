@@ -38,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { FleetMaintenancePanel } from "@/components/fleet-panels";
+import { PrinterMaterials } from "@/components/printer-materials";
 import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
@@ -136,7 +137,7 @@ export function PrinterDetailPage({
   const [machineBusy, setMachineBusy] = useState<string | null>(null);
   const [hotendTarget, setHotendTarget] = useState("");
   const [bedTarget, setBedTarget] = useState("");
-  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "maintenance" | "config" | "diagnostics" | "settings">("status");
+  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "materials" | "maintenance" | "config" | "diagnostics" | "settings">("status");
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
@@ -501,6 +502,9 @@ export function PrinterDetailPage({
             { key: "status" as const, label: "Status" },
             { key: "files" as const, label: "Files" },
             { key: "jobs" as const, label: "Jobs" },
+            ...(printer.access.can_print
+              ? [{ key: "materials" as const, label: "Materials & tools" }]
+              : []),
             ...(printer.access.can_admin
               ? [{ key: "maintenance" as const, label: "Maintenance" }]
               : []),
@@ -880,6 +884,8 @@ export function PrinterDetailPage({
         />
       )}
 
+      {activeTab === "materials" && <PrinterMaterials printer={printer} />}
+
       {activeTab === "maintenance" && (
         <div className="animate-panel-in">
           <FleetMaintenancePanel printers={[printer]} onPrintersChanged={() => { void loadPrinter(); }} />
@@ -1212,6 +1218,8 @@ function PrinterSettings({
   const [username, setUsername] = useState(printer.prusalink_username ?? "");
   const [mainboardId, setMainboardId] = useState(printer.elegoo_centauri_mainboard_id ?? "");
   const [secret, setSecret] = useState("");
+  const [providerMaterialSync, setProviderMaterialSync] = useState(printer.provider_material_sync_enabled ?? true);
+  const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(printer.operator_release_required ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1235,6 +1243,8 @@ function PrinterSettings({
       model_name: modelName,
       group,
       notes,
+      provider_material_sync_enabled: providerMaterialSync,
+      operator_release_required: operatorReleaseRequired,
     };
     if (printer.provider === "moonraker") {
       payload.moonraker_url = address;
@@ -1345,6 +1355,14 @@ function PrinterSettings({
           <SettingsField label={secretLabel} hint="Leave blank to keep current value">
             <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Unchanged" disabled={!canEdit} />
           </SettingsField>
+          <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
+            <input type="checkbox" checked={providerMaterialSync} onChange={(event) => setProviderMaterialSync(event.target.checked)} disabled={!canEdit} className="mt-0.5 h-4 w-4" />
+            <span><span className="block text-sm font-medium text-foreground">Provider material sync</span><span className="mt-0.5 block text-xs text-muted-foreground">Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.</span></span>
+          </label>
+          <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
+            <input type="checkbox" checked={operatorReleaseRequired} onChange={(event) => setOperatorReleaseRequired(event.target.checked)} disabled={!canEdit} className="mt-0.5 h-4 w-4" />
+            <span><span className="block text-sm font-medium text-foreground">Require operator release</span><span className="mt-0.5 block text-xs text-muted-foreground">After a managed print completes, block scheduling until an operator releases or holds the printer.</span></span>
+          </label>
           {!canEdit && <p className="text-xs text-warning">Sign in to edit printer settings.</p>}
           {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
         </div>

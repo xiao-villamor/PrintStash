@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     staging_max_active_per_user: int = Field(default=4, gt=0)
     staging_max_gb: int = Field(default=4, gt=0)
     staging_min_free_gb: int = Field(default=1, ge=0)
+    fleet_batch_max_quantity: int = Field(default=100, gt=0)
     ingest_worker_count: int = Field(default=2, gt=0)
     media_worker_timeout_seconds: int = Field(default=180, gt=0)
     # Best-effort archive ceiling for files recovered from a Bambu printer's

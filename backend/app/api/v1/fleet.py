@@ -15,6 +15,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.schemas.fleet import (
+    BatchCreate,
     FleetSummary,
     MaintenanceLogCreate,
     MaintenanceLogRead,
@@ -22,13 +23,16 @@ from app.schemas.fleet import (
     MaintenanceWindowCreate,
     MaintenanceWindowRead,
     MaintenanceWindowUpdate,
+    OperatorDecision,
+    PrintBatchRead,
     PrinterRoutingRead,
     PrinterRoutingUpdate,
     QueueJobCreate,
     QueueJobUpdate,
 )
+from app.schemas.materials import CompatibilityRead, CompatibilityRequest
 from app.schemas.printers import PrintJobRead
-from app.services import fleet, printer_rbac, rbac
+from app.services import fleet, materials, printer_rbac, rbac
 from app.services.task_queue import TaskEnvelope, task_queue
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
@@ -93,6 +97,8 @@ async def create_queue_job(
         status_code = (
             404 if exc.code in {"file_not_found", "printer_not_found"} else 400
         )
+        if exc.code == "material_mismatch_confirmation_required":
+            status_code = 409
         raise HTTPException(status_code=status_code, detail=exc.code) from exc
     await task_queue.enqueue(
         TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
@@ -100,10 +106,85 @@ async def create_queue_job(
     return PrintJobRead(**job.model_dump())
 
 
+@router.post("/compatibility", response_model=CompatibilityRead)
+def check_compatibility(
+    payload: CompatibilityRequest,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> CompatibilityRead:
+    artifact = session.get(File, payload.file_id)
+    if artifact is None or artifact.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    model = session.get(Model, artifact.model_id)
+    if model is None or model.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="file_not_found")
+    rbac.require_model_collection_role(
+        session, current_user, model.collection_id, CollectionRole.EDIT
+    )
+    for printer_id in set(payload.printer_ids):
+        printer_rbac.require_printer_role(
+            session, current_user, printer_id, PrinterRole.VIEW
+        )
+    try:
+        return materials.compatibility_report(
+            session, payload.file_id, payload.printer_ids
+        )
+    except materials.MaterialStateError as exc:
+        raise HTTPException(status_code=404, detail=exc.code) from exc
+
+
+@router.post(
+    "/batches", response_model=PrintBatchRead, status_code=status.HTTP_201_CREATED
+)
+async def create_batch(
+    payload: BatchCreate,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> PrintBatchRead:
+    if not current_user.is_superuser:
+        if payload.strategy != RoutingStrategy.MANUAL or payload.printer_id is None:
+            raise HTTPException(status_code=403, detail="printer_permission_denied")
+        printer_rbac.require_printer_role(
+            session, current_user, payload.printer_id, PrinterRole.PRINT
+        )
+    elif payload.printer_id is not None:
+        printer_rbac.require_printer_role(
+            session, current_user, payload.printer_id, PrinterRole.PRINT
+        )
+    artifact = session.get(File, payload.file_id)
+    if artifact is not None:
+        model = session.get(Model, artifact.model_id)
+        if model is not None:
+            rbac.require_model_collection_role(
+                session, current_user, model.collection_id, CollectionRole.EDIT
+            )
+    try:
+        batch, jobs = fleet.create_batch(session, payload, current_user)
+    except fleet.FleetError as exc:
+        status_code = (
+            404 if exc.code in {"file_not_found", "printer_not_found"} else 400
+        )
+        if exc.code == "material_mismatch_confirmation_required":
+            status_code = 409
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
+    await task_queue.enqueue(
+        TaskEnvelope(job_id=str(batch.id), kind="fleet_dispatch", payload={})
+    )
+    return PrintBatchRead(
+        **batch.model_dump(),
+        jobs=[PrintJobRead(**job.model_dump()) for job in jobs],
+    )
+
+
 def _queue_error(exc: fleet.FleetError) -> HTTPException:
     if exc.code in {"queue_job_not_found", "printer_not_found"}:
         return HTTPException(status_code=404, detail=exc.code)
-    if exc.code in {"queue_job_not_editable", "queue_job_changed"}:
+    if exc.code in {
+        "queue_job_not_editable",
+        "queue_job_changed",
+        "operator_decision_not_pending",
+        "material_mismatch_confirmation_required",
+    }:
         return HTTPException(status_code=409, detail=exc.code)
     return HTTPException(status_code=400, detail=exc.code)
 
@@ -174,6 +255,25 @@ async def retry_queue_job(
     await task_queue.enqueue(
         TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
     )
+    return PrintJobRead(**job.model_dump())
+
+
+@router.post("/queue/{job_id}/operator-decision", response_model=PrintJobRead)
+async def decide_operator_release(
+    job_id: int,
+    payload: OperatorDecision,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> PrintJobRead:
+    _require_queue_job_role(session, current_user, job_id, PrinterRole.PRINT)
+    try:
+        job = fleet.operator_decision(session, job_id, payload.action, current_user)
+    except fleet.FleetError as exc:
+        raise _queue_error(exc) from exc
+    if payload.action == "release":
+        await task_queue.enqueue(
+            TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
+        )
     return PrintJobRead(**job.model_dump())
 
 

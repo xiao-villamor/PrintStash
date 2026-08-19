@@ -19,6 +19,7 @@ from .models import (
     BambuConfig,
     Capability,
     ElegooCentauriConfig,
+    MaterialSlotSnapshot,
     MoonrakerConfig,
     OctoPrintConfig,
     PrinterConfig,
@@ -29,6 +30,7 @@ from .models import (
     ProviderId,
     PrusaLinkConfig,
     TemperatureSnapshot,
+    ToolSnapshot,
 )
 from .registry import ProviderRegistry
 
@@ -40,6 +42,7 @@ __all__ = [
     "ConfigValueKind",
     "ElegooCentauriConfig",
     "MoonrakerConfig",
+    "MaterialSlotSnapshot",
     "OctoPrintConfig",
     "PROVIDER_DEFINITIONS",
     "PrinterClient",
@@ -57,5 +60,6 @@ __all__ = [
     "SetupOption",
     "SnapshotCallback",
     "TemperatureSnapshot",
+    "ToolSnapshot",
     "catalog_document",
 ]

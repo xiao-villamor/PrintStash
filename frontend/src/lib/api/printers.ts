@@ -21,6 +21,8 @@ import {
   PrinterRole,
   PrinterStatusResponse,
   PrinterUpdate,
+  PrinterMaterialStateRead,
+  ManualMaterialStateUpdate,
   SendToPrinter,
   StartPrinterFile,
 } from "@/types";
@@ -67,6 +69,17 @@ export function updatePrinter(
     "PATCH",
     payload,
   );
+}
+
+export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {
+  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, { fresh: true });
+}
+
+export function updatePrinterManualMaterialState(
+  id: number,
+  payload: ManualMaterialStateUpdate,
+): Promise<PrinterMaterialStateRead> {
+  return sendJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state/manual`, "PUT", payload);
 }
 
 export function deletePrinter(id: number): Promise<void> {

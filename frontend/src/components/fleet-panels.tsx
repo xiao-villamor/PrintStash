@@ -7,6 +7,7 @@ import {
   createMaintenanceWindow,
   deleteMaintenanceLog,
   deleteMaintenanceWindow,
+  decideFleetOperatorGate,
   listMaintenanceLog,
   listMaintenanceWindows,
   retryFleetJob,
@@ -84,7 +85,7 @@ export function FleetQueuePanel({ printers }: { printers: PrinterRead[] }) {
         confirmLabel="Cancel job"
       />
       {summaryQuery.data && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Queue summary">
+        <><div className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Queue summary">
           {[
             ["Queued", summaryQuery.data.queued_jobs],
             ["Active", summaryQuery.data.active_jobs],
@@ -97,16 +98,29 @@ export function FleetQueuePanel({ printers }: { printers: PrinterRead[] }) {
             </div>
           ))}
         </div>
+        {(summaryQuery.data.printers?.length ?? 0) > 0 && (
+          <section className="space-y-2" aria-label="Fleet board">
+            <h2 className="text-sm font-semibold text-foreground">Fleet board</h2>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {summaryQuery.data.printers?.map((printer) => (
+                <article key={printer.printer_id} className="rounded-lg border border-border bg-card p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold text-foreground">{printer.name}</h3><p className="mt-1 text-xs text-muted-foreground">{printer.group || "No group"} · {printer.nozzle_diameter_mm == null ? "Nozzle unknown" : `${printer.nozzle_diameter_mm.toFixed(2)} mm nozzle`}</p></div><div className="flex flex-wrap justify-end gap-1"><Badge variant="outline">{printer.status}</Badge>{printer.drain_mode && <Badge variant="warning">drain</Badge>}{printer.maintenance && <Badge variant="warning">maintenance</Badge>}{printer.pending_operator_release && <Badge variant="warning">release needed</Badge>}</div></div>
+                  {printer.progress != null && <div className="mt-3 h-1.5 overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${Math.max(0, Math.min(100, printer.progress * 100))}%` }} /></div>}
+                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2"><p><span className="font-medium text-foreground">Loaded:</span> {printer.loaded_slots.length ? printer.loaded_slots.join(", ") : "Unknown"}</p><p><span className="font-medium text-foreground">Current:</span> {printer.current_job_name || "Idle"}{printer.current_priority ? ` · ${printer.current_priority}` : ""}</p><p className="sm:col-span-2"><span className="font-medium text-foreground">Next:</span> {printer.next_job_name || "None"}{printer.next_priority ? ` · ${printer.next_priority}` : ""}</p></div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}</>
       )}
       <QueueSection
         title="Queued"
         jobs={queued}
         printerNames={printerNames}
         busy={busy}
-        actions={(job, index) => (
+        actions={(job) => (
           <>
-            <Button variant="ghost" size="icon-sm" aria-label={`Move ${job.remote_filename} up`} disabled={busy === job.id || index === 0} onClick={() => void mutate(job.id, () => updateFleetJob(job.id, { queue_position: index }))}><ArrowUp className="h-3.5 w-3.5" /></Button>
-            <Button variant="ghost" size="icon-sm" aria-label={`Move ${job.remote_filename} down`} disabled={busy === job.id || index === queued.length - 1} onClick={() => void mutate(job.id, () => updateFleetJob(job.id, { queue_position: index + 2 }))}><ArrowDown className="h-3.5 w-3.5" /></Button>
+            {(() => { const lane = queued.filter((row) => (row.priority ?? "normal") === (job.priority ?? "normal")); const laneIndex = lane.findIndex((row) => row.id === job.id); return <><Button variant="ghost" size="icon-sm" aria-label={`Move ${job.remote_filename} up`} disabled={busy === job.id || laneIndex === 0} onClick={() => void mutate(job.id, () => updateFleetJob(job.id, { queue_position: laneIndex }))}><ArrowUp className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon-sm" aria-label={`Move ${job.remote_filename} down`} disabled={busy === job.id || laneIndex === lane.length - 1} onClick={() => void mutate(job.id, () => updateFleetJob(job.id, { queue_position: laneIndex + 2 }))}><ArrowDown className="h-3.5 w-3.5" /></Button></>; })()}
             <Button variant="ghost" size="icon-sm" aria-label={`Cancel ${job.remote_filename}`} disabled={busy === job.id} onClick={() => setCancelTarget(job)}><Trash2 className="h-3.5 w-3.5" /></Button>
           </>
         )}
@@ -117,7 +131,7 @@ export function FleetQueuePanel({ printers }: { printers: PrinterRead[] }) {
         jobs={recent}
         printerNames={printerNames}
         busy={busy}
-        actions={(job) => job.retryable ? <Button variant="outline" size="xs" disabled={busy === job.id} onClick={() => void mutate(job.id, () => retryFleetJob(job.id))}><RotateCcw className="h-3.5 w-3.5" />Retry</Button> : null}
+        actions={(job) => <>{job.operator_gate_state === "pending" && <><Button variant="outline" size="xs" disabled={busy === job.id} onClick={() => void mutate(job.id, () => decideFleetOperatorGate(job.id, "release"))}>Release</Button><Button variant="outline" size="xs" disabled={busy === job.id} onClick={() => void mutate(job.id, () => decideFleetOperatorGate(job.id, "hold"))}>Hold</Button></>}{job.retryable && <Button variant="outline" size="xs" disabled={busy === job.id} onClick={() => void mutate(job.id, () => retryFleetJob(job.id))}><RotateCcw className="h-3.5 w-3.5" />Retry</Button>}</>}
       />
       {recent.length >= historyLimit && historyLimit < 100 && (
         <div className="flex justify-center">
@@ -144,23 +158,41 @@ function QueueSection({
   actions?: (job: PrintJobRead, index: number) => React.ReactNode;
 }) {
   if (jobs.length === 0) return null;
+  const groups = Array.from(
+    jobs.reduce((result, job, index) => {
+      const key = job.batch_id == null ? `job-${job.id}` : `batch-${job.batch_id}`;
+      const current = result.get(key) ?? [];
+      current.push({ job, index });
+      result.set(key, current);
+      return result;
+    }, new Map<string, Array<{ job: PrintJobRead; index: number }>>()),
+  );
+  const row = (job: PrintJobRead, index: number) => (
+    <div key={job.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
+      <span className="w-7 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{job.state === "queued" ? job.queue_position : "—"}</span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground">{job.remote_filename}{job.copy_index != null ? ` · copy ${job.copy_index}` : ""}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {job.printer_id ? printerNames.get(job.printer_id) ?? `Printer ${job.printer_id}` : "Unassigned"} · {job.routing_strategy.replace("_", " ")}
+          {job.target_group ? ` · ${job.target_group}` : ""}
+          {job.blocked_reason ? ` · ${job.blocked_reason.replaceAll("_", " ")}` : ""}
+        </p>
+      </div>
+      <Badge variant={job.priority === "rush" ? "warning" : "outline"}>{job.priority ?? "normal"}</Badge>
+      {job.operator_gate_state === "pending" && <Badge variant="warning">release needed</Badge>}
+      <Badge variant={job.blocked_reason || job.state === "failed" ? "warning" : "outline"}>{job.state}</Badge>
+      <div className="flex items-center gap-1" aria-busy={busy === job.id}>{actions?.(job, index)}</div>
+    </div>
+  );
   return (
     <Localized><section className="space-y-2" aria-label={`${title} print jobs`}>
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        {jobs.map((job, index) => (
-          <div key={job.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
-            <span className="w-7 shrink-0 font-mono text-xs tabular-nums text-muted-foreground">{job.state === "queued" ? job.queue_position : "—"}</span>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">{job.remote_filename}</p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {job.printer_id ? printerNames.get(job.printer_id) ?? `Printer ${job.printer_id}` : "Unassigned"} · {job.routing_strategy.replace("_", " ")}
-                {job.blocked_reason ? ` · ${job.blocked_reason.replaceAll("_", " ")}` : ""}
-              </p>
-            </div>
-            <Badge variant={job.blocked_reason || job.state === "failed" ? "warning" : "outline"}>{job.state}</Badge>
-            <div className="flex items-center gap-1" aria-busy={busy === job.id}>{actions?.(job, index)}</div>
-          </div>
+        {groups.map(([key, entries]) => entries[0].job.batch_id == null ? row(entries[0].job, entries[0].index) : (
+          <details key={key} open className="border-b border-border last:border-b-0">
+            <summary className="cursor-pointer bg-muted/30 px-4 py-3 text-sm font-semibold text-foreground">Batch #{entries[0].job.batch_id} · {entries.length} copies</summary>
+            {entries.map(({ job, index }) => row(job, index))}
+          </details>
         ))}
       </div>
     </section></Localized>

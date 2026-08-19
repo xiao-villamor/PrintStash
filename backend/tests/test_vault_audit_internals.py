@@ -223,6 +223,37 @@ def test_check_primary_stops_when_cancelled(db_session: Session) -> None:
     assert run.state == VaultAuditRunState.CANCELLED
 
 
+def test_check_primary_skips_trashed_artifacts(db_session: Session) -> None:
+    user = _make_user(db_session, "primary-trashed")
+    run = _make_run(db_session, user)
+    model = _make_model(db_session, "trashed-artifact")
+    file_row = _make_file(db_session, model, path="missing-from-trash.stl")
+    model.deleted_at = utcnow()
+    db_session.add(model)
+    db_session.commit()
+
+    completed = vault_audit._check_primary(
+        db_session,
+        run,
+        [
+            OwnedBlob(
+                key=file_row.path,
+                resource_type="file",
+                resource_id=file_row.id,
+                display_name=file_row.original_filename,
+            )
+        ],
+    )
+
+    assert completed is True
+    from sqlmodel import select
+
+    findings = db_session.exec(
+        select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)
+    ).all()
+    assert findings == []
+
+
 # --------------------------------------------------------------------------- #
 # _check_database
 # --------------------------------------------------------------------------- #
@@ -348,6 +379,39 @@ def test_check_external_flags_missing_linked_file(db_session: Session) -> None:
     linked = [f for f in findings if f.code == "linked_file_missing"]
     assert len(linked) == 1
     assert linked[0].repair_action is None
+
+
+def test_check_external_skips_trashed_linked_file(db_session: Session) -> None:
+    user = _make_user(db_session, "ext-trashed")
+    run = _make_run(db_session, user)
+    model = _make_model(db_session, "ext-trashed-model")
+    file_row = _make_file(
+        db_session,
+        model,
+        path="/nowhere/trashed.stl",
+        is_external=True,
+        deleted_at=utcnow(),
+    )
+
+    vault_audit._check_external(
+        db_session,
+        run,
+        [
+            OwnedBlob(
+                key=file_row.path,
+                resource_type="file",
+                resource_id=file_row.id,
+                display_name=file_row.original_filename,
+            )
+        ],
+    )
+
+    from sqlmodel import select
+
+    findings = db_session.exec(
+        select(VaultAuditFinding).where(VaultAuditFinding.run_id == run.id)
+    ).all()
+    assert not any(finding.code == "linked_file_missing" for finding in findings)
 
 
 # --------------------------------------------------------------------------- #

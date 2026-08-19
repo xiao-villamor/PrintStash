@@ -105,7 +105,7 @@ import {
 import { toast } from "@/lib/toast";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import {
-  readPrinterCardImagePreference,
+  usePrinterCardImagePreference,
   writePrinterCardImagePreference,
 } from "@/lib/printer-card-display";
 import { CHANGELOG, GITHUB_REPO } from "@/lib/changelog";
@@ -309,7 +309,7 @@ export function SettingsPanel() {
     DEFAULT_METADATA_PREFERENCES,
   );
   const [cardMetrics, setCardMetrics] = useState<CardMetrics>(DEFAULT_CARD_METRICS);
-  const [showPrinterCardImage, setShowPrinterCardImage] = useState(false);
+  const showPrinterCardImage = usePrinterCardImagePreference();
   const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
     (section) => !["sso", "maintenance"].includes(section.id) || user?.is_superuser,
@@ -370,7 +370,6 @@ export function SettingsPanel() {
   useEffect(() => {
     setMetadataPrefs(readMetadataPreferences());
     setCardMetrics(readCardMetrics());
-    setShowPrinterCardImage(readPrinterCardImagePreference());
     setPreviewPreferences(readPreviewPreferences());
   }, []);
 
@@ -859,7 +858,6 @@ export function SettingsPanel() {
   }
 
   function updatePrinterCardImagePreference(next: boolean) {
-    setShowPrinterCardImage(next);
     writePrinterCardImagePreference(next);
     toast.success(next ? "Printer card images enabled." : "Printer card images hidden.");
   }

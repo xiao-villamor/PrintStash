@@ -23,9 +23,7 @@ from .models import (
 
 
 class OctoPrintError(RuntimeError):
-    def __init__(
-        self, detail: str, *, code: str = "provider_transport_error"
-    ) -> None:
+    def __init__(self, detail: str, *, code: str = "provider_transport_error") -> None:
         super().__init__(detail)
         self.code = code
 
@@ -88,9 +86,7 @@ class OctoPrintClient:
             async with self._client() as client:
                 response = await client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
-            raise OctoPrintError(
-                "octoprint_timeout", code="provider_timeout"
-            ) from exc
+            raise OctoPrintError("octoprint_timeout", code="provider_timeout") from exc
         except httpx.HTTPError as exc:
             raise OctoPrintError(str(exc)) from exc
         if response.status_code in {401, 403}:
@@ -106,9 +102,7 @@ class OctoPrintClient:
                 code="provider_endpoint_not_supported",
             )
         if response.status_code == 409:
-            raise OctoPrintError(
-                "octoprint_conflict", code="provider_no_active_job"
-            )
+            raise OctoPrintError("octoprint_conflict", code="provider_no_active_job")
         if response.status_code >= 400:
             raise OctoPrintError(
                 f"octoprint_http_{response.status_code}",
@@ -211,9 +205,7 @@ class OctoPrintClient:
                 "print_duration": progress.get("printTime"),
             },
             "virtual_sdcard": {
-                "progress": max(
-                    0.0, min(1.0, float(completion or 0) / 100.0)
-                )
+                "progress": max(0.0, min(1.0, float(completion or 0) / 100.0))
             },
             "heater_bed": {
                 "temperature": bed.get("actual"),
@@ -256,9 +248,7 @@ class OctoPrintClient:
             return []
         return self._flatten_files(files)
 
-    async def upload(
-        self, local_path: Path, remote_filename: str
-    ) -> dict[str, Any]:
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
         *parent_parts, filename = target.split("/")
         data = {"select": "false", "print": "false"}
@@ -268,9 +258,7 @@ class OctoPrintClient:
             body = await self._request(
                 "POST",
                 "/api/files/local",
-                files={
-                    "file": (filename, content, "application/octet-stream")
-                },
+                files={"file": (filename, content, "application/octet-stream")},
                 data=data,
             )
         return body if isinstance(body, dict) else {"ok": True}
@@ -298,9 +286,7 @@ class OctoPrintClient:
         )
 
     async def cancel(self) -> dict[str, Any]:
-        return await self._request(
-            "POST", "/api/job", json={"command": "cancel"}
-        )
+        return await self._request("POST", "/api/job", json={"command": "cancel"})
 
     async def run_gcode(self, script: str) -> dict[str, Any]:
         del script

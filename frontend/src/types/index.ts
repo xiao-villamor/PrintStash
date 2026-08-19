@@ -75,6 +75,9 @@ export type {
   MoonrakerConfigRead,
   PrintJobState,
   RoutingStrategy,
+  JobPriority,
+  CompatibilityPolicy,
+  CompatibilityVerdict,
   PrinterRole,
   PrinterAccess,
   PrinterPermissionRead,
@@ -95,6 +98,13 @@ export type {
   PrinterRoutingUpdate,
   MaintenanceWindow,
   MaintenanceLog,
+  MaterialToolRead,
+  MaterialSlotRead,
+  PrinterMaterialStateRead,
+  ManualMaterialStateUpdate,
+  CompatibilityRead,
+  BatchCreate,
+  PrintBatchRead,
 } from "./printers";
 
 export type {

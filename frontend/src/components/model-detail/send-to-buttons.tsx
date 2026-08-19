@@ -4,19 +4,20 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "@/lib/navigation";
 import { FileCode2, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
-import { enqueueFleetJob, sendToPrinter } from "@/lib/api";
+import { checkFleetCompatibility, createFleetBatch, enqueueFleetJob, sendToPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { formatGrams } from "@/lib/format";
 import { createTask, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
-import { FileRead, ModelPrinterFileRead, RoutingStrategy } from "@/types";
+import { CompatibilityRead, FileRead, JobPriority, ModelPrinterFileRead, RoutingStrategy } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Modal } from "@/components/ui/modal";
 import { Localized } from "@/components/ui/localized";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 
 const selectClassName =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
@@ -61,6 +62,11 @@ export function SendToButtons({
   const [startPrint, setStartPrint] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
+  const [quantity, setQuantity] = useState(1);
+  const [priority, setPriority] = useState<JobPriority>("normal");
+  const [targetGroup, setTargetGroup] = useState("");
+  const [compatibility, setCompatibility] = useState<CompatibilityRead | null>(null);
+  const [confirmMismatch, setConfirmMismatch] = useState(false);
   useEffect(() => {
     if (user && !user.is_superuser) setRoutingStrategy("manual");
   }, [user]);
@@ -126,24 +132,52 @@ export function SendToButtons({
     );
   }
 
-  async function send() {
+  async function send(allowMismatch = false) {
     if (!selectedFile) return;
+    const targetPrinterIds = deliveryMode === "send" || routingStrategy === "manual"
+      ? selectedPrinters.map((printer) => printer.id)
+      : [];
+    if (!allowMismatch && targetPrinterIds.length > 0) {
+      try {
+        const report = await checkFleetCompatibility(selectedFile, targetPrinterIds);
+        setCompatibility(report);
+        if (
+          report.printers.some((row) => row.verdict === "mismatch")
+          && (deliveryMode === "queue" || startPrint)
+        ) {
+          setConfirmMismatch(true);
+          return;
+        }
+      } catch (e: any) {
+        setError(e.message || "Compatibility check failed");
+        return;
+      }
+    }
     if (deliveryMode === "queue") {
       if (routingStrategy === "manual" && selectedPrinters.length === 0) return;
       const spool = selectedSpoolId !== "" ? spools.find((candidate) => candidate.id === selectedSpoolId) : undefined;
       setSending(true);
       setError(null);
       try {
-        await enqueueFleetJob({
+        const payload = {
           file_id: selectedFile,
           strategy: routingStrategy,
           printer_id: routingStrategy === "manual" ? selectedPrinters[0]?.id : undefined,
           spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
           spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
           spool_filament_id: spool?.filament_id ?? null,
+          priority,
+          target_group: targetGroup.trim() || null,
+          compatibility_policy: allowMismatch ? "allow_mismatch" as const : "safe" as const,
+        };
+        if (quantity > 1) await createFleetBatch({
+          ...payload,
+          quantity,
+          ...(routingStrategy === "manual" ? {} : { spool_id: null, spool_name: null, spool_filament_id: null }),
         });
+        else await enqueueFleetJob(payload);
         setShowSend(false);
-        toast.success("Added to fleet queue");
+        toast.success(quantity > 1 ? `Created ${quantity}-copy batch` : "Added to fleet queue");
       } catch (e: any) {
         setError(e.message || "Queue failed");
       } finally {
@@ -181,6 +215,7 @@ export function SendToButtons({
               ? spool.filament_name || spool.name || `Spool ${spool.id}`
               : null,
             spool_filament_id: spool ? spool.filament_id : null,
+            compatibility_policy: allowMismatch ? "allow_mismatch" : "safe",
           });
           completed += 1;
           updateTask(taskId, {
@@ -255,6 +290,14 @@ export function SendToButtons({
 
   return (
     <Localized><>
+      <ConfirmModal
+        open={confirmMismatch}
+        onClose={() => setConfirmMismatch(false)}
+        onConfirm={() => { setConfirmMismatch(false); void send(true); }}
+        title="Print with a known material mismatch?"
+        description="The selected G-code material or nozzle does not match the printer’s known loaded state. Continuing records an audited override. Color differences alone do not block printing."
+        confirmLabel="Print anyway"
+      />
       <div className="space-y-3">
       <div className="flex items-center justify-between">
         <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Printer status</span>
@@ -363,14 +406,19 @@ export function SendToButtons({
           </fieldset>
 
           {deliveryMode === "queue" && (
-            <label className="block space-y-1.5 text-sm font-medium text-foreground">
-              Routing
-              <select value={routingStrategy} onChange={(event) => setRoutingStrategy(event.target.value as RoutingStrategy)} className={selectClassName}>
-                {user?.is_superuser && <option value="least_busy">Least busy eligible printer</option>}
-                {user?.is_superuser && <option value="default">Default printer</option>}
-                <option value="manual">Choose printer</option>
-              </select>
-            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block space-y-1.5 text-sm font-medium text-foreground">Routing<select value={routingStrategy} onChange={(event) => setRoutingStrategy(event.target.value as RoutingStrategy)} className={selectClassName}>{user?.is_superuser && <option value="least_busy">Least busy eligible printer</option>}{user?.is_superuser && <option value="default">Default printer</option>}<option value="manual">Choose printer</option></select></label>
+              <label className="block space-y-1.5 text-sm font-medium text-foreground">Copies<input className={selectClassName} type="number" min={1} value={quantity || ""} onChange={(event) => setQuantity(Number(event.target.value))} /></label>
+              <label className="block space-y-1.5 text-sm font-medium text-foreground">Priority<select className={selectClassName} value={priority} onChange={(event) => setPriority(event.target.value as JobPriority)}><option value="low">Low</option><option value="normal">Normal</option><option value="rush">Rush</option></select></label>
+              <label className="block space-y-1.5 text-sm font-medium text-foreground">Printer group<input className={selectClassName} value={targetGroup} onChange={(event) => setTargetGroup(event.target.value)} placeholder="Any group" /></label>
+            </div>
+          )}
+
+          {compatibility && (deliveryMode === "send" || routingStrategy === "manual") && (
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Compatibility: {compatibility.printers.map((row) => `${printers.find((printer) => printer.id === row.printer_id)?.name ?? row.printer_id}: ${row.verdict}`).join(" · ")}
+              {compatibility.printers.some((row) => row.verdict === "unknown") && <span className="mt-1 block">Unknown state remains usable and will not block this action.</span>}
+            </div>
           )}
 
           {(deliveryMode === "send" || routingStrategy === "manual") && <fieldset className="space-y-2">
@@ -494,9 +542,9 @@ export function SendToButtons({
         <div className="-mx-6 -mb-6 mt-5 flex shrink-0 justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
           <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>Cancel</Button>
           <Button
-            onClick={send}
+            onClick={() => void send()}
             loading={sending}
-            disabled={!selectedFile || (deliveryMode === "send" ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart) : routingStrategy === "manual" && selectedPrinters.length === 0)}
+            disabled={!selectedFile || (deliveryMode === "send" ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart) : quantity < 1 || routingStrategy === "manual" && selectedPrinters.length === 0)}
           >
             {!sending && <Send className="h-4 w-4" />}
             {sending ? (deliveryMode === "queue" ? "Queuing…" : "Sending…") : deliveryMode === "queue" ? "Add to queue" : startPrint ? "Send & start print" : "Send to printer"}

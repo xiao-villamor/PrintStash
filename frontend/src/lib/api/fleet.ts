@@ -7,6 +7,9 @@ import type {
   PrintJobRead,
   QueueJobCreate,
   QueueJobUpdate,
+  BatchCreate,
+  CompatibilityRead,
+  PrintBatchRead,
 } from "@/types";
 
 export function getFleetSummary(): Promise<FleetSummary> {
@@ -23,6 +26,21 @@ export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<Pr
 
 export function enqueueFleetJob(payload: QueueJobCreate): Promise<PrintJobRead> {
   return sendJson<PrintJobRead>("/api/v1/fleet/queue", "POST", payload);
+}
+
+export function checkFleetCompatibility(fileId: number, printerIds: number[]): Promise<CompatibilityRead> {
+  return sendJson<CompatibilityRead>("/api/v1/fleet/compatibility", "POST", {
+    file_id: fileId,
+    printer_ids: printerIds,
+  });
+}
+
+export function createFleetBatch(payload: BatchCreate): Promise<PrintBatchRead> {
+  return sendJson<PrintBatchRead>("/api/v1/fleet/batches", "POST", payload);
+}
+
+export function decideFleetOperatorGate(id: number, action: "release" | "hold"): Promise<PrintJobRead> {
+  return sendJson<PrintJobRead>(`/api/v1/fleet/queue/${id}/operator-decision`, "POST", { action });
 }
 
 export function updateFleetJob(id: number, payload: QueueJobUpdate): Promise<PrintJobRead> {

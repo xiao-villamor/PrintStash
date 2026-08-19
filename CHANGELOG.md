@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Material-aware fleet dispatch adds source-labelled printer tools and feeds,
+  Bambu AMS and Moonraker active-Spoolman synchronization, G-code compatibility
+  preflight with audited mismatch overrides, atomic multi-copy batches, group
+  constraints, priority lanes, optional operator release gates, and a bounded
+  fleet overview ([#73](https://github.com/xiao-villamor/PrintStash/issues/73)).
+
 ## 0.12.0
 
 **Back up before upgrading. This release includes additive database migrations and deployment/dependency changes; PostgreSQL, MinIO, and lite-image users should review [UPGRADE.md](./UPGRADE.md).**

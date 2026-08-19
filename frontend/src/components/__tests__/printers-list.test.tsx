@@ -1,9 +1,10 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { PrintersPage } from "@/components/printers-list";
+import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
 
 vi.mock("@/lib/api", () => ({
   createPrinter: vi.fn().mockResolvedValue({}),
@@ -272,6 +273,21 @@ describe("printer card", () => {
 
     window.localStorage.setItem("printstash.printer-card.show-image", "true");
     render(<PrintersPage />);
+    expect(screen.getByAltText("Voron 2.4 printer")).toBeInTheDocument();
+  });
+
+  it("updates a mounted printer page when the saved display preference changes", () => {
+    mockUsePrinters.mockReturnValue({
+      data: [makePrinter()],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<PrintersPage />);
+    expect(screen.queryByAltText("Voron 2.4 printer")).not.toBeInTheDocument();
+
+    act(() => writePrinterCardImagePreference(true));
+
     expect(screen.getByAltText("Voron 2.4 printer")).toBeInTheDocument();
   });
 

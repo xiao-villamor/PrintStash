@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { LocaleToggle } from "@/components/locale-toggle";
 import { DomLocalization, Localized } from "@/components/ui/localized";
@@ -11,6 +11,21 @@ function Probe() {
   const { t } = useI18n();
   return <p>{t("auth.welcome")}</p>;
 }
+
+it("defaults a new browser to English regardless of browser language", async () => {
+  localStorage.clear();
+  vi.spyOn(window.navigator, "language", "get").mockReturnValue("es-ES");
+
+  render(
+    <I18nProvider>
+      <Probe />
+    </I18nProvider>,
+  );
+
+  expect(screen.getByText("Welcome back")).toBeInTheDocument();
+  await waitFor(() => expect(localStorage.getItem("printstash.locale")).toBe("en"));
+  expect(document.documentElement.lang).toBe("en");
+});
 
 it("persists locale and switches typed messages", async () => {
   localStorage.setItem("printstash.locale", "en");

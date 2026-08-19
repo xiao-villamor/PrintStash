@@ -6,6 +6,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import (
+    CompatibilityPolicy,
+    JobPriority,
+    OperatorGateState,
     PrinterProvider,
     PrinterRole,
     PrinterStatus,
@@ -38,6 +41,7 @@ class PrinterCapabilities(BaseModel):
     can_list_files: bool = False
     can_send_gcode: bool = False
     can_measure_consumption: bool = False
+    can_report_material_state: bool = False
     support_level: str = "stable"
     support_notes: list[str] = Field(default_factory=list)
     unsupported_actions: list[str] = Field(default_factory=list)
@@ -98,6 +102,8 @@ class PrinterCreate(BaseModel):
     model_name: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
+    provider_material_sync_enabled: bool = True
+    operator_release_required: bool = False
 
     @model_validator(mode="after")
     def validate_provider_fields(self) -> "PrinterCreate":
@@ -173,6 +179,8 @@ class PrinterUpdate(BaseModel):
     model_name: Optional[str] = Field(default=None, max_length=128)
     notes: Optional[str] = Field(default=None, max_length=4096)
     group: Optional[str] = Field(default=None, max_length=128)
+    provider_material_sync_enabled: Optional[bool] = None
+    operator_release_required: Optional[bool] = None
 
 
 class PrinterRead(BaseModel):
@@ -205,6 +213,8 @@ class PrinterRead(BaseModel):
     drain_mode: bool = False
     drain_reason: Optional[str] = None
     drain_updated_at: Optional[datetime] = None
+    provider_material_sync_enabled: bool = True
+    operator_release_required: bool = False
     status: PrinterStatus
     last_seen_at: Optional[datetime] = None
     last_error: Optional[str] = None
@@ -232,6 +242,7 @@ class SendToPrinter(BaseModel):
     spool_id: Optional[int] = None
     spool_name: Optional[str] = Field(default=None, max_length=256)
     spool_filament_id: Optional[int] = None
+    compatibility_policy: CompatibilityPolicy = CompatibilityPolicy.SAFE
 
     @field_validator("remote_filename")
     @classmethod
@@ -312,6 +323,16 @@ class PrintJobRead(BaseModel):
     dispatch_attempts: int = 0
     retryable: bool = False
     requested_by: Optional[int] = None
+    batch_id: Optional[int] = None
+    copy_index: Optional[int] = None
+    priority: JobPriority = JobPriority.NORMAL
+    target_group: Optional[str] = None
+    compatibility_policy: CompatibilityPolicy = CompatibilityPolicy.SAFE
+    material_override_by: Optional[int] = None
+    material_override_at: Optional[datetime] = None
+    operator_gate_state: OperatorGateState = OperatorGateState.NOT_REQUIRED
+    operator_decided_by: Optional[int] = None
+    operator_decided_at: Optional[datetime] = None
     spool_id: Optional[int] = None
     spool_name: Optional[str] = None
     started_at: Optional[datetime] = None

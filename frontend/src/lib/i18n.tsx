@@ -138,10 +138,7 @@ function initialLocale(): Locale {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (SUPPORTED_LOCALES.includes(stored as Locale)) return stored as Locale;
   } catch { /* Storage can be unavailable in hardened/private contexts. */ }
-  const browserLocale = SUPPORTED_LOCALES.find((candidate) =>
-    navigator.language.toLowerCase().startsWith(candidate),
-  );
-  return browserLocale ?? "en";
+  return "en";
 }
 
 export function I18nProvider({ children }: { children: React.ReactNode }) {

@@ -204,3 +204,14 @@ manufacturing platform.
 - Advanced organization administration, approval workflows, and external
   business-system integrations.
 - Cost analytics and advanced production traceability.
+## Material-aware routing
+
+- Material comparison trims whitespace and ignores case, but deliberately does
+  not guess aliases such as `PLA+` and `PLA`.
+- Bambu AMS state depends on the fields exposed by the installed firmware.
+  Moonraker's active Spoolman spool is tracked configuration, not physical
+  detection. Other providers require manual feed state.
+- Color differences are advisory. PrintStash does not slice files, purchase
+  material, or account for consumption across multiple spools in one print.
+- Multi-material G-code without a complete tool-to-feed mapping remains
+  `unknown` rather than being declared compatible or mismatched.

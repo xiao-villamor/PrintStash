@@ -3,6 +3,28 @@
 PrintStash is Moonraker/Klipper-first. Other printer providers can exist, but
 they must make unsupported actions explicit in the API and UI.
 
+## Material and tool state
+
+Every provider supports operator-managed tools and material feeds in PrintStash.
+Printer groups remain stable routing/location labels and are never treated as
+loaded-filament state. Unknown material state remains schedulable for backward
+compatibility; a proven material or nozzle mismatch requires confirmation for a
+direct/manual print and is excluded from safe automatic routing. Color is shown
+as an advisory only.
+
+- Bambu LAN reports AMS trays, empty trays, the external spool feed, colors, and
+  the installed nozzle when firmware includes it. Incremental MQTT reports are
+  merged with the last full state. Provider state becomes stale while offline.
+- Moonraker reports the single active Spoolman spool ID configured through its
+  integration. PrintStash resolves material/color only when the same spool is
+  available from PrintStash's configured Spoolman inventory. This state is
+  labelled externally tracked because it is operator/macro managed, not a
+  physical filament sensor.
+- PrusaLink, OctoPrint, and Elegoo feeds are manual in this release.
+
+Provider synchronization can be disabled per printer. Manual state is never
+deleted by a provider failure and remains valid until an operator changes it.
+
 ## Moonraker / Klipper
 
 Support level: stable.

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import update
+from sqlalchemy import case, update
 from sqlmodel import select
 
 from app.core.logging import get_logger
@@ -15,6 +15,7 @@ from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
     File,
+    JobPriority,
     Model,
     Printer,
     PrinterRole,
@@ -152,6 +153,11 @@ def _claim_next_sync() -> int | None:
                 )
                 .order_by(
                     PrintJob.blocked_reason.is_not(None),  # type: ignore[union-attr]
+                    case(
+                        (PrintJob.priority == JobPriority.RUSH, 0),
+                        (PrintJob.priority == JobPriority.NORMAL, 1),
+                        else_=2,
+                    ),
                     PrintJob.queue_position,
                     PrintJob.created_at,
                     PrintJob.id,
@@ -162,12 +168,12 @@ def _claim_next_sync() -> int | None:
         if not candidates:
             return None
 
-        routing = fleet.build_routing_snapshot(session)
         requester_ids = {
             int(row.requested_by) for row in candidates if row.requested_by is not None
         }
         file_ids = {int(row.file_id) for row in candidates}
         model_ids = {int(row.model_id) for row in candidates}
+        routing = fleet.build_routing_snapshot(session, file_ids)
         users = {
             int(row.id): row
             for row in session.exec(
@@ -202,6 +208,9 @@ def _claim_next_sync() -> int | None:
                     row.routing_strategy,
                     requested_printer_id,
                     snapshot=routing,
+                    file_id=row.file_id,
+                    target_group=row.target_group,
+                    compatibility_policy=row.compatibility_policy,
                 )
             except fleet.FleetError as exc:
                 printer, blocked_reason = None, exc.code

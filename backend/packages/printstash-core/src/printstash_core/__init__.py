@@ -9,6 +9,7 @@ from .printers import (
     ConfigField,
     ConfigValueKind,
     ElegooCentauriConfig,
+    MaterialSlotSnapshot,
     MoonrakerConfig,
     OctoPrintConfig,
     PrinterClient,
@@ -25,6 +26,7 @@ from .printers import (
     SetupOption,
     SnapshotCallback,
     TemperatureSnapshot,
+    ToolSnapshot,
     catalog_document,
 )
 
@@ -36,6 +38,7 @@ __all__ = [
     "ConfigValueKind",
     "ElegooCentauriConfig",
     "MoonrakerConfig",
+    "MaterialSlotSnapshot",
     "OctoPrintConfig",
     "PROVIDER_DEFINITIONS",
     "PrinterClient",
@@ -53,5 +56,6 @@ __all__ = [
     "SetupOption",
     "SnapshotCallback",
     "TemperatureSnapshot",
+    "ToolSnapshot",
     "catalog_document",
 ]

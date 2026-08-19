@@ -12,6 +12,8 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
     BackgroundJob,
+    Collection,
+    Document,
     ExternalLibrary,
     File,
     FileType,
@@ -69,8 +71,9 @@ def finding_read(row: VaultAuditFinding) -> VaultAuditFindingRead:
 def read_run(
     session: Session, row: VaultAuditRun, *, findings: bool = True
 ) -> VaultAuditRunRead:
-    finding_rows = []
-    if findings and row.id is not None:
+    finding_rows: list[VaultAuditFinding] = []
+    severities: list[VaultAuditSeverity] = []
+    if row.id is not None and findings:
         finding_rows = list(
             session.exec(
                 select(VaultAuditFinding)
@@ -78,10 +81,61 @@ def read_run(
                 .order_by(VaultAuditFinding.severity.desc(), VaultAuditFinding.id.asc())  # type: ignore[attr-defined]
             ).all()
         )
+        severities = [finding.severity for finding in finding_rows]
+    elif row.id is not None:
+        severities = list(
+            session.exec(
+                select(VaultAuditFinding.severity).where(
+                    VaultAuditFinding.run_id == row.id
+                )
+            ).all()
+        )
+    values = row.model_dump()
+    values.update(
+        critical_count=severities.count(VaultAuditSeverity.CRITICAL),
+        warning_count=severities.count(VaultAuditSeverity.WARNING),
+        info_count=severities.count(VaultAuditSeverity.INFO),
+    )
     return VaultAuditRunRead(
-        **row.model_dump(),
+        **values,
         findings=[finding_read(finding) for finding in finding_rows],
     )
+
+
+def _blob_is_live(session: Session, blob: OwnedBlob) -> bool:
+    """Keep trash claimed by storage without reporting it as a live issue."""
+    if blob.resource_type == "file":
+        file_row = session.get(File, blob.resource_id)
+        if file_row is None:
+            return True
+        if file_row.deleted_at is not None:
+            return False
+        model_row = session.get(Model, file_row.model_id)
+        return model_row is None or model_row.deleted_at is None
+    model = {
+        "document": Document,
+        "document_image": Document,
+        "collection_image": Collection,
+    }.get(blob.resource_type)
+    if model is None:
+        return True
+    row = session.get(model, blob.resource_id)
+    return row is None or row.deleted_at is None
+
+
+def _sync_counts(session: Session, run: VaultAuditRun) -> None:
+    """Persist exact totals after the audit, independent of phase refreshes."""
+    session.flush()
+    severities = list(
+        session.exec(
+            select(VaultAuditFinding.severity).where(
+                VaultAuditFinding.run_id == run.id
+            )
+        ).all()
+    )
+    run.critical_count = severities.count(VaultAuditSeverity.CRITICAL)
+    run.warning_count = severities.count(VaultAuditSeverity.WARNING)
+    run.info_count = severities.count(VaultAuditSeverity.INFO)
 
 
 def create_run(
@@ -197,6 +251,7 @@ def _check_primary(
     session: Session, run: VaultAuditRun, blobs: list[OwnedBlob]
 ) -> bool:
     backend = get_backend()
+    blobs = [blob for blob in blobs if _blob_is_live(session, blob)]
     total = max(len(blobs), 1)
     for index, blob in enumerate(blobs):
         if _cancelled(session, run):
@@ -407,7 +462,7 @@ def _check_external(
                 identifier=library.name,
                 details={"library_id": library.id, "root_label": library.name},
             )
-    for blob in blobs:
+    for blob in (blob for blob in blobs if _blob_is_live(session, blob)):
         path = Path(blob.key)
         file_row = session.get(File, blob.resource_id)
         try:
@@ -531,7 +586,9 @@ def execute_run(run_id: int) -> None:
             if run.state == VaultAuditRunState.CANCELLED:
                 return
             run.current_phase = "references"
-            for blob in snapshot.embedded:
+            for blob in (
+                blob for blob in snapshot.embedded if _blob_is_live(session, blob)
+            ):
                 if not get_backend().exists(blob.key):
                     _add(
                         session,
@@ -578,6 +635,7 @@ def execute_run(run_id: int) -> None:
             run.progress = 100.0
             run.current_phase = "completed"
             run.finished_at = utcnow()
+            _sync_counts(session, run)
             session.add(run)
             session.commit()
         except Exception:

@@ -27,7 +27,7 @@ import { Localized } from "@/components/ui/localized";
 import { useOptionalI18n } from "@/lib/i18n";
 import { translateUiText } from "@/components/ui/localized";
 import { FleetMaintenancePanel, FleetQueuePanel } from "@/components/fleet-panels";
-import { readPrinterCardImagePreference } from "@/lib/printer-card-display";
+import { usePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon, Network, Clock3, Search, Check, CircleAlert, Layers3, Play } from "lucide-react";
 
@@ -64,7 +64,7 @@ export function PrintersPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterRead | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [showCardImages] = useState(readPrinterCardImagePreference);
+  const showCardImages = usePrinterCardImagePreference();
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<"fleet" | "queue" | "maintenance">("fleet");
   const visiblePrinters = useMemo(

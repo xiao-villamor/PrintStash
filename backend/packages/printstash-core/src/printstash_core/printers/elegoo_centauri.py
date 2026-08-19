@@ -25,9 +25,7 @@ from .models import (
 
 
 class ElegooCentauriError(RuntimeError):
-    def __init__(
-        self, detail: str, *, code: str = "provider_transport_error"
-    ) -> None:
+    def __init__(self, detail: str, *, code: str = "provider_transport_error") -> None:
         super().__init__(detail)
         self.code = code
 
@@ -77,16 +75,16 @@ Connector = Callable[[bool], Awaitable[_CentauriConnection]]
 AsyncAction = Callable[..., Awaitable[Any]]
 
 
-async def _call_supported_kwargs(
-    action: AsyncAction, *args: Any, **kwargs: Any
-) -> Any:
+async def _call_supported_kwargs(action: AsyncAction, *args: Any, **kwargs: Any) -> Any:
     """Call across the supported pycentauri range without guessing its version."""
 
     try:
         parameters = inspect.signature(action).parameters.values()
     except (TypeError, ValueError):
         return await action(*args, **kwargs)
-    if not any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+    if not any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
+    ):
         accepted = {parameter.name for parameter in parameters}
         kwargs = {key: value for key, value in kwargs.items() if key in accepted}
     return await action(*args, **kwargs)
@@ -252,9 +250,7 @@ class ElegooCentauriClient:
                     else None
                 ),
             },
-            "virtual_sdcard": {
-                "progress": max(0.0, min(1.0, progress))
-            },
+            "virtual_sdcard": {"progress": max(0.0, min(1.0, progress))},
             "heater_bed": {
                 "temperature": getattr(status, "temp_bed", None),
                 "target": getattr(status, "temp_bed_target", None),
@@ -271,9 +267,7 @@ class ElegooCentauriClient:
     async def list_files(self) -> list[Mapping[str, Any]]:
         self._unsupported()
 
-    async def upload(
-        self, local_path: Path, remote_filename: str
-    ) -> dict[str, Any]:
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         remote_name = await self._with_connection(
             True,
             lambda connection: connection.upload_file(

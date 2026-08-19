@@ -26,9 +26,15 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
     FileType,
+    MaterialSlotState,
+    MaterialSource,
     NotificationEventType,
+    OperatorGateState,
     Printer,
+    PrinterMaterialSlot,
+    PrinterProvider,
     PrinterStatus,
+    PrinterTool,
     PrintJob,
     PrintJobState,
 )
@@ -40,6 +46,7 @@ from app.services import (
     ingestion,
     notifications,
     print_results,
+    runtime_config,
     thumbnail,
 )
 from app.services.backup import begin_mutating_operation, end_mutating_operation
@@ -51,6 +58,7 @@ from app.services.printer_provider import (
 )
 from app.services.realtime import InProcessBus, RealtimeBus
 from app.services.runtime_config import auto_mark_known_good_enabled
+from app.services.spoolman import SpoolmanClient, SpoolmanError
 
 logger = get_logger(__name__)
 
@@ -339,6 +347,27 @@ class PrinterHub:
         progress = float(snap.get("virtual_sdcard", {}).get("progress") or 0.0)
         filename = print_stats.get("filename") or None
 
+        material_slots = status.get("material_slots")
+        material_tools = status.get("material_tools")
+        if isinstance(material_slots, list) or isinstance(material_tools, list):
+            enriched = await self._enrich_material_slots(
+                printer_id, material_slots if isinstance(material_slots, list) else []
+            )
+            if begin_mutating_operation():
+                try:
+                    await asyncio.to_thread(
+                        self._sync_material_state_db,
+                        printer_id,
+                        enriched,
+                        material_tools if isinstance(material_tools, list) else None,
+                    )
+                except Exception:
+                    logger.exception(
+                        "printer hub: material-state sync failed for %s", printer_id
+                    )
+                finally:
+                    end_mutating_operation()
+
         await self._mark_status(printer_id, vault_status, error=None)
         capture = await self._sync_active_job(
             printer_id, ms_state, filename, progress, sync_print_stats
@@ -368,6 +397,185 @@ class PrinterHub:
             printer_id,
             {"type": "update", "printer_id": printer_id, "data": snap},
         )
+
+    @staticmethod
+    def _spoolman_config() -> tuple[str, str | None] | None:
+        with get_session_factory().session() as session:
+            if not runtime_config.spoolman_enabled(session):
+                return None
+            config = runtime_config.spoolman_config(session)
+            base_url = config.get("base_url")
+            if not base_url:
+                return None
+            return str(base_url), config.get("api_key")
+
+    async def _enrich_material_slots(
+        self, printer_id: int, slots: list[object]
+    ) -> list[dict[str, Any]]:
+        normalized = [dict(row) for row in slots if isinstance(row, dict)]
+        spool_ids = {
+            int(row["external_spool_id"])
+            for row in normalized
+            if isinstance(row.get("external_spool_id"), int)
+        }
+        if not spool_ids:
+            return normalized
+        config = await asyncio.to_thread(self._spoolman_config)
+        if config is None:
+            return normalized
+        client = SpoolmanClient(config[0], config[1])
+        resolved: dict[int, dict[str, Any]] = {}
+        for spool_id in spool_ids:
+            try:
+                resolved[spool_id] = await client.get_spool(spool_id)
+            except SpoolmanError:
+                logger.info(
+                    "printer hub: Moonraker spool %s could not be resolved for printer %s",
+                    spool_id,
+                    printer_id,
+                )
+        for row in normalized:
+            spool_id = row.get("external_spool_id")
+            spool = resolved.get(spool_id) if isinstance(spool_id, int) else None
+            if not spool:
+                continue
+            filament = spool.get("filament")
+            filament = filament if isinstance(filament, dict) else {}
+            vendor = filament.get("vendor")
+            vendor = vendor if isinstance(vendor, dict) else {}
+            row.update(
+                {
+                    "material_type": filament.get("material"),
+                    "material_brand": vendor.get("name"),
+                    "color_hex": filament.get("color_hex"),
+                    "spool_id": spool_id,
+                    "spool_name": spool.get("name") or f"Spool {spool_id}",
+                    "spool_filament_id": filament.get("id"),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _sync_material_state_db(
+        printer_id: int,
+        slots: list[dict[str, Any]],
+        tools: list[object] | None = None,
+    ) -> None:
+        with get_session_factory().session() as session:
+            printer = session.get(Printer, printer_id)
+            if printer is None or not printer.provider_material_sync_enabled:
+                return
+            source = (
+                MaterialSource.BAMBU_AMS
+                if printer.provider == PrinterProvider.BAMBU_LAN
+                else MaterialSource.MOONRAKER_SPOOLMAN
+            )
+            existing = {
+                row.slot_key: row
+                for row in session.exec(
+                    select(PrinterMaterialSlot).where(
+                        PrinterMaterialSlot.printer_id == printer_id,
+                        PrinterMaterialSlot.source == source,
+                    )
+                ).all()
+            }
+            now = utcnow()
+            seen: set[str] = set()
+            for item in slots:
+                slot_key = str(item.get("slot_key") or "").strip()
+                if not slot_key:
+                    continue
+                seen.add(slot_key)
+                row = existing.get(slot_key) or PrinterMaterialSlot(
+                    printer_id=printer_id,
+                    slot_key=slot_key,
+                    label=str(item.get("label") or slot_key),
+                    source=source,
+                )
+                raw_state = str(item.get("state") or "unknown").lower()
+                row.label = str(item.get("label") or slot_key)
+                row.tool_key = str(item["tool_key"]) if item.get("tool_key") else None
+                row.state = (
+                    MaterialSlotState(raw_state)
+                    if raw_state in {state.value for state in MaterialSlotState}
+                    else MaterialSlotState.UNKNOWN
+                )
+                row.material_type = (
+                    str(item["material_type"]).strip()
+                    if item.get("material_type")
+                    else None
+                )
+                row.material_brand = (
+                    str(item["material_brand"]).strip()
+                    if item.get("material_brand")
+                    else None
+                )
+                color = str(item.get("color_hex") or "").strip().upper().lstrip("#")
+                row.color_hex = (
+                    f"#{color[:6]}"
+                    if len(color) >= 6
+                    and all(char in "0123456789ABCDEF" for char in color[:6])
+                    else None
+                )
+                row.spool_id = (
+                    item.get("spool_id")
+                    if isinstance(item.get("spool_id"), int)
+                    else None
+                )
+                row.spool_name = (
+                    str(item["spool_name"]) if item.get("spool_name") else None
+                )
+                row.spool_filament_id = (
+                    item.get("spool_filament_id")
+                    if isinstance(item.get("spool_filament_id"), int)
+                    else None
+                )
+                row.observed_at = now
+                row.updated_at = now
+                session.add(row)
+            for slot_key, row in existing.items():
+                if slot_key not in seen:
+                    session.delete(row)
+            if tools is not None:
+                existing_tools = {
+                    row.tool_key: row
+                    for row in session.exec(
+                        select(PrinterTool).where(
+                            PrinterTool.printer_id == printer_id,
+                            PrinterTool.source == source,
+                        )
+                    ).all()
+                }
+                seen_tools: set[str] = set()
+                for item in tools:
+                    if not isinstance(item, dict):
+                        continue
+                    tool_key = str(item.get("tool_key") or "").strip()
+                    if not tool_key:
+                        continue
+                    seen_tools.add(tool_key)
+                    tool = existing_tools.get(tool_key) or PrinterTool(
+                        printer_id=printer_id,
+                        tool_key=tool_key,
+                        label=str(item.get("label") or tool_key),
+                        source=source,
+                    )
+                    raw_nozzle = item.get("nozzle_diameter_mm")
+                    tool.label = str(item.get("label") or tool_key)
+                    tool.nozzle_diameter_mm = (
+                        float(raw_nozzle)
+                        if isinstance(raw_nozzle, (int, float))
+                        and not isinstance(raw_nozzle, bool)
+                        and raw_nozzle > 0
+                        else None
+                    )
+                    tool.observed_at = now
+                    tool.updated_at = now
+                    session.add(tool)
+                for tool_key, tool in existing_tools.items():
+                    if tool_key not in seen_tools:
+                        session.delete(tool)
+            session.commit()
 
     async def _mark_status(
         self, printer_id: int, status: PrinterStatus, *, error: str | None
@@ -700,6 +908,13 @@ class PrinterHub:
                         job.filament_g_effective,
                         job.cost,
                     ) = print_results.resolve_completion_cost(session, job)
+                    printer = session.get(Printer, printer_id)
+                    if (
+                        job.source == "vault"
+                        and printer is not None
+                        and printer.operator_release_required
+                    ):
+                        job.operator_gate_state = OperatorGateState.PENDING
             if changed:
                 job.updated_at = utcnow()
                 if new_state == PrintJobState.FAILED:

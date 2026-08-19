@@ -5,9 +5,11 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from printstash_core.printers import (
+    MaterialSlotSnapshot,
     PrinterSnapshot,
     PrintSnapshot,
     TemperatureSnapshot,
+    ToolSnapshot,
 )
 
 MOONRAKER_PAYLOAD = {
@@ -154,3 +156,35 @@ def test_manually_created_snapshot_has_canonical_legacy_shape() -> None:
         "extruder": {"temperature": 210, "target": 215},
         "toolhead": {"position": [1, 2, 3]},
     }
+
+
+def test_material_slots_and_tools_are_typed_and_round_trip() -> None:
+    snapshot = PrinterSnapshot(
+        material_slots=(
+            MaterialSlotSnapshot(
+                slot_key="ams:0:0",
+                label="AMS 0 tray 0",
+                state="loaded",
+                material_type="PLA",
+                color_hex="#FF0000",
+                tool_key="tool0",
+            ),
+        ),
+        material_tools=(
+            ToolSnapshot(tool_key="tool0", label="Tool 0", nozzle_diameter_mm=0.4),
+        ),
+    )
+
+    assert snapshot.to_legacy_payload()["material_slots"] == [
+        {
+            "slot_key": "ams:0:0",
+            "label": "AMS 0 tray 0",
+            "state": "loaded",
+            "material_type": "PLA",
+            "color_hex": "#FF0000",
+            "tool_key": "tool0",
+        }
+    ]
+    assert snapshot.to_legacy_payload()["material_tools"] == [
+        {"tool_key": "tool0", "label": "Tool 0", "nozzle_diameter_mm": 0.4}
+    ]

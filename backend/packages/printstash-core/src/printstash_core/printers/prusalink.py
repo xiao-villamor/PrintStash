@@ -23,9 +23,7 @@ from .models import (
 
 
 class PrusaLinkError(RuntimeError):
-    def __init__(
-        self, detail: str, *, code: str = "provider_transport_error"
-    ) -> None:
+    def __init__(self, detail: str, *, code: str = "provider_transport_error") -> None:
         super().__init__(detail)
         self.code = code
 
@@ -98,9 +96,7 @@ class PrusaLinkClient:
             async with self._client() as client:
                 response = await client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:
-            raise PrusaLinkError(
-                "prusalink_timeout", code="provider_timeout"
-            ) from exc
+            raise PrusaLinkError("prusalink_timeout", code="provider_timeout") from exc
         except httpx.HTTPError as exc:
             raise PrusaLinkError(str(exc)) from exc
         if response.status_code in {401, 403}:
@@ -168,9 +164,7 @@ class PrusaLinkClient:
         status: dict[str, Any], job: dict[str, Any]
     ) -> dict[str, Any]:
         raw_printer = status.get("printer")
-        printer: dict[str, Any] = (
-            raw_printer if isinstance(raw_printer, dict) else {}
-        )
+        printer: dict[str, Any] = raw_printer if isinstance(raw_printer, dict) else {}
         raw_job = job.get("job")
         if isinstance(raw_job, dict):
             job_data: dict[str, Any] = raw_job
@@ -218,9 +212,7 @@ class PrusaLinkClient:
         raw_temp = telemetry.get("temp-bed") or telemetry.get("temp_bed")
         temp: dict[str, Any] = raw_temp if isinstance(raw_temp, dict) else {}
         raw_nozzle = telemetry.get("temp-nozzle") or telemetry.get("temp_nozzle")
-        nozzle: dict[str, Any] = (
-            raw_nozzle if isinstance(raw_nozzle, dict) else {}
-        )
+        nozzle: dict[str, Any] = raw_nozzle if isinstance(raw_nozzle, dict) else {}
         bed_actual = printer.get("temp_bed", temp.get("actual"))
         bed_target = printer.get("target_bed", temp.get("target"))
         nozzle_actual = printer.get("temp_nozzle", nozzle.get("actual"))
@@ -273,17 +265,14 @@ class PrusaLinkClient:
                         "path": path or name,
                         "filename": item.get("display_name") or name or path,
                         "size": item.get("size"),
-                        "modified": item.get("m_timestamp")
-                        or item.get("modified"),
+                        "modified": item.get("m_timestamp") or item.get("modified"),
                     }
                 )
 
         append_items(files)
         return result
 
-    async def upload(
-        self, local_path: Path, remote_filename: str
-    ) -> dict[str, Any]:
+    async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
         content = await asyncio.to_thread(local_path.read_bytes)
         body = await self._request(

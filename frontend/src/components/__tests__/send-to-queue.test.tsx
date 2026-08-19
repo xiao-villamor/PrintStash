@@ -6,13 +6,17 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { SendToButtons } from "@/components/model-detail/send-to-buttons";
 import type { PrinterRead, SpoolRead } from "@/types";
 
-const { enqueueFleetJob, mockUsePrinters, mockUseSpoolmanStatus, mockUseSpools } = vi.hoisted(() => ({
+const { checkFleetCompatibility, createFleetBatch, enqueueFleetJob, mockUsePrinters, mockUseSpoolmanStatus, mockUseSpools } = vi.hoisted(() => ({
+  checkFleetCompatibility: vi.fn(),
+  createFleetBatch: vi.fn(),
   enqueueFleetJob: vi.fn(),
   mockUsePrinters: vi.fn(),
   mockUseSpoolmanStatus: vi.fn(() => ({ data: { enabled: false } })),
   mockUseSpools: vi.fn(() => ({ data: [] as SpoolRead[] })),
 }));
 vi.mock("@/lib/api", () => ({
+  checkFleetCompatibility,
+  createFleetBatch,
   enqueueFleetJob,
   sendToPrinter: vi.fn(),
 }));
@@ -75,6 +79,10 @@ const printer: PrinterRead = {
 beforeEach(() => {
   enqueueFleetJob.mockReset();
   enqueueFleetJob.mockResolvedValue({ id: 1 });
+  createFleetBatch.mockReset();
+  createFleetBatch.mockResolvedValue({ id: 1, jobs: [] });
+  checkFleetCompatibility.mockReset();
+  checkFleetCompatibility.mockResolvedValue({ file_id: 42, requirements: [], nozzle_diameter_mm: null, printers: [] });
   mockUsePrinters.mockReturnValue({ data: [printer], isLoading: false, error: null });
   mockUseSpoolmanStatus.mockReturnValue({ data: { enabled: false } });
   mockUseSpools.mockReturnValue({ data: [] });
@@ -164,4 +172,45 @@ it("warns when the spool has no tracked remaining weight instead of assuming it'
   await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
 
   expect(await screen.findByText(/no tracked remaining weight/)).toBeInTheDocument();
+});
+
+it("confirms a known manual mismatch and records the override policy", async () => {
+  checkFleetCompatibility.mockResolvedValue({
+    file_id: 42,
+    requirements: [{ tool_index: 0, material_type: "PLA", color_hex: null }],
+    nozzle_diameter_mm: 0.4,
+    printers: [{ printer_id: 7, verdict: "mismatch", reasons: ["material_type_mismatch"], missing_materials: ["pla"], color_advisories: [] }],
+  });
+  render(<SendToButtons gcodeFiles={[{ id: 42, original_filename: "cube.gcode", version: 1, gcode_revision_number: 1, revision_label: null, is_recommended: true, metadata: null }]} printerFiles={[]} />);
+
+  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+  await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+  await userEvent.selectOptions(screen.getByLabelText("Routing"), "manual");
+  await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+  expect(await screen.findByText("Print with a known material mismatch?")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Print anyway" }));
+
+  await waitFor(() => expect(enqueueFleetJob).toHaveBeenCalledWith(expect.objectContaining({
+    compatibility_policy: "allow_mismatch",
+    printer_id: 7,
+  })));
+});
+
+it("creates an atomic batch when copies is greater than one", async () => {
+  render(<SendToButtons gcodeFiles={[{ id: 42, original_filename: "cube.gcode", version: 1, gcode_revision_number: 1, revision_label: null, is_recommended: true, metadata: null }]} printerFiles={[]} />);
+
+  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+  await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+  await userEvent.clear(screen.getByLabelText("Copies"));
+  await userEvent.type(screen.getByLabelText("Copies"), "3");
+  await userEvent.selectOptions(screen.getByLabelText("Priority"), "rush");
+  await userEvent.type(screen.getByLabelText("Printer group"), "Workshop");
+  await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+
+  await waitFor(() => expect(createFleetBatch).toHaveBeenCalledWith(expect.objectContaining({
+    file_id: 42,
+    quantity: 3,
+    priority: "rush",
+    target_group: "Workshop",
+  })));
 });

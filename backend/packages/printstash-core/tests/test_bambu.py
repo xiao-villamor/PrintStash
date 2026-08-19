@@ -32,9 +32,7 @@ from printstash_core.printers.registry import ProviderRegistry
 
 
 def make_client(**kwargs: Any) -> BambuClient:
-    return BambuClient(
-        BambuConfig("192.0.2.10", "TEST-SERIAL", "test-code"), **kwargs
-    )
+    return BambuClient(BambuConfig("192.0.2.10", "TEST-SERIAL", "test-code"), **kwargs)
 
 
 class FakeMqttClient:
@@ -54,7 +52,9 @@ class FakeMqttClient:
 
 
 class FakeFtpsClient:
-    def __init__(self, *, remote_size: int | None = None, download: bytes = b"") -> None:
+    def __init__(
+        self, *, remote_size: int | None = None, download: bytes = b""
+    ) -> None:
         self.remote_size = remote_size
         self.download = download
         self.calls: list[tuple[Any, ...]] = []
@@ -100,6 +100,114 @@ def test_bambu_ca_bundle_is_the_characterized_three_certificate_chain() -> None:
     )
 
 
+def test_normalize_status_exposes_ams_and_external_material_slots() -> None:
+    status = make_client()._normalize_status(
+        {
+            "print": {
+                "gcode_state": "idle",
+                "nozzle_diameter": "0.4",
+                "ams": {
+                    "ams": [
+                        {
+                            "id": "0",
+                            "tray": [
+                                {
+                                    "id": "0",
+                                    "tray_type": "PLA",
+                                    "tray_color": "FF0000FF",
+                                },
+                                {"id": "1", "tray_type": "", "tray_color": ""},
+                            ],
+                        }
+                    ]
+                },
+                "vt_tray": {"tray_type": "PETG", "tray_color": "00FF00FF"},
+            }
+        }
+    )
+
+    assert status["material_slots"] == [
+        {
+            "slot_key": "ams:0:0",
+            "label": "AMS 0 tray 0",
+            "tool_key": "tool0",
+            "state": "loaded",
+            "material_type": "PLA",
+            "color_hex": "#FF0000",
+        },
+        {
+            "slot_key": "ams:0:1",
+            "label": "AMS 0 tray 1",
+            "tool_key": "tool0",
+            "state": "empty",
+            "material_type": None,
+            "color_hex": None,
+        },
+        {
+            "slot_key": "external",
+            "label": "External spool",
+            "tool_key": "tool0",
+            "state": "loaded",
+            "material_type": "PETG",
+            "color_hex": "#00FF00",
+        },
+    ]
+    assert status["material_tools"] == [
+        {"tool_key": "tool0", "label": "Tool 0", "nozzle_diameter_mm": 0.4}
+    ]
+
+
+def test_ams_incremental_empty_and_malformed_updates_preserve_effective_snapshot() -> (
+    None
+):
+    client = make_client()
+    client._normalize_status(
+        {
+            "print": {
+                "ams": {
+                    "ams": [
+                        {
+                            "id": "0",
+                            "tray": [
+                                {
+                                    "id": "0",
+                                    "tray_type": "PLA",
+                                    "tray_color": "FF0000FF",
+                                },
+                                {
+                                    "id": "1",
+                                    "tray_type": "PETG",
+                                    "tray_color": "00FF00FF",
+                                },
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    incremental = client._normalize_status(
+        {
+            "print": {
+                "ams": {
+                    "ams": [
+                        {
+                            "id": "0",
+                            "tray": [{"id": "1", "tray_type": "", "tray_color": ""}],
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    malformed = client._normalize_status({"print": {"ams": {"ams": [None, "bad"]}}})
+
+    by_key = {row["slot_key"]: row for row in incremental["material_slots"]}
+    assert by_key["ams:0:0"]["material_type"] == "PLA"
+    assert by_key["ams:0:1"]["state"] == "empty"
+    assert malformed["material_slots"] == incremental["material_slots"]
+
+
 def test_mqtt_setup_loads_ca_and_restores_serial_identity_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -130,7 +238,7 @@ def test_mqtt_peer_must_match_configured_serial() -> None:
             self.common_name = common_name
 
         def getpeercert(self) -> dict[str, object]:
-            return {"subject": ((('commonName', self.common_name),),)}
+            return {"subject": ((("commonName", self.common_name),),)}
 
     class Client:
         def __init__(self, common_name: str) -> None:
@@ -204,7 +312,9 @@ async def test_upload_rejects_paths_and_size_mismatches(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_artifact_download_keeps_path_and_byte_limit_guards(tmp_path: Path) -> None:
+async def test_artifact_download_keeps_path_and_byte_limit_guards(
+    tmp_path: Path,
+) -> None:
     ftp = FakeFtpsClient(download=b"1234")
     client = make_client(ftps_client_factory=lambda: ftp)
     destination = tmp_path / "benchy.3mf"
@@ -297,9 +407,7 @@ async def test_command_response_correlation_and_rejection_codes(
 
     monkeypatch.setattr(client, "_mqtt_request", rejected)
     with pytest.raises(ProviderError) as error:
-        await client._send_command(
-            {"print": {"sequence_id": "42", "command": "pause"}}
-        )
+        await client._send_command({"print": {"sequence_id": "42", "command": "pause"}})
     assert error.value.code == "provider_command_rejected"
     assert error.value.detail == "bambu command rejected by printer: busy"
 
@@ -341,6 +449,13 @@ def test_status_normalization_preserves_state_progress_and_external_metadata() -
             "external_nozzle_diameter": 0.4,
         },
         "virtual_sdcard": {"progress": 0.42},
+        "material_tools": [
+            {
+                "tool_key": "tool0",
+                "label": "Tool 0",
+                "nozzle_diameter_mm": 0.4,
+            }
+        ],
     }
 
 

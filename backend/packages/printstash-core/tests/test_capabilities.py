@@ -29,6 +29,7 @@ def test_capabilities_match_current_action_vocabulary() -> None:
         "server_info",
         "server_config",
         "printer_config",
+        "material_state",
     }
 
 

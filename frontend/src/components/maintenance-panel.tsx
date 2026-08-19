@@ -143,7 +143,7 @@ export function MaintenancePanel() {
               <div className="flex flex-wrap gap-2">
                 {(["all", "critical", "warning", "info"] as const).map((value) => (
                   <Button key={value} size="xs" variant={severity === value ? "secondary" : "ghost"} onClick={() => setSeverity(value)}>
-                    {value}{value === "critical" ? ` ${run.critical_count}` : value === "warning" ? ` ${run.warning_count}` : value === "info" ? ` ${run.info_count}` : ""}
+                    {value}{value === "all" ? ` ${run.findings.length}` : value === "critical" ? ` ${run.critical_count}` : value === "warning" ? ` ${run.warning_count}` : ` ${run.info_count}`}
                   </Button>
                 ))}
               </div>

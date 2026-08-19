@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
+    ArtifactMaterialRequirement,
     Collection,
     CollectionRole,
     ExternalLibrary,
@@ -430,6 +431,22 @@ def persist_artifact(
         # that have no Metadata column.
         md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
         session.add(Metadata(file_id=file_row.id, **md_fields))
+        requirements = meta.get("material_requirements")
+        if isinstance(requirements, list):
+            for requirement in requirements:
+                if not isinstance(requirement, dict):
+                    continue
+                material_type = requirement.get("material_type")
+                if not isinstance(material_type, str) or not material_type.strip():
+                    continue
+                session.add(
+                    ArtifactMaterialRequirement(
+                        file_id=file_row.id,
+                        tool_index=int(requirement.get("tool_index") or 0),
+                        material_type=material_type.strip(),
+                        color_hex=requirement.get("color_hex"),
+                    )
+                )
         session.commit()
     except Exception:
         session.rollback()
