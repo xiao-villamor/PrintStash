@@ -95,10 +95,15 @@ def test_read_run_counts_actual_findings_instead_of_stale_run_totals(
     db_session.commit()
 
     result = vault_audit.read_run(db_session, run)
+    summary = vault_audit.read_run(db_session, run, findings=False)
 
     assert result.critical_count == 2
     assert result.warning_count == 1
     assert result.info_count == 0
+    assert summary.critical_count == 2
+    assert summary.warning_count == 1
+    assert summary.info_count == 0
+    assert summary.findings == []
 
 
 def test_concurrent_audit_start_returns_active_run(db_session: Session) -> None:
