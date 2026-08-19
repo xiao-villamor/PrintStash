@@ -283,7 +283,8 @@ deliberately not a full manufacturing platform. Set expectations accordingly:
   Connect cloud is not used.
 - **Elegoo support covers Neptune 4, Pro, Plus, and Max** through Moonraker;
   Centauri Carbon and Carbon 2 additionally have beta local status/control
-  support through native SDCP/MQTT. Centauri upload/inventory is unavailable.
+  support through native SDCP/MQTT, plus beta G-code upload since 0.11.3.
+  Centauri file inventory and deletion remain unavailable.
 - **Hardware coverage is still thin.** Provider behavior needs more real-world
   validation across printers, firmware versions, and network/auth setups.
   Reports are very welcome.
