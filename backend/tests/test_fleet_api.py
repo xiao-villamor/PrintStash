@@ -437,7 +437,15 @@ def test_fleet_summary_counts_queue_drain_and_maintenance(
     summary = client.get("/api/v1/fleet/summary", headers=auth_headers)
 
     assert summary.status_code == 200
-    assert summary.json() == {
+    payload = summary.json()
+    assert {key: payload[key] for key in (
+        "total_printers",
+        "queued_jobs",
+        "active_jobs",
+        "draining_printers",
+        "maintenance_printers",
+        "attention_jobs",
+    )} == {
         "total_printers": 1,
         "queued_jobs": 1,
         "active_jobs": 0,
@@ -445,6 +453,26 @@ def test_fleet_summary_counts_queue_drain_and_maintenance(
         "maintenance_printers": 1,
         "attention_jobs": 1,
     }
+    assert payload["printers"] == [
+        {
+            "printer_id": printer.id,
+            "name": "Summary",
+            "status": "ready",
+            "progress": None,
+            "group": None,
+            "loaded_slots": [],
+            "nozzle_diameter_mm": None,
+            "current_job_id": None,
+            "current_job_name": None,
+            "current_priority": None,
+            "next_job_id": payload["printers"][0]["next_job_id"],
+            "next_job_name": payload["printers"][0]["next_job_name"],
+            "next_priority": "normal",
+            "drain_mode": True,
+            "maintenance": True,
+            "pending_operator_release": False,
+        }
+    ]
 
 
 def test_failed_dispatch_can_be_retried(

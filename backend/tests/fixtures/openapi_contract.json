@@ -290,6 +290,41 @@
         "title": "ArtifactOutcomeRead",
         "type": "object"
       },
+      "ArtifactRequirementRead": {
+        "properties": {
+          "color_hex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Hex"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "tool_index": {
+            "title": "Tool Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tool_index"
+        ],
+        "title": "ArtifactRequirementRead",
+        "type": "object"
+      },
       "AuthProvidersRead": {
         "properties": {
           "oidc_display_name": {
@@ -304,6 +339,97 @@
           }
         },
         "title": "AuthProvidersRead",
+        "type": "object"
+      },
+      "BatchCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy",
+            "default": "safe"
+          },
+          "file_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "File Id",
+            "type": "integer"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/JobPriority",
+            "default": "normal"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "spool_filament_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Filament Id"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          },
+          "spool_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Name"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/RoutingStrategy",
+            "default": "least_busy"
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
+          }
+        },
+        "required": [
+          "file_id",
+          "quantity"
+        ],
+        "title": "BatchCreate",
         "type": "object"
       },
       "Body_add_gcode_revision_api_v1_models__model_id__gcode_revisions_post": {
@@ -1045,6 +1171,123 @@
           "name"
         ],
         "title": "CollectionStatRead",
+        "type": "object"
+      },
+      "CompatibilityPolicy": {
+        "enum": [
+          "safe",
+          "allow_mismatch"
+        ],
+        "title": "CompatibilityPolicy",
+        "type": "string"
+      },
+      "CompatibilityPrinterRead": {
+        "properties": {
+          "color_advisories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Color Advisories",
+            "type": "array"
+          },
+          "missing_materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Materials",
+            "type": "array"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "integer"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "verdict": {
+            "enum": [
+              "compatible",
+              "mismatch",
+              "unknown"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "verdict"
+        ],
+        "title": "CompatibilityPrinterRead",
+        "type": "object"
+      },
+      "CompatibilityRead": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "printers": {
+            "items": {
+              "$ref": "#/components/schemas/CompatibilityPrinterRead"
+            },
+            "title": "Printers",
+            "type": "array"
+          },
+          "requirements": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactRequirementRead"
+            },
+            "title": "Requirements",
+            "type": "array"
+          }
+        },
+        "required": [
+          "file_id",
+          "requirements",
+          "printers"
+        ],
+        "title": "CompatibilityRead",
+        "type": "object"
+      },
+      "CompatibilityRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "File Id",
+            "type": "integer"
+          },
+          "printer_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Printer Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "file_id",
+          "printer_ids"
+        ],
+        "title": "CompatibilityRequest",
         "type": "object"
       },
       "DocumentCreate": {
@@ -1859,6 +2102,148 @@
         "title": "FileType",
         "type": "string"
       },
+      "FleetPrinterBoardRead": {
+        "properties": {
+          "current_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Job Id"
+          },
+          "current_job_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Job Name"
+          },
+          "current_priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPriority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "drain_mode": {
+            "default": false,
+            "title": "Drain Mode",
+            "type": "boolean"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "loaded_slots": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Loaded Slots",
+            "type": "array"
+          },
+          "maintenance": {
+            "default": false,
+            "title": "Maintenance",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Job Id"
+          },
+          "next_job_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Job Name"
+          },
+          "next_priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPriority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "pending_operator_release": {
+            "default": false,
+            "title": "Pending Operator Release",
+            "type": "boolean"
+          },
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "integer"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "name",
+          "status"
+        ],
+        "title": "FleetPrinterBoardRead",
+        "type": "object"
+      },
       "FleetSummary": {
         "properties": {
           "active_jobs": {
@@ -1876,6 +2261,13 @@
           "maintenance_printers": {
             "title": "Maintenance Printers",
             "type": "integer"
+          },
+          "printers": {
+            "items": {
+              "$ref": "#/components/schemas/FleetPrinterBoardRead"
+            },
+            "title": "Printers",
+            "type": "array"
           },
           "queued_jobs": {
             "title": "Queued Jobs",
@@ -2682,6 +3074,15 @@
         "title": "IngestResponse",
         "type": "object"
       },
+      "JobPriority": {
+        "enum": [
+          "low",
+          "normal",
+          "rush"
+        ],
+        "title": "JobPriority",
+        "type": "string"
+      },
       "LibraryCreate": {
         "additionalProperties": false,
         "properties": {
@@ -3446,6 +3847,41 @@
         "title": "MakerWorldVerifyRequest",
         "type": "object"
       },
+      "ManualMaterialStateUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Updated At"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialSlotWrite"
+            },
+            "maxItems": 64,
+            "title": "Slots",
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialToolWrite"
+            },
+            "maxItems": 16,
+            "title": "Tools",
+            "type": "array"
+          }
+        },
+        "title": "ManualMaterialStateUpdate",
+        "type": "object"
+      },
       "ManualPrintJobCreate": {
         "additionalProperties": false,
         "properties": {
@@ -3555,6 +3991,351 @@
           "file_id"
         ],
         "title": "ManualPrintJobCreate",
+        "type": "object"
+      },
+      "MaterialSlotRead": {
+        "properties": {
+          "color_hex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Hex"
+          },
+          "confidence": {
+            "enum": [
+              "operator_set",
+              "provider_reported",
+              "externally_tracked"
+            ],
+            "title": "Confidence",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "material_brand": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "slot_key": {
+            "title": "Slot Key",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MaterialSource"
+          },
+          "spool_filament_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Filament Id"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          },
+          "spool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Name"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MaterialSlotState"
+          },
+          "tool_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Key"
+          }
+        },
+        "required": [
+          "slot_key",
+          "label",
+          "state",
+          "source",
+          "confidence"
+        ],
+        "title": "MaterialSlotRead",
+        "type": "object"
+      },
+      "MaterialSlotState": {
+        "enum": [
+          "loaded",
+          "empty",
+          "unknown"
+        ],
+        "title": "MaterialSlotState",
+        "type": "string"
+      },
+      "MaterialSlotWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "color_hex": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color Hex"
+          },
+          "label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "material_brand": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Brand"
+          },
+          "material_type": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Type"
+          },
+          "slot_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Slot Key",
+            "type": "string"
+          },
+          "spool_filament_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Filament Id"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          },
+          "spool_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MaterialSlotState",
+            "default": "unknown"
+          },
+          "tool_key": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Key"
+          }
+        },
+        "required": [
+          "slot_key",
+          "label"
+        ],
+        "title": "MaterialSlotWrite",
+        "type": "object"
+      },
+      "MaterialSource": {
+        "enum": [
+          "manual",
+          "bambu_ams",
+          "moonraker_spoolman"
+        ],
+        "title": "MaterialSource",
+        "type": "string"
+      },
+      "MaterialToolRead": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MaterialSource"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "tool_key": {
+            "title": "Tool Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_key",
+          "label",
+          "source"
+        ],
+        "title": "MaterialToolRead",
+        "type": "object"
+      },
+      "MaterialToolWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "nozzle_diameter_mm": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 5.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter Mm"
+          },
+          "tool_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Tool Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_key",
+          "label"
+        ],
+        "title": "MaterialToolWrite",
         "type": "object"
       },
       "MetadataRead": {
@@ -4810,6 +5591,34 @@
         "title": "NotificationsSettingsUpdate",
         "type": "object"
       },
+      "OperatorDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "release",
+              "hold"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "OperatorDecision",
+        "type": "object"
+      },
+      "OperatorGateState": {
+        "enum": [
+          "not_required",
+          "pending",
+          "released",
+          "held"
+        ],
+        "title": "OperatorGateState",
+        "type": "string"
+      },
       "OutlinerModelRead": {
         "properties": {
           "collection": {
@@ -4850,6 +5659,87 @@
         "title": "OutlinerModelRead",
         "type": "object"
       },
+      "PrintBatchRead": {
+        "properties": {
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/PrintJobRead"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/JobPriority"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "routing_strategy": {
+            "$ref": "#/components/schemas/RoutingStrategy"
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "file_id",
+          "model_id",
+          "quantity",
+          "routing_strategy",
+          "priority",
+          "compatibility_policy",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PrintBatchRead",
+        "type": "object"
+      },
       "PrintJobRead": {
         "properties": {
           "artifact_capture_error": {
@@ -4868,6 +5758,17 @@
             "title": "Artifact Evidence",
             "type": "string"
           },
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
           "blocked_reason": {
             "anyOf": [
               {
@@ -4878,6 +5779,21 @@
               }
             ],
             "title": "Blocked Reason"
+          },
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy",
+            "default": "safe"
+          },
+          "copy_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Index"
           },
           "created_at": {
             "format": "date-time",
@@ -5042,9 +5958,59 @@
             "title": "Id",
             "type": "integer"
           },
+          "material_override_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Override At"
+          },
+          "material_override_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material Override By"
+          },
           "model_id": {
             "title": "Model Id",
             "type": "integer"
+          },
+          "operator_decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator Decided At"
+          },
+          "operator_decided_by": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator Decided By"
+          },
+          "operator_gate_state": {
+            "$ref": "#/components/schemas/OperatorGateState",
+            "default": "not_required"
           },
           "printer_id": {
             "anyOf": [
@@ -5056,6 +6022,10 @@
               }
             ],
             "title": "Printer Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/JobPriority",
+            "default": "normal"
           },
           "progress": {
             "title": "Progress",
@@ -5142,6 +6112,17 @@
           },
           "state": {
             "$ref": "#/components/schemas/PrintJobState"
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
           },
           "updated_at": {
             "format": "date-time",
@@ -5453,6 +6434,11 @@
             "title": "Can Pause",
             "type": "boolean"
           },
+          "can_report_material_state": {
+            "default": false,
+            "title": "Can Report Material State",
+            "type": "boolean"
+          },
           "can_resume": {
             "title": "Can Resume",
             "type": "boolean"
@@ -5666,9 +6652,19 @@
             ],
             "title": "Octoprint Url"
           },
+          "operator_release_required": {
+            "default": false,
+            "title": "Operator Release Required",
+            "type": "boolean"
+          },
           "provider": {
             "$ref": "#/components/schemas/PrinterProvider",
             "default": "moonraker"
+          },
+          "provider_material_sync_enabled": {
+            "default": true,
+            "title": "Provider Material Sync Enabled",
+            "type": "boolean"
           },
           "provider_variant": {
             "anyOf": [
@@ -5902,6 +6898,46 @@
           "updated_at"
         ],
         "title": "PrinterFileRead",
+        "type": "object"
+      },
+      "PrinterMaterialStateRead": {
+        "properties": {
+          "printer_id": {
+            "title": "Printer Id",
+            "type": "integer"
+          },
+          "provider_sync_enabled": {
+            "title": "Provider Sync Enabled",
+            "type": "boolean"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialSlotRead"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "$ref": "#/components/schemas/MaterialToolRead"
+            },
+            "title": "Tools",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "printer_id",
+          "updated_at",
+          "provider_sync_enabled",
+          "tools",
+          "slots"
+        ],
+        "title": "PrinterMaterialStateRead",
         "type": "object"
       },
       "PrinterPermissionRead": {
@@ -6398,8 +7434,18 @@
             ],
             "title": "Octoprint Url"
           },
+          "operator_release_required": {
+            "default": false,
+            "title": "Operator Release Required",
+            "type": "boolean"
+          },
           "provider": {
             "$ref": "#/components/schemas/PrinterProvider"
+          },
+          "provider_material_sync_enabled": {
+            "default": true,
+            "title": "Provider Material Sync Enabled",
+            "type": "boolean"
           },
           "provider_variant": {
             "anyOf": [
@@ -6785,6 +7831,17 @@
             ],
             "title": "Octoprint Url"
           },
+          "operator_release_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operator Release Required"
+          },
           "provider": {
             "anyOf": [
               {
@@ -6794,6 +7851,17 @@
                 "type": "null"
               }
             ]
+          },
+          "provider_material_sync_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Material Sync Enabled"
           },
           "provider_variant": {
             "anyOf": [
@@ -6882,6 +7950,10 @@
       "QueueJobCreate": {
         "additionalProperties": false,
         "properties": {
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy",
+            "default": "safe"
+          },
           "file_id": {
             "exclusiveMinimum": 0.0,
             "title": "File Id",
@@ -6898,6 +7970,10 @@
               }
             ],
             "title": "Printer Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/JobPriority",
+            "default": "normal"
           },
           "spool_filament_id": {
             "anyOf": [
@@ -6936,6 +8012,18 @@
           "strategy": {
             "$ref": "#/components/schemas/RoutingStrategy",
             "default": "manual"
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
           }
         },
         "required": [
@@ -6947,6 +8035,16 @@
       "QueueJobUpdate": {
         "additionalProperties": false,
         "properties": {
+          "compatibility_policy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompatibilityPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expected_updated_at": {
             "anyOf": [
               {
@@ -6971,6 +8069,16 @@
             ],
             "title": "Printer Id"
           },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobPriority"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "queue_position": {
             "anyOf": [
               {
@@ -6992,6 +8100,18 @@
                 "type": "null"
               }
             ]
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
           }
         },
         "title": "QueueJobUpdate",
@@ -7328,6 +8448,10 @@
       "SendToPrinter": {
         "additionalProperties": false,
         "properties": {
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy",
+            "default": "safe"
+          },
           "file_id": {
             "exclusiveMinimum": 0.0,
             "title": "File Id",
@@ -12948,6 +14072,98 @@
         ]
       }
     },
+    "/api/v1/fleet/batches": {
+      "post": {
+        "operationId": "create_batch_api_v1_fleet_batches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintBatchRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Batch",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/v1/fleet/compatibility": {
+      "post": {
+        "operationId": "check_compatibility_api_v1_fleet_compatibility_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompatibilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatibilityRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Check Compatibility",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
     "/api/v1/fleet/printers/{printer_id}/maintenance-log": {
       "get": {
         "operationId": "get_maintenance_log_api_v1_fleet_printers__printer_id__maintenance_log_get",
@@ -13649,6 +14865,63 @@
           }
         ],
         "summary": "Patch Queue Job",
+        "tags": [
+          "fleet"
+        ]
+      }
+    },
+    "/api/v1/fleet/queue/{job_id}/operator-decision": {
+      "post": {
+        "operationId": "decide_operator_release_api_v1_fleet_queue__job_id__operator_decision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrintJobRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Decide Operator Release",
         "tags": [
           "fleet"
         ]
@@ -19390,6 +20663,110 @@
           }
         ],
         "summary": "List recent print jobs for a printer",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/material-state": {
+      "get": {
+        "operationId": "get_printer_material_state_api_v1_printers__printer_id__material_state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterMaterialStateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read effective tools and loaded material slots",
+        "tags": [
+          "printers"
+        ]
+      }
+    },
+    "/api/v1/printers/{printer_id}/material-state/manual": {
+      "put": {
+        "operationId": "put_printer_manual_material_state_api_v1_printers__printer_id__material_state_manual_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "printer_id",
+            "required": true,
+            "schema": {
+              "title": "Printer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualMaterialStateUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrinterMaterialStateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace operator-maintained tools and loaded material slots",
         "tags": [
           "printers"
         ]

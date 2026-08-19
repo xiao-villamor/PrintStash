@@ -49,18 +49,39 @@ class TestMoonrakerClientHTTP:
 
     def test_query_status_builds_correct_params(self):
         client = MoonrakerClient("http://printer.local:7125")
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"result": {"status": {}}}
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {"result": {"status": {}}}
+        spool_resp = MagicMock()
+        spool_resp.status_code = 200
+        spool_resp.json.return_value = {"result": {"spool_id": None}}
 
         with patch("app.services.moonraker.get_http_client") as mock_get_client:
-            mock_get_client.return_value.request = AsyncMock(return_value=mock_resp)
+            mock_get_client.return_value.request = AsyncMock(
+                side_effect=[status_resp, spool_resp]
+            )
             result = asyncio.run(client.query_status())
-            call_args = mock_get_client.return_value.request.call_args
+            calls = mock_get_client.return_value.request.call_args_list
+            call_args = calls[0]
             url = call_args[0][1]
             assert "/printer/objects/query?" in url
             assert "print_stats=" in url
-            assert result == {"result": {"status": {}}}
+            assert calls[1][0][1].endswith("/server/spoolman/spool_id")
+            assert result == {
+                "result": {
+                    "status": {
+                        "material_slots": [
+                            {
+                                "slot_key": "tool0",
+                                "label": "Moonraker active spool",
+                                "tool_key": "tool0",
+                                "state": "unknown",
+                                "external_spool_id": None,
+                            }
+                        ]
+                    }
+                }
+            }
 
     def test_list_gcode_files_uses_gcodes_root(self):
         client = MoonrakerClient("http://printer.local:7125")

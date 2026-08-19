@@ -15,7 +15,8 @@ export const SHARED_PRINTER_CONTRACT = {
     "emergency_stop",
     "server_info",
     "server_config",
-    "printer_config"
+    "printer_config",
+    "material_state"
   ],
   "providers": {
     "moonraker": {
@@ -33,7 +34,8 @@ export const SHARED_PRINTER_CONTRACT = {
         "emergency_stop",
         "server_info",
         "server_config",
-        "printer_config"
+        "printer_config",
+        "material_state"
       ],
       "supportLevel": "stable",
       "supportNotes": [],

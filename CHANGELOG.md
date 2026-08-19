@@ -34,6 +34,16 @@
 
 ### Fixed
 
+- Vault Maintenance now derives severity totals from the findings it actually
+  returns, shows the complete finding count, and skips missing-file checks for
+  trashed Models, Artifacts, Documents, Collection images, and external links.
+- Printer-card image visibility now reloads and synchronizes from its saved
+  browser preference, while browsers without a saved language start in English
+  instead of inheriting the browser locale.
+- Confirmation dialogs now translate their title, description, Cancel,
+  destructive action, and Close label consistently, expose an accessible
+  dialog name, remove empty header spacing, and stack long actions on narrow
+  screens.
 - Startup and hourly maintenance no longer infer file ownership by recursively deleting unindexed objects from configured storage. First-run local vault paths must now be writable, dedicated empty directories; failed uploads clean up only their exact destinations, and occupied paths are never overwritten. Existing NAS and Nextcloud folders belong under External Libraries.
 - Task Center is now the single import-job transition owner, emits one terminal event per job, rejects stale/out-of-order polling responses, resumes active work after reload/connectivity changes, and coordinates one post-Bulk refresh.
 - Import jobs cannot report completion before Model, Artifact, Metadata, primary storage, and expected thumbnail outputs are visible from a fresh session.

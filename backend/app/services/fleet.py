@@ -419,16 +419,14 @@ def choose_printer(
         )
 
     eligible = [row for row in printers if _eligible(session, row, snapshot)]
+    if not eligible:
+        return None, "no_eligible_printer"
     if compatibility_policy == CompatibilityPolicy.SAFE:
         eligible = [
             row for row in eligible if _compatibility_rank(row, file_id, snapshot) < 2
         ]
     if not eligible:
-        return None, (
-            "no_material_compatible_printer"
-            if printers and file_id is not None
-            else "no_eligible_printer"
-        )
+        return None, "no_material_compatible_printer"
     counts = snapshot.active_counts if snapshot is not None else _active_counts(session)
     oldest = datetime.min
     eligible.sort(

@@ -102,6 +102,13 @@ async def test_bambu_status_contract_is_sparse_and_preserves_external_metadata()
                     "external_nozzle_diameter": 0.4,
                 },
                 "virtual_sdcard": {"progress": 0.42},
+                "material_tools": [
+                    {
+                        "tool_key": "tool0",
+                        "label": "Tool 0",
+                        "nozzle_diameter_mm": 0.4,
+                    }
+                ],
             }
         }
     }
@@ -275,6 +282,7 @@ async def test_centauri_status_contract_uses_canonical_snapshot_shape() -> None:
                     Capability.CANCEL,
                     Capability.LIVE_STATUS,
                     Capability.UPLOAD,
+                    Capability.MATERIAL_STATE,
                 }
             ),
             "beta",
