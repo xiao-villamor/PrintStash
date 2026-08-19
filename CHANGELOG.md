@@ -2,20 +2,19 @@
 
 ## Unreleased
 
-### Added
-
-- Material-aware fleet dispatch adds source-labelled printer tools and feeds,
-  Bambu AMS and Moonraker active-Spoolman synchronization, G-code compatibility
-  preflight with audited mismatch overrides, atomic multi-copy batches, group
-  constraints, priority lanes, optional operator release gates, and a bounded
-  fleet overview ([#73](https://github.com/xiao-villamor/PrintStash/issues/73)).
-
 ## 0.12.0
 
 **Back up before upgrading. This release includes additive database migrations and deployment/dependency changes; PostgreSQL, MinIO, and lite-image users should review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
+- **Material-aware fleet dispatch.** Printer tools and material feeds now track
+  their source, Bambu AMS and Moonraker active-Spoolman state can synchronize
+  automatically, and G-code preflight compares material and nozzle metadata
+  before a direct send. Fleet batches add copy counts, group constraints,
+  priority lanes, audited mismatch overrides, optional operator release gates,
+  and an at-a-glance printer board
+  ([#73](https://github.com/xiao-villamor/PrintStash/issues/73)).
 - Preview settings now control interactive 3D/G-code render sharpness, downloaded screenshot resolution, and generated Model image resolution, with a background action to recreate existing Model previews.
 - Import jobs now publish durable completion metadata, explicit complete/partial outcomes, thumbnail status and stable reasons, restart recovery, monotonic progress, structured metrics/logs, and no-store polling.
 - A memory-bounded streaming STL fallback generates 640×480 WebP thumbnails for oversized or otherwise unrasterizable meshes, including Vault Maintenance repair and Bulk upload flows ([#67](https://github.com/xiao-villamor/PrintStash/issues/67)).

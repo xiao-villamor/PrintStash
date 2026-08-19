@@ -7,12 +7,13 @@
 
 # PrintStash
 
-### Self-hosted asset management for people who 3D print more things than they can remember.
+### A self-hosted workspace for 3D print files, revisions, printers, and the work around them.
 
-PrintStash is a local-first web app for STL, 3MF, OBJ, and G-code libraries.
-Upload manually or let OrcaSlicer push new G-code after every slice, then find
-files by model name, collection, tags, slicer metadata, material, printer, and
-print history.
+PrintStash is a local-first web app for STL, 3MF, OBJ, STEP, and G-code
+libraries. It connects Models and G-code revisions to printer fleets, material
+state, print history, Documents, share links, notifications, access control,
+Pending Imports, and Vault audits. Upload from the browser, capture a model URL,
+mirror a NAS folder, or let OrcaSlicer push new G-code after every slice.
 
 ![PrintStash demo](screenshots/00-demo-v010.gif)
 
@@ -105,6 +106,27 @@ are welcome in
   real grams used on a Moonraker-measured completion — with double-count
   detection for Moonraker's native Spoolman hook.
 
+**Fleet and material-aware dispatch**
+- Queue one print or an atomic multi-copy batch across configured printers.
+- Route manually, to the default printer, or to the least-busy eligible printer,
+  with exact group constraints and low, normal, or rush priority lanes.
+- Track operator-set tools and material feeds on every provider. Bambu AMS trays
+  and Moonraker's active Spoolman spool can synchronize automatically.
+- Compare G-code material and nozzle metadata before dispatch. Known mismatches
+  require an audited confirmation; unknown state remains usable.
+- Keep printers out of rotation with maintenance windows, soft drain, or an
+  optional operator release gate after a completed print.
+
+**Capture, Documents, sharing, and notifications**
+- Pending Imports keep URL and browser captures reviewable across restarts, with
+  retry, archive/file selection, tags, and Collection assignment before ingest.
+- Attach Markdown notes, PDFs, images, and other files to any Collection.
+  Markdown includes a built-in editor, preview, and pasted or dropped images.
+- Create expiring, read-only public links for a Model. Original-file downloads
+  stay off unless the owner enables them for that link.
+- Send print-completed, failed, cancelled, and printer-offline events to generic
+  webhooks, Discord, Telegram, or ntfy, with per-event and per-printer controls.
+
 **Statistics and cost insights**
 - A Statistics dashboard (admin-only) turns completed prints into trends: total
   cost, prints, filament used, average filament per print, and total print time.
@@ -118,15 +140,27 @@ are welcome in
   password.
 - JWT login with refresh/logout, admin user management, and named API keys for
   scripts and slicer hooks.
+- Optional OIDC / SSO works with Authentik, Authelia, and similar providers,
+  including PKCE, just-in-time users, admin-group mapping, encrypted settings,
+  and local-login fallback.
 - Collection-level RBAC shares parts of a library at view/edit/admin levels.
-- Audit logs record who changed what.
+- Per-printer roles grant view, print, control, or admin independently and apply
+  to UI sessions, API keys, REST endpoints, and live WebSocket state.
+- Audit logs record who changed what, including authenticated browser actions.
 - A recycle bin keeps soft-deleted models restorable until retention expires,
   with manual restore, purge-expired, and permanent-delete.
 
-**Backups, portability, and customization**
+**Vault integrity, backups, and portability**
+- Quick and Full Vault audits persist findings, support cancellation, group
+  problems by severity, and repair eligible thumbnail, Metadata, and recommended
+  Revision findings through narrow audited actions.
 - Full backup/restore of the database plus stored files and thumbnails.
+- Backup verification checks archive structure and manifest membership, while
+  creation fails closed if a vault-owned blob cannot be read consistently.
 - Backups can mirror to S3/R2-compatible storage, independent of where vault
   files live.
+- Export or import a versioned, hash-verified portable library archive with
+  Models, Artifacts, metadata, taxonomy, history, favorites, and saved views.
 - Metadata export to JSON or CSV for analysis, migration planning, or audits.
 - Model-card metrics and the metadata fields shown on detail pages are
   configurable.

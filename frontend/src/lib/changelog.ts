@@ -25,6 +25,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: "0.12.0",
     date: "Aug 2026",
     changes: [
+      "Material-aware fleet dispatch now tracks source-labelled printer tools and feeds, synchronizes Bambu AMS and Moonraker active-Spoolman state, checks G-code material and nozzle compatibility, and adds multi-copy batches, groups, priority lanes, audited overrides, release gates, and a fleet board",
       "Preview settings now control interactive 3D and G-code sharpness, downloaded screenshot resolution, and generated Model image resolution, with background regeneration for existing previews",
       "Import jobs now expose durable complete or partial outcomes, verified output and thumbnail details, restart recovery, monotonic progress, structured metrics and logs, and no-store polling",
       "Oversized or otherwise unrasterizable STL files now receive memory-bounded 640×480 WebP thumbnails across normal upload, Bulk upload, and Vault Maintenance repair flows",

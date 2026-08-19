@@ -213,6 +213,12 @@ queue manager.
 
 ## 0.12 — Dependency and Ingestion Reliability (in development)
 
+- Source-labelled printer tools and material feeds, with manual state for every
+  provider, Bambu AMS synchronization, and Moonraker active-Spoolman tracking
+- Material and nozzle compatibility preflight for direct sends and automatic
+  routing, including audited mismatch overrides and advisory color comparison
+- Atomic multi-copy batches, exact printer-group constraints, priority lanes,
+  optional operator release gates, and an at-a-glance fleet board
 - Argon2 password hashing with transparent, successful-login migration from
   legacy bcrypt hashes
 - NumPy 2, Trimesh 5, Cascadio 0.1.1, Psycopg 3, and explicit optional async
