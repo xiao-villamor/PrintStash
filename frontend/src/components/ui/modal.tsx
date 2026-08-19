@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DURATION, useMountTransition, useOverlayBehavior } from "@/lib/overlay";
+import { useOptionalI18n } from "@/lib/i18n";
 
 /**
  * Low-level dialog chrome: portal, animated backdrop + panel, focus trap,
@@ -62,43 +63,49 @@ export function Modal({
   open,
   onClose,
   title,
+  labelledBy,
   children,
   className,
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
+  labelledBy?: string;
   children: ReactNode;
   className?: string;
 }) {
   const titleId = useId();
+  const closeLabel = useOptionalI18n()?.t("nav.close") ?? "Close";
+  const closeButton = (
+    <button
+      type="button"
+      onClick={onClose}
+      className="rounded-md p-1 hover:bg-accent"
+      aria-label={closeLabel}
+    >
+      <X className="h-4 w-4" />
+    </button>
+  );
   return (
     <ModalShell
       open={open}
       onClose={onClose}
-      labelledBy={title ? titleId : undefined}
+      labelledBy={labelledBy ?? (title ? titleId : undefined)}
       className={cn(
         "w-full max-w-lg rounded-lg border bg-background p-6 shadow-lg",
         className,
       )}
     >
-      <div className="mb-4 flex items-center justify-between">
-        {title ? (
+      {title ? (
+        <div className="mb-4 flex items-center justify-between">
           <h2 id={titleId} className="text-lg font-semibold">
             {title}
           </h2>
-        ) : (
-          <span />
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md p-1 hover:bg-accent"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+          {closeButton}
+        </div>
+      ) : (
+        <div className="absolute right-4 top-4">{closeButton}</div>
+      )}
       {children}
     </ModalShell>
   );
