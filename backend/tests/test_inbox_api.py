@@ -466,7 +466,9 @@ def test_delete_intent_processor_retries_backend_failure_and_blocks_mismatch(
 def test_capture_source_mismatch_rejects_before_slot_write(db_session: Session) -> None:
     owner = _user(db_session, "slot-source")
     raw = _slot_payload().model_dump(mode="json")
-    raw["capture_source"]["canonical_url"] = "https://printables.com/model/1"
+    raw["capture_source"]["canonical_url"] = (
+        "https://makerworld.com/en/models/1234-other"
+    )
     with pytest.raises(
         inbox.importer.ImportError_, match="capture_source_url_mismatch"
     ):
@@ -710,6 +712,7 @@ def test_capture_cover_attaches_before_raw_slot_receipt_is_released(
         model_id=model.id,
         provider="makerworld",
         canonical_url="https://makerworld.com/en/models/1234-widget",
+        source_item_id="1234",
         identity_key=uuid.uuid4().hex * 2,
     )
     db_session.add(source)

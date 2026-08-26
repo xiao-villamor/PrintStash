@@ -8,11 +8,17 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from threading import Barrier, Thread
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.services import storage_backend
-from app.services.storage_backend import LocalStorageBackend, StorageCollisionError
+from app.services.storage_backend import (
+    CreationReceipt,
+    LocalStorageBackend,
+    StorageBackend,
+    StorageCollisionError,
+)
 
 
 @dataclass
@@ -235,6 +241,148 @@ def test_ensure_setup_creates_data_and_thumb_dirs(
 
     assert data_dir.is_dir()
     assert thumb_dir.is_dir()
+
+
+def _receipt(key: str = "opaque-key", *, size: int = 5) -> CreationReceipt:
+    return CreationReceipt(
+        key=key,
+        size=size,
+        token="test-creation-token",
+        backend="compatibility",
+        namespace="test-namespace",
+    )
+
+
+def test_compatibility_stream_write_returns_created_byte_count() -> None:
+    backend = MagicMock()
+    backend.create_stream.return_value = _receipt(size=5)
+
+    written = StorageBackend.write_stream(backend, BytesIO(b"owned"), "blob")
+
+    assert written == 5
+
+
+def test_compatibility_byte_write_returns_created_byte_count() -> None:
+    backend = MagicMock()
+    backend.create_bytes.return_value = _receipt(size=5)
+
+    written = StorageBackend.write_bytes(backend, b"owned", "blob")
+
+    assert written == 5
+
+
+def test_compatibility_backend_rejects_unsupported_atomic_creation() -> None:
+    backend = LocalStorageBackend()
+
+    with pytest.raises(NotImplementedError, match="atomic_create_not_supported"):
+        StorageBackend.create_stream(backend, BytesIO(b"owned"), "opaque-key")
+
+
+def test_compatibility_backend_rejects_unsupported_atomic_replacement() -> None:
+    backend = LocalStorageBackend()
+
+    with pytest.raises(NotImplementedError, match="atomic_replace_not_supported"):
+        StorageBackend.replace_stream(backend, BytesIO(b"new"), _receipt())
+
+
+def test_compatibility_backend_fails_closed_for_rollback() -> None:
+    assert StorageBackend.rollback_create(LocalStorageBackend(), _receipt()) is False
+
+
+def test_compatibility_backend_fails_closed_for_creation_match() -> None:
+    assert StorageBackend.creation_matches(LocalStorageBackend(), _receipt()) is False
+
+
+def test_compatibility_backend_rejects_unsupported_legacy_adoption() -> None:
+    with pytest.raises(
+        NotImplementedError, match="existing_storage_adoption_not_supported"
+    ):
+        StorageBackend.adopt_existing(
+            LocalStorageBackend(),
+            "opaque-key",
+            expected_size=5,
+            expected_sha256="a" * 64,
+        )
+
+
+def test_object_info_returns_none_for_missing_key() -> None:
+    backend = MagicMock()
+    backend.exists.return_value = False
+
+    result = StorageBackend.object_info(backend, "missing")
+
+    assert result is None
+    backend.stat_size.assert_not_called()
+
+
+def test_object_info_returns_size_for_existing_key() -> None:
+    backend = MagicMock()
+    backend.exists.return_value = True
+    backend.stat_size.return_value = 25
+
+    result = StorageBackend.object_info(backend, "present")
+
+    assert result is not None
+    assert result.size == 25
+
+
+def test_local_compatible_backend_without_direct_path_rejects_atomic_create() -> None:
+    class OpaqueBackend(LocalStorageBackend):
+        def direct_path(self, key: str) -> Path | None:
+            return None
+
+    with pytest.raises(NotImplementedError, match="atomic_create_not_supported"):
+        OpaqueBackend().create_stream(BytesIO(b"owned"), "opaque-key")
+
+
+def test_download_cleanup_failure_preserves_published_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    backend = LocalStorageBackend()
+    source = tmp_path / "source.stl"
+    source.write_bytes(b"solid")
+    destination = tmp_path / "copy.stl"
+    original_unlink = Path.unlink
+
+    def fail_download_temp(self: Path, *args, **kwargs) -> None:
+        if self.name.startswith(".printstash-download-"):
+            raise OSError("cleanup denied")
+        original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_download_temp)
+
+    result = backend.download_to_path(str(source), destination)
+
+    assert result.read_bytes() == b"solid"
+    assert "storage download temp cleanup failed" in caplog.text
+
+
+def test_usage_skips_entry_whose_stat_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "vault"
+    root.mkdir()
+    good = root / "good.stl"
+    good.write_bytes(b"12345")
+    bad = root / "unreadable.stl"
+    bad.write_bytes(b"123")
+    original_stat = Path.stat
+    bad_stat_calls = 0
+
+    def fail_second_bad_stat(self: Path, *args, **kwargs):
+        nonlocal bad_stat_calls
+        if self == bad:
+            bad_stat_calls += 1
+            if bad_stat_calls >= 2:
+                raise OSError("stat denied")
+        return original_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", fail_second_bad_stat)
+
+    result = LocalStorageBackend().usage(str(root))
+
+    assert result["object_count"] == 1
+    assert result["total_size_bytes"] == 5
 
 
 def test_create_stream_is_atomic_create_only_and_receipted(

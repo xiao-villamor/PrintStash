@@ -128,6 +128,17 @@ def test_apply_overlay_copies_all_persisted_fields(db_session: Session) -> None:
     assert "makerworld_cookie" not in _overlay
 
 
+def test_apply_overlay_copies_thumbnail_width(db_session: Session) -> None:
+    config = runtime_config.get_or_create(db_session)
+    config.model_thumbnail_width = 640
+    db_session.add(config)
+    db_session.commit()
+
+    runtime_config.apply_overlay(db_session)
+
+    assert _overlay["model_thumbnail_width"] == 640
+
+
 def test_apply_overlay_clears_stale_keys_not_in_config(db_session: Session) -> None:
     _overlay["some_stale_key_from_a_prior_boot"] = "gone"
     runtime_config.get_or_create(db_session)  # empty row: every _set() is a no-op
@@ -220,6 +231,38 @@ def test_update_config_data_dir_clear_uses_env_default_path(
     runtime_config.update_config(db_session, data_dir="")
     # Falls back to the env/default Settings value, still coerced to a Path.
     assert isinstance(_overlay["data_dir"], Path)
+
+
+def test_update_storage_persists_and_activates_directories(
+    db_session: Session, tmp_path: Path
+) -> None:
+    data_dir = tmp_path / "updated-data"
+    thumb_dir = tmp_path / "updated-thumbs"
+
+    config = runtime_config.update_storage(
+        db_session, data_dir=str(data_dir), thumb_dir=str(thumb_dir)
+    )
+
+    assert config.data_dir == str(data_dir)
+    assert config.thumb_dir == str(thumb_dir)
+    assert _overlay["data_dir"] == data_dir
+    assert _overlay["thumb_dir"] == thumb_dir
+    assert data_dir.is_dir()
+    assert thumb_dir.is_dir()
+
+
+def test_update_config_invalid_integer_environment_uses_safe_fallback(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        runtime_config,
+        "_env_or_default",
+        lambda _field_name: "not-an-integer",
+    )
+
+    runtime_config.update_config(db_session, trash_retention_days=-1)
+
+    assert _overlay["trash_retention_days"] == 30
 
 
 def test_makerworld_legacy_token_helper_only_clears(db_session: Session) -> None:

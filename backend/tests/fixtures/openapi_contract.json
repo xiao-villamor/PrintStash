@@ -1064,7 +1064,9 @@
             "enum": [
               "makerworld",
               "printables",
-              "thingiverse"
+              "thingiverse",
+              "myminifactory",
+              "cults"
             ],
             "title": "Provider",
             "type": "string"

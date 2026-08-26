@@ -1,20 +1,34 @@
+"""Authentication services keep credentials upgradeable and sessions revocable.
+
+The tests defend durable token rotation and revocation without allowing malformed
+legacy credentials or identity-provider accounts through local authentication.
+"""
+
 from __future__ import annotations
 
 import threading
 
 import bcrypt
+import pytest
 from sqlalchemy.sql.dml import Update
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.time import utcnow
-from app.db.models import RefreshToken, User
+from app.db.models import ApiKey, RefreshToken, User
 from app.services.auth import (
+    ACCESS_BLOCKLIST,
+    _verify_password_and_update,
     authenticate_api_key,
     authenticate_user,
     create_api_key,
     create_refresh_token,
     hash_password,
+    invalidate_user_sessions,
     prune_expired_refresh_tokens,
+    revoke_access_token,
+    revoke_all_refresh_tokens,
+    revoke_api_key,
+    revoke_refresh_token,
     rotate_refresh_token,
     verify_password,
 )
@@ -217,3 +231,88 @@ def test_prune_expired_refresh_tokens_is_bounded_and_preserves_live_tokens(
     assert len(remaining) == 1
     assert remaining[0].expires_at > utcnow().replace(tzinfo=None)
     assert live not in expired
+
+
+def test_malformed_password_hash_is_failed_upgrade_check() -> None:
+    assert _verify_password_and_update("Password123", "malformed") == (False, None)
+
+
+def test_invalid_access_token_revocation_leaves_blocklist_unchanged() -> None:
+    before = set(ACCESS_BLOCKLIST)
+
+    revoke_access_token("not-a-token")
+
+    assert ACCESS_BLOCKLIST == before
+
+
+def test_missing_refresh_token_is_not_revoked(db_session: Session) -> None:
+    assert revoke_refresh_token(db_session, "missing-token") is False
+
+
+def test_revoke_all_refresh_tokens_revokes_every_live_row(
+    db_session: Session,
+) -> None:
+    user = _user(db_session, "revoke-all")
+    create_refresh_token(db_session, user.id)
+    create_refresh_token(db_session, user.id)
+
+    revoke_all_refresh_tokens(db_session, user.id)
+
+    rows = db_session.exec(
+        select(RefreshToken).where(RefreshToken.user_id == user.id)
+    ).all()
+    assert len(rows) == 2
+    assert rows[0].revoked is True
+    assert rows[0].revoked_at is not None
+    assert rows[1].revoked is True
+    assert rows[1].revoked_at is not None
+
+
+def test_invalidate_sessions_rejects_unpersisted_user(db_session: Session) -> None:
+    user = User(username="unpersisted", hashed_password=hash_password("Password123"))
+
+    with pytest.raises(ValueError, match="unpersisted user"):
+        invalidate_user_sessions(db_session, user)
+
+
+def test_prune_expired_refresh_tokens_rejects_non_positive_batch() -> None:
+    with pytest.raises(ValueError, match="batch_size must be positive"):
+        prune_expired_refresh_tokens(batch_size=0)
+
+
+def test_oidc_managed_user_cannot_use_local_password(db_session: Session) -> None:
+    user = User(
+        username="oidc-user",
+        hashed_password=hash_password("Password123"),
+        is_active=True,
+        oidc_managed=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    authenticated = authenticate_user(db_session, user.username, "Password123")
+
+    assert authenticated is None
+
+
+@pytest.mark.parametrize(
+    "key_selector",
+    [
+        pytest.param(lambda _foreign_id: 999_999, id="missing"),
+        pytest.param(lambda foreign_id: foreign_id, id="foreign"),
+    ],
+)
+def test_api_key_revocation_refuses_missing_or_foreign_key(
+    db_session: Session, key_selector
+) -> None:
+    owner = _user(db_session, "key-owner")
+    other = _user(db_session, "key-other")
+    record, _ = create_api_key(db_session, other.id, "other key")
+    requested_id = key_selector(record.id)
+
+    revoked = revoke_api_key(db_session, owner.id, requested_id)
+
+    assert revoked is False
+    persisted = db_session.get(ApiKey, record.id)
+    assert persisted is not None
+    assert persisted.revoked_at is None

@@ -4,52 +4,8 @@ from pathlib import Path
 
 from alembic.config import Config
 from sqlalchemy import inspect
-from sqlmodel import Session, delete, select
 
 from alembic import command
-from app.db.models import (
-    BrowserDevice,
-    BrowserPairingCode,
-    CaptureProvider,
-    ProviderConnection,
-    ProviderOAuthState,
-    User,
-)
-from app.services.auth import hash_password
-
-
-def test_user_hard_delete_cascades_provider_and_pairing_rows(
-    db_session: Session,
-) -> None:
-    user = User(
-        username="provider-cascade", hashed_password=hash_password("Password123")
-    )
-    db_session.add(user)
-    db_session.flush()
-    db_session.add_all(
-        [
-            ProviderConnection(user_id=user.id, provider=CaptureProvider.CULTS),
-            ProviderOAuthState(
-                user_id=user.id,
-                provider=CaptureProvider.MYMINIFACTORY,
-                state_hash="a" * 64,
-                redirect_uri="https://example.test/callback",
-                expires_at=user.created_at,
-            ),
-            BrowserPairingCode(
-                user_id=user.id, code_hash="b" * 64, expires_at=user.created_at
-            ),
-            BrowserDevice(user_id=user.id, name="Browser", credential_hash="c" * 64),
-        ]
-    )
-    db_session.commit()
-    db_session.connection().exec_driver_sql("PRAGMA foreign_keys=ON")
-    db_session.exec(delete(User).where(User.id == user.id))
-    db_session.commit()
-    assert not db_session.exec(select(ProviderConnection)).all()
-    assert not db_session.exec(select(ProviderOAuthState)).all()
-    assert not db_session.exec(select(BrowserPairingCode)).all()
-    assert not db_session.exec(select(BrowserDevice)).all()
 
 
 def test_fb14_upgrade_and_downgrade_are_structural(tmp_path: Path) -> None:

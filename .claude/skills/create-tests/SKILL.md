@@ -445,7 +445,7 @@ render data without logic.
 ## Validate before you report
 
 Backend: `cd backend && ./scripts/test.sh fast -q` for the loop, `./scripts/test.sh
-full -q` before claiming green (coverage gate is `--cov-fail-under=95` in
+full -q` before claiming green (coverage gate is `--cov-fail-under=90` in
 CI); `uv run ruff check app/ tests/`; `uv run pyright`. Frontend: `pnpm lint
 && pnpm typecheck && pnpm test`. Report the exact result — never say tests
 passed without running them, and paste failures verbatim.

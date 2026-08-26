@@ -23,11 +23,13 @@ every file processes within a peak-RSS budget instead of OOM-killing the scan.
 
 from __future__ import annotations
 
+import io
 import os
 import zipfile
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from app.core.config import _overlay
 from app.services import mesh_processing
@@ -134,7 +136,9 @@ def test_real_compression_bomb_3mf_is_not_decompressed(
     # so trimesh never decompresses the bomb. The embedded preview still stands in.
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
-    png = mesh_processing._PNG_MAGIC + b"slicer-preview"
+    preview = io.BytesIO()
+    Image.new("RGB", (8, 8), "navy").save(preview, format="PNG")
+    png = preview.getvalue()
     p = tmp_path / "bomb.3mf"
     with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("3D/3dmodel.model", b"<triangle/>" * 2_000_000)  # tiny on disk

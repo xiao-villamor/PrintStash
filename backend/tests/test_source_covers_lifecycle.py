@@ -567,6 +567,47 @@ def test_expired_cover_intent_without_bytes_removes_cover_and_lease(
     backend.rollback_create.assert_not_called()
 
 
+def test_expired_orphan_cover_lease_removes_stale_ownership_proof(
+    db_session: Session,
+) -> None:
+    source = _source(db_session)
+    cover = ModelSourceCover(
+        provenance_source_id=source.id,
+        storage_key="opaque/covers/orphan.webp",
+        size_bytes=4,
+    )
+    db_session.add(cover)
+    db_session.flush()
+    lease = staging_leases.create_cover_lease(
+        db_session,
+        model_source_cover_id=cover.id or 0,
+        owner_user_id=None,
+        destination_key=cover.storage_key,
+        size_bytes=4,
+        sha256="a" * 64,
+    )
+    record_creation(
+        db_session,
+        _receipt(key=cover.storage_key, token="stale"),
+        object_kind="model_source_cover",
+    )
+    cover_id = cover.id
+    db_session.commit()
+
+    connection = db_session.connection()
+    connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+    connection.exec_driver_sql(
+        "DELETE FROM model_source_covers WHERE id = ?", (cover_id,)
+    )
+    db_session.commit()
+    db_session.connection().exec_driver_sql("PRAGMA foreign_keys=ON")
+    db_session.expire_all()
+
+    assert source_covers.expire_pending(db_session, _backend(), lease=lease) is True
+    assert db_session.get(StagingLease, lease.id) is None
+    assert db_session.exec(select(OwnedStorageObject)).all() == []
+
+
 def test_restart_reconcile_discards_unpublished_cover_intent(
     db_session: Session,
 ) -> None:
@@ -596,6 +637,69 @@ def test_restart_reconcile_discards_unpublished_cover_intent(
     db_session.commit()
     assert db_session.get(ModelSourceCover, cover.id) is None
     assert db_session.get(StagingLease, lease.id) is None
+
+
+def test_restart_reconcile_continues_past_uncertain_cover_intent(
+    db_session: Session,
+) -> None:
+    sources = [_source(db_session), _source(db_session)]
+    keys = ["opaque/covers/uncertain.webp", "opaque/covers/absent.webp"]
+    covers: list[ModelSourceCover] = []
+    leases: list[StagingLease] = []
+    for source, key in zip(sources, keys, strict=True):
+        cover = ModelSourceCover(
+            provenance_source_id=source.id, storage_key=key, size_bytes=4
+        )
+        db_session.add(cover)
+        db_session.flush()
+        covers.append(cover)
+        leases.append(
+            staging_leases.create_cover_lease(
+                db_session,
+                model_source_cover_id=cover.id or 0,
+                owner_user_id=None,
+                destination_key=key,
+                size_bytes=4,
+                sha256="b" * 64,
+            )
+        )
+    db_session.commit()
+    backend = _backend()
+    backend.adopt_existing.side_effect = NotImplementedError
+
+    def object_info(key: str):
+        if key == keys[0]:
+            raise RuntimeError("storage unavailable")
+        return None
+
+    backend.object_info.side_effect = object_info
+
+    assert source_covers.reconcile_pending(db_session, backend) == 1
+    assert db_session.get(ModelSourceCover, covers[0].id) is not None
+    assert db_session.get(StagingLease, leases[0].id) is not None
+    assert db_session.get(ModelSourceCover, covers[1].id) is None
+    assert db_session.get(StagingLease, leases[1].id) is None
+
+
+def test_commit_failure_rollback_is_noop_without_publication_receipt(
+    db_session: Session,
+) -> None:
+    source = _source(db_session)
+    cover = ModelSourceCover(
+        provenance_source_id=source.id,
+        storage_key="opaque/covers/no-publication.webp",
+        size_bytes=4,
+    )
+    db_session.add(cover)
+    db_session.flush()
+    backend = _backend()
+    result = source_covers.SourceCoverWrite(cover=cover, created=False)
+
+    source_covers.rollback_after_commit_failure(db_session, backend, result)
+
+    backend.rollback_create.assert_not_called()
+    backend.replace_bytes.assert_not_called()
+    assert db_session.get(ModelSourceCover, cover.id) is cover
 
 
 @pytest.mark.parametrize(
@@ -715,7 +819,13 @@ def test_finish_import_uses_only_intent_and_final_sqlite_commits(
             source_url=source.canonical_url,
             state="importing",
             manifest_json=json.dumps(
-                {"source": {"canonical_url": source.canonical_url}}
+                {
+                    "source": {
+                        "provider": source.provider,
+                        "canonical_url": source.canonical_url,
+                        "source_item_id": None,
+                    }
+                }
             ),
         )
         setup.add_all([source, row])

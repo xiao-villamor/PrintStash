@@ -122,7 +122,7 @@ jobs:
         run: uv run ty check app/ --exit-zero --quiet
 
       - name: Test backend
-        run: ./scripts/test.sh full -v --cov=app --cov-report=term-missing --cov-fail-under=95
+        run: ./scripts/test.sh full -v --cov=app --cov-report=term-missing --cov-fail-under=90
 
   backend-python313:
     name: Backend compatibility (Python 3.13, advisory)

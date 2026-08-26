@@ -672,13 +672,16 @@ test("URL capture is reviewable, reports a partial result, and restores a source
   await expect(page.getByText("Fixture maker")).toBeVisible();
   await expect(page.getByText("CC BY 4.0")).toBeVisible();
   await expect(page.getByText("Print with supports.")).toBeVisible();
-  await page.getByRole("button", { name: "Edit" }).first().click();
-  await page.getByLabel("Creator override").fill("Corrected maker");
-  await page.getByRole("button", { name: "Save" }).click();
+  const creatorField = page
+    .getByRole("heading", { name: "Creator", exact: true, level: 3 })
+    .locator("../..");
+  await creatorField.getByRole("button", { name: "Edit" }).click();
+  await creatorField.getByLabel("Creator override").fill("Corrected maker");
+  await creatorField.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Corrected maker")).toBeVisible();
   await expect(page.getByText("Edited")).toBeVisible();
-  await page.getByRole("button", { name: "Edit" }).first().click();
-  await page.getByRole("button", { name: "Restore captured value" }).click();
+  await creatorField.getByRole("button", { name: "Edit" }).click();
+  await creatorField.getByRole("button", { name: "Restore captured value" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore captured value?" });
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Restore" }).click();
@@ -724,7 +727,7 @@ test("pending import can be deleted with its staged capture", async ({ page }) =
   await dialog.getByRole("button", { name: "Delete import" }).click();
 
   await expect(page).toHaveURL(/\/inbox$/);
-  await expect(page.getByText("Capture a source URL", { exact: true })).toBeVisible();
+  await expect(page.getByText("No imports in the queue", { exact: true })).toBeVisible();
 });
 
 test.describe("shared volumes enabled", () => {

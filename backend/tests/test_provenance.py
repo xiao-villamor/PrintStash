@@ -105,6 +105,50 @@ def test_snapshot_hash_is_canonical_and_identity_uses_stable_source_id() -> None
     assert provenance.identity_key(first) == provenance.identity_key(second)
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ftp://example.com/model",
+        "https:///model",
+        "https://user:secret@example.com/model",
+    ],
+)
+def test_canonicalize_url_rejects_non_public_or_credentialed_urls(value: str) -> None:
+    with pytest.raises(ValueError, match="canonical_url_must"):
+        provenance.canonicalize_url(value)
+
+
+def test_canonicalize_url_preserves_port_and_strips_query_and_fragment() -> None:
+    assert (
+        provenance.canonicalize_url(
+            "HTTPS://Example.COM:8443/model/42?token=secret#details"
+        )
+        == "https://example.com:8443/model/42"
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        ({"source_filename": ""}, "invalid_source_filename"),
+        ({"source_filename": "x" * 513}, "invalid_source_filename"),
+        ({"blob_sha256": "not-a-sha"}, "invalid_blob_sha256"),
+    ],
+)
+def test_provenance_context_rejects_malformed_identity_fields(
+    overrides: dict[str, str], error: str
+) -> None:
+    values = {
+        "manifest": _capture(),
+        "source_file_id": "42:file-a",
+        "source_filename": "part.stl",
+        "blob_sha256": "a" * 64,
+    }
+    values.update(overrides)
+    with pytest.raises(ValueError, match=error):
+        provenance.ProvenanceContext(**values)
+
+
 def test_capture_is_idempotent_and_override_empty_wins(db_session: Session) -> None:
     model = _model(db_session)
     initial = provenance.upsert_capture(
@@ -508,6 +552,80 @@ def test_portable_attach_keeps_existing_capture_and_local_override(
     )
 
 
+def test_attach_existing_rejects_unsupported_portable_override(
+    db_session: Session,
+) -> None:
+    model = _model(db_session)
+    artifact = File(
+        model_id=model.id,
+        path="provenance/unsupported.stl",
+        original_filename="unsupported.stl",
+        file_type=FileType.STL,
+        size_bytes=1,
+        sha256="e" * 64,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    context = provenance.ProvenanceContext(
+        manifest=_capture(),
+        source_file_id="42:file-a",
+        source_filename="part.stl",
+        blob_sha256="e" * 64,
+    )
+
+    with pytest.raises(ValueError, match="unsupported_provenance_field"):
+        provenance.attach_existing_artifact(
+            db_session, artifact, context, imported_overrides={"secret": "value"}
+        )
+
+    assert (
+        db_session.exec(
+            select(ModelProvenanceField).where(
+                ModelProvenanceField.field_name == "secret"
+            )
+        ).all()
+        == []
+    )
+
+
+def test_attach_existing_imports_override_for_sparse_capture(
+    db_session: Session,
+) -> None:
+    model = _model(db_session)
+    artifact = File(
+        model_id=model.id,
+        path="provenance/sparse.stl",
+        original_filename="sparse.stl",
+        file_type=FileType.STL,
+        size_bytes=1,
+        sha256="f" * 64,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    context = provenance.ProvenanceContext(
+        manifest=_capture_without_title(),
+        source_file_id="42:file-a",
+        source_filename="part.stl",
+        blob_sha256="f" * 64,
+    )
+
+    result = provenance.attach_existing_artifact(
+        db_session, artifact, context, imported_overrides={"title": "Portable title"}
+    )
+
+    row = db_session.exec(
+        select(ModelProvenanceField).where(
+            ModelProvenanceField.provenance_source_id
+            == result.link.provenance_source_id,
+            ModelProvenanceField.field_name == "title",
+        )
+    ).one()
+    assert result.imported_override_fields == ("title",)
+    assert result.conflicting_override_fields == ()
+    assert row.captured_at is None
+    assert provenance.effective_value(row) == "Portable title"
+
+
 def test_import_key_is_stable_and_distinguishes_blob_bytes() -> None:
     capture = _capture()
     assert provenance.import_key(
@@ -608,6 +726,56 @@ def test_preflight_does_not_disclose_a_link_to_an_unrelated_actor(
     )
     assert result.status == "not_found"
     assert result.link is result.model_id is result.file_id is None
+
+
+def test_preflight_without_blob_identity_returns_not_found_without_mutation(
+    db_session: Session,
+) -> None:
+    before_models = len(db_session.exec(select(Model)).all())
+    before_files = len(db_session.exec(select(File)).all())
+
+    result = provenance.preflight_existing_artifact(
+        db_session,
+        provenance.ProvenanceContext(
+            manifest=_capture(),
+            source_file_id="42:file-a",
+            source_filename="part.stl",
+            blob_sha256=None,
+            actor_id=None,
+        ),
+    )
+
+    assert result.status == "not_found"
+    assert result.link is result.model_id is result.file_id is None
+    assert len(db_session.exec(select(Model)).all()) == before_models
+    assert len(db_session.exec(select(File)).all()) == before_files
+
+
+def test_attach_ingested_artifact_requires_blob_sha256(
+    db_session: Session,
+) -> None:
+    model = _model(db_session)
+    artifact = File(
+        model_id=model.id,
+        path="provenance/no-blob.stl",
+        original_filename="no-blob.stl",
+        file_type=FileType.STL,
+        size_bytes=1,
+        sha256="1" * 64,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    context = provenance.ProvenanceContext(
+        manifest=_capture(),
+        source_file_id="42:file-a",
+        source_filename="part.stl",
+        blob_sha256=None,
+    )
+
+    with pytest.raises(ValueError, match="provenance_context_requires_blob_sha256"):
+        provenance.attach_ingested_artifact(db_session, artifact, context)
+
+    assert db_session.exec(select(ArtifactProvenanceLink)).all() == []
 
 
 def test_live_reuse_trash_restore_and_hard_delete_follow_provenance_lifecycle(

@@ -44,8 +44,16 @@ def _headers(session: Session, name: str) -> dict[str, str]:
 
 
 def test_cults_connection_is_encrypted_scoped_and_disconnects(
-    client: TestClient, db_session: Session
+    client: TestClient, db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    async def accept_credentials(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        provider_service.CultsMetadataClient,
+        "validate_credentials",
+        accept_credentials,
+    )
     owner = _headers(db_session, "provider-owner")
     other = _headers(db_session, "provider-other")
     response = client.post(

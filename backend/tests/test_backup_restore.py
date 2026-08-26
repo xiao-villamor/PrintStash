@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -51,7 +52,7 @@ from app.db.session import (
     override_session_factory,
 )
 from app.services.auth import create_access_token, hash_password
-from app.services.storage_backend import get_backend
+from app.services.storage_backend import CreationReceipt, get_backend
 
 
 @dataclass
@@ -397,9 +398,7 @@ def test_download_backup_archive_endpoint(client: TestClient, backup_env: Backup
 
 
 def test_restore_recovers_database_rows(backup_env: BackupEnv):
-    _, key = _seed_model_with_blob(
-        backup_env, name="Widget", content=b"solid widget\n"
-    )
+    _, key = _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
     meta = backup.create_backup()
 
     # Disaster: wipe every model row.
@@ -434,9 +433,7 @@ def test_restore_recovers_database_rows(backup_env: BackupEnv):
 
 
 def test_restore_replaces_live_wal_state_without_replay(backup_env: BackupEnv):
-    _, key = _seed_model_with_blob(
-        backup_env, name="Widget", content=b"solid widget\n"
-    )
+    _, key = _seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
     meta = backup.create_backup()
 
     # Keep a WAL connection open with a committed post-backup change. A raw
@@ -1200,9 +1197,10 @@ def test_restore_skips_directory_entries_under_files_prefix(
             entries.append((member, data))
 
     updated_archive = io.BytesIO()
-    with gzip.GzipFile(fileobj=updated_archive, mode="wb") as gz, tarfile.open(
-        fileobj=gz, mode="w:"
-    ) as tar:
+    with (
+        gzip.GzipFile(fileobj=updated_archive, mode="wb") as gz,
+        tarfile.open(fileobj=gz, mode="w:") as tar,
+    ):
         for member, data in entries:
             if data is not None:
                 tar.addfile(member, io.BytesIO(data))
@@ -1392,9 +1390,10 @@ def test_restore_skips_unreadable_files_member(backup_env: BackupEnv):
             entries.append((member, data))
 
     updated_archive = io.BytesIO()
-    with gzip.GzipFile(fileobj=updated_archive, mode="wb") as gz, tarfile.open(
-        fileobj=gz, mode="w:"
-    ) as tar:
+    with (
+        gzip.GzipFile(fileobj=updated_archive, mode="wb") as gz,
+        tarfile.open(fileobj=gz, mode="w:") as tar,
+    ):
         for member, data in entries:
             if data is not None:
                 tar.addfile(member, io.BytesIO(data))
@@ -1700,6 +1699,330 @@ def test_restore_backup_endpoint_500_on_unexpected_error(
 
     assert resp.status_code == 500
     assert "kaboom" in resp.json()["detail"]
+
+
+def test_end_mutating_operation_rejects_unbalanced_call() -> None:
+    backup._active_mutations = 0
+
+    with pytest.raises(RuntimeError, match="unbalanced_mutating_operation"):
+        backup.end_mutating_operation()
+
+
+def test_restore_maintenance_timeout_clears_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backup._active_mutations = 1
+    monkeypatch.setattr(backup, "_RESTORE_DRAIN_TIMEOUT_S", 0)
+
+    with pytest.raises(backup.RestoreConflictError, match="still active"):
+        backup._begin_restore_maintenance()
+
+    assert backup.restore_in_progress() is False
+    backup.end_mutating_operation()
+    assert backup.begin_mutating_operation() is True
+    backup.end_mutating_operation()
+
+
+def test_validate_sqlite_snapshot_rejects_failed_integrity_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.execute.return_value.fetchone.return_value = ("corrupt",)
+    monkeypatch.setattr(backup.sqlite3, "connect", lambda _path: connection)
+
+    with pytest.raises(RuntimeError, match="sqlite_snapshot_integrity_check_failed"):
+        backup._validate_sqlite_snapshot(tmp_path / "snapshot.sqlite3")
+
+
+def test_sqlite_snapshot_rejects_missing_database_file(
+    backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = backup_env.root / "missing.sqlite3"
+    monkeypatch.setitem(_overlay, "db_url", f"sqlite:///{missing}")
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        with backup._sqlite_snapshot_file():
+            pass
+
+    assert exc_info.value.args == (missing,)
+
+
+def test_backup_sqlite_copy_returns_integral_snapshot(backup_env: BackupEnv) -> None:
+    payload = backup._backup_sqlite_copy()
+    snapshot = backup_env.root / "copied.sqlite3"
+    snapshot.write_bytes(payload)
+
+    with sqlite3.connect(snapshot) as connection:
+        result = connection.execute("PRAGMA integrity_check").fetchone()
+
+    assert result == ("ok",)
+
+
+def test_local_backup_ownership_requires_current_proof(backup_env: BackupEnv) -> None:
+    archive = backup_env.backup_dir / "printstash-backup-unowned.tar.gz"
+    archive.write_bytes(b"unowned")
+    meta = backup.BackupMeta(
+        id="unowned",
+        created_at="2026-01-01T00:00:00+00:00",
+        size_bytes=archive.stat().st_size,
+        storage_backend="local",
+        file_count=0,
+        app_version="0.0.0",
+        path=str(archive),
+    )
+
+    with pytest.raises(
+        backup.BackupOwnershipError, match="backup_storage_ownership_unverified"
+    ):
+        backup._require_backup_archive_owned(meta)
+
+
+def test_cloud_backup_ownership_requires_configured_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    meta = backup.BackupMeta(
+        id="cloud",
+        created_at="2026-01-01T00:00:00+00:00",
+        size_bytes=1,
+        storage_backend="s3",
+        file_count=0,
+        app_version="0.0.0",
+        path="printstash-backups/cloud.tar.gz",
+        location="s3",
+    )
+    monkeypatch.setattr(backup, "_get_backup_s3", lambda: None)
+
+    with pytest.raises(
+        backup.BackupOwnershipError, match="backup_storage_ownership_unverified"
+    ):
+        backup._require_backup_archive_owned(meta)
+
+
+def test_stage_restore_rejects_unsafe_member_before_extraction(tmp_path: Path) -> None:
+    archive = tmp_path / "unsafe.tar.gz"
+    source = tmp_path / "payload"
+    source.write_bytes(b"escape")
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname="../escape")
+
+    with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
+        backup._stage_restore_archive(archive, tmp_path / "staging")
+
+    assert not (tmp_path.parent / "escape").exists()
+
+
+def test_stage_restore_requires_database_member(tmp_path: Path) -> None:
+    archive = tmp_path / "missing-db.tar.gz"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('{"files": []}')
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(manifest, arcname="manifest.json")
+
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    with pytest.raises(RuntimeError, match="backup_member_missing:db.sqlite3"):
+        backup._stage_restore_archive(archive, staging)
+
+
+def test_rollback_preserves_object_when_proof_no_longer_matches(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    class ProofMismatchBackend:
+        @staticmethod
+        def rollback_create(_receipt: CreationReceipt) -> bool:
+            return False
+
+    backend = ProofMismatchBackend()
+    monkeypatch.setattr(backup, "get_backend", lambda: backend)
+    receipt = CreationReceipt(
+        key="vault-data/blob",
+        size=1,
+        token="proof-mismatch",
+        backend="fake",
+        namespace="test",
+    )
+    applied = [backup._AppliedBlob(key=receipt.key, receipt=receipt)]
+
+    backup._rollback_applied_blobs(applied)
+
+    assert "preserved uncertain storage key vault-data/blob" in caplog.text
+
+
+def test_rollback_continues_after_cleanup_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    first_path = tmp_path / "first"
+    second_path = tmp_path / "second"
+    first_path.write_bytes(b"first")
+    second_path.write_bytes(b"second")
+
+    class FailingCleanupBackend:
+        @staticmethod
+        def rollback_create(receipt: CreationReceipt) -> bool:
+            if receipt.key == str(first_path):
+                raise RuntimeError("cleanup failed")
+            Path(receipt.key).unlink()
+            return True
+
+    backend = FailingCleanupBackend()
+    monkeypatch.setattr(backup, "get_backend", lambda: backend)
+    first_receipt = CreationReceipt(
+        key=str(first_path),
+        size=5,
+        token="first",
+        backend="fake",
+        namespace="test",
+    )
+    second_receipt = CreationReceipt(
+        key=str(second_path),
+        size=6,
+        token="second",
+        backend="fake",
+        namespace="test",
+    )
+    applied = [
+        backup._AppliedBlob(key=str(second_path), receipt=second_receipt),
+        backup._AppliedBlob(key=str(first_path), receipt=first_receipt),
+    ]
+
+    backup._rollback_applied_blobs(applied)
+
+    assert first_path.read_bytes() == b"first"
+    assert not second_path.exists()
+    assert f"restore rollback failed for storage key {first_path}" in caplog.text
+
+
+def test_apply_staged_blobs_rejects_duplicate_destination(
+    backup_env: BackupEnv,
+) -> None:
+    first = backup_env.root / "first"
+    second = backup_env.root / "second"
+    first.write_bytes(b"one")
+    second.write_bytes(b"two")
+    destination = str(backup_env.data_dir / "duplicate.stl")
+    blobs = [
+        backup._StagedBlob(key=destination, path=first),
+        backup._StagedBlob(key=destination, path=second),
+    ]
+
+    with pytest.raises(
+        backup.RestoreConflictError, match="restore_duplicate_destination"
+    ):
+        backup._apply_staged_blobs(blobs, backup_env.root / "rollback")
+
+    assert not Path(destination).exists()
+
+
+def test_apply_staged_blobs_rolls_back_size_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    staged = tmp_path / "blob"
+    staged.write_bytes(b"five!")
+    destination = tmp_path / "published"
+
+    class SizeMismatchBackend:
+        @staticmethod
+        def exists(_key: str) -> bool:
+            return False
+
+        @staticmethod
+        def direct_path(_key: str) -> None:
+            return None
+
+        @staticmethod
+        def create_stream(source, key: str) -> CreationReceipt:
+            destination.write_bytes(source.read())
+            return CreationReceipt(
+                key=key,
+                size=1,
+                token="token",
+                backend="fake",
+                namespace="test",
+            )
+
+        @staticmethod
+        def rollback_create(_receipt: CreationReceipt) -> bool:
+            destination.unlink()
+            return True
+
+    backend = SizeMismatchBackend()
+    monkeypatch.setattr(backup, "get_backend", lambda: backend)
+
+    with pytest.raises(RuntimeError, match="restore_blob_size_mismatch"):
+        backup._apply_staged_blobs(
+            [backup._StagedBlob(key="vault-data/blob", path=staged)],
+            tmp_path / "rollback",
+        )
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        pytest.param("/absolute/blob", id="absolute"),
+        pytest.param("vault-data/../escape", id="traversal"),
+        pytest.param("other-prefix/blob", id="wrong-prefix"),
+    ],
+)
+def test_validate_restore_key_rejects_remote_key_outside_namespace(
+    key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class OpaqueBackend:
+        @staticmethod
+        def direct_path(_key: str) -> None:
+            return None
+
+    backend = OpaqueBackend()
+    monkeypatch.setattr(backup, "get_backend", lambda: backend)
+
+    with pytest.raises(RuntimeError, match="backup_restore_key_outside_storage"):
+        backup._validate_restore_key(key)
+
+
+def test_validate_restore_key_rejects_local_path_outside_managed_roots(
+    backup_env: BackupEnv,
+) -> None:
+    outside = backup_env.root / "outside" / "blob.stl"
+
+    with pytest.raises(RuntimeError, match="backup_restore_key_outside_storage"):
+        backup._validate_restore_key(str(outside))
+
+
+def test_restore_database_rejects_non_file_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(backup, "_db_path", lambda: None)
+
+    with pytest.raises(RuntimeError, match="cannot restore to non-file database"):
+        backup._restore_database_from_path(tmp_path / "source.sqlite3")
+
+
+def test_restore_database_rejects_failed_destination_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source_path = tmp_path / "source.sqlite3"
+    destination_path = tmp_path / "destination.sqlite3"
+    source_path.write_bytes(b"source")
+    destination_path.write_bytes(b"destination")
+    source = MagicMock()
+    destination = MagicMock()
+    source.__enter__.return_value = source
+    destination.__enter__.return_value = destination
+    destination.execute.return_value.fetchone.return_value = ("corrupt",)
+    connections = iter([source, destination])
+    monkeypatch.setattr(backup, "_db_path", lambda: destination_path)
+    monkeypatch.setattr(backup, "_validate_sqlite_snapshot", lambda _path: None)
+    monkeypatch.setattr(backup, "_dispose_session_engine", lambda: None)
+    monkeypatch.setattr(
+        backup.sqlite3, "connect", lambda *_args, **_kwargs: next(connections)
+    )
+
+    with pytest.raises(RuntimeError, match="restored_database_integrity_check_failed"):
+        backup._restore_database_from_path(source_path)
 
 
 @requires_s3

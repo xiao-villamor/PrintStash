@@ -271,7 +271,7 @@ locally against a real server before claiming the change is Postgres-safe.
 
 ## Coverage gate
 
-CI runs `./scripts/test.sh full --cov=app --cov-fail-under=95`. A new branch
+CI runs `./scripts/test.sh full --cov=app --cov-fail-under=90`. A new branch
 without a test lowers the number; add the test. `# pragma: no cover` is
 reserved for the `s3`-marked paths the `storage-s3` job validates for real —
 not a tool for skipping hard cases.

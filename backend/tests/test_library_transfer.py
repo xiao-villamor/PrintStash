@@ -1,3 +1,9 @@
+"""Portable library archives round-trip data without unsafe or partial writes.
+
+The suite defends archive compatibility, size/path preflight, idempotent import,
+and the exact metadata operators need when moving a vault between installs.
+"""
+
 from __future__ import annotations
 
 import inspect
@@ -290,6 +296,121 @@ def test_library_archive_export_preflights_import_entry_limit(
 
     with pytest.raises(ValueError, match="archive_too_large"):
         library_transfer.create_archive(db_session, user)
+
+
+def _portable_artifact(*, source_id: int) -> dict[str, object]:
+    return {
+        "source_id": source_id,
+        "entry": f"blobs/{source_id}.stl",
+        "original_filename": f"{source_id}.stl",
+        "file_type": "stl",
+        "version": 1,
+        "size_bytes": 0,
+        "sha256": f"{source_id:x}".zfill(64),
+    }
+
+
+def _portable_model(*, source_id: int, artifacts: list[dict[str, object]]) -> dict:
+    return {
+        "source_id": source_id,
+        "name": f"Model {source_id}",
+        "hash": f"{source_id:x}".zfill(64),
+        "artifacts": artifacts,
+    }
+
+
+def test_portable_manifest_rejects_duplicate_model_source_ids() -> None:
+    payload = {
+        "format": library_transfer.FORMAT,
+        "models": [
+            _portable_model(source_id=1, artifacts=[]),
+            _portable_model(source_id=1, artifacts=[]),
+        ],
+    }
+
+    with pytest.raises(ValueError, match="duplicate model source_id"):
+        library_transfer.PortableManifest.model_validate(payload)
+
+
+def test_portable_manifest_rejects_duplicate_artifact_source_ids() -> None:
+    payload = {
+        "format": library_transfer.FORMAT,
+        "models": [
+            _portable_model(source_id=1, artifacts=[_portable_artifact(source_id=5)]),
+            _portable_model(source_id=2, artifacts=[_portable_artifact(source_id=5)]),
+        ],
+    }
+
+    with pytest.raises(ValueError, match="duplicate artifact source_id"):
+        library_transfer.PortableManifest.model_validate(payload)
+
+
+def test_library_archive_export_rejects_oversized_manifest(
+    db_session: Session,
+    auth_headers: dict[str, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, _, _ = _seed(db_session, tmp_path)
+    monkeypatch.setattr(library_transfer, "MAX_MANIFEST_BYTES", 1)
+
+    with pytest.raises(ValueError, match="archive_too_large"):
+        library_transfer.create_archive(db_session, user)
+
+
+def test_artifact_member_validation_rejects_missing_blob(tmp_path: Path) -> None:
+    archive_path = tmp_path / "missing-blob.zip"
+    with zipfile.ZipFile(archive_path, "w"):
+        pass
+
+    with zipfile.ZipFile(archive_path) as archive:
+        with pytest.raises(ValueError, match="archive_blob_missing"):
+            library_transfer._validate_artifact_member(
+                archive,
+                {"entry": "blobs/missing.stl", "size_bytes": 0, "sha256": "a" * 64},
+            )
+
+
+def test_artifact_member_validation_rejects_non_numeric_size(tmp_path: Path) -> None:
+    archive_path = tmp_path / "invalid-size.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("blobs/part.stl", b"solid")
+
+    with zipfile.ZipFile(archive_path) as archive:
+        with pytest.raises(ValueError, match="invalid_manifest"):
+            library_transfer._validate_artifact_member(
+                archive,
+                {
+                    "entry": "blobs/part.stl",
+                    "size_bytes": "not-a-number",
+                    "sha256": "a" * 64,
+                },
+            )
+
+
+def test_sidecar_reader_rejects_duplicate_manifest_members(tmp_path: Path) -> None:
+    archive_path = tmp_path / "duplicate-manifest.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", "{}")
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            archive.writestr("manifest.json", "{}")
+
+    with zipfile.ZipFile(archive_path) as archive:
+        with pytest.raises(ValueError, match="portable_manifest_invalid"):
+            library_transfer._read_provenance_sidecar(archive, {"models": []})
+
+
+def test_sidecar_reader_accepts_archive_without_optional_sidecar(
+    tmp_path: Path,
+) -> None:
+    archive_path = tmp_path / "without-sidecar.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", "{}")
+
+    with zipfile.ZipFile(archive_path) as archive:
+        result = library_transfer._read_provenance_sidecar(archive, {"models": []})
+
+    assert result is None
 
 
 def test_library_archive_limit_covers_large_library_reference() -> None:

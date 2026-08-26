@@ -1,3 +1,9 @@
+"""Provider composition preserves honest capabilities and credential gates.
+
+These tests defend the application-level adapter boundary independently from
+wire-protocol tests so unsupported hardware operations cannot reach I/O.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,6 +16,13 @@ import pytest
 from paho.mqtt import client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
+from printstash_core.printers import (
+    BambuConfig,
+    ElegooCentauriConfig,
+    MoonrakerConfig,
+    OctoPrintConfig,
+    PrusaLinkConfig,
+)
 
 from app.db.models import Printer, PrinterProvider
 from app.services.printer_provider import (
@@ -207,7 +220,9 @@ class TestProviderFactory:
             provider_variant="elegoo_centauri_carbon",
             elegoo_centauri_host="192.168.1.50",
         )
-        assert isinstance(get_provider_client(p, registry=self.registry), ElegooCentauriProvider)
+        assert isinstance(
+            get_provider_client(p, registry=self.registry), ElegooCentauriProvider
+        )
 
     def test_centauri_carbon_2_requires_access_code(self):
         p = Printer(
@@ -248,6 +263,154 @@ class TestProviderFactory:
         with pytest.raises(ProviderError) as exc:
             get_provider_client(p, registry=self.registry)
         assert exc.value.code == "provider_credentials_missing"
+
+    def test_moonraker_missing_url_is_rejected(self):
+        printer = Printer(name="moonraker", provider=PrinterProvider.MOONRAKER)
+
+        with pytest.raises(ProviderError) as exc_info:
+            MoonrakerProvider.build(printer)
+
+        assert exc_info.value.code == "provider_credentials_missing"
+
+    def test_prusalink_api_key_credentials_build_provider(self):
+        printer = Printer(
+            name="mk4",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://mk4.local",
+            prusalink_auth_mode="api_key",
+            prusalink_api_key="fake-api-key",
+        )
+
+        provider = PrusaLinkProvider.build(printer)
+
+        assert isinstance(provider, PrusaLinkProvider)
+
+    def test_prusalink_api_key_mode_requires_key(self):
+        printer = Printer(
+            name="mk4",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://mk4.local",
+            prusalink_auth_mode="api_key",
+        )
+
+        with pytest.raises(ProviderError) as exc_info:
+            PrusaLinkProvider.build(printer)
+
+        assert exc_info.value.code == "provider_credentials_missing"
+
+    def test_centauri_unknown_variant_is_rejected(self):
+        printer = Printer(
+            name="unknown-centauri",
+            provider=PrinterProvider.ELEGOO_CENTAURI,
+            provider_variant="unknown",
+            elegoo_centauri_host="192.0.2.20",
+        )
+
+        with pytest.raises(ProviderError) as exc_info:
+            ElegooCentauriProvider.build(printer)
+
+        assert exc_info.value.code == "provider_credentials_missing"
+
+    def test_centauri_carbon_2_with_access_code_builds_provider(self):
+        printer = Printer(
+            name="cc2",
+            provider=PrinterProvider.ELEGOO_CENTAURI,
+            provider_variant="elegoo_centauri_carbon_2",
+            elegoo_centauri_host="192.0.2.21",
+            elegoo_centauri_access_code="12345678",
+        )
+
+        provider = ElegooCentauriProvider.build(printer)
+
+        assert isinstance(provider, ElegooCentauriProvider)
+
+    @pytest.mark.parametrize(
+        ("printer", "expected"),
+        [
+            pytest.param(
+                Printer(
+                    name="moonraker",
+                    provider=PrinterProvider.MOONRAKER,
+                    moonraker_url="http://192.0.2.1:7125",
+                    api_key="fake-key",
+                    provider_variant="elegoo_neptune4",
+                ),
+                MoonrakerConfig(
+                    base_url="http://192.0.2.1:7125",
+                    api_key="fake-key",
+                    variant="elegoo_neptune4",
+                ),
+                id="moonraker",
+            ),
+            pytest.param(
+                Printer(
+                    name="bambu",
+                    provider=PrinterProvider.BAMBU_LAN,
+                    bambu_host="192.0.2.2",
+                    bambu_serial="FAKE-SERIAL",
+                    bambu_access_code="12345678",
+                ),
+                BambuConfig(
+                    host="192.0.2.2", serial="FAKE-SERIAL", access_code="12345678"
+                ),
+                id="bambu-lan",
+            ),
+            pytest.param(
+                Printer(
+                    name="prusalink",
+                    provider=PrinterProvider.PRUSALINK,
+                    prusalink_url="http://192.0.2.3",
+                    prusalink_auth_mode="api_key",
+                    prusalink_api_key="fake-key",
+                ),
+                PrusaLinkConfig(
+                    base_url="http://192.0.2.3",
+                    auth_mode="api_key",
+                    username=None,
+                    password=None,
+                    api_key="fake-key",
+                ),
+                id="prusalink",
+            ),
+            pytest.param(
+                Printer(
+                    name="octoprint",
+                    provider=PrinterProvider.OCTOPRINT,
+                    octoprint_url="http://192.0.2.4",
+                    octoprint_api_key="fake-key",
+                ),
+                OctoPrintConfig(base_url="http://192.0.2.4", api_key="fake-key"),
+                id="octoprint",
+            ),
+            pytest.param(
+                Printer(
+                    name="centauri",
+                    provider=PrinterProvider.ELEGOO_CENTAURI,
+                    provider_variant="elegoo_centauri_carbon",
+                    elegoo_centauri_host="192.0.2.5",
+                    elegoo_centauri_mainboard_id="FAKE-BOARD",
+                ),
+                ElegooCentauriConfig(
+                    host="192.0.2.5",
+                    model="elegoo_centauri_carbon",
+                    access_code=None,
+                    mainboard_id="FAKE-BOARD",
+                ),
+                id="elegoo-centauri",
+            ),
+        ],
+    )
+    def test_printer_record_copies_to_neutral_config(self, printer, expected):
+        assert printer_config_from_model(printer) == expected
+
+    def test_unknown_provider_record_is_rejected(self):
+        printer = Printer(name="unknown", provider=PrinterProvider.MOONRAKER)
+        object.__setattr__(printer, "provider", "unknown")
+
+        with pytest.raises(ProviderError) as exc_info:
+            printer_config_from_model(printer)
+
+        assert exc_info.value.code == "unknown_provider"
 
 
 def _fake_mqtt_client() -> MagicMock:

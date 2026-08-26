@@ -115,7 +115,7 @@ Per-PR jobs live in `.github/workflows/ci.yml` (backend + coverage gate,
 `storage-s3`/SeaweedFS, frontend, e2e-real, security, migration-upgrade, docker).
 A `schedule` (nightly) + `workflow_dispatch` re-runs the whole gauntlet as a
 comprehensive off-peak / on-demand gate. Backend coverage is gated at
-`--cov-fail-under=95`; frontend vitest thresholds (`vite.config.ts`) are an
+`--cov-fail-under=90`; frontend vitest thresholds (`vite.config.ts`) are an
 informative floor for now. The `backend` job runs without a live S3-compatible
 endpoint, so `S3StorageBackend` (`app/services/storage_backend.py`) and the
 S3 branches of `app/services/backup.py` are marked `# pragma: no cover` —

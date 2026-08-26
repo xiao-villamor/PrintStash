@@ -97,23 +97,33 @@ async def test_offline_capture_import_recapture_deduplicates_durable_artifact(
     api, superuser_headers, e2e_db, monkeypatch, tmp_path
 ) -> None:
     """Offline URL capture follows the real Inbox/import/provenance transaction."""
-    manifest = _captured_manifest()
     manifest = CaptureManifestV2.from_dict(
         {
-            **manifest.to_dict(),
+            **_captured_manifest().to_dict(),
             "files": [
-                {"id": "stl-1", "name": "benchy.gcode", "file_type": "gcode", "size": 1}
+                {
+                    "id": "stl-1",
+                    "name": "benchy.gcode",
+                    "file_type": "gcode",
+                    "size": 1,
+                }
             ],
         }
     )
     monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+    # The API/background task writes through separate SQLite connections.
+    # Keep this assertion session out of a read transaction while they run.
+    e2e_db.commit()
 
     async def _fixture_capture(_url: str) -> CaptureManifestV2:
         return manifest
 
     async def _fixture_resolved(
-        _url: str, _manifest: CaptureManifestV2, _ids: list[str]
-    ):
+        _url: str,
+        _manifest: CaptureManifestV2,
+        _ids: list[str],
+        _context: object,
+    ) -> list[ResolvedAsset]:
         return [_stage_fixture_asset(tmp_path, manifest).resolved]
 
     async def _fixture_stage(resolved: ResolvedAsset) -> list[StagedAsset]:
@@ -151,6 +161,7 @@ async def test_offline_capture_import_recapture_deduplicates_durable_artifact(
     assert len(e2e_db.exec(select(File)).all()) == 1
     assert len(e2e_db.exec(select(ArtifactProvenanceLink)).all()) == 1
     assert len(e2e_db.exec(select(Model)).all()) == 1
+    e2e_db.commit()
 
     model_id = first["results"][0]["model_id"]
     source = (
@@ -175,7 +186,9 @@ async def test_offline_capture_import_recapture_deduplicates_durable_artifact(
     preserved = await api.get(
         f"/api/v1/models/{model_id}/provenance", headers=superuser_headers
     )
-    assert preserved.json()["sources"][0]["fields"][0]["effective_value"] == "My Benchy"
+    assert preserved.json()["sources"][0]["fields"][0]["effective_value"] == (
+        "My Benchy"
+    )
 
 
 @pytest.mark.asyncio
@@ -194,13 +207,17 @@ async def test_offline_capture_partial_result_retries_only_failed_selection(
         }
     )
     monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+    e2e_db.commit()
     resolution_calls: list[list[str]] = []
 
     async def _fixture_capture(_url: str) -> CaptureManifestV2:
         return manifest
 
     async def _fixture_resolved(
-        _url: str, _manifest: CaptureManifestV2, selected_ids: list[str]
+        _url: str,
+        _manifest: CaptureManifestV2,
+        selected_ids: list[str],
+        _context: object,
     ) -> list[ResolvedAsset]:
         resolution_calls.append(selected_ids)
         return [
@@ -240,7 +257,7 @@ async def test_offline_capture_partial_result_retries_only_failed_selection(
         if kwargs["original_filename"] == "bad.gcode" and fail_bad:
             fail_bad = False
             raise RuntimeError("fixture_child_failure")
-        original_ingest(*args, **kwargs)
+        return original_ingest(*args, **kwargs)
 
     monkeypatch.setattr(
         inbox.import_resolvers, "resolve_capture_manifest", _fixture_capture
@@ -268,8 +285,12 @@ async def test_offline_capture_partial_result_retries_only_failed_selection(
     ).json()
     assert partial["state"] == "completed"
     assert partial["completion"] == "partial"
-    assert {result["state"] for result in partial["results"]} == {"imported", "failed"}
+    assert {result["state"] for result in partial["results"]} == {
+        "imported",
+        "failed",
+    }
     assert len(e2e_db.exec(select(File)).all()) == 1
+    e2e_db.commit()
 
     retried = await api.post(
         f"/api/v1/inbox/{item_id}/retry", headers=superuser_headers

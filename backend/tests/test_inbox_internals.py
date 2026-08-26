@@ -7,13 +7,15 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from contextlib import nullcontext
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
-from printstash_core.imports import CaptureManifestV2
+from printstash_core.imports import CaptureManifestV2, ResolvedAsset
 from sqlmodel import Session, select
 
 from app.core.config import _overlay, settings
@@ -42,6 +44,7 @@ from app.schemas.inbox import CaptureUploadSlotsCreate, InboxItemUpdate
 from app.services import import_resolvers, importer, inbox, staging_leases
 from app.services.auth import hash_password
 from app.services.jobs import registry
+from app.services.storage_backend import StorageBackend
 
 
 def _make_user(session: Session, username: str, *, admin: bool = True) -> User:
@@ -77,6 +80,33 @@ def _make_item(session: Session, owner: User, **overrides) -> InboxItem:
     session.commit()
     session.refresh(row)
     return row
+
+
+def _capture_manifest(*file_names: str) -> CaptureManifestV2:
+    return CaptureManifestV2.from_dict(
+        {
+            "schema_version": 2,
+            "kind": "model_files",
+            "source": {
+                "provider": "printables",
+                "canonical_url": "https://www.printables.com/model/42-bracket",
+                "source_item_id": "42",
+                "source_revision": None,
+                "adapter_version": "printables-v1",
+                "fields": {},
+            },
+            "files": [
+                {
+                    "id": name,
+                    "name": name,
+                    "file_type": Path(name).suffix.lstrip("."),
+                    "size": None,
+                }
+                for name in file_names
+            ],
+            "selected_ids": list(file_names),
+        }
+    )
 
 
 def test_begin_browser_import_transfer_failure_rolls_back_job_and_lease(
@@ -1107,6 +1137,12 @@ async def test_legacy_browser_file_failure_retry_then_success_returns_lease_to_r
         select(StagingLease).where(StagingLease.background_job_id == job_id)
     ).one()
     assert lease.inbox_item_id is None
+    retry_now = lease.expires_at - timedelta(minutes=1)
+    monkeypatch.setattr(
+        staging_leases,
+        "utcnow",
+        lambda: retry_now,
+    )
 
     retried = inbox.retry(db_session, failed)
     assert retried.state == InboxItemState.REVIEW
@@ -1115,6 +1151,9 @@ async def test_legacy_browser_file_failure_retry_then_success_returns_lease_to_r
     ).one()
     assert returned.inbox_item_id == row.id
     assert returned.background_job_id is None
+    # Release the read transaction before ``run_import`` opens its own
+    # engine-bound session and writes the next job state.
+    db_session.commit()
 
     def complete_import(*, job_id: str, **_kwargs) -> None:
         registry.update(job_id, state="completed", model_id=23)
@@ -1604,3 +1643,188 @@ def test_reconcile_fails_importing_item_without_finished_job(
         fresh = session.get(InboxItem, row.id)
         assert fresh.state == InboxItemState.FAILED
         assert fresh.error_code == "import_interrupted"
+
+
+@pytest.mark.asyncio
+async def test_download_assets_expands_importable_archive_and_removes_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"archive")
+    extracted = tmp_path / "part.stl"
+
+    async def download(_url: str) -> tuple[Path, str]:
+        return archive, "bundle.zip"
+
+    async def no_page_url(_url: str) -> None:
+        return None
+
+    async def immediate(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(import_resolvers, "resolve_page_url", no_page_url)
+    monkeypatch.setattr(inbox.asyncio, "to_thread", immediate)
+    monkeypatch.setattr(importer, "download_to_staging", download)
+    monkeypatch.setattr(
+        importer,
+        "inspect_archive",
+        lambda _path: [
+            importer.ArchiveEntry("mesh", "part.stl", 4, "stl", False),
+            importer.ArchiveEntry("note", "readme.txt", 4, None, False),
+        ],
+    )
+
+    def extract(_path: Path, selected: list[str]) -> list[tuple[Path, str]]:
+        assert selected == ["part.stl"]
+        extracted.write_bytes(b"mesh")
+        return [(extracted, "part.stl")]
+
+    monkeypatch.setattr(importer, "extract_selected", extract)
+
+    assert await inbox._download_assets("https://example.test/page") == [
+        (extracted, "part.stl")
+    ]
+    assert not archive.exists()
+
+
+@pytest.mark.asyncio
+async def test_download_resolved_zip_retains_selection_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _capture_manifest("bundle.zip")
+    resolved = ResolvedAsset(
+        manifest=manifest,
+        source_selection_id="bundle.zip",
+        source_file_id="bundle.zip",
+        source_filename="bundle.zip",
+        download_url="https://download.test/bundle.zip",
+        source_item_id="42",
+    )
+    archive = tmp_path / "bundle.zip"
+    archive.write_bytes(b"archive")
+    first = tmp_path / "one.stl"
+    second = tmp_path / "two.3mf"
+
+    async def download(_url: str) -> tuple[Path, str]:
+        return archive, "bundle.zip"
+
+    async def immediate(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(inbox.asyncio, "to_thread", immediate)
+    monkeypatch.setattr(importer, "download_to_staging", download)
+    monkeypatch.setattr(
+        importer,
+        "inspect_archive",
+        lambda _path: [
+            importer.ArchiveEntry("one", "one.stl", 3, "stl", False),
+            importer.ArchiveEntry("two", "two.3mf", 3, "3mf", False),
+        ],
+    )
+
+    def extract(_path: Path, selected: list[str]) -> list[tuple[Path, str]]:
+        assert selected == ["one.stl", "two.3mf"]
+        first.write_bytes(b"one")
+        second.write_bytes(b"two")
+        return [(first, "one.stl"), (second, "two.3mf")]
+
+    monkeypatch.setattr(importer, "extract_selected", extract)
+
+    assets = await inbox._download_resolved_asset(resolved)
+
+    assert [asset.resolved for asset in assets] == [resolved, resolved]
+    assert [asset.container_entry_path for asset in assets] == ["one.stl", "two.3mf"]
+    assert len({asset.result_key for asset in assets}) == 2
+    assert [asset.blob_sha256 for asset in assets] == [
+        hashlib.sha256(b"one").hexdigest(),
+        hashlib.sha256(b"two").hexdigest(),
+    ]
+    assert not archive.exists()
+
+
+@pytest.mark.asyncio
+async def test_browser_zip_staging_uses_manifest_identity_and_removes_unknown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _capture_manifest("part.stl")
+    archive = tmp_path / "capture.zip"
+    archive.write_bytes(b"browser-owned")
+    selected = tmp_path / "part.stl"
+    unknown = tmp_path / "unknown.stl"
+
+    def extract(_path: Path, wanted: list[str]) -> list[tuple[Path, str]]:
+        assert wanted == ["part.stl"]
+        selected.write_bytes(b"part")
+        unknown.write_bytes(b"unknown")
+        return [(selected, "part.stl"), (unknown, "unknown.stl")]
+
+    async def immediate(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(inbox.asyncio, "to_thread", immediate)
+    monkeypatch.setattr(importer, "extract_selected", extract)
+    assets = await inbox._stage_local_capture_assets(archive, manifest, ["part.stl"])
+
+    assert len(assets) == 1
+    assert assets[0].source_selection_id == "part.stl"
+    assert assets[0].container_entry_path == "part.stl"
+    assert assets[0].staged_path == selected
+    assert archive.exists()
+    assert not unknown.exists()
+
+
+@pytest.mark.asyncio
+async def test_browser_single_asset_is_copied_and_review_source_remains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def immediate(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(inbox.asyncio, "to_thread", immediate)
+    _overlay["staging_dir"] = tmp_path / "staging"
+    settings.incoming_dir.mkdir(parents=True)
+    source = tmp_path / "part.stl"
+    source.write_bytes(b"solid part")
+    manifest = _capture_manifest("part.stl")
+
+    assets = await inbox._stage_local_capture_assets(source, manifest, ["part.stl"])
+
+    assert len(assets) == 1
+    assert source.read_bytes() == b"solid part"
+    assert assets[0].staged_path != source
+    assert assets[0].staged_path.read_bytes() == b"solid part"
+    assert assets[0].source_selection_id == "part.stl"
+    assert assets[0].blob_sha256 == hashlib.sha256(b"solid part").hexdigest()
+
+
+def test_capture_slot_staging_rejects_incomplete_selection() -> None:
+    manifest = _capture_manifest("one.stl", "two.stl")
+
+    with pytest.raises(importer.ImportError_, match="capture_upload_slots_incomplete"):
+        inbox._stage_capture_upload_slot_assets(
+            manifest, ["two.stl"], {"one.stl": "slot/one"}
+        )
+
+
+def test_capture_slot_staging_copies_exact_bytes_through_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _overlay["staging_dir"] = tmp_path / "staging"
+    settings.incoming_dir.mkdir(parents=True)
+    source = tmp_path / "durable.stl"
+    source.write_bytes(b"durable bytes")
+    backend = MagicMock(spec=StorageBackend)
+    backend.local_path.return_value = nullcontext(source)
+    monkeypatch.setattr(inbox, "get_backend", lambda: backend)
+    manifest = _capture_manifest("part.stl")
+
+    assets = inbox._stage_capture_upload_slot_assets(
+        manifest, ["part.stl"], {"part.stl": "capture-slots/part"}
+    )
+
+    backend.local_path.assert_called_once_with("capture-slots/part")
+    assert len(assets) == 1
+    assert assets[0].staged_path.read_bytes() == b"durable bytes"
+    assert assets[0].blob_sha256 == hashlib.sha256(b"durable bytes").hexdigest()
+    assert assets[0].resolved.source_file_id == "part.stl"
+    assert assets[0].resolved.source_item_id == "42"

@@ -12,10 +12,13 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
+from typing import Iterator
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
+from sqlalchemy import event
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.db.models import (
     File,
@@ -26,11 +29,39 @@ from app.db.models import (
     PrintJob,
     PrintJobState,
 )
-from app.db.session import get_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+    override_session_factory,
+)
 from app.services.printer_hub import PrinterHub
 from app.services.printer_provider import build_provider_registry, get_provider_client
 from tests.e2e.fakes.mock_printer import create_app
 from tests.e2e.fakes.server import start_server
+
+
+@pytest.fixture(autouse=True)
+def _use_file_backed_db(tmp_path: Path, threaded_hub_db: None) -> Iterator[None]:
+    """Give concurrent PrinterHub workers production-like SQLite connections.
+
+    Both emulated printers drive real ``asyncio.to_thread`` writes. A temporary
+    on-disk database supports WAL, so readers and the two independent worker
+    connections do not acquire shared-cache table locks. The dependency keeps
+    fixture ordering and restores the suite's default factory on teardown.
+    """
+    del threaded_hub_db
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'fleet-emulators.sqlite'}",
+        connect_args={"check_same_thread": False, "timeout": 5},
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    SQLModel.metadata.create_all(engine)
+    override_session_factory(SQLiteSessionFactory(engine))
+    try:
+        yield
+    finally:
+        engine.dispose()
 
 
 class _Backend:

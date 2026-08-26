@@ -25,7 +25,13 @@ from app.db.models import (
     Model,
     ShareLink,
     StorageDeleteIntent,
+    User,
+    VaultAuditFinding,
+    VaultAuditFindingState,
+    VaultAuditMode,
+    VaultAuditRun,
 )
+from app.services import trash
 from app.services.storage_backend import get_backend
 from app.services.storage_ownership import record_creation
 from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
@@ -89,6 +95,114 @@ def _binary_document(session: Session, storage, name: str = "manual.pdf") -> Doc
     session.commit()
     _owned_write(session, storage, storage.document_file_key(doc.id, name))
     return doc
+
+
+class TestRequireDestructiveMaintenanceSafe:
+    def test_open_namespace_escape_blocks_destructive_maintenance(
+        self, db_session: Session
+    ) -> None:
+        user = User(username="audit-owner", hashed_password="not-used")
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+        run = VaultAuditRun(requested_by=user.id, mode=VaultAuditMode.QUICK)
+        db_session.add(run)
+        db_session.commit()
+        db_session.refresh(run)
+        db_session.add(
+            VaultAuditFinding(
+                run_id=run.id,
+                code="managed_storage_namespace_escape",
+                severity="critical",
+                state=VaultAuditFindingState.OPEN,
+                resource_type="storage",
+                resource_identifier="vault",
+                details_json='{"detail":"managed root escaped"}',
+            )
+        )
+        db_session.commit()
+
+        with pytest.raises(
+            trash.UnsafeStorageDeleteError, match="storage_cleanup_blocked"
+        ):
+            trash._require_destructive_maintenance_safe(db_session)
+
+
+class TestClaimPurge:
+    def test_unpersisted_resource_is_rejected(self, db_session: Session) -> None:
+        model = Model(name="unpersisted", slug="unpersisted", hash="u" * 64)
+
+        with pytest.raises(trash.PurgeConflictError, match="storage_cleanup_blocked"):
+            trash._claim_purge(db_session, model)
+
+
+class TestPreflightPrimaryKeys:
+    def test_access_probe_failure_is_translated(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = get_backend()
+
+        def reject(_keys):
+            raise PermissionError("read-only")
+
+        monkeypatch.setattr(backend, "verify_destructive_access", reject)
+
+        with pytest.raises(
+            trash.UnsafeStorageDeleteError, match="storage_delete_access_unverified"
+        ):
+            trash._preflight_primary_keys(db_session, ["owned-key"])
+
+
+class TestRestoreModel:
+    def test_active_purge_claim_is_rejected(self, db_session: Session) -> None:
+        model = Model(
+            name="claimed",
+            slug="claimed-restore",
+            hash="r" * 64,
+            deleted_at=utcnow(),
+            purge_token="claim-token",
+        )
+        db_session.add(model)
+        db_session.commit()
+
+        with pytest.raises(trash.PurgeConflictError, match="storage_cleanup_blocked"):
+            trash.restore_model(db_session, model)
+
+
+class TestRestoreDocument:
+    def test_active_purge_claim_is_rejected(self, db_session: Session) -> None:
+        document = Document(
+            name="claimed-document",
+            kind=DocumentKind.MARKDOWN,
+            deleted_at=utcnow(),
+            purge_token="claim-token",
+        )
+        db_session.add(document)
+        db_session.commit()
+
+        with pytest.raises(trash.PurgeConflictError, match="storage_cleanup_blocked"):
+            trash.restore_document(db_session, document)
+
+
+class TestHardDeleteExpiredModels:
+    def test_negative_retention_preserves_expired_models(
+        self, db_session: Session
+    ) -> None:
+        model = Model(
+            name="retained",
+            slug="negative-retention",
+            hash="n" * 64,
+            deleted_at=utcnow() - timedelta(days=365),
+        )
+        db_session.add(model)
+        db_session.commit()
+        db_session.refresh(model)
+
+        purged_ids = trash.hard_delete_expired_models(db_session, retention_days=-1)
+
+        assert purged_ids == []
+        db_session.expire_all()
+        assert db_session.get(Model, model.id) is not None
 
 
 def test_gc_preserves_document_blobs(db_session: Session, storage) -> None:

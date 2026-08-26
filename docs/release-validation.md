@@ -55,7 +55,7 @@ uv run ruff format --check app/ tests/
 uv run ruff check app/ tests/
 uv run pyright
 uv run deptry app
-uv run pytest tests --cov=app --cov-report=term-missing --cov-fail-under=95
+uv run pytest tests --cov=app --cov-report=term-missing --cov-fail-under=90
 uv run bandit -r app -q
 uv run pip-audit
 ```

@@ -60,6 +60,22 @@ def test_set_sqlite_pragmas_configures_connection(tmp_path) -> None:
         engine.dispose()
 
 
+def test_invalid_sqlite_synchronous_mode_falls_back_to_normal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setitem(_overlay, "sqlite_synchronous", "unsafe")
+    engine = create_engine(f"sqlite:///{tmp_path / 'invalid-pragma.sqlite'}")
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+
+    try:
+        with engine.connect() as connection:
+            synchronous = connection.exec_driver_sql("PRAGMA synchronous").scalar()
+    finally:
+        engine.dispose()
+
+    assert synchronous == 1
+
+
 # --------------------------------------------------------------------------- #
 # Async engine URL translation
 # --------------------------------------------------------------------------- #
