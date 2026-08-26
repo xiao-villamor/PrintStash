@@ -42,7 +42,7 @@ layer.
 - Confirm dialogs come from `components/ui/confirm-modal`: scope the click to
   `page.getByRole("dialog").getByRole("button", { name: "Delete" })`.
 - Fleet specs use the standalone Moonraker + Spoolman emulator
-  (`backend/tests/e2e/fakes/mock_printer.py`, started by
+  (`backend/tests/fakes/mock_printer.py`, started by
   `scripts/start-mock-printer.sh`). Add a printer pointed at
   `http://127.0.0.1:${PLAYWRIGHT_MOCK_PRINTER_PORT}`; it's a live printer with
   no hardware.

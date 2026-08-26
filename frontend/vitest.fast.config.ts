@@ -18,7 +18,7 @@ export default defineConfig({
       "src/generated/__tests__/printer-contracts.test.ts",
       "src/lib/__tests__/currency.test.ts",
       "src/lib/__tests__/errors.test.ts",
-      "src/lib/__tests__/printer-provider-contract.test.ts",
+      "src/lib/__tests__/printer-providers.test.ts",
     ],
   },
 });

@@ -176,7 +176,7 @@ jobs:
         run: uv sync --extra dev --extra async-db --frozen
 
       - name: Test optional SQLite async contracts
-        run: uv run pytest tests/test_db_session.py -v -k "async or capability"
+        run: uv run pytest tests/integration/db/test_session.py -v -k "async or capability"
 
   postgres:
     name: PostgreSQL contracts
@@ -218,7 +218,7 @@ jobs:
       - name: Test PostgreSQL migrations and critical contracts
         env:
           PRINTSTASH_TEST_POSTGRES_URL: postgresql://printstash:printstash@localhost:5432/printstash
-        run: uv run pytest tests/postgres -v
+        run: uv run pytest tests/integration/postgres -v
 
   storage-s3:
     name: Storage backend (S3/SeaweedFS)
@@ -261,7 +261,9 @@ jobs:
       - name: Test S3 storage backend + backup destination against real SeaweedFS
         env:
           PRINTSTASH_TEST_S3_ENDPOINT: http://localhost:9100
-        run: uv run pytest tests/test_storage_s3.py tests/test_backup_restore.py -v
+        run: >-
+          uv run pytest tests/contract/services/test_storage_backend.py
+          tests/integration/services/backup -m s3 -v
 
   security:
     name: Security scan

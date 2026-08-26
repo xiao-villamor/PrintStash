@@ -32,10 +32,11 @@ Adding a provider means writing one class (module docstring in
       advertise a capability firmware can't safely honor (Centauri file-list
       probes crash the printer daemon — that's why upload/list stay off).
 - [ ] Conformance: add a `FULL_CREDENTIALS` row in
-      `tests/test_provider_conformance.py` — the suite then auto-tests the
+      `tests/unit/services/printer_provider/test_provider_conformance.py` — the suite then auto-tests the
       contract (`test_every_provider_is_covered` fails until you do).
 - [ ] Protocol-specific tests in a per-provider module
-      (`tests/test_prusalink.py` style) against mocked transports.
+      (`tests/unit/services/prusalink/test_prusalink.py` for normalization and
+      `tests/contract/services/test_prusalink.py` for wire behavior).
 - [ ] Diagnostics work without leaking secrets:
       `GET /api/v1/printers/{id}/diagnostics`.
 - [ ] Frontend: add-printer flow preset asking only the credentials this

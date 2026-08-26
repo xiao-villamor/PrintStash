@@ -52,7 +52,7 @@ Files in `backend/alembic/versions/`, named `<rev>_snake_description.py`
       (e.g. `e8d1c5b3a7f2_backfill_recommended_gcode.py`,
       `b2d8f6a1c94e_repair_orphan_fk_rows.py`).
 - [ ] Test the upgrade path with real data: previous-release DB →
-      `alembic upgrade head` → app boots (`tests/test_migrations.py` +
+      `alembic upgrade head` → app boots (`tests/integration/db/migrate/` +
       CI migration-upgrade job cover the basics).
 
 ## Testing expectations
@@ -70,15 +70,14 @@ Files in `backend/alembic/versions/`, named `<rev>_snake_description.py`
 
 ### Test layers
 
-Four layers, each with its own home:
+Backend tests live under `backend/tests/{unit,integration,contract,e2e}/` and
+mirror `app/`; shared protocol fakes live in `backend/tests/fakes/`. Directory
+placement defines the tier and `scripts/test.sh` defines the lanes. Load the
+`create-tests` skill for the canonical policy before changing or auditing tests.
 
-- **Unit / integration** — `backend/tests/test_<concern>.py`. Per-concern
-  files; provider integration packs are `tests/test_<provider>_integration.py`.
 - **Backend e2e** — `backend/tests/e2e/`. Boots the real app and drives full
-  flows against contract-enforcing fakes under `tests/e2e/fakes/` (printer
-  emulators, `mock_oidc_provider.py`). Part of `pytest tests` since it's a
-  subdirectory; no separate command. Fakes share a wall-clock `print_sim.py`
-  so no real hardware or background tasks are needed.
+  flows against contract-enforcing fakes from `tests/fakes/` (printer
+  emulators, `mock_oidc_provider.py`).
 - **Mock-API Playwright** — `frontend/tests/e2e/`, run with `pnpm test:e2e`.
   Route smoke tests against mocked API responses.
 - **Real-backend Playwright** — `frontend/tests/e2e-real/`, run with
@@ -91,9 +90,9 @@ each file's docstring for its exact flags — they differ per provider):
 
 ```bash
 cd backend
-uv run python -m tests.e2e.fakes.mock_printer   --port 7125 --print-seconds 5   # Moonraker + Spoolman
-uv run python -m tests.e2e.fakes.mock_prusalink --port 8080 --auth-mode api_key --api-key secret
-uv run python -m tests.e2e.fakes.mock_octoprint --port 5000 --print-seconds 5
+uv run python -m tests.fakes.mock_printer   --port 7125 --print-seconds 5   # Moonraker + Spoolman
+uv run python -m tests.fakes.mock_prusalink --port 8080 --auth-mode api_key --api-key secret
+uv run python -m tests.fakes.mock_octoprint --port 5000 --print-seconds 5
 ```
 
 Bambu's MQTT/FTPS protocol fakes run in-process and verify credentials, TLS,

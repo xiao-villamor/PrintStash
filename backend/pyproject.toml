@@ -62,10 +62,14 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--capture=sys"
+addopts = "--capture=sys --strict-markers --import-mode=importlib"
+pythonpath = ["."]
 markers = [
     "e2e: end-to-end tests that boot the real app against contract-enforcing fakes (slower; run with `pytest tests/e2e`)",
-    "integration: tests that cross a process/service/schema boundary or consume real-world fixture files",
+    "contract: client/provider tests against contract-enforcing fakes over real loopback sockets",
+    "postgres: tests that require PRINTSTASH_TEST_POSTGRES_URL",
+    "s3: tests that require PRINTSTASH_TEST_S3_ENDPOINT",
+    "slow: tests that consume large real files or run long simulations",
 ]
 
 [tool.ruff.lint]

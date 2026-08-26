@@ -63,32 +63,40 @@ from app.db.session import (  # noqa: E402
     override_session_factory,
 )
 from app.services.printer_hub import PrinterHub  # noqa: E402
+from tests.paths import TEST_DATA_DIR  # noqa: E402
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Classify boundary tests so local development can select a useful tier.
+    """Apply tier and resource policy from the test directory layout."""
+    tests_root = Path(__file__).parent.resolve()
+    postgres_available = bool(os.environ.get("PRINTSTASH_TEST_POSTGRES_URL"))
+    s3_available = bool(os.environ.get("PRINTSTASH_TEST_S3_ENDPOINT"))
 
-    E2E modules already declare their marker explicitly.  Integration modules
-    follow stable path/name conventions because they exercise a real server,
-    external storage/database, or full-size fixture rather than an in-process
-    contract fake.  The default pytest invocation still collects every test.
-    """
     for item in items:
-        path = Path(str(item.path))
-        name = path.name
-        if "e2e" in path.parts:
+        path = Path(str(item.path)).resolve()
+        try:
+            tier = path.relative_to(tests_root).parts[0]
+        except (ValueError, IndexError):
+            continue
+
+        if tier == "e2e":
             item.add_marker(pytest.mark.e2e)
-        elif (
-            "postgres" in path.parts
-            or "migration" in name
-            or name.startswith("test_real_")
-            or name.endswith("_integration.py")
-            or name.endswith("_real.py")
-            or name.endswith("_realfiles.py")
-            or name == "test_db_session.py"
-            or name == "test_storage_s3.py"
-        ):
-            item.add_marker(pytest.mark.integration)
+        elif tier == "contract":
+            item.add_marker(pytest.mark.contract)
+
+        if "postgres" in path.parts:
+            item.add_marker(pytest.mark.postgres)
+
+        if item.get_closest_marker("postgres") and not postgres_available:
+            item.add_marker(
+                pytest.mark.skip(
+                    reason="PRINTSTASH_TEST_POSTGRES_URL is not configured"
+                )
+            )
+        if item.get_closest_marker("s3") and not s3_available:
+            item.add_marker(
+                pytest.mark.skip(reason="PRINTSTASH_TEST_S3_ENDPOINT is not configured")
+            )
 
 
 # The dev shell exports a short VAULT_JWT_SECRET (e.g. "dev-jwt-secret", 14 bytes),
@@ -99,7 +107,6 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 # still monkeypatch this per-case; they revert to this compliant baseline.
 settings._frozen.jwt_secret = "printstash-test-jwt-secret-0123456789abcdef"  # 43 bytes
 
-TEST_DATA_DIR = Path(__file__).parent / "fixtures"
 TEST_DATA_DIR.mkdir(exist_ok=True)
 
 TEST_DB_URL = "sqlite:///:memory:"
@@ -115,8 +122,7 @@ event.listen(_test_engine, "connect", _set_sqlite_pragmas)
 
 _test_factory = SQLiteSessionFactory(_test_engine)
 
-# A handful of e2e tests (test_prusalink_integration.py, test_octoprint_
-# integration.py, test_mock_printer_integration.py) run the *real*
+# A handful of contract tests under ``tests/contract/`` run the real
 # PrinterHub polling loop against a real mock HTTP server: it does its DB
 # writes via asyncio.to_thread worker threads, genuinely concurrently with
 # the test's own main-thread session reads. StaticPool hands every session
@@ -370,6 +376,36 @@ def threaded_hub_db() -> Iterator[None]:
         yield
     finally:
         override_session_factory(_test_factory)
+
+
+@pytest.fixture
+def file_backed_integration_db(_patch_engine: None, tmp_path: Path) -> Iterator[None]:
+    """Use independent SQLite connections for app and background work.
+
+    LocalTaskQueue may commit from a worker while the request and assertion
+    sessions are still alive. A file-backed database with production pragmas
+    gives each session its own connection without changing the application
+    seam exercised by integration tests.
+    """
+    del _patch_engine
+    db_path = tmp_path / "integration.sqlite"
+    db_url = f"sqlite:///{db_path}"
+    engine = create_engine(
+        db_url,
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool,
+    )
+    event.listen(engine, "connect", _set_sqlite_pragmas)
+    _init_test_db(engine)
+    factory = SQLiteSessionFactory(engine)
+    override_session_factory(factory)
+    _overlay["db_url"] = db_url
+    try:
+        yield
+    finally:
+        engine.dispose()
+        override_session_factory(_test_factory)
+        _overlay["db_url"] = TEST_DB_URL
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.PLAYWRIGHT_REAL_PORT ?? 3310);
 const apiPort = Number(process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410);
 const apiBase = `http://127.0.0.1:${apiPort}`;
-// Standalone Moonraker + Spoolman emulator (backend/tests/e2e/fakes/mock_printer.py)
+// Standalone Moonraker + Spoolman emulator (backend/tests/fakes/mock_printer.py)
 // for fleet.spec.ts — a real, live printer with no physical hardware involved.
 const mockPrinterPort = Number(process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530);
 

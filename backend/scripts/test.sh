@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  echo "usage: $0 {fast|contract|e2e|full|affected|serial} [pytest arguments...]"
+}
+
 lane="${1:-fast}"
+if [[ "$lane" == "--help" || "$lane" == "-h" ]]; then
+  usage
+  exit 0
+fi
 if (( $# > 0 )); then
   shift
 fi
@@ -14,37 +22,51 @@ for arg in "${pytest_args[@]}"; do
     break
   fi
 done
-if [[ "$has_target" == false ]]; then
-  pytest_args=(tests "${pytest_args[@]}")
-fi
-
 parallel=(-n auto --dist worksteal)
 
 case "$lane" in
   fast)
-    # The normal feature loop: in-process tests, excluding service/schema
-    # boundaries, real files, and the real-app E2E layer.
-    exec uv run pytest "${parallel[@]}" -m "not integration and not e2e" "${pytest_args[@]}"
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(
+        tests/unit
+        tests/integration
+        "${pytest_args[@]}"
+      )
+    fi
+    exec uv run pytest "${parallel[@]}" -m "not slow" "${pytest_args[@]}"
     ;;
-  affected)
-    # First use seeds .testmondata; later runs select tests whose executed
-    # Python lines changed. Never use this lane as the only pre-merge gate.
-    exec uv run pytest "${parallel[@]}" --testmon "${pytest_args[@]}"
-    ;;
-  integration)
-    exec uv run pytest "${parallel[@]}" -m integration "${pytest_args[@]}"
+  contract)
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(tests/contract "${pytest_args[@]}")
+    fi
+    exec uv run pytest "${parallel[@]}" "${pytest_args[@]}"
     ;;
   e2e)
-    exec uv run pytest "${parallel[@]}" -m e2e "${pytest_args[@]}"
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(tests/e2e "${pytest_args[@]}")
+    fi
+    exec uv run pytest "${parallel[@]}" "${pytest_args[@]}"
+    ;;
+  affected)
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(tests packages/printstash-core/tests "${pytest_args[@]}")
+    fi
+    exec uv run pytest "${parallel[@]}" --testmon "${pytest_args[@]}"
     ;;
   full)
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(tests packages/printstash-core/tests "${pytest_args[@]}")
+    fi
     exec uv run pytest "${parallel[@]}" "${pytest_args[@]}"
     ;;
   serial)
+    if [[ "$has_target" == false ]]; then
+      pytest_args=(tests packages/printstash-core/tests "${pytest_args[@]}")
+    fi
     exec uv run pytest "${pytest_args[@]}"
     ;;
   *)
-    echo "usage: $0 {fast|affected|integration|e2e|full|serial} [pytest arguments...]" >&2
+    usage >&2
     exit 2
     ;;
 esac
