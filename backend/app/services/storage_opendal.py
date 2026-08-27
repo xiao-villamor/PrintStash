@@ -295,6 +295,14 @@ def _operator_for(spec: TransportSpec):
             username=str(options["username"]),
             password=str(options["password"]),
         )
+    if "password" in options:
+        raise StorageConfigurationError(
+            "SFTP password authentication is unavailable; use a mounted private key"
+        )
+    if "passphrase" in options:
+        raise StorageConfigurationError(
+            "Encrypted SFTP private keys are unavailable; mount an unencrypted service key"
+        )
     kwargs: dict[str, str] = {
         "endpoint": f"ssh://{options['host']}:{options['port']}",
         "root": str(options["root"]),
@@ -305,8 +313,6 @@ def _operator_for(spec: TransportSpec):
     }
     if "private_key_path" in options:
         kwargs["key"] = str(options["private_key_path"])
-    if "password" in options:
-        kwargs["password"] = str(options["password"])
     try:
         return opendal.Operator("sftp", **kwargs)
     except Exception as exc:

@@ -11,7 +11,10 @@ from urllib.request import urlopen
 import asyncssh
 import pytest
 
-from app.services.storage_backend import StorageCollisionError
+from app.services.storage_backend import (
+    StorageCollisionError,
+    StorageConfigurationError,
+)
 from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_providers import TransportKind, TransportSpec
 
@@ -160,6 +163,15 @@ def test_sftp_mounted_key_stream_round_trip(sftp_endpoint) -> None:
     assert receipt.size == len(payload)
     assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
     assert backend.capabilities.tier.value == "unguarded"
+
+
+def test_sftp_password_authentication_fails_with_actionable_guidance() -> None:
+    spec = _sftp_spec(22, Path("/unused"))
+    spec.options.pop("private_key_path")
+    spec.options["password"] = "secret"
+
+    with pytest.raises(StorageConfigurationError, match="mounted private key"):
+        OpenDALStorageBackend(spec)
 
 
 class _RenameFailure:
