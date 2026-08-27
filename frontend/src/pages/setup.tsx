@@ -20,7 +20,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Cloud,
   HardDrive,
   Loader2,
   RefreshCw,
@@ -28,7 +27,12 @@ import {
   UserPlus,
 } from "lucide-react";
 
-import { completeSetup, getSetupStatus } from "@/lib/api";
+import { completeSetup, getSetupStatus, getStorageProviders } from "@/lib/api";
+import {
+  defaultProviderValues,
+  StorageProviderPicker,
+  type ProviderValues,
+} from "@/components/storage-provider-picker";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
@@ -36,7 +40,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { storeLogin, type StoredUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import type { SetupStatus } from "@/types";
+import type { SetupStatus, StorageProvider } from "@/types";
 
 type Step = 1 | 2;
 
@@ -90,11 +94,17 @@ function humanizeError(raw: string): string {
  */
 export interface SetupPageDeps {
   getSetupStatus: typeof getSetupStatus;
+  getStorageProviders: typeof getStorageProviders;
   completeSetup: typeof completeSetup;
   storeLogin: typeof storeLogin;
 }
 
-const LIVE_DEPS: SetupPageDeps = { getSetupStatus, completeSetup, storeLogin };
+const LIVE_DEPS: SetupPageDeps = {
+  getSetupStatus,
+  getStorageProviders,
+  completeSetup,
+  storeLogin,
+};
 
 export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }) {
   const router = useRouter();
@@ -111,14 +121,9 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   const [confirm, setConfirm] = useState("");
 
   // Step 2 — storage
-  const [storageBackend, setStorageBackend] = useState("local");
-  const [dataDir, setDataDir] = useState("");
-  const [thumbDir, setThumbDir] = useState("");
-  const [s3Bucket, setS3Bucket] = useState("");
-  const [s3Endpoint, setS3Endpoint] = useState("");
-  const [s3Region, setS3Region] = useState("auto");
-  const [s3AccessKey, setS3AccessKey] = useState("");
-  const [s3SecretKey, setS3SecretKey] = useState("");
+  const [providers, setProviders] = useState<StorageProvider[]>([]);
+  const [storageProvider, setStorageProvider] = useState("local");
+  const [providerValues, setProviderValues] = useState<ProviderValues>({});
   const [backupDays, setBackupDays] = useState(30);
   const [backupS3Bucket, setBackupS3Bucket] = useState("");
   const [backupS3Endpoint, setBackupS3Endpoint] = useState("");
@@ -131,21 +136,33 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
 
   useEffect(() => {
     let cancelled = false;
-    deps
-      .getSetupStatus()
-      .then((s) => {
+    Promise.all([deps.getSetupStatus(), deps.getStorageProviders()])
+      .then(([s, providerCatalogue]) => {
         if (cancelled) return;
         if (s.configured) {
           router.replace("/login");
           return;
         }
         setStatus(s);
-        setStorageBackend(s.current_storage_backend || "local");
-        setDataDir(s.current_data_dir ?? "");
-        setThumbDir(s.current_thumb_dir ?? "");
-        setS3Bucket(s.current_s3_bucket ?? "");
-        setS3Endpoint(s.current_s3_endpoint_url ?? "");
-        setS3Region(s.current_s3_region || "auto");
+        setProviders(providerCatalogue);
+        const providerId =
+          s.current_storage_provider ?? (s.current_storage_backend === "s3" ? "s3" : "local");
+        const descriptor = providerCatalogue.find((provider) => provider.id === providerId);
+        const legacyValues =
+          providerId === "local"
+            ? {
+                data_dir: s.current_data_dir ?? s.default_data_dir ?? "",
+                thumb_dir: s.current_thumb_dir ?? s.default_thumb_dir ?? "",
+              }
+            : {
+                bucket: s.current_s3_bucket ?? "",
+                endpoint_url: s.current_s3_endpoint_url ?? "",
+                region: s.current_s3_region ?? "auto",
+              };
+        setStorageProvider(providerId);
+        const initialValues = descriptor ? defaultProviderValues(descriptor) : {};
+        Object.assign(initialValues, legacyValues, s.current_storage_provider_config);
+        setProviderValues(initialValues);
         setBackupDays(s.current_backup_retention_days ?? 30);
         setBackupS3Bucket(s.current_backup_s3_bucket ?? "");
         setBackupS3Endpoint(s.current_backup_s3_endpoint_url ?? "");
@@ -181,11 +198,16 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   }
 
   function validateStep2(): string | null {
-    if (storageBackend === "s3" && !s3Bucket.trim()) {
-      return "S3/R2 storage needs a bucket name.";
-    }
-    if (storageBackend === "local" && (!dataDir.trim() || !thumbDir.trim())) {
-      return "Local storage needs both data and thumbnail directories.";
+    const provider = providers.find((item) => item.id === storageProvider);
+    if (!provider?.selectable) return provider?.disabled_reason ?? "Choose an available provider.";
+    const missing = provider.fields.find(
+      (field) =>
+        field.required &&
+        !field.secret &&
+        String(providerValues[field.name] ?? "").trim().length === 0,
+    );
+    if (missing) {
+      return `${missing.label} is required.`;
     }
     if (!Number.isFinite(backupDays) || backupDays < 0) {
       return "Backup retention must be 0 or more days.";
@@ -203,28 +225,18 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
     }
     setBusy(true);
     try {
-      const trimmedData = dataDir.trim();
-      const trimmedThumb = thumbDir.trim();
+      const config = Object.fromEntries(
+        Object.entries(providerValues).filter(
+          ([name, value]) => name !== "secret_fields_set" && value !== "",
+        ),
+      );
       const res = await deps.completeSetup({
         setup_token: setupToken.trim(),
         username: username.trim(),
         password,
         email: email.trim() || undefined,
-        storage_backend: storageBackend,
-        // Only send path overrides if the user actually changed the value.
-        data_dir:
-          storageBackend === "local" && trimmedData && trimmedData !== status?.current_data_dir
-            ? trimmedData
-            : undefined,
-        thumb_dir:
-          storageBackend === "local" && trimmedThumb && trimmedThumb !== status?.current_thumb_dir
-            ? trimmedThumb
-            : undefined,
-        s3_bucket: s3Bucket.trim() || undefined,
-        s3_endpoint_url: s3Endpoint.trim() || undefined,
-        s3_region: s3Region.trim() || "auto",
-        s3_access_key: s3AccessKey.trim() || undefined,
-        s3_secret_key: s3SecretKey || undefined,
+        storage_provider: storageProvider,
+        storage_provider_config: { provider: storageProvider, ...config },
         backup_retention_days: backupDays,
         backup_s3_bucket: backupS3Bucket.trim() || undefined,
         backup_s3_endpoint_url: backupS3Endpoint.trim() || undefined,
@@ -351,24 +363,16 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
               />
             ) : (
               <StorageStep
-                storageBackend={storageBackend}
-                setStorageBackend={setStorageBackend}
-                dataDir={dataDir}
-                setDataDir={setDataDir}
-                thumbDir={thumbDir}
-                setThumbDir={setThumbDir}
-                defaultDataDir={status.default_data_dir ?? ""}
-                defaultThumbDir={status.default_thumb_dir ?? ""}
-                s3Bucket={s3Bucket}
-                setS3Bucket={setS3Bucket}
-                s3Endpoint={s3Endpoint}
-                setS3Endpoint={setS3Endpoint}
-                s3Region={s3Region}
-                setS3Region={setS3Region}
-                s3AccessKey={s3AccessKey}
-                setS3AccessKey={setS3AccessKey}
-                s3SecretKey={s3SecretKey}
-                setS3SecretKey={setS3SecretKey}
+                providers={providers}
+                storageProvider={storageProvider}
+                providerValues={providerValues}
+                setStorageProvider={(provider) => {
+                  setStorageProvider(provider.id);
+                  setProviderValues(defaultProviderValues(provider));
+                }}
+                setProviderValue={(name, value) =>
+                  setProviderValues((current) => ({ ...current, [name]: value }))
+                }
                 backupDays={backupDays}
                 setBackupDays={setBackupDays}
                 backupS3Bucket={backupS3Bucket}
@@ -513,24 +517,11 @@ function AccountStep(props: {
 }
 
 function StorageStep(props: {
-  storageBackend: string;
-  setStorageBackend: (v: string) => void;
-  dataDir: string;
-  setDataDir: (v: string) => void;
-  thumbDir: string;
-  setThumbDir: (v: string) => void;
-  defaultDataDir: string;
-  defaultThumbDir: string;
-  s3Bucket: string;
-  setS3Bucket: (v: string) => void;
-  s3Endpoint: string;
-  setS3Endpoint: (v: string) => void;
-  s3Region: string;
-  setS3Region: (v: string) => void;
-  s3AccessKey: string;
-  setS3AccessKey: (v: string) => void;
-  s3SecretKey: string;
-  setS3SecretKey: (v: string) => void;
+  providers: StorageProvider[];
+  storageProvider: string;
+  providerValues: ProviderValues;
+  setStorageProvider: (provider: StorageProvider) => void;
+  setProviderValue: (name: string, value: string | number) => void;
   backupDays: number;
   setBackupDays: (v: number) => void;
   backupS3Bucket: string;
@@ -549,105 +540,16 @@ function StorageStep(props: {
       <StepHeader
         eyebrow="Step 2 of 2"
         title="Choose your storage"
-        description="Keep the recommended local paths, or connect S3-compatible object storage."
+        description="Choose a provider, review its safety guarantees, then enter the connection details."
       />
 
-      <fieldset>
-        <legend className="mb-2 block text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-          Storage backend
-        </legend>
-        <div className="grid grid-cols-2 gap-3">
-          <ChoiceButton
-            active={props.storageBackend === "local"}
-            icon={HardDrive}
-            label="Local disk"
-            description="Recommended"
-            onClick={() => props.setStorageBackend("local")}
-          />
-          <ChoiceButton
-            active={props.storageBackend === "s3"}
-            icon={Cloud}
-            label="S3 / R2"
-            description="Object storage"
-            onClick={() => props.setStorageBackend("s3")}
-          />
-        </div>
-      </fieldset>
-
-      {props.storageBackend === "local" ? (
-        <div className="animate-panel-in space-y-3">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Data directory"
-              id="setup-data-dir"
-              value={props.dataDir}
-              onChange={props.setDataDir}
-              required
-              hint={`Default: ${props.defaultDataDir}`}
-              mono
-            />
-            <Field
-              label="Thumbnail directory"
-              id="setup-thumb-dir"
-              value={props.thumbDir}
-              onChange={props.setThumbDir}
-              required
-              hint={`Default: ${props.defaultThumbDir}`}
-              mono
-            />
-          </div>
-          <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-            These are private PrintStash storage and must be empty. Add existing NAS or Nextcloud
-            folders later under Settings → External Libraries; those files stay in place.
-          </div>
-        </div>
-      ) : (
-        <div className="animate-panel-in space-y-4">
-          <Field
-            label="Bucket"
-            id="setup-s3-bucket"
-            value={props.s3Bucket}
-            onChange={props.setS3Bucket}
-            required
-            mono
-          />
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field
-              label="Endpoint URL"
-              optional
-              id="setup-s3-endpoint"
-              value={props.s3Endpoint}
-              onChange={props.setS3Endpoint}
-              hint="Leave empty for AWS S3"
-              mono
-            />
-            <Field
-              label="Region"
-              id="setup-s3-region"
-              value={props.s3Region}
-              onChange={props.setS3Region}
-              mono
-            />
-            <Field
-              label="Access key"
-              optional
-              id="setup-s3-access-key"
-              value={props.s3AccessKey}
-              onChange={props.setS3AccessKey}
-              mono
-            />
-            <Field
-              label="Secret key"
-              optional
-              id="setup-s3-secret-key"
-              value={props.s3SecretKey}
-              onChange={props.setS3SecretKey}
-              type="password"
-              mono
-            />
-          </div>
-        </div>
-      )}
+      <StorageProviderPicker
+        providers={props.providers}
+        providerId={props.storageProvider}
+        values={props.providerValues}
+        onProviderChange={props.setStorageProvider}
+        onValueChange={props.setProviderValue}
+      />
 
       <section
         className="space-y-4 border-t border-outline-variant pt-5"
@@ -735,34 +637,6 @@ function StorageStep(props: {
         </details>
       </section>
     </div>
-  );
-}
-
-function ChoiceButton(props: {
-  active: boolean;
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  description: string;
-  onClick: () => void;
-}) {
-  const Icon = props.icon;
-  return (
-    <Button
-      type="button"
-      variant="outline"
-      aria-pressed={props.active}
-      onClick={props.onClick}
-      className={cn(
-        "h-auto min-w-0 justify-start gap-3 px-3 py-3 text-left whitespace-normal",
-        props.active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
-      )}
-    >
-      <Icon className="h-5 w-5 shrink-0" aria-hidden />
-      <span className="min-w-0">
-        <span className="block text-sm font-medium">{props.label}</span>
-        <span className="block text-xs font-normal opacity-70">{props.description}</span>
-      </span>
-    </Button>
   );
 }
 

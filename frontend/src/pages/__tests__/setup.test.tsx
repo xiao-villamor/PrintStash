@@ -5,13 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { usePathname } from "@/lib/navigation";
 import SetupPage, { type SetupPageDeps } from "@/pages/setup";
-import type { SetupResponse, SetupStatus } from "@/types";
+import type { SetupResponse, SetupStatus, StorageProvider } from "@/types";
 
 // The wizard takes its endpoints and login store as an injected `deps` bag, and
 // navigates through the real router, so this test needs no module replacement.
 function stubDeps(): SetupPageDeps {
   return {
     getSetupStatus: vi.fn<SetupPageDeps["getSetupStatus"]>(),
+    getStorageProviders: vi.fn<SetupPageDeps["getStorageProviders"]>(),
     completeSetup: vi.fn<SetupPageDeps["completeSetup"]>(),
     storeLogin: vi.fn<SetupPageDeps["storeLogin"]>(),
   };
@@ -38,11 +39,45 @@ const status: SetupStatus = {
   configured_at: null,
 };
 
+const providers: StorageProvider[] = [
+  {
+    id: "local",
+    label: "Local disk",
+    category: "this_machine",
+    description: "Private directories on this machine.",
+    expected_tier: "verified",
+    expected_tier_note: "Local storage is verified after startup probes.",
+    consequences: [],
+    documentation_url: "/docs/storage-providers.md#local",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "data_dir",
+        label: "Data directory",
+        help: "Private model storage.",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "thumb_dir",
+        label: "Thumbnail directory",
+        help: "Private thumbnail storage.",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+    ],
+  },
+];
+
 const setupResponse: SetupResponse = {
   configured: true,
   user_id: 1,
   username: "admin",
   storage_backend: "local",
+  storage_provider: "local",
   data_dir: "/data/files",
   thumb_dir: "/data/thumbs",
   access_token: "token",
@@ -82,6 +117,7 @@ async function reachStorage() {
 beforeEach(() => {
   deps = stubDeps();
   vi.mocked(deps.getSetupStatus).mockResolvedValue(status);
+  vi.mocked(deps.getStorageProviders).mockResolvedValue(providers);
   vi.mocked(deps.completeSetup).mockResolvedValue(setupResponse);
 });
 

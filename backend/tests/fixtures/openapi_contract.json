@@ -1064,7 +1064,9 @@
             "enum": [
               "makerworld",
               "printables",
-              "thingiverse"
+              "thingiverse",
+              "myminifactory",
+              "cults"
             ],
             "title": "Provider",
             "type": "string"
@@ -9302,6 +9304,16 @@
         "title": "ProvenanceSourceRead",
         "type": "object"
       },
+      "ProviderCategory": {
+        "enum": [
+          "this_machine",
+          "s3_compatible",
+          "nextcloud_webdav",
+          "nas_sftp"
+        ],
+        "title": "ProviderCategory",
+        "type": "string"
+      },
       "ProviderConnectionRead": {
         "properties": {
           "connected": {
@@ -10113,6 +10125,30 @@
             ],
             "title": "Storage Backend"
           },
+          "storage_provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider"
+          },
+          "storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider Config"
+          },
           "thumb_dir": {
             "anyOf": [
               {
@@ -10158,6 +10194,11 @@
           "storage_backend": {
             "default": "local",
             "title": "Storage Backend",
+            "type": "string"
+          },
+          "storage_provider": {
+            "default": "local",
+            "title": "Storage Provider",
             "type": "string"
           },
           "thumb_dir": {
@@ -10306,6 +10347,29 @@
               }
             ],
             "title": "Current Storage Backend"
+          },
+          "current_storage_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Storage Provider"
+          },
+          "current_storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Storage Provider Config"
           },
           "current_thumb_dir": {
             "anyOf": [
@@ -10851,6 +10915,149 @@
           "remote_filename"
         ],
         "title": "StartPrinterFile",
+        "type": "object"
+      },
+      "StorageFieldDescriptor": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "input_type": {
+            "default": "text",
+            "enum": [
+              "text",
+              "password",
+              "url",
+              "number",
+              "path"
+            ],
+            "title": "Input Type",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "help"
+        ],
+        "title": "StorageFieldDescriptor",
+        "type": "object"
+      },
+      "StorageProvider": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ProviderCategory"
+          },
+          "consequences": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Consequences",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "documentation_url": {
+            "title": "Documentation Url",
+            "type": "string"
+          },
+          "expected_tier": {
+            "enum": [
+              "verified",
+              "guarded",
+              "unguarded"
+            ],
+            "title": "Expected Tier",
+            "type": "string"
+          },
+          "expected_tier_note": {
+            "title": "Expected Tier Note",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/StorageFieldDescriptor"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "category",
+          "description",
+          "expected_tier",
+          "expected_tier_note",
+          "consequences",
+          "documentation_url",
+          "available",
+          "selectable",
+          "fields"
+        ],
+        "title": "StorageProvider",
         "type": "object"
       },
       "StorageUsageRead": {
@@ -11809,6 +12016,43 @@
             "title": "Storage Backend",
             "type": "string"
           },
+          "storage_capabilities": {
+            "additionalProperties": true,
+            "title": "Storage Capabilities",
+            "type": "object"
+          },
+          "storage_probe_diagnostics": {
+            "additionalProperties": true,
+            "title": "Storage Probe Diagnostics",
+            "type": "object"
+          },
+          "storage_provider": {
+            "default": "",
+            "title": "Storage Provider",
+            "type": "string"
+          },
+          "storage_provider_config": {
+            "additionalProperties": true,
+            "title": "Storage Provider Config",
+            "type": "object"
+          },
+          "storage_tier": {
+            "default": "unguarded",
+            "title": "Storage Tier",
+            "type": "string"
+          },
+          "storage_unverified_acknowledged": {
+            "default": false,
+            "title": "Storage Unverified Acknowledged",
+            "type": "boolean"
+          },
+          "storage_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Storage Warnings",
+            "type": "array"
+          },
           "thumb_dir": {
             "default": "",
             "title": "Thumb Dir",
@@ -12151,6 +12395,30 @@
             ],
             "title": "Storage Backend"
           },
+          "storage_provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider"
+          },
+          "storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider Config"
+          },
           "thumb_dir": {
             "anyOf": [
               {
@@ -12345,6 +12613,18 @@
     "/api/v1/admin/gc": {
       "post": {
         "operationId": "run_gc_api_v1_admin_gc_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -12359,6 +12639,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -12627,6 +12917,16 @@
             "schema": {
               "default": false,
               "title": "Hard",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
               "type": "boolean"
             }
           }
@@ -15000,6 +15300,16 @@
             "schema": {
               "title": "Document Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
             }
           }
         ],
@@ -20326,6 +20636,18 @@
     "/api/v1/models/trash/expired": {
       "delete": {
         "operationId": "purge_expired_trash_api_v1_models_trash_expired_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -20336,6 +20658,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -21297,6 +21629,16 @@
             "schema": {
               "title": "Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
             }
           }
         ],
@@ -24456,6 +24798,32 @@
         "summary": "Test the configured Spoolman connection",
         "tags": [
           "spoolman"
+        ]
+      }
+    },
+    "/api/v1/storage/providers": {
+      "get": {
+        "description": "Return metadata only; credentials and configured values are never exposed.",
+        "operationId": "list_storage_providers_api_v1_storage_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorageProvider"
+                  },
+                  "title": "Response List Storage Providers Api V1 Storage Providers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List storage providers",
+        "tags": [
+          "storage"
         ]
       }
     },

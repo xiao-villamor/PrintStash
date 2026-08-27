@@ -463,3 +463,66 @@ def provider_catalogue() -> list[StorageProvider]:
         )
     )
     return entries
+
+
+def render_storage_provider_docs() -> str:
+    """Render the public provider reference from the authoritative registry."""
+    category_labels = {
+        ProviderCategory.THIS_MACHINE: "This machine",
+        ProviderCategory.S3_COMPATIBLE: "S3-compatible object storage",
+        ProviderCategory.WEBDAV: "Nextcloud and WebDAV",
+        ProviderCategory.SFTP: "NAS over SFTP",
+    }
+    lines = [
+        "# Storage providers",
+        "",
+        "PrintStash probes the configured storage at startup. The expected tier below is guidance; `/api/v1/health` and Settings report the active probed tier.",
+        "",
+        "| Provider | Category | Expected tier | Configuration fields |",
+        "| --- | --- | --- | --- |",
+    ]
+    for provider in provider_catalogue():
+        fields = ", ".join(
+            f"`{field.name}`" + (" (secret)" if field.secret else "")
+            for field in provider.fields
+        )
+        lines.append(
+            f"| [{provider.label}](#{provider.id}) | {category_labels[provider.category]} | {provider.expected_tier.title()} | {fields} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Safety tiers",
+            "",
+            "- **Verified** storage proves conditional creation, replacement identity, and deletion identity. Automated storage-backed purge is allowed.",
+            "- **Guarded** storage proves unique creation but lacks at least one destructive-operation proof. Manual permanent deletion requires one-shot confirmation; scheduled storage purge is skipped.",
+            "- **Unguarded** storage cannot prove unique creation. Startup additionally requires `VAULT_STORAGE_ALLOW_UNVERIFIED=true`.",
+            "",
+            "Directory `fsync` support is diagnostic only. Local paths on network or unknown filesystems are capped at Guarded even when hardlinks work.",
+            "",
+        ]
+    )
+    for provider in provider_catalogue():
+        lines.extend(
+            [
+                f"## {provider.id}",
+                "",
+                provider.description,
+                "",
+                f"Expected tier: **{provider.expected_tier.title()}**. {provider.expected_tier_note}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Credentials and upgrades",
+            "",
+            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one of a password or a mounted private-key path; inline private-key material is rejected.",
+            "",
+            "PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.",
+            "",
+            "`VAULT_STORAGE_BACKEND` and the legacy S3 variables remain compatibility inputs. New deployments should use `VAULT_STORAGE_PROVIDER` and `VAULT_STORAGE_PROVIDER_CONFIG`.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
