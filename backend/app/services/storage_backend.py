@@ -161,6 +161,10 @@ class StorageCollisionError(FileExistsError):
     """A create-only write found an object already present at its exact key."""
 
 
+class StorageConfigurationError(RuntimeError):
+    """The selected storage target is missing or cannot be accessed safely."""
+
+
 @dataclass(frozen=True)
 class CreationReceipt:
     """Positive evidence that one storage operation created one exact object.
@@ -1131,41 +1135,14 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
         except botocore.exceptions.ClientError as exc:
             code = exc.response.get("Error", {}).get("Code")
             if code in ("404", "NoSuchBucket", "NotFound"):
-                logger.info("s3: creating bucket %r", self._bucket)
-                location = (
-                    {"LocationConstraint": settings.s3_region}
-                    if settings.s3_region and settings.s3_region != "auto"
-                    else {}
-                )
-                self._client.create_bucket(
-                    Bucket=self._bucket, CreateBucketConfiguration=location
-                )
-            else:
-                raise
-
-    def _apply_lifecycle_policy(self) -> None:
-        expiration_days = int(settings.s3_lifecycle_expiration_days or 0)
-        transition_days = int(settings.s3_lifecycle_transition_days or 0)
-        if expiration_days <= 0 and transition_days <= 0:
-            return
-        rule: dict = {
-            "ID": "vault-data-lifecycle",
-            "Status": "Enabled",
-            "Filter": {"Prefix": self._prefix()},
-        }
-        if transition_days > 0:
-            rule["Transitions"] = [
-                {
-                    "Days": transition_days,
-                    "StorageClass": settings.s3_transition_storage_class,
-                }
-            ]
-        if expiration_days > 0:
-            rule["Expiration"] = {"Days": expiration_days}
-        self._client.put_bucket_lifecycle_configuration(
-            Bucket=self._bucket,
-            LifecycleConfiguration={"Rules": [rule]},
-        )
+                raise StorageConfigurationError(
+                    f"S3 bucket {self._bucket!r} does not exist; create it with "
+                    "your storage provider and grant PrintStash object access"
+                ) from exc
+            raise StorageConfigurationError(
+                f"S3 bucket {self._bucket!r} is not accessible; verify the "
+                "endpoint, region, credentials, and bucket permissions"
+            ) from exc
 
     def _prefix(self) -> str:
         return "vault-data/"
@@ -1536,16 +1513,6 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
     def ensure_setup(self) -> None:
         self._ensure_bucket()
         self._probe_capabilities()
-        if (
-            int(settings.s3_lifecycle_expiration_days or 0) > 0
-            or int(settings.s3_lifecycle_transition_days or 0) > 0
-        ):
-            # Bucket lifecycle configuration is bucket-wide and replacing it
-            # can destroy operator-managed rules or expire objects that this
-            # installation never proved it owns. Keep automatic mutation off.
-            logger.warning(
-                "automatic S3 lifecycle mutation is disabled for data safety"
-            )
 
     def delete(self, key: str) -> None:
         del key

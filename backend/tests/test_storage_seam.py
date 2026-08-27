@@ -502,19 +502,15 @@ def test_s3_rollback_deletes_exact_version_and_preserves_same_etag_replacement()
 
 
 # ---------------------------------------------------------------------------
-# S3 _ensure_bucket(): create-if-missing on startup
+# S3 _ensure_bucket(): validate-only startup
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("code", ["404", "NoSuchBucket", "NotFound"])
-def test_s3_ensure_bucket_creates_on_missing(
+def test_s3_ensure_bucket_fails_with_guidance_on_missing(
     code: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A HeadBucket miss (real S3 raises "NoSuchBucket"; MinIO's bodyless HEAD
-    response makes boto3 fall back to the raw HTTP status "404") must trigger
-    bucket creation, not propagate — found by running against real MinIO,
-    where the previous check (`Error.StatusCode`, a key that doesn't exist on
-    a ClientError) never matched and startup always failed."""
+    """A HeadBucket miss must fail without administering the user's account."""
     import botocore.exceptions
 
     from app.core.config import _overlay
@@ -535,11 +531,10 @@ def test_s3_ensure_bucket_creates_on_missing(
     backend._bucket = "test-bucket"  # type: ignore[attr-defined]
     monkeypatch.setitem(_overlay, "s3_region", "auto")
 
-    backend._ensure_bucket()  # type: ignore[attr-defined]
+    with pytest.raises(RuntimeError, match="does not exist; create it"):
+        backend._ensure_bucket()  # type: ignore[attr-defined]
 
-    assert backend._client.created == [  # type: ignore[attr-defined]
-        {"Bucket": "test-bucket", "CreateBucketConfiguration": {}}
-    ]
+    assert backend._client.created == []  # type: ignore[attr-defined]
 
 
 def test_s3_ensure_bucket_raises_on_auth_error() -> None:
@@ -558,5 +553,5 @@ def test_s3_ensure_bucket_raises_on_auth_error() -> None:
     backend._client = _Client()  # type: ignore[attr-defined]
     backend._bucket = "test-bucket"  # type: ignore[attr-defined]
 
-    with pytest.raises(botocore.exceptions.ClientError):
+    with pytest.raises(RuntimeError, match="not accessible"):
         backend._ensure_bucket()  # type: ignore[attr-defined]

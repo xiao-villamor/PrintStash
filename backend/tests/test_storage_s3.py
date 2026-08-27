@@ -245,18 +245,14 @@ def test_health_probe_reports_error_for_missing_bucket(s3_backend: S3StorageBack
 def test_ensure_setup_never_mutates_bucket_lifecycle_automatically(
     s3_backend: S3StorageBackend,
 ):
-    _overlay["s3_lifecycle_expiration_days"] = 30
-    try:
-        s3_backend.ensure_setup()  # must not raise against a real S3-compatible bucket
+    s3_backend.ensure_setup()  # must not raise against a real S3-compatible bucket
 
-        import botocore.exceptions
+    import botocore.exceptions
 
-        with pytest.raises(botocore.exceptions.ClientError):
-            s3_backend._client.get_bucket_lifecycle_configuration(
-                Bucket=s3_backend._bucket
-            )
-    finally:
-        _overlay.pop("s3_lifecycle_expiration_days", None)
+    with pytest.raises(botocore.exceptions.ClientError):
+        s3_backend._client.get_bucket_lifecycle_configuration(
+            Bucket=s3_backend._bucket
+        )
 
 
 def test_exists_raises_on_non_404_client_error(s3_backend: S3StorageBackend):

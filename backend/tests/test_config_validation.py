@@ -37,8 +37,6 @@ def test_numeric_settings_reject_impossible_values(
         ("mesh_max_load_mb", 0),
         ("max_render_jobs", 0),
         ("bambu_external_capture_max_mb", 0),
-        ("s3_lifecycle_expiration_days", 0),
-        ("s3_lifecycle_transition_days", 0),
         ("backup_retention_days", 0),
         ("trash_retention_days", 0),
     ],
@@ -54,13 +52,4 @@ def test_archive_entry_limit_cannot_exceed_total_limit() -> None:
             _env_file=None,
             max_archive_entry_mb=100,
             max_archive_uncompressed_mb=99,
-        )
-
-
-def test_s3_transition_must_precede_expiration_when_both_are_enabled() -> None:
-    with pytest.raises(ValidationError, match="s3_lifecycle_transition_days"):
-        FrozenSettings(
-            _env_file=None,
-            s3_lifecycle_transition_days=30,
-            s3_lifecycle_expiration_days=30,
         )

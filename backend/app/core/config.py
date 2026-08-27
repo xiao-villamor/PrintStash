@@ -54,10 +54,6 @@ class Settings(BaseSettings):
     s3_secret_key: str = ""
     s3_presigned_url_expire_seconds: int = Field(default=900, gt=0)
     s3_multipart_threshold_mb: int = Field(default=50, gt=0)
-    # Zero disables the corresponding lifecycle action.
-    s3_lifecycle_expiration_days: int = Field(default=0, ge=0)
-    s3_lifecycle_transition_days: int = Field(default=0, ge=0)
-    s3_transition_storage_class: str = "STANDARD_IA"
 
     db_url: str = "sqlite:////data/db/printstash.sqlite"
     sqlite_synchronous: str = "NORMAL"
@@ -248,15 +244,6 @@ class Settings(BaseSettings):
             )
         if self.sqlite_synchronous.upper() not in {"NORMAL", "FULL"}:
             raise ValueError("sqlite_synchronous must be NORMAL or FULL")
-        if (
-            self.s3_lifecycle_expiration_days
-            and self.s3_lifecycle_transition_days
-            and self.s3_lifecycle_transition_days >= self.s3_lifecycle_expiration_days
-        ):
-            raise ValueError(
-                "s3_lifecycle_transition_days must be lower than "
-                "s3_lifecycle_expiration_days"
-            )
         return self
 
     @property
