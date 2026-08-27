@@ -36,7 +36,7 @@ def test_delete_model_soft_deletes(
     assert model.deleted_at is not None
 
 
-def test_restore_model_and_purge_model(
+def test_restore_model(
     client: TestClient, auth_headers: dict[str, str], db_session: Session
 ) -> None:
     model = _model(db_session)
@@ -48,6 +48,12 @@ def test_restore_model_and_purge_model(
     assert restored.status_code == 200
     db_session.refresh(model)
     assert model.deleted_at is None
+
+
+def test_purge_model(
+    client: TestClient, auth_headers: dict[str, str], db_session: Session
+) -> None:
+    model = _model(db_session, slug="purge-model")
 
     model.deleted_at = utcnow()
     db_session.add(model)

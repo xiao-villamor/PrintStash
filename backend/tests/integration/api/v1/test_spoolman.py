@@ -2,11 +2,75 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
+
+from app.db.models import User
+from app.services.auth import create_access_token, hash_password
 
 
-def test_requires_superuser(client: TestClient):
-    assert client.get("/api/v1/spoolman").status_code == 401
+def _non_superuser_headers(session: Session, username: str) -> dict[str, str]:
+    user = User(
+        username=username,
+        hashed_password=hash_password("Password123"),
+        is_active=True,
+        is_superuser=False,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    token = create_access_token(user.id, user.username, scope="admin")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "request_kwargs"),
+    [
+        pytest.param("GET", "/api/v1/spoolman", {}, id="status"),
+        pytest.param("PUT", "/api/v1/spoolman", {"json": {}}, id="update"),
+        pytest.param(
+            "POST", "/api/v1/spoolman/sync-filaments", {}, id="sync-filaments"
+        ),
+        pytest.param("POST", "/api/v1/spoolman/test", {"json": {}}, id="test"),
+        pytest.param("GET", "/api/v1/spoolman/spools", {}, id="spools"),
+    ],
+)
+def test_requires_authentication_for_every_spoolman_route(
+    client: TestClient,
+    method: str,
+    path: str,
+    request_kwargs: dict[str, object],
+) -> None:
+    response = client.request(method, path, **request_kwargs)
+
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "request_kwargs"),
+    [
+        pytest.param("GET", "/api/v1/spoolman", {}, id="status"),
+        pytest.param("PUT", "/api/v1/spoolman", {"json": {}}, id="update"),
+        pytest.param(
+            "POST", "/api/v1/spoolman/sync-filaments", {}, id="sync-filaments"
+        ),
+        pytest.param("POST", "/api/v1/spoolman/test", {"json": {}}, id="test"),
+        pytest.param("GET", "/api/v1/spoolman/spools", {}, id="spools"),
+    ],
+)
+def test_rejects_non_superusers_for_every_spoolman_route(
+    client: TestClient,
+    db_session: Session,
+    method: str,
+    path: str,
+    request_kwargs: dict[str, object],
+) -> None:
+    headers = _non_superuser_headers(db_session, f"spoolman-{method}-{len(path)}")
+
+    response = client.request(method, path, headers=headers, **request_kwargs)
+
+    assert response.status_code == 403, response.text
 
 
 def test_status_defaults_disabled(client: TestClient, auth_headers):
@@ -46,6 +110,37 @@ def test_update_preserves_key_when_masked(client: TestClient, auth_headers):
     )
     body = client.get("/api/v1/spoolman", headers=auth_headers).json()
     assert body["has_api_key"] is True
+
+
+def test_accepts_a_local_network_base_url(client: TestClient, auth_headers) -> None:
+    response = client.put(
+        "/api/v1/spoolman",
+        json={"base_url": "http://192.168.10.15:7912"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["base_url"] == "http://192.168.10.15:7912"
+
+
+def test_update_rejects_unknown_fields_without_changing_config(
+    client: TestClient, auth_headers
+):
+    client.put(
+        "/api/v1/spoolman",
+        json={"base_url": "http://saved:7912"},
+        headers=auth_headers,
+    )
+
+    response = client.put(
+        "/api/v1/spoolman",
+        json={"unknown": True},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422, response.text
+    status_response = client.get("/api/v1/spoolman", headers=auth_headers)
+    assert status_response.json()["base_url"] == "http://saved:7912"
 
 
 def test_spools_empty_when_disabled(client: TestClient, auth_headers):
@@ -166,6 +261,38 @@ def test_test_connection_uses_typed_api_key_override(
     )
     assert resp.status_code == 200
     assert captured["api_key"] == "brand-new-key"
+
+
+def test_test_connection_does_not_persist_typed_overrides(
+    client: TestClient, auth_headers, monkeypatch
+):
+    import app.api.v1.spoolman as mod
+
+    async def fake_probe(_client):
+        return {
+            "connected": True,
+            "version": "1.2.3",
+            "error": None,
+            "native_hook_detected": False,
+        }
+
+    monkeypatch.setattr(mod, "_probe", fake_probe)
+    client.put(
+        "/api/v1/spoolman",
+        json={"base_url": "http://saved:7912", "api_key": "saved-key"},
+        headers=auth_headers,
+    )
+
+    response = client.post(
+        "/api/v1/spoolman/test",
+        json={"base_url": "http://typed:7912", "api_key": "typed-key"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    saved = client.get("/api/v1/spoolman", headers=auth_headers).json()
+    assert saved["base_url"] == "http://saved:7912"
+    assert saved["has_api_key"] is True
 
 
 def test_probe_reports_connected_and_native_hook(
@@ -350,6 +477,33 @@ def test_list_spools_returns_flattened_records(
     assert body[0]["filament_name"] == "PLA Red"
     assert body[0]["vendor_name"] == "Acme"
     assert body[0]["location"] == "CANVAS-1"
+
+
+def test_list_spools_forwards_the_archived_filter(
+    client: TestClient, auth_headers, monkeypatch
+):
+    import app.api.v1.spoolman as mod
+
+    client.put(
+        "/api/v1/spoolman",
+        json={"base_url": "http://s:7912", "enabled": True},
+        headers=auth_headers,
+    )
+    observed: list[bool] = []
+
+    async def fake_list_spools(self, *, include_archived=False):
+        observed.append(include_archived)
+        return []
+
+    monkeypatch.setattr(mod.SpoolmanClient, "list_spools", fake_list_spools)
+
+    response = client.get(
+        "/api/v1/spoolman/spools?include_archived=true", headers=auth_headers
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+    assert observed == [True]
 
 
 def test_list_spools_degrades_on_spoolman_error(

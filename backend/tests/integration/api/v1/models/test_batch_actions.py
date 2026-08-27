@@ -491,3 +491,42 @@ def test_batch_too_many_ids_rejected(client: TestClient, db_session: Session) ->
         json={"model_ids": list(range(1, 502))},
     )
     assert res.status_code == 422
+
+
+def test_batch_move_rejects_too_many_model_ids(
+    client: TestClient, db_session: Session
+) -> None:
+    user = _user(db_session, "move-validator", superuser=True)
+    response = client.post(
+        "/api/v1/models/batch/move",
+        headers=_headers(user),
+        json={"model_ids": list(range(1, 502)), "collection": "target"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_batch_tags_rejects_too_many_model_ids(
+    client: TestClient, db_session: Session
+) -> None:
+    user = _user(db_session, "tag-validator", superuser=True)
+    response = client.post(
+        "/api/v1/models/batch/tags",
+        headers=_headers(user),
+        json={"model_ids": list(range(1, 502)), "add": ["PLA"]},
+    )
+
+    assert response.status_code == 422
+
+
+def test_batch_revision_labels_rejects_too_many_file_ids(
+    client: TestClient, db_session: Session
+) -> None:
+    user = _user(db_session, "label-validator", superuser=True)
+    response = client.patch(
+        "/api/v1/models/batch/revision-labels",
+        headers=_headers(user),
+        json={"file_ids": list(range(1, 502)), "revision_label": "candidate"},
+    )
+
+    assert response.status_code == 422

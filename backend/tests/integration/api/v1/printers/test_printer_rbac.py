@@ -174,6 +174,7 @@ class TestPrinterRbac:
             {"octoprint_url": "http://attacker.invalid"},
             {"octoprint_api_key": "replacement"},
         ],
+        ids=lambda update: next(iter(update)),
     )
     def test_printer_admin_cannot_change_connection_settings(
         self,

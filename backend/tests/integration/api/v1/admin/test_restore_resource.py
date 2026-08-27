@@ -99,15 +99,15 @@ class TestAuditLog:
             AuditLog(
                 actor_id=admin.id,
                 action="update",
-                resource_type="model",
-                resource_id=1,
+                resource_type="matrix_combined_filter",
+                resource_id=76543210,
             )
         )
         db_session.add(
             AuditLog(
                 actor_id=admin.id,
                 action="update",
-                resource_type="printer",
+                resource_type="matrix_other_filter",
                 resource_id=2,
             )
         )
@@ -115,13 +115,16 @@ class TestAuditLog:
 
         resp = client.get(
             "/api/v1/admin/audit",
-            params={"resource": "model", "resource_id": 1},
+            params={
+                "resource": "matrix_combined_filter",
+                "resource_id": 76543210,
+            },
             headers=_headers(admin),
         )
         assert resp.status_code == 200
         rows = resp.json()
         assert len(rows) == 1
-        assert rows[0]["resource_type"] == "model"
+        assert rows[0]["resource_type"] == "matrix_combined_filter"
 
 
 class TestRunGc:

@@ -421,6 +421,21 @@ class TestUpdateProviderValidation:
                 "octoprint_api_key_required",
             ),
         ],
+        ids=[
+            "moonraker-url",
+            "bambu-host",
+            "bambu-serial",
+            "bambu-access-code",
+            "prusalink-url",
+            "prusalink-auth-mode",
+            "prusalink-digest-credentials",
+            "prusalink-api-key",
+            "centauri-model",
+            "centauri-host",
+            "centauri-access-code",
+            "octoprint-url",
+            "octoprint-api-key",
+        ],
     )
     def test_update_provider_validation_errors(
         self,

@@ -5,24 +5,213 @@ A failure means this boundary no longer preserves its observable contract.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
+from app.api.v1 import setup as setup_api
 from app.core.config import _overlay
 from app.db.models import SystemConfig, User
+from app.db.session import get_session_factory
+from app.schemas.setup import SetupRequest
 from app.services import runtime_config
 from app.services.setup_token import current_setup_token
 
 
+def _isolate_runtime_dirs(tmp_path: Path) -> None:
+    _overlay["staging_dir"] = tmp_path / "staging"
+    _overlay["backup_dir"] = tmp_path / "backups"
+    _overlay["data_dir"] = tmp_path / "files"
+    _overlay["thumb_dir"] = tmp_path / "thumbs"
+
+
 class TestFirstRunSetup:
     def _isolate_runtime_dirs(self, tmp_path: Path) -> None:
-        _overlay["staging_dir"] = tmp_path / "staging"
-        _overlay["backup_dir"] = tmp_path / "backups"
-        _overlay["data_dir"] = tmp_path / "files"
-        _overlay["thumb_dir"] = tmp_path / "thumbs"
+        _isolate_runtime_dirs(tmp_path)
+
+    def test_completes_first_run_setup(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "first-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["configured"] is True
+        assert response.json()["username"] == "first-admin"
+
+    def test_creates_exactly_one_first_superuser(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "sole-first-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        users = db_session.exec(select(User)).all()
+        assert len(users) == 1
+        assert users[0].is_superuser is True
+        assert users[0].is_active is True
+
+    def test_issues_an_authenticated_session_after_setup(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "session-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+            },
+        )
+        assert response.status_code == 201, response.text
+
+        me = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {response.json()['access_token']}"},
+        )
+
+        assert me.status_code == 200, me.text
+        assert me.json()["username"] == "session-admin"
+
+    def test_persists_selected_local_storage_settings(
+        self,
+        client: TestClient,
+        db_session: Session,
+        tmp_path: Path,
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        data_dir = tmp_path / "chosen-files"
+        thumb_dir = tmp_path / "chosen-thumbs"
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "local-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+                "data_dir": str(data_dir),
+                "thumb_dir": str(thumb_dir),
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.data_dir == str(data_dir.resolve())
+        assert config.thumb_dir == str(thumb_dir.resolve())
+
+    def test_accepts_optional_email_omission(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "no-email-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        user = db_session.exec(select(User)).one()
+        assert user.email is None
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("setup_token", "short", id="short-setup-token"),
+            pytest.param("username", "ab", id="short-username"),
+            pytest.param("password", "short", id="short-password"),
+            pytest.param("username", "u" * 129, id="long-username"),
+            pytest.param("password", "p" * 257, id="long-password"),
+        ],
+    )
+    def test_validates_setup_credential_boundaries(
+        self,
+        client: TestClient,
+        db_session: Session,
+        tmp_path: Path,
+        field: str,
+        value: str,
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        payload = {
+            "setup_token": current_setup_token(),
+            "username": "boundary-admin",
+            "password": "Password123",
+            "storage_backend": "local",
+        }
+        payload[field] = value
+
+        response = client.post("/api/v1/setup", json=payload)
+
+        assert response.status_code == 422, response.text
+        assert db_session.exec(select(User)).first() is None
+
+    def test_rejects_an_unsupported_storage_backend(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "backend-admin",
+                "password": "Password123",
+                "storage_backend": "ftp",
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "invalid_storage_backend"
+        assert db_session.exec(select(User)).first() is None
+
+    def test_validates_backup_retention_lower_boundary(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "retention-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+                "backup_retention_days": -1,
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert db_session.exec(select(User)).first() is None
 
     def test_setup_persists_s3_storage_and_backup_choices(
         self, client: TestClient, db_session: Session, tmp_path: Path
@@ -63,6 +252,67 @@ class TestFirstRunSetup:
         assert cfg.backup_retention_days == 14
         assert cfg.backup_s3_bucket == "vault-backups"
 
+    def test_persists_s3_settings_without_exposing_secrets(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        access_key = "setup-asset-access"
+        secret_key = "setup-asset-secret"
+        setup_response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "s3-admin",
+                "password": "Password123",
+                "storage_backend": "s3",
+                "s3_bucket": "vault-assets",
+                "s3_access_key": access_key,
+                "s3_secret_key": secret_key,
+            },
+        )
+        assert setup_response.status_code == 201, setup_response.text
+
+        config_response = client.get(
+            "/api/v1/config",
+            headers={
+                "Authorization": f"Bearer {setup_response.json()['access_token']}"
+            },
+        )
+
+        assert config_response.status_code == 200, config_response.text
+        assert config_response.json()["s3_bucket"] == "vault-assets"
+        assert config_response.json()["has_s3_access_key"] is True
+        assert config_response.json()["has_s3_secret_key"] is True
+        assert access_key not in config_response.text
+        assert secret_key not in config_response.text
+
+    def test_persists_backup_retention_and_backup_target_settings(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "backup-admin",
+                "password": "Password123",
+                "storage_backend": "s3",
+                "s3_bucket": "vault-assets",
+                "backup_retention_days": 14,
+                "backup_s3_bucket": "vault-backups",
+                "backup_s3_endpoint_url": "https://backup.example.test",
+                "backup_s3_region": "auto",
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.backup_retention_days == 14
+        assert config.backup_s3_bucket == "vault-backups"
+        assert config.backup_s3_endpoint_url == "https://backup.example.test"
+
     def test_setup_requires_bucket_when_s3_selected(
         self, client: TestClient, tmp_path: Path
     ):
@@ -99,6 +349,39 @@ class TestFirstRunSetup:
         assert second.status_code == 409
         assert second.json()["detail"] == "already_configured"
         assert len(db_session.exec(select(User)).all()) == 1
+
+    def test_makes_concurrent_setup_single_winner(
+        self,
+        file_backed_integration_db: None,
+        tmp_path: Path,
+    ) -> None:
+        del file_backed_integration_db
+        self._isolate_runtime_dirs(tmp_path)
+        token = current_setup_token()
+        factory = get_session_factory()
+
+        def submit(username: str) -> int:
+            with factory.scoped_session() as session:
+                body = SetupRequest.model_validate(
+                    {
+                        "setup_token": token,
+                        "username": username,
+                        "password": "Password123",
+                        "storage_backend": "local",
+                    }
+                )
+                try:
+                    setup_api.complete_setup(body, Response(), session)
+                except HTTPException as exc:
+                    return exc.status_code
+                return 201
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(submit, ("race-admin-a", "race-admin-b")))
+
+        assert sorted(statuses) == [201, 409]
+        with get_session_factory().scoped_session() as session:
+            assert len(session.exec(select(User)).all()) == 1
 
     def test_setup_rejects_request_without_operator_token(
         self, client: TestClient, db_session: Session, tmp_path: Path

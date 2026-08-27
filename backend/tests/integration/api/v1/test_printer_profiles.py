@@ -202,7 +202,7 @@ def test_printer_profile_update_not_found(
     assert resp.json()["detail"] == "printer_profile_not_found"
 
 
-def test_printer_profile_update_rename_conflict_and_field_edits(
+def test_printer_profile_update_rejects_a_duplicate_name(
     client: TestClient, db_session: Session, auth_headers: dict[str, str]
 ) -> None:
     a = PrinterProfile(name="Printer A", printer_model="A")
@@ -220,8 +220,17 @@ def test_printer_profile_update_rename_conflict_and_field_edits(
     )
     assert conflict.status_code == 409
 
-    ok = client.patch(
-        f"/api/v1/printer-profiles/{b.id}",
+
+def test_printer_profile_update_trims_editable_fields(
+    client: TestClient, db_session: Session, auth_headers: dict[str, str]
+) -> None:
+    profile = PrinterProfile(name="Printer B", printer_model="B")
+    db_session.add(profile)
+    db_session.commit()
+    db_session.refresh(profile)
+
+    response = client.patch(
+        f"/api/v1/printer-profiles/{profile.id}",
         headers=auth_headers,
         json={
             "name": "Printer B Renamed",
@@ -229,8 +238,9 @@ def test_printer_profile_update_rename_conflict_and_field_edits(
             "slicer_name": "  PrusaSlicer  ",
         },
     )
-    assert ok.status_code == 200
-    body = ok.json()
+
+    assert response.status_code == 200
+    body = response.json()
     assert body["name"] == "Printer B Renamed"
     assert body["printer_model"] == "Prusa MK4"
     assert body["slicer_name"] == "PrusaSlicer"
