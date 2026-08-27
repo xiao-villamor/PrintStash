@@ -25,14 +25,20 @@ from app.db.models import (
     ModelSourceCover,
     OwnedStorageObject,
     StagingLease,
+    StorageObjectState,
     StorageDeleteIntent,
     User,
 )
-from app.db.session import SQLiteSessionFactory, _set_sqlite_pragmas
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+)
 from app.services import inbox, source_covers, staging_leases, trash
 from app.services.source_cover_processing import process_source_cover_upload
 from app.services.storage_backend import (
     CreationReceipt,
+    LocalStorageBackend,
     StorageBackend,
     StorageObjectInfo,
     get_backend,
@@ -76,12 +82,58 @@ def _receipt(key: str = "opaque/covers/1.webp", token: str = "new") -> CreationR
     )
 
 
-def test_create_publish_failure_leaves_no_cover_lease_or_proof(
+class _LedgerObservingBackend(LocalStorageBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pending_seen = False
+
+    def create_stream(self, src, key: str) -> CreationReceipt:
+        with get_session_factory().session() as observer:
+            row = observer.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).first()
+            self.pending_seen = (
+                row is not None and row.state is StorageObjectState.PENDING
+            )
+        return super().create_stream(src, key)
+
+
+class _FailingPublicationBackend(LocalStorageBackend):
+    def create_stream(self, src, key: str) -> CreationReceipt:
+        del src, key
+        raise RuntimeError("publish failed")
+
+
+def test_create_reserves_authoritative_ownership_before_publication(
     db_session: Session,
 ) -> None:
     source = _source(db_session)
-    backend = _backend()
-    backend.create_bytes.side_effect = RuntimeError("publish failed")
+    db_session.commit()
+    backend = _LedgerObservingBackend()
+
+    result = source_covers.put(
+        db_session,
+        backend,
+        provenance_source_id=source.id,
+        actor_id=None,
+        data=_png(),
+        content_type="image/png",
+    )
+
+    assert backend.pending_seen is True
+    proof = db_session.exec(
+        select(OwnedStorageObject).where(
+            OwnedStorageObject.key == result.cover.storage_key
+        )
+    ).one()
+    assert proof.state is StorageObjectState.COMMITTED
+
+
+def test_create_publish_failure_leaves_reclaimable_ownership_intent(
+    db_session: Session,
+) -> None:
+    source = _source(db_session)
+    backend = _FailingPublicationBackend()
 
     with pytest.raises(RuntimeError, match="publish failed"):
         source_covers.put(
@@ -95,7 +147,10 @@ def test_create_publish_failure_leaves_no_cover_lease_or_proof(
 
     assert db_session.exec(select(ModelSourceCover)).all() == []
     assert db_session.exec(select(StagingLease)).all() == []
-    assert db_session.exec(select(OwnedStorageObject)).all() == []
+    with get_session_factory().session() as observer:
+        proof = observer.exec(select(OwnedStorageObject)).one()
+        assert proof.state is StorageObjectState.PENDING
+        assert proof.last_error == "RuntimeError"
 
 
 def test_create_rolls_back_published_bytes_when_recording_the_receipt_fails(
@@ -761,7 +816,7 @@ def test_finish_import_uses_only_intent_and_final_sqlite_commits(
 
     inbox._finish_import(row_id, "finish-job", factory)
 
-    assert len(commits) == 2  # durable intent + final Inbox terminalization
+    assert len(commits) == 4  # cover intent + ownership + evidence + Inbox finalization
     with Session(engine) as check:
         finished = check.get(InboxItem, row_id)
         assert finished is not None

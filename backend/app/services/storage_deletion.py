@@ -207,6 +207,7 @@ def process_storage_delete_intents(
                         receipt.key,
                         expected_size=receipt.size,
                         expected_etag=receipt.etag,
+                        expected_version_id=receipt.version_id,
                     )
                     if allow_unverified
                     else backend.rollback_create(receipt)

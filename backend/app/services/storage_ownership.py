@@ -340,6 +340,23 @@ def sweep_orphaned_publications(
             blocked += 1
             continue
         try:
+            if row.version_id is not None:
+                removed = backend.reclaim_unverified(
+                    row.key,
+                    expected_size=row.size_bytes or 0,
+                    expected_etag=row.etag,
+                    expected_sha256=row.sha256,
+                    expected_version_id=row.version_id,
+                )
+                if not removed:
+                    row.state = StorageObjectState.BLOCKED
+                    row.last_error = "storage_reclaim_mismatch"
+                    session.add(row)
+                    blocked += 1
+                    continue
+                session.delete(row)
+                reclaimed += 1
+                continue
             info = backend.object_info(row.key)
             if info is None:
                 session.delete(row)
@@ -375,6 +392,12 @@ def sweep_orphaned_publications(
                 row.key,
                 expected_size=info.size,
                 expected_etag=info.etag,
+                expected_sha256=(
+                    row.sha256
+                    if row.etag is None and row.object_kind in _SMALL_HASH_KINDS
+                    else None
+                ),
+                expected_version_id=row.version_id,
             )
             if not removed:
                 row.state = StorageObjectState.BLOCKED

@@ -235,9 +235,11 @@ class StorageBackend(ABC):
         *,
         expected_size: int,
         expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
     ) -> bool:
         """Best-effort delete after a ledger-owned caller rechecks evidence."""
-        del key, expected_size, expected_etag
+        del key, expected_size, expected_etag, expected_sha256, expected_version_id
         return False
 
     @abstractmethod
@@ -537,7 +539,10 @@ class LocalStorageBackend(StorageBackend):
         *,
         expected_size: int,
         expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
     ) -> bool:
+        del expected_version_id
         self.namespace_for(key)
         info = self.object_info(key)
         if info is None:
@@ -546,6 +551,16 @@ class LocalStorageBackend(StorageBackend):
             return False
         if expected_etag is not None and info.etag != expected_etag:
             return False
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            try:
+                with Path(key).open("rb") as source:
+                    while chunk := source.read(1024 * 1024):
+                        digest.update(chunk)
+            except FileNotFoundError:
+                return True
+            if digest.hexdigest() != expected_sha256.lower():
+                return False
         try:
             Path(key).unlink()
         except FileNotFoundError:
@@ -1081,8 +1096,41 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
         *,
         expected_size: int,
         expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
     ) -> bool:
         self.namespace_for(key)
+        if expected_version_id is not None:
+            import botocore.exceptions
+
+            try:
+                response = self._client.head_object(
+                    Bucket=self._bucket,
+                    Key=key,
+                    VersionId=expected_version_id,
+                )
+            except botocore.exceptions.ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in {
+                    "404",
+                    "NoSuchKey",
+                    "NoSuchVersion",
+                    "NotFound",
+                }:
+                    return True
+                raise
+            etag = response.get("ETag")
+            if etag and not str(etag).startswith('"'):
+                etag = f'"{etag}"'
+            if int(response.get("ContentLength", 0) or 0) != expected_size:
+                return False
+            if expected_etag is not None and str(etag) != expected_etag:
+                return False
+            self._client.delete_object(
+                Bucket=self._bucket,
+                Key=key,
+                VersionId=expected_version_id,
+            )
+            return True
         info = self.object_info(key)
         if info is None:
             return True
@@ -1090,6 +1138,12 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
             return False
         if expected_etag is not None and info.etag != expected_etag:
             return False
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            for chunk in self.stream_chunks(key):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256.lower():
+                return False
         self._client.delete_object(Bucket=self._bucket, Key=key)
         return True
 

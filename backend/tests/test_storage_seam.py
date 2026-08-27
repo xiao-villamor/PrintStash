@@ -315,6 +315,37 @@ def test_s3_object_info_exposes_remote_etag_and_size() -> None:
     assert info.etag == '"remote-etag"'
 
 
+def test_s3_orphan_reclamation_deletes_the_recorded_version() -> None:
+    class _Client:
+        def __init__(self) -> None:
+            self.deleted: dict[str, str] | None = None
+
+        def head_object(self, **_kwargs):
+            return {"ContentLength": 42, "ETag": '"remote-etag"'}
+
+        def delete_object(self, **kwargs):
+            self.deleted = kwargs
+
+    client = _Client()
+    backend = object.__new__(S3StorageBackend)
+    backend._client = client  # type: ignore[attr-defined]
+    backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+
+    removed = backend.reclaim_unverified(
+        "vault-data/orphan.bin",
+        expected_size=42,
+        expected_etag='"remote-etag"',
+        expected_version_id="owned-version",
+    )
+
+    assert removed is True
+    assert client.deleted == {
+        "Bucket": "test-bucket",
+        "Key": "vault-data/orphan.bin",
+        "VersionId": "owned-version",
+    }
+
+
 def test_s3_lifecycle_audit_reports_expiration_covering_managed_prefix() -> None:
     class _Client:
         def get_bucket_lifecycle_configuration(self, **_kwargs):

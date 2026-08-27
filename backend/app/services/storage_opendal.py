@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import mmap
 import tempfile
 import uuid
@@ -268,7 +269,10 @@ class OpenDALStorageBackend(StorageBackend):
         *,
         expected_size: int,
         expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
     ) -> bool:
+        del expected_version_id
         info = self.object_info(key)
         if info is None:
             return True
@@ -276,6 +280,12 @@ class OpenDALStorageBackend(StorageBackend):
             return False
         if expected_etag is not None and info.etag != expected_etag:
             return False
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            for chunk in self.stream_chunks(key):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256.lower():
+                return False
         self._operator.delete(self._relative(key))
         return True
 
