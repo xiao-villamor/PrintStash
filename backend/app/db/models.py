@@ -1207,6 +1207,14 @@ class SystemConfig(SQLModel, table=True):
     # Storage backend: "local" or "s3"
     storage_backend: Optional[str] = Field(default=None, max_length=64)
 
+    # Typed provider configuration. Non-secret and secret JSON are split so
+    # sanitized reads never need to deserialize plaintext credentials.
+    storage_provider: Optional[str] = Field(default=None, max_length=64)
+    storage_provider_config_json: Optional[str] = Field(default=None)
+    storage_provider_secret_json: Optional[str] = Field(
+        default=None, sa_column=Column(EncryptedText(), nullable=True)
+    )
+
     # Generated on first boot when no VAULT_JWT_SECRET is supplied, so an install
     # never signs tokens with the public default. Stays None when the operator
     # sets the env var — theirs wins and we don't copy it into the DB.

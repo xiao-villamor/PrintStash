@@ -35,6 +35,7 @@ from app.services.storage_paths import (
     validate_disjoint_directories,
     validate_file_outside_roots,
 )
+from app.services.storage_providers import TransportKind, resolve_transport
 
 logger = get_logger(__name__)
 
@@ -121,6 +122,7 @@ def get_status(session: Session = Depends(get_session)) -> SetupStatus:
     configured = config.configured_at is not None and user_count > 0
     if configured:
         return SetupStatus(configured=True)
+    provider_config = runtime_config.get_sanitized_storage_provider(session)
     return SetupStatus(
         configured=configured,
         setup_token_required=True,
@@ -130,6 +132,10 @@ def get_status(session: Session = Depends(get_session)) -> SetupStatus:
         current_data_dir=str(settings.data_dir),
         current_thumb_dir=str(settings.thumb_dir),
         current_storage_backend=str(settings.storage_backend),
+        current_storage_provider=(provider_config[0] if provider_config else None),
+        current_storage_provider_config=(
+            provider_config[1] if provider_config else None
+        ),
         current_s3_bucket=str(settings.s3_bucket),
         current_s3_endpoint_url=str(settings.s3_endpoint_url),
         current_s3_region=str(settings.s3_region),
@@ -186,14 +192,62 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
             detail="users_already_exist",
         )
 
-    storage_backend = body.storage_backend or str(settings.storage_backend)
-    if storage_backend not in ("local", "s3"):
+    legacy_storage_fields = {
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_region",
+        "s3_access_key",
+        "s3_secret_key",
+    }
+    new_storage_supplied = (
+        body.storage_provider is not None or body.storage_provider_config is not None
+    )
+    if new_storage_supplied and body.model_fields_set & legacy_storage_fields:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="mixed_storage_provider_input",
+        )
+    if (body.storage_provider is None) != (body.storage_provider_config is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="storage_provider_and_config_required",
+        )
+    requested_provider = None
+    transport = None
+    if body.storage_provider is not None and body.storage_provider_config is not None:
+        try:
+            requested_provider = runtime_config.resolve_requested_storage_provider(
+                runtime_config.get_config(session),
+                provider=body.storage_provider,
+                raw_config=body.storage_provider_config,
+            )
+            transport = resolve_transport(requested_provider)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+    storage_backend = (
+        "local"
+        if transport is not None and transport.kind is TransportKind.LOCAL
+        else "s3"
+        if transport is not None and transport.kind is TransportKind.S3
+        else requested_provider.provider
+        if requested_provider is not None
+        else body.storage_backend or str(settings.storage_backend)
+    )
+    if requested_provider is None and storage_backend not in ("local", "s3"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="invalid_storage_backend",
         )
     if storage_backend == "s3" and not (
-        (body.s3_bucket or "").strip() or str(settings.s3_bucket)
+        str(transport.options["bucket"])
+        if transport is not None and transport.kind is TransportKind.S3
+        else (body.s3_bucket or "").strip() or str(settings.s3_bucket)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -205,8 +259,16 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         # The browser omits unchanged defaults, so validate the effective paths,
         # not only explicit overrides.  This catches a populated or read-only
         # bind mount at /data/files before setup mutates any database state.
-        effective_data_dir = body.data_dir or str(settings.data_dir)
-        effective_thumb_dir = body.thumb_dir or str(settings.thumb_dir)
+        effective_data_dir = (
+            str(transport.options["data_dir"])
+            if transport is not None
+            else body.data_dir or str(settings.data_dir)
+        )
+        effective_thumb_dir = (
+            str(transport.options["thumb_dir"])
+            if transport is not None
+            else body.thumb_dir or str(settings.thumb_dir)
+        )
         protected_dirs: dict[str, str | Path] = {
             "data_dir": effective_data_dir,
             "thumb_dir": effective_thumb_dir,
@@ -243,32 +305,52 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         effective_thumb_dir = body.thumb_dir
 
     effective_s3_bucket = (
-        body.s3_bucket if body.s3_bucket is not None else str(settings.s3_bucket)
+        str(transport.options["bucket"])
+        if transport is not None and transport.kind is TransportKind.S3
+        else body.s3_bucket
+        if body.s3_bucket is not None
+        else str(settings.s3_bucket)
     )
     effective_s3_endpoint_url = (
-        body.s3_endpoint_url
+        str(transport.options["endpoint_url"])
+        if transport is not None and transport.kind is TransportKind.S3
+        else body.s3_endpoint_url
         if body.s3_endpoint_url is not None
         else str(settings.s3_endpoint_url)
     )
     effective_s3_region = (
-        body.s3_region if body.s3_region is not None else str(settings.s3_region)
+        str(transport.options["region"])
+        if transport is not None and transport.kind is TransportKind.S3
+        else body.s3_region
+        if body.s3_region is not None
+        else str(settings.s3_region)
     )
 
     # 2. Persist storage and backup overrides into the runtime overlay.
+    if requested_provider is not None:
+        runtime_config.update_storage_provider(
+            session,
+            provider=body.storage_provider or "",
+            raw_config=body.storage_provider_config or {},
+            commit=False,
+            apply_runtime=False,
+        )
     runtime_config.update_config(
         session,
-        storage_backend=storage_backend,
+        storage_backend=None if requested_provider is not None else storage_backend,
         # Pin the effective roots. Leaving these null would let a later env
         # change silently reinterpret existing rows against a different mount.
-        data_dir=effective_data_dir,
-        thumb_dir=effective_thumb_dir,
+        data_dir=None if requested_provider is not None else effective_data_dir,
+        thumb_dir=None if requested_provider is not None else effective_thumb_dir,
         # Pin the remote namespace identity for the same reason as local roots:
         # environment drift must not reinterpret owned keys in another bucket.
-        s3_bucket=effective_s3_bucket,
-        s3_endpoint_url=effective_s3_endpoint_url,
-        s3_region=effective_s3_region,
-        s3_access_key=body.s3_access_key,
-        s3_secret_key=body.s3_secret_key,
+        s3_bucket=None if requested_provider is not None else effective_s3_bucket,
+        s3_endpoint_url=None
+        if requested_provider is not None
+        else effective_s3_endpoint_url,
+        s3_region=None if requested_provider is not None else effective_s3_region,
+        s3_access_key=None if requested_provider is not None else body.s3_access_key,
+        s3_secret_key=None if requested_provider is not None else body.s3_secret_key,
         backup_retention_days=body.backup_retention_days,
         backup_s3_bucket=body.backup_s3_bucket,
         backup_s3_endpoint_url=body.backup_s3_endpoint_url,
@@ -311,6 +393,7 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
         user_id=user.id,
         username=user.username,
         storage_backend=str(settings.storage_backend),
+        storage_provider=(body.storage_provider or str(settings.storage_backend)),
         data_dir=str(settings.data_dir),
         thumb_dir=str(settings.thumb_dir),
         access_token=token,

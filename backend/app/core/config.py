@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     )
 
     storage_backend: str = "local"
+    storage_provider: str = ""
+    storage_provider_config: str = ""
+    storage_provider_secrets: str = ""
     storage_allow_unverified: bool = False
     data_dir: Path = Path("/data/files")
     thumb_dir: Path = Path("/data/thumbs")

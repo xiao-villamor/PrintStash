@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, NoReturn, Optional
+from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -59,6 +59,8 @@ class VaultConfigRead(BaseModel):
     storage_warnings: list[str] = Field(default_factory=list)
     storage_probe_diagnostics: dict[str, object] = Field(default_factory=dict)
     storage_unverified_acknowledged: bool = False
+    storage_provider: str = ""
+    storage_provider_config: dict[str, object] = Field(default_factory=dict)
 
 
 class VaultConfigUpdate(BaseModel):
@@ -81,6 +83,8 @@ class VaultConfigUpdate(BaseModel):
     oidc_allow_insecure_http: Optional[bool] = None
 
     storage_backend: Optional[str] = None
+    storage_provider: Optional[str] = Field(default=None, max_length=64)
+    storage_provider_config: Optional[dict[str, Any]] = None
     data_dir: Optional[str] = None
     thumb_dir: Optional[str] = None
     s3_bucket: Optional[str] = None
@@ -110,6 +114,9 @@ def get_config(
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
     cfg = runtime_config.get_effective_config(session)
+    provider_config = runtime_config.get_sanitized_storage_provider(session)
+    if provider_config is not None:
+        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
     backend = get_backend()
     cfg.update(
         storage_tier=backend.capabilities.tier.value,
@@ -251,6 +258,30 @@ def update_config(
     body: VaultConfigUpdate,
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
+    legacy_storage_fields = {
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_region",
+        "s3_access_key",
+        "s3_secret_key",
+    }
+    new_storage_supplied = (
+        body.storage_provider is not None or body.storage_provider_config is not None
+    )
+    legacy_storage_supplied = bool(body.model_fields_set & legacy_storage_fields)
+    if new_storage_supplied and legacy_storage_supplied:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="mixed_storage_provider_input",
+        )
+    if (body.storage_provider is None) != (body.storage_provider_config is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="storage_provider_and_config_required",
+        )
     if body.storage_backend is not None and body.storage_backend not in (
         "",
         "local",
@@ -286,6 +317,25 @@ def update_config(
             changed(body.s3_region, settings.s3_region),
         )
     )
+    requested_provider = None
+    if body.storage_provider is not None and body.storage_provider_config is not None:
+        config_row = runtime_config.get_config(session)
+        try:
+            requested_provider = runtime_config.resolve_requested_storage_provider(
+                config_row,
+                provider=body.storage_provider,
+                raw_config=body.storage_provider_config,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
+        current_provider = runtime_config._stored_provider_config(config_row)
+        namespace_change = current_provider is None or (
+            runtime_config.storage_provider_signature(current_provider)
+            != runtime_config.storage_provider_signature(requested_provider)
+        )
     if namespace_change:
         # Runtime remapping would make row-derived keys point at a new root or
         # bucket. There is intentionally no in-place shortcut: a future storage
@@ -311,16 +361,23 @@ def update_config(
     if body.currency is not None:
         runtime_config.set_currency(session, body.currency)
 
+    if requested_provider is not None:
+        runtime_config.update_storage_provider(
+            session,
+            provider=body.storage_provider or "",
+            raw_config=body.storage_provider_config or {},
+        )
+
     runtime_config.update_config(
         session,
-        storage_backend=body.storage_backend,
-        data_dir=body.data_dir,
-        thumb_dir=body.thumb_dir,
-        s3_bucket=body.s3_bucket,
-        s3_endpoint_url=body.s3_endpoint_url,
-        s3_region=body.s3_region,
-        s3_access_key=body.s3_access_key,
-        s3_secret_key=body.s3_secret_key,
+        storage_backend=None if new_storage_supplied else body.storage_backend,
+        data_dir=None if new_storage_supplied else body.data_dir,
+        thumb_dir=None if new_storage_supplied else body.thumb_dir,
+        s3_bucket=None if new_storage_supplied else body.s3_bucket,
+        s3_endpoint_url=None if new_storage_supplied else body.s3_endpoint_url,
+        s3_region=None if new_storage_supplied else body.s3_region,
+        s3_access_key=None if new_storage_supplied else body.s3_access_key,
+        s3_secret_key=None if new_storage_supplied else body.s3_secret_key,
         backup_retention_days=body.backup_retention_days,
         trash_retention_days=body.trash_retention_days,
         model_thumbnail_width=body.model_thumbnail_width,
@@ -343,6 +400,9 @@ def update_config(
     )
 
     cfg = runtime_config.get_effective_config(session)
+    provider_config = runtime_config.get_sanitized_storage_provider(session)
+    if provider_config is not None:
+        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
     backend = get_backend()
     cfg.update(
         storage_tier=backend.capabilities.tier.value,

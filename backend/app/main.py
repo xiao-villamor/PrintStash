@@ -53,7 +53,12 @@ from app.services.printer_hub import PrinterHub
 from app.services.printer_jobs import reconcile_stranded_dispatches, run_fleet_scheduler
 from app.services.printer_provider import build_provider_registry, get_provider_client
 from app.services.realtime import InProcessBus
-from app.services.runtime_config import apply_overlay, ensure_jwt_secret, is_configured
+from app.services.runtime_config import (
+    apply_environment_storage_provider,
+    apply_overlay,
+    ensure_jwt_secret,
+    is_configured,
+)
 from app.services.setup_token import current_setup_token
 from app.services.storage_backend import (
     LocalStorageBackend,
@@ -169,6 +174,7 @@ async def lifespan(app: FastAPI):
     init_db()
     with get_session_factory().scoped_session() as session:
         apply_overlay(session)
+        apply_environment_storage_provider(session)
         # Persisted runtime configuration can differ from environment
         # defaults, so revalidate before creating the secrets key.
         validate_runtime_storage_paths()

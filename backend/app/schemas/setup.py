@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +23,8 @@ class SetupStatus(BaseModel):
     current_data_dir: Optional[str] = None
     current_thumb_dir: Optional[str] = None
     current_storage_backend: Optional[str] = None
+    current_storage_provider: Optional[str] = None
+    current_storage_provider_config: Optional[dict[str, object]] = None
     current_s3_bucket: Optional[str] = None
     current_s3_endpoint_url: Optional[str] = None
     current_s3_region: Optional[str] = None
@@ -43,6 +45,8 @@ class SetupRequest(BaseModel):
     password: str = Field(min_length=8, max_length=256)
     email: Optional[str] = Field(default=None, max_length=255)
     storage_backend: Optional[str] = Field(default=None, max_length=64)
+    storage_provider: Optional[str] = Field(default=None, max_length=64)
+    storage_provider_config: Optional[dict[str, Any]] = None
     data_dir: Optional[str] = Field(default=None, max_length=1024)
     thumb_dir: Optional[str] = Field(default=None, max_length=1024)
     s3_bucket: Optional[str] = Field(default=None, max_length=256)
@@ -65,6 +69,7 @@ class SetupResponse(BaseModel):
     user_id: int
     username: str
     storage_backend: str = "local"
+    storage_provider: str = "local"
     data_dir: str
     thumb_dir: str
     access_token: str

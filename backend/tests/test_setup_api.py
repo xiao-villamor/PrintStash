@@ -58,6 +58,59 @@ class TestFirstRunSetup:
         assert cfg.backup_retention_days == 14
         assert cfg.backup_s3_bucket == "vault-backups"
 
+    def test_setup_persists_typed_provider_without_returning_secrets(
+        self, client: TestClient, db_session: Session, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "provider-admin",
+                "password": "Password123",
+                "storage_provider": "cloudflare_r2",
+                "storage_provider_config": {
+                    "provider": "cloudflare_r2",
+                    "bucket": "models",
+                    "account_id": "account-123",
+                    "access_key": "access-secret",
+                    "secret_key": "key-secret",
+                    "root": "printstash",
+                },
+            },
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["storage_provider"] == "cloudflare_r2"
+        row = db_session.get(SystemConfig, 1)
+        assert row is not None
+        assert row.storage_provider == "cloudflare_r2"
+        assert "access-secret" not in (row.storage_provider_config_json or "")
+        assert row.s3_endpoint_url == ("https://account-123.r2.cloudflarestorage.com")
+
+    def test_setup_rejects_mixed_new_and_legacy_storage_input(
+        self, client: TestClient, tmp_path: Path
+    ) -> None:
+        self._isolate_runtime_dirs(tmp_path)
+        response = client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "provider-admin",
+                "password": "Password123",
+                "storage_backend": "local",
+                "storage_provider": "local",
+                "storage_provider_config": {
+                    "provider": "local",
+                    "data_dir": str(tmp_path / "files"),
+                    "thumb_dir": str(tmp_path / "thumbs"),
+                },
+            },
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "mixed_storage_provider_input"
+
     def test_setup_requires_bucket_when_s3_selected(
         self, client: TestClient, tmp_path: Path
     ):
