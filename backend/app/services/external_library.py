@@ -54,7 +54,7 @@ from app.services.ingestion import (
 from app.services.jobs import registry
 from app.services.profile_detection import upsert_detected_profiles
 from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import publish_bytes
 
 logger = get_logger(__name__)
 
@@ -294,10 +294,13 @@ def _reindex_changed(
     assert file_row.id is not None
     if thumb_bytes:
         try:
-            receipt = backend.create_bytes(
-                thumbnail.to_webp(thumb_bytes), backend.thumbnail_key(file_row.id)
+            publish_bytes(
+                session,
+                backend,
+                backend.thumbnail_key(file_row.id),
+                thumbnail.to_webp(thumb_bytes),
+                object_kind="thumbnail",
             )
-            record_creation(session, receipt, object_kind="thumbnail")
             session.commit()
         except (StorageCollisionError, ValueError):
             # Existing thumbnails are never replaced without a separate,

@@ -75,6 +75,7 @@ from app.services.storage_backend import (
     get_backend,
 )
 from app.services.storage_deletion import enqueue_creation_receipt
+from app.services.storage_ownership import publish_file
 from app.services.storage_paths import unlink_managed_file
 
 _inbox_manifest_adapter = TypeAdapter(InboxManifestRead)
@@ -395,6 +396,17 @@ def _capture_source_draft(
     if len(encoded) > MAX_MANIFEST_BYTES:
         raise importer.ImportError_("capture_source_too_large")
     try:
+        submitted = _canonical_capture_source_url(
+            value.provider, source_url, value.source_item_id
+        )
+        captured = _canonical_capture_source_url(
+            value.provider, value.canonical_url, value.source_item_id
+        )
+    except (KeyError, TypeError, ValueError, importer.ImportError_) as exc:
+        raise importer.ImportError_("capture_source_url_mismatch") from exc
+    if submitted != captured:
+        raise importer.ImportError_("capture_source_url_mismatch")
+    try:
         source = CaptureSource.from_dict(raw)
     except (ValueError, CaptureContractError) as exc:
         raise importer.ImportError_("capture_source_invalid") from exc
@@ -593,18 +605,24 @@ def upload_capture_slot(
             session.commit()
             session.refresh(slot)
             return slot
-        with temporary.open("rb") as incoming:
-            try:
-                receipt = backend.create_stream(incoming, slot.storage_key)
-            except StorageCollisionError:
-                # The only object eligible for adoption is this slot's exact
-                # declared key and content.  A foreign/mismatched collision
-                # remains untouched and the pending lease remains retryable.
-                if not staging_leases.reconcile_capture_slot(session, backend, slot):
-                    raise
-                session.commit()
-                session.refresh(slot)
-                return slot
+        try:
+            receipt = publish_file(
+                session,
+                backend,
+                slot.storage_key,
+                temporary,
+                object_kind="capture_upload_slot",
+                sha256=slot.sha256,
+            )
+        except StorageCollisionError:
+            # The only object eligible for adoption is this slot's exact
+            # declared key and content.  A foreign/mismatched collision
+            # remains untouched and the pending lease remains retryable.
+            if not staging_leases.reconcile_capture_slot(session, backend, slot):
+                raise
+            session.commit()
+            session.refresh(slot)
+            return slot
         if receipt.size != slot.size_bytes:
             backend.rollback_create(receipt)
             raise ValueError("capture_upload_size_mismatch")
@@ -788,7 +806,8 @@ def _attach_capture_cover(
         source_raw.get("canonical_url") if isinstance(source_raw, dict) else None
     )
     if (
-        not isinstance(provider, str)
+        provider is not None
+        and not isinstance(provider, str)
         or source_item_id is not None
         and not isinstance(source_item_id, str)
         or not isinstance(canonical_url, str)
@@ -796,15 +815,19 @@ def _attach_capture_cover(
         return False
     query = select(ModelProvenanceSource).where(
         ModelProvenanceSource.model_id == row.resulting_model_id,
-        ModelProvenanceSource.provider == provider,
         ModelProvenanceSource.canonical_url == canonical_url,
     )
-    query = query.where(
-        ModelProvenanceSource.source_item_id.is_(None)
-        if source_item_id is None
-        else ModelProvenanceSource.source_item_id == source_item_id
-    )
-    sources = session.exec(query).all()
+    if isinstance(provider, str):
+        query = query.where(ModelProvenanceSource.provider == provider)
+    if source_item_id is not None:
+        exact = session.exec(
+            query.where(ModelProvenanceSource.source_item_id == source_item_id)
+        ).all()
+        # Older provenance rows may predate source-item IDs. The canonical URL
+        # remains a safe fallback only when it identifies exactly one source.
+        sources = exact or session.exec(query).all()
+    else:
+        sources = session.exec(query).all()
     if len(sources) != 1 or sources[0].id is None:
         return False
     source = sources[0]
@@ -975,7 +998,27 @@ def _parse_capture_source(value: str | None, source_url: str) -> CaptureSource |
         if isinstance(raw, dict) and "tags" not in raw:
             # Legacy browser-upload payloads predate structured source tags.
             raw = {**raw, "tags": []}
+        if isinstance(raw, dict):
+            raw_provider = raw.get("provider")
+            raw_item_id = raw.get("source_item_id")
+            raw_url = raw.get("canonical_url")
+            if all(isinstance(item, str) for item in (raw_provider, raw_item_id, raw_url)):
+                try:
+                    submitted = _canonical_capture_source_url(
+                        raw_provider, source_url, raw_item_id
+                    )
+                    captured = _canonical_capture_source_url(
+                        raw_provider, raw_url, raw_item_id
+                    )
+                except (KeyError, TypeError, ValueError, importer.ImportError_) as exc:
+                    raise importer.ImportError_(
+                        "capture_source_url_mismatch"
+                    ) from exc
+                if submitted != captured:
+                    raise importer.ImportError_("capture_source_url_mismatch")
         source = CaptureSource.from_dict(raw)
+    except importer.ImportError_:
+        raise
     except (TypeError, ValueError, CaptureContractError) as exc:
         raise importer.ImportError_("capture_source_invalid") from exc
     if source.provider not in {"makerworld", "printables", "thingiverse"}:

@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import OwnedStorageObject, StorageDeleteIntent
+from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
 from app.db.session import get_session_factory
 from app.services.storage_backend import CreationReceipt, StorageBackend, get_backend
 from app.services.storage_ownership import UnsafeStorageDeleteError
@@ -25,6 +25,8 @@ class DeleteIntentResult:
 
 
 def _owned_receipt(row: OwnedStorageObject) -> CreationReceipt:
+    if row.token is None or row.size_bytes is None:
+        raise UnsafeStorageDeleteError("storage_ownership_incomplete")
     return CreationReceipt(
         key=row.key,
         size=row.size_bytes,
@@ -70,7 +72,10 @@ def enqueue_owned_key(
     its ownership proof.
     """
     rows = session.exec(
-        select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        select(OwnedStorageObject).where(
+            OwnedStorageObject.key == key,
+            OwnedStorageObject.state == StorageObjectState.COMMITTED,
+        )
     ).all()
     for owned in rows:
         receipt = _owned_receipt(owned)

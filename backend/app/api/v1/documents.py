@@ -47,7 +47,13 @@ from app.schemas.documents import (
 from app.services import rbac
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_deletion import process_storage_delete_intents
-from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
+from app.services.storage_ownership import (
+    UnsafeStorageDeleteError,
+    complete_publication,
+    fail_publication,
+    publish_bytes,
+    reserve_creation,
+)
 from app.services.trash import hard_delete_document, restore_document
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -308,14 +314,28 @@ async def upload_document(
     backend = get_backend()
     key = backend.document_file_key(doc.id, safe)
     receipt = None
+    reservation_id = None
     try:
+        reservation_id = reserve_creation(
+            session,
+            backend,
+            key,
+            object_kind="document",
+            expected_size=file.size,
+        )
         receipt = await run_in_threadpool(backend.create_stream, file.file, key)
+        complete_publication(
+            session,
+            reservation_id,
+            receipt,
+            object_kind="document",
+            sha256=None,
+        )
         if receipt.size > settings.max_upload_bytes:
             raise HTTPException(status_code=413, detail="upload_too_large")
         doc.filename = safe
         doc.size_bytes = receipt.size
         session.add(doc)
-        record_creation(session, receipt, object_kind="document")
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()
@@ -323,8 +343,10 @@ async def upload_document(
             status_code=status.HTTP_409_CONFLICT,
             detail="storage_destination_exists",
         ) from exc
-    except Exception:
+    except Exception as exc:
         session.rollback()
+        if reservation_id is not None:
+            fail_publication(session, reservation_id, exc)
         if receipt is not None:
             backend.rollback_create(receipt)
         raise
@@ -447,8 +469,13 @@ async def upload_document_image(
     key = backend.document_image_key(doc.id, name)
     receipt = None
     try:
-        receipt = backend.create_bytes(data, key)
-        record_creation(session, receipt, object_kind="document_image")
+        receipt = publish_bytes(
+            session,
+            backend,
+            key,
+            data,
+            object_kind="document_image",
+        )
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()

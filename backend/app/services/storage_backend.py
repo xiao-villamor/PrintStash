@@ -220,6 +220,22 @@ class StorageBackend(ABC):
         """Read-only operator policy findings that may expire managed bytes."""
         return []
 
+    def namespace_for(self, key: str) -> str:
+        """Return the owned namespace that contains an opaque storage key."""
+        del key
+        raise NotImplementedError("storage_namespace_not_supported")
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+    ) -> bool:
+        """Best-effort delete after a ledger-owned caller rechecks evidence."""
+        del key, expected_size, expected_etag
+        return False
+
     @abstractmethod
     def blob_key(self, slug: str, version: int, filename: str) -> str: ...
 
@@ -504,6 +520,34 @@ class LocalStorageBackend(StorageBackend):
             if resolved == root or resolved.is_relative_to(root):
                 return f"{role}:{root}"
         return None
+
+    def namespace_for(self, key: str) -> str:
+        namespace = self._owned_namespace(Path(key))
+        if namespace is None:
+            raise StorageCollisionError("storage_key_outside_managed_root")
+        return namespace
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+    ) -> bool:
+        self.namespace_for(key)
+        info = self.object_info(key)
+        if info is None:
+            return True
+        if info.size != expected_size:
+            return False
+        if expected_etag is not None and info.etag != expected_etag:
+            return False
+        try:
+            Path(key).unlink()
+        except FileNotFoundError:
+            return True
+        _fsync_directory(Path(key).parent)
+        return True
 
     def direct_path(self, key: str) -> Path | None:
         return Path(key)
@@ -1020,6 +1064,30 @@ class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-
             namespace_ownership=True,
             direct_path=False,
         )
+
+    def namespace_for(self, key: str) -> str:
+        prefix = self._prefix()
+        if not key.startswith(prefix):
+            raise StorageCollisionError("storage_key_outside_managed_root")
+        return f"{self._bucket}/{prefix}"
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+    ) -> bool:
+        self.namespace_for(key)
+        info = self.object_info(key)
+        if info is None:
+            return True
+        if info.size != expected_size:
+            return False
+        if expected_etag is not None and info.etag != expected_etag:
+            return False
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return True
 
     def destructive_lifecycle_findings(self) -> list[dict[str, object]]:
         import botocore.exceptions

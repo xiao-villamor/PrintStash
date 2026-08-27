@@ -150,6 +150,12 @@ class CaptureUploadSlotState(str, Enum):
     UPLOADED = "uploaded"
 
 
+class StorageObjectState(str, Enum):
+    PENDING = "pending"
+    COMMITTED = "committed"
+    BLOCKED = "blocked"
+
+
 class CaptureProvider(str, Enum):
     MYMINIFACTORY = "myminifactory"
     CULTS = "cults"
@@ -1315,12 +1321,10 @@ class SystemConfig(SQLModel, table=True):
 
 
 class OwnedStorageObject(SQLModel, table=True):
-    """Object-level proof recorded only after a create-only storage write.
+    """Intent and proof for one key PrintStash means to own.
 
-    Legacy rows start without an entry. Local primary Artifacts may be adopted
-    later only when their bytes match the historical size + SHA-256 and the
-    backend can bind that content to a stable filesystem identity. Database
-    presence, naming, and directory placement alone remain insufficient proof.
+    ``PENDING`` is committed before storage publication. The transition to
+    ``COMMITTED`` shares the domain transaction that makes the object live.
     """
 
     __tablename__ = "owned_storage_objects"
@@ -1335,8 +1339,22 @@ class OwnedStorageObject(SQLModel, table=True):
     namespace: str = Field(max_length=1024, index=True)
     key: str = Field(max_length=2048)
     object_kind: str = Field(max_length=64, index=True)
-    token: str = Field(max_length=64)
-    size_bytes: int
+    state: StorageObjectState = Field(
+        default=StorageObjectState.PENDING,
+        sa_column=Column(
+            SAEnum(
+                StorageObjectState,
+                values_callable=lambda members: [member.value for member in members],
+                native_enum=False,
+                length=16,
+            ),
+            nullable=False,
+            index=True,
+        ),
+    )
+    token: Optional[str] = Field(default=None, max_length=64)
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = Field(default=None, max_length=64, index=True)
     etag: Optional[str] = Field(default=None, max_length=255)
     version_id: Optional[str] = Field(default=None, max_length=1024)
     device: Optional[int] = Field(
@@ -1348,7 +1366,9 @@ class OwnedStorageObject(SQLModel, table=True):
     ctime_ns: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    committed_at: Optional[datetime] = Field(default=None, index=True)
+    last_error: Optional[str] = Field(default=None, max_length=255)
 
 
 class StorageDeleteIntent(SQLModel, table=True):

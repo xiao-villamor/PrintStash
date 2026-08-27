@@ -21,7 +21,7 @@ from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     BackgroundJob,
     CaptureUploadSlot,
@@ -646,11 +646,12 @@ def return_inbox_lease_to_review(
 ) -> StagingLease:
     """Return one legacy browser-file lease from a job to its inbox review."""
     lease = _one_owner_lease(session, job_id=job_id)
-    if lease.expires_at <= (now or utcnow()):
+    current = ensure_utc(now or utcnow())
+    if ensure_utc(lease.expires_at) <= current:
         raise StagingLeaseError("staging lease expired")
     lease.background_job_id = None
     lease.inbox_item_id = inbox_item_id
-    lease.expires_at = (now or utcnow()) + timedelta(
+    lease.expires_at = current + timedelta(
         days=settings.staging_review_lease_days
     )
     session.flush()

@@ -48,6 +48,7 @@ from app.services.storage_ownership import (
     UnsafeStorageDeleteError,
     require_or_adopt_legacy_artifact,
     require_owned_key,
+    sweep_orphaned_publications,
 )
 
 logger = get_logger(__name__)
@@ -549,6 +550,12 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
         purged["storage_completed"] = storage_result.completed
         purged["storage_pending"] = storage_result.pending
         purged["storage_blocked"] = storage_result.blocked
+        orphan_result = sweep_orphaned_publications(session, get_backend())
+        purged["publication_orphans_reclaimed"] = orphan_result.reclaimed
+        purged["publication_orphans_cleared"] = orphan_result.cleared
+        purged["publication_orphans_blocked"] = orphan_result.blocked
+        purged["publication_orphans_pending"] = orphan_result.pending
+        session.commit()
         purged["resources_blocked"] = resources_blocked
         purged["orphan_blobs"] = _cleanup_orphan_blobs(session)
     logger.info(
