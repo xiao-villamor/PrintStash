@@ -58,6 +58,7 @@ class VaultConfigRead(BaseModel):
     storage_capabilities: dict[str, object] = Field(default_factory=dict)
     storage_warnings: list[str] = Field(default_factory=list)
     storage_probe_diagnostics: dict[str, object] = Field(default_factory=dict)
+    storage_unverified_acknowledged: bool = False
 
 
 class VaultConfigUpdate(BaseModel):
@@ -115,6 +116,7 @@ def get_config(
         storage_capabilities=backend.capabilities.as_dict(),
         storage_warnings=list(backend.capabilities.warnings),
         storage_probe_diagnostics=backend.probe_diagnostics,
+        storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
     )
     return VaultConfigRead(**cfg)
 
@@ -347,5 +349,6 @@ def update_config(
         storage_capabilities=backend.capabilities.as_dict(),
         storage_warnings=list(backend.capabilities.warnings),
         storage_probe_diagnostics=backend.probe_diagnostics,
+        storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
     )
     return VaultConfigRead(**cfg)

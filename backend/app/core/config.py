@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     )
 
     storage_backend: str = "local"
+    storage_allow_unverified: bool = False
     data_dir: Path = Path("/data/files")
     thumb_dir: Path = Path("/data/thumbs")
     staging_dir: Path = Path("/data/staging")

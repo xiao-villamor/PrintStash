@@ -29,7 +29,11 @@ from app.db.models import (
 from app.services import ingestion as ingestion_service
 from app.services.auth import create_access_token, hash_password
 from app.services.jobs import registry
-from app.services.storage_backend import get_backend
+from app.services.storage_backend import (
+    ObjectIdentity,
+    StorageCapabilities,
+    get_backend,
+)
 from app.services.storage_ownership import record_creation
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -619,6 +623,60 @@ def test_trash_can_restore_and_purge_model(
     assert db_session.get(File, payload["file_id"]) is None
     assert not get_backend().exists(blob_path)
     assert not get_backend().exists(thumb_path)
+
+
+def test_non_verified_purge_requires_one_shot_confirmation(
+    tmp_path: Path,
+    client: TestClient,
+    db_session: Session,
+    auth_headers: dict[str, str],
+    monkeypatch,
+) -> None:
+    _configure_storage(tmp_path)
+    payload = _completed_job(
+        client,
+        client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("risk.stl", _cube_stl(), "application/sla")},
+            data={"model_name": "Risk confirmation"},
+        ),
+    )
+    model_id = payload["model_id"]
+    assert client.delete(
+        f"/api/v1/models/{model_id}", headers=auth_headers
+    ).status_code == 204
+    backend = get_backend()
+    monkeypatch.setattr(
+        backend,
+        "_capabilities",
+        StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.ETAG,
+            verified_delete=False,
+            conditional_replace=False,
+            namespace_ownership=True,
+            direct_path=False,
+        ),
+    )
+
+    refused = client.delete(
+        f"/api/v1/models/{model_id}/purge", headers=auth_headers
+    )
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == {
+        "code": "storage_risk_confirmation_required",
+        "tier": "guarded",
+        "operation": "purge_model",
+        "required_confirmation": "confirm_storage_risk=true",
+    }
+    assert db_session.get(Model, model_id) is not None
+
+    confirmed = client.delete(
+        f"/api/v1/models/{model_id}/purge?confirm_storage_risk=true",
+        headers=auth_headers,
+    )
+    assert confirmed.status_code == 200, confirmed.text
 
 
 def test_purge_expired_trash_uses_retention_setting(

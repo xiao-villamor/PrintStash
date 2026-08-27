@@ -96,7 +96,11 @@ def _backup_probe() -> dict:
 
 def _storage_probe() -> dict:
     try:
-        return get_backend().health_probe()
+        result = get_backend().health_probe()
+        result["unverified_acknowledged"] = bool(
+            settings.storage_allow_unverified
+        )
+        return result
     except Exception as exc:
         return {
             "ok": False,

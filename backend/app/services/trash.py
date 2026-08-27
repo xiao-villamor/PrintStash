@@ -39,7 +39,7 @@ from app.db.models import (
 )
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
-from app.services.storage_backend import get_backend
+from app.services.storage_backend import StorageTier, get_backend
 from app.services.storage_deletion import (
     enqueue_owned_key,
     process_storage_delete_intents,
@@ -62,6 +62,35 @@ _COLLECTION_IMAGE_RE = re.compile(
 
 class PurgeConflictError(UnsafeStorageDeleteError):
     """The resource changed or was restored before its purge claim landed."""
+
+
+class StorageRiskConfirmationRequired(UnsafeStorageDeleteError):
+    """A non-Verified backend requires one-shot destructive confirmation."""
+
+    def __init__(self, operation: str) -> None:
+        self.tier = get_backend().capabilities.tier
+        self.operation = operation
+        super().__init__("storage_risk_confirmation_required")
+
+    @property
+    def detail(self) -> dict[str, str]:
+        return {
+            "code": "storage_risk_confirmation_required",
+            "tier": self.tier.value,
+            "operation": self.operation,
+            "required_confirmation": "confirm_storage_risk=true",
+        }
+
+
+def _require_storage_risk(
+    *, operation: str, storage_backed: bool, confirmed: bool
+) -> None:
+    if (
+        storage_backed
+        and get_backend().capabilities.tier is not StorageTier.VERIFIED
+        and not confirmed
+    ):
+        raise StorageRiskConfirmationRequired(operation)
 
 
 def _require_destructive_maintenance_safe(session: Session) -> None:
@@ -95,7 +124,9 @@ def _claim_purge(session: Session, resource) -> str:
     return token
 
 
-def _preflight_primary_keys(session: Session, keys: Iterable[str]) -> None:
+def _preflight_primary_keys(
+    session: Session, keys: Iterable[str], *, allow_unverified: bool = False
+) -> None:
     backend = get_backend()
     exact_keys = list(dict.fromkeys(keys))
     if not exact_keys:
@@ -106,10 +137,13 @@ def _preflight_primary_keys(session: Session, keys: Iterable[str]) -> None:
     except Exception as exc:
         raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
     for key in exact_keys:
-        require_owned_key(session, backend, key)
+        if not allow_unverified:
+            require_owned_key(session, backend, key)
 
 
-def _preflight_primary_files(session: Session, files: Iterable[File]) -> None:
+def _preflight_primary_files(
+    session: Session, files: Iterable[File], *, allow_unverified: bool = False
+) -> None:
     """Verify current receipts or reconstruct proof for pre-0.12 Artifacts."""
     backend = get_backend()
     rows = [file_row for file_row in files if not file_row.is_external]
@@ -120,6 +154,8 @@ def _preflight_primary_files(session: Session, files: Iterable[File]) -> None:
     except Exception as exc:
         raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
     for file_row in rows:
+        if allow_unverified:
+            continue
         require_or_adopt_legacy_artifact(
             session,
             backend,
@@ -178,6 +214,7 @@ def hard_delete_file(
     maintain_revision_invariant: bool = True,
     ownership_preflighted: bool = False,
     purge_claimed_by_parent: bool = False,
+    confirm_storage_risk: bool = False,
 ) -> None:
     """Permanently remove one Artifact and every vault-owned dependent.
 
@@ -186,6 +223,12 @@ def hard_delete_file(
     """
     if file_row.id is None:
         return
+    if not purge_claimed_by_parent:
+        _require_storage_risk(
+            operation="purge_file",
+            storage_backed=True,
+            confirmed=confirm_storage_risk,
+        )
     _require_destructive_maintenance_safe(session)
     if not purge_claimed_by_parent:
         _claim_purge(session, file_row)
@@ -194,7 +237,9 @@ def hard_delete_file(
     file_id = int(file_row.id)
     if not file_row.is_external:
         if not ownership_preflighted:
-            _preflight_primary_files(session, [file_row])
+            _preflight_primary_files(
+                session, [file_row], allow_unverified=confirm_storage_risk
+            )
         # Once a multi-key purge starts, a late storage failure must leak the
         # uncertain remainder rather than roll back DB rows after earlier exact
         # objects were already removed.
@@ -205,6 +250,7 @@ def hard_delete_file(
             required_proof=True,
             resource_kind="file",
             resource_id=file_id,
+            allow_unverified=confirm_storage_risk,
         )
     enqueue_owned_key(
         session,
@@ -212,6 +258,7 @@ def hard_delete_file(
         backend.thumbnail_key(file_id),
         resource_kind="file_thumbnail",
         resource_id=file_id,
+        allow_unverified=confirm_storage_risk,
     )
     enqueue_owned_key(
         session,
@@ -219,6 +266,7 @@ def hard_delete_file(
         backend.legacy_thumbnail_key(file_id),
         resource_kind="file_thumbnail_legacy",
         resource_id=file_id,
+        allow_unverified=confirm_storage_risk,
     )
     shared_cache_owner = session.exec(
         select(File.id).where(
@@ -233,6 +281,7 @@ def hard_delete_file(
             backend.stl_cache_key(file_row.sha256),
             resource_kind="stl_cache",
             resource_id=file_id,
+            allow_unverified=confirm_storage_risk,
         )
 
     model = session.get(Model, file_row.model_id)
@@ -273,18 +322,34 @@ def hard_delete_file(
 
 
 def hard_delete_document(
-    session: Session, document: Document, *, ownership_preflighted: bool = False
+    session: Session,
+    document: Document,
+    *,
+    ownership_preflighted: bool = False,
+    confirm_storage_risk: bool = False,
 ) -> None:
     """Permanently remove a Document row and every vault-owned blob."""
     if document.id is None:
         return
+    storage_backed = bool(document.filename) or bool(
+        _DOCUMENT_IMAGE_RE.search(document.body or "")
+    )
+    _require_storage_risk(
+        operation="purge_document",
+        storage_backed=storage_backed,
+        confirmed=confirm_storage_risk,
+    )
     _require_destructive_maintenance_safe(session)
     _claim_purge(session, document)
     backend = get_backend()
     if document.filename:
         document_key = backend.document_file_key(document.id, document.filename)
         if not ownership_preflighted:
-            _preflight_primary_keys(session, [document_key])
+            _preflight_primary_keys(
+                session,
+                [document_key],
+                allow_unverified=confirm_storage_risk,
+            )
         enqueue_owned_key(
             session,
             backend,
@@ -292,6 +357,7 @@ def hard_delete_document(
             required_proof=True,
             resource_kind="document",
             resource_id=document.id,
+            allow_unverified=confirm_storage_risk,
         )
     for document_id, name in _DOCUMENT_IMAGE_RE.findall(document.body or ""):
         if int(document_id) == document.id:
@@ -301,6 +367,7 @@ def hard_delete_document(
                 backend.document_image_key(document.id, name),
                 resource_kind="document_image",
                 resource_id=document.id,
+                allow_unverified=confirm_storage_risk,
             )
     session.delete(document)
 
@@ -314,10 +381,17 @@ def restore_document(session: Session, document: Document) -> None:
     session.add(document)
 
 
-def hard_delete_collection(session: Session, collection: Collection) -> None:
+def hard_delete_collection(
+    session: Session, collection: Collection, *, confirm_storage_risk: bool = False
+) -> None:
     """Permanently remove a Collection and its explicitly referenced images."""
     if collection.id is None:
         return
+    _require_storage_risk(
+        operation="purge_collection",
+        storage_backed=bool(_COLLECTION_IMAGE_RE.search(collection.readme or "")),
+        confirmed=confirm_storage_risk,
+    )
     _require_destructive_maintenance_safe(session)
     _claim_purge(session, collection)
     backend = get_backend()
@@ -329,25 +403,43 @@ def hard_delete_collection(session: Session, collection: Collection) -> None:
                 backend.collection_image_key(collection.id, name),
                 resource_kind="collection_image",
                 resource_id=collection.id,
+                allow_unverified=confirm_storage_risk,
             )
     session.delete(collection)
 
 
 def hard_delete_model(
-    session: Session, model: Model, *, ownership_preflighted: bool = False
+    session: Session,
+    model: Model,
+    *,
+    ownership_preflighted: bool = False,
+    confirm_storage_risk: bool = False,
 ) -> None:
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
         return
     _require_destructive_maintenance_safe(session)
 
-    _claim_purge(session, model)
-
     file_rows = session.exec(select(File).where(File.model_id == model.id)).all()
+    has_cover = session.exec(
+        select(ModelSourceCover.id)
+        .join(ModelProvenanceSource)
+        .where(ModelProvenanceSource.model_id == model.id)
+        .limit(1)
+    ).first()
+    _require_storage_risk(
+        operation="purge_model",
+        storage_backed=bool(file_rows) or has_cover is not None,
+        confirmed=confirm_storage_risk,
+    )
+
+    _claim_purge(session, model)
     # Verify every required primary before deleting the first byte. This avoids
     # a mixed legacy/missing model producing a partially applied hard delete.
     if not ownership_preflighted:
-        _preflight_primary_files(session, file_rows)
+        _preflight_primary_files(
+            session, file_rows, allow_unverified=confirm_storage_risk
+        )
     model.thumbnail_file_id = None
     model.thumbnail_path = None
     session.add(model)
@@ -369,6 +461,7 @@ def hard_delete_model(
             required_proof=True,
             resource_kind="model_source_cover",
             resource_id=cover.id,
+            allow_unverified=confirm_storage_risk,
         )
     for file_row in file_rows:
         hard_delete_file(
@@ -377,6 +470,7 @@ def hard_delete_model(
             maintain_revision_invariant=False,
             ownership_preflighted=True,
             purge_claimed_by_parent=True,
+            confirm_storage_risk=confirm_storage_risk,
         )
     session.flush()
 
@@ -396,7 +490,12 @@ def hard_delete_model(
     session.delete(model)
 
 
-def hard_delete_expired_models(session: Session, retention_days: int) -> list[int]:
+def hard_delete_expired_models(
+    session: Session,
+    retention_days: int,
+    *,
+    confirm_storage_risk: bool = False,
+) -> list[int]:
     if retention_days < 0:
         return []
 
@@ -414,10 +513,17 @@ def hard_delete_expired_models(session: Session, retention_days: int) -> list[in
         ).all()
         # Preflight the entire batch before deleting the first object. One
         # legacy or remounted item must preserve every model in this purge.
-        _preflight_primary_files(session, file_rows)
+        _preflight_primary_files(
+            session, file_rows, allow_unverified=confirm_storage_risk
+        )
     purged_ids = [model.id for model in models if model.id is not None]
     for model in models:
-        hard_delete_model(session, model, ownership_preflighted=True)
+        hard_delete_model(
+            session,
+            model,
+            ownership_preflighted=True,
+            confirm_storage_risk=confirm_storage_risk,
+        )
     return [int(model_id) for model_id in purged_ids]
 
 
@@ -435,7 +541,12 @@ def _cleanup_orphan_blobs(session: Session) -> int:
     return 0
 
 
-def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
+def gc_soft_deleted(
+    retention_days: int | None = None,
+    *,
+    confirm_storage_risk: bool = False,
+    scheduled: bool = True,
+) -> dict[str, int]:
     """Hourly GC: purge expired trash rows and their exact owned blob keys.
 
     No-ops while a backup restore is in progress — restore replaces the DB
@@ -487,7 +598,11 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
         resources_blocked = 0
         for model in expired_models:
             try:
-                hard_delete_model(session, model)
+                hard_delete_model(
+                    session,
+                    model,
+                    confirm_storage_risk=confirm_storage_risk and not scheduled,
+                )
                 session.commit()
                 purged["rows"] += 1
             except UnsafeStorageDeleteError:
@@ -498,7 +613,11 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
                 )
         for document in expired_documents:
             try:
-                hard_delete_document(session, document)
+                hard_delete_document(
+                    session,
+                    document,
+                    confirm_storage_risk=confirm_storage_risk and not scheduled,
+                )
                 session.commit()
                 purged["rows"] += 1
             except UnsafeStorageDeleteError:
@@ -510,7 +629,11 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
                 )
         for file_row in standalone_expired_files:
             try:
-                hard_delete_file(session, file_row)
+                hard_delete_file(
+                    session,
+                    file_row,
+                    confirm_storage_risk=confirm_storage_risk and not scheduled,
+                )
                 session.commit()
                 purged["rows"] += 1
             except UnsafeStorageDeleteError:
@@ -527,7 +650,11 @@ def gc_soft_deleted(retention_days: int | None = None) -> dict[str, int]:
         ).all()
         for collection in expired_collections:
             try:
-                hard_delete_collection(session, collection)
+                hard_delete_collection(
+                    session,
+                    collection,
+                    confirm_storage_risk=confirm_storage_risk and not scheduled,
+                )
                 session.commit()
                 purged["rows"] += 1
             except UnsafeStorageDeleteError:

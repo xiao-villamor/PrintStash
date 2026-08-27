@@ -54,7 +54,11 @@ from app.services.storage_ownership import (
     publish_bytes,
     reserve_creation,
 )
-from app.services.trash import hard_delete_document, restore_document
+from app.services.trash import (
+    StorageRiskConfirmationRequired,
+    hard_delete_document,
+    restore_document,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -243,6 +247,7 @@ def restore_trashed_document(
 )
 def permanently_delete_document(
     document_id: int,
+    confirm_storage_risk: bool = Query(False),
     _current_user: User = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -252,7 +257,16 @@ def permanently_delete_document(
     if document is None:
         raise HTTPException(status_code=404, detail="document_not_found")
     try:
-        hard_delete_document(session, document)
+        hard_delete_document(
+            session,
+            document,
+            confirm_storage_risk=confirm_storage_risk,
+        )
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -260,7 +274,7 @@ def permanently_delete_document(
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    process_storage_delete_intents()
+    process_storage_delete_intents(allow_unverified=confirm_storage_risk)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

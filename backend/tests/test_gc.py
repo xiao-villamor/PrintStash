@@ -26,7 +26,11 @@ from app.db.models import (
     ShareLink,
     StorageDeleteIntent,
 )
-from app.services.storage_backend import get_backend
+from app.services.storage_backend import (
+    ObjectIdentity,
+    StorageCapabilities,
+    get_backend,
+)
 from app.services.storage_ownership import record_creation
 from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
 
@@ -76,6 +80,34 @@ def _model_with_file(session: Session, storage, slug: str) -> File:
     session.commit()
     session.refresh(f)
     return f
+
+
+def test_scheduled_gc_skips_storage_backed_guarded_purge(
+    db_session: Session, storage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifact = _model_with_file(db_session, storage, "guarded-scheduled")
+    model = db_session.get(Model, artifact.model_id)
+    assert model is not None
+    model.deleted_at = utcnow() - timedelta(days=2)
+    db_session.commit()
+    monkeypatch.setattr(
+        storage,
+        "_capabilities",
+        StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.ETAG,
+            verified_delete=False,
+            conditional_replace=False,
+            namespace_ownership=True,
+            direct_path=False,
+        ),
+    )
+
+    result = gc_soft_deleted(retention_days=0)
+
+    assert result["rows"] == 0
+    assert result["resources_blocked"] == 1
+    assert storage.exists(artifact.path)
 
 
 def _binary_document(session: Session, storage, name: str = "manual.pdf") -> Document:

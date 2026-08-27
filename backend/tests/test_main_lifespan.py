@@ -41,6 +41,7 @@ from app.db.models import (
 from app.services import storage_backend
 from app.services.auth import create_access_token, hash_password
 from app.services.realtime import InProcessBus
+from app.services.storage_backend import ObjectIdentity, StorageCapabilities
 
 
 @pytest.fixture
@@ -137,6 +138,17 @@ def test_storage_composition_runs_publication_recovery_after_binding(
     events: list[str] = []
 
     class _Backend:
+        backend_name = "test"
+        capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.INODE,
+            verified_delete=True,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=True,
+        )
+        probe_diagnostics: dict[str, object] = {}
+
         def ensure_setup(self) -> None:
             events.append("ensure")
 
@@ -155,6 +167,48 @@ def test_storage_composition_runs_publication_recovery_after_binding(
 
     assert app_main._compose_storage_backend() is backend
     assert events == ["ensure", "bind", "recover"]
+
+
+def test_storage_composition_rejects_unacknowledged_unguarded_backend(
+    _local_storage: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = storage_backend.LocalStorageBackend()
+    backend._capabilities = StorageCapabilities(  # noqa: SLF001
+        conditional_create=False,
+        object_identity=ObjectIdentity.NONE,
+        verified_delete=False,
+        conditional_replace=False,
+        namespace_ownership=True,
+        direct_path=False,
+    )
+    monkeypatch.setattr(backend, "ensure_setup", lambda: None)
+    monkeypatch.setattr(app_main, "LocalStorageBackend", lambda: backend)
+
+    with pytest.raises(RuntimeError, match="VAULT_STORAGE_ALLOW_UNVERIFIED=true"):
+        app_main._compose_storage_backend()
+
+
+def test_storage_composition_accepts_acknowledged_unguarded_backend(
+    _local_storage: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import inbox
+
+    backend = storage_backend.LocalStorageBackend()
+    backend._capabilities = StorageCapabilities(  # noqa: SLF001
+        conditional_create=False,
+        object_identity=ObjectIdentity.NONE,
+        verified_delete=False,
+        conditional_replace=False,
+        namespace_ownership=True,
+        direct_path=False,
+    )
+    monkeypatch.setattr(backend, "ensure_setup", lambda: None)
+    monkeypatch.setattr(app_main, "LocalStorageBackend", lambda: backend)
+    monkeypatch.setattr(app_main, "bind_backend", lambda value: value)
+    monkeypatch.setattr(inbox, "reconcile_storage_publications", lambda: 0)
+    monkeypatch.setitem(_overlay, "storage_allow_unverified", True)
+
+    assert app_main._compose_storage_backend() is backend
 
 
 def test_storage_composition_recovers_cover_published_before_restart_binding(

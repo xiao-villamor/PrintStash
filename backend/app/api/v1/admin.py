@@ -29,6 +29,7 @@ from app.services.auth import (
 from app.services.storage_deletion import process_storage_delete_intents
 from app.services.storage_ownership import UnsafeStorageDeleteError
 from app.services.trash import (
+    StorageRiskConfirmationRequired,
     gc_soft_deleted,
     hard_delete_collection,
     hard_delete_document,
@@ -202,6 +203,7 @@ def admin_delete_resource(
     resource: str,
     resource_id: int,
     hard: bool = Query(default=False),
+    confirm_storage_risk: bool = Query(default=False),
     session: Session = Depends(get_session),
 ) -> Response:
     model = _RESOURCE_MODEL.get(resource)
@@ -213,15 +215,28 @@ def admin_delete_resource(
     if hard:
         try:
             if isinstance(row, File):
-                hard_delete_file(session, row)
+                hard_delete_file(
+                    session, row, confirm_storage_risk=confirm_storage_risk
+                )
             elif isinstance(row, Document):
-                hard_delete_document(session, row)
+                hard_delete_document(
+                    session, row, confirm_storage_risk=confirm_storage_risk
+                )
             elif isinstance(row, Model):
-                hard_delete_model(session, row)
+                hard_delete_model(
+                    session, row, confirm_storage_risk=confirm_storage_risk
+                )
             elif isinstance(row, Collection):
-                hard_delete_collection(session, row)
+                hard_delete_collection(
+                    session, row, confirm_storage_risk=confirm_storage_risk
+                )
             else:
                 session.delete(row)
+        except StorageRiskConfirmationRequired as exc:
+            session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+            ) from exc
         except UnsafeStorageDeleteError as exc:
             session.rollback()
             raise HTTPException(
@@ -233,7 +248,9 @@ def admin_delete_resource(
         session.add(row)
     session.commit()
     if hard:
-        process_storage_delete_intents()
+        process_storage_delete_intents(
+            allow_unverified=confirm_storage_risk
+        )
     return Response(status_code=204)
 
 
@@ -279,5 +296,8 @@ def list_audit(
 
 
 @router.post("/gc")
-def run_gc() -> dict[str, int]:
-    return gc_soft_deleted()
+def run_gc(confirm_storage_risk: bool = Query(default=False)) -> dict[str, int]:
+    return gc_soft_deleted(
+        confirm_storage_risk=confirm_storage_risk,
+        scheduled=False,
+    )

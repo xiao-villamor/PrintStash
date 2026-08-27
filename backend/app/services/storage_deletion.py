@@ -64,6 +64,7 @@ def enqueue_owned_key(
     required_proof: bool = False,
     resource_kind: str | None = None,
     resource_id: int | str | None = None,
+    allow_unverified: bool = False,
 ) -> bool:
     """Move an ownership receipt into the durable delete outbox.
 
@@ -80,7 +81,13 @@ def enqueue_owned_key(
     for owned in rows:
         receipt = _owned_receipt(owned)
         try:
-            matches = backend.creation_matches(receipt)
+            if allow_unverified:
+                info = backend.object_info(receipt.key)
+                matches = info is not None and info.size == receipt.size
+                if matches and receipt.etag is not None:
+                    matches = info.etag == receipt.etag
+            else:
+                matches = backend.creation_matches(receipt)
         except Exception as exc:
             if required_proof:
                 raise UnsafeStorageDeleteError("storage_verification_failed") from exc
@@ -166,7 +173,9 @@ def _mark_retry(intent: StorageDeleteIntent, exc: Exception) -> None:
     intent.updated_at = utcnow()
 
 
-def process_storage_delete_intents(*, limit: int = 100) -> DeleteIntentResult:
+def process_storage_delete_intents(
+    *, limit: int = 100, allow_unverified: bool = False
+) -> DeleteIntentResult:
     """Consume committed intents idempotently, preserving mismatched objects."""
     completed = pending = blocked = 0
     backend = get_backend()
@@ -192,7 +201,16 @@ def process_storage_delete_intents(*, limit: int = 100) -> DeleteIntentResult:
                 session.commit()
                 continue
             try:
-                removed = backend.rollback_create(_intent_receipt(intent))
+                receipt = _intent_receipt(intent)
+                removed = (
+                    backend.reclaim_unverified(
+                        receipt.key,
+                        expected_size=receipt.size,
+                        expected_etag=receipt.etag,
+                    )
+                    if allow_unverified
+                    else backend.rollback_create(receipt)
+                )
                 if not removed and backend.exists(intent.key):
                     intent.status = "blocked"
                     intent.last_error = "storage_receipt_mismatch"

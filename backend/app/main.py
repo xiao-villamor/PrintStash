@@ -59,6 +59,7 @@ from app.services.storage_backend import (
     LocalStorageBackend,
     S3StorageBackend,
     StorageBackend,
+    StorageTier,
     bind_backend,
 )
 from app.services.task_queue import LocalTaskQueue
@@ -115,6 +116,14 @@ def _compose_storage_backend() -> StorageBackend:
     else:
         storage_backend = LocalStorageBackend()
     storage_backend.ensure_setup()
+    if (
+        storage_backend.capabilities.tier is StorageTier.UNGUARDED
+        and not settings.storage_allow_unverified
+    ):
+        raise RuntimeError(
+            "unguarded storage refused; set "
+            "VAULT_STORAGE_ALLOW_UNVERIFIED=true to acknowledge the risk"
+        )
     logger.info(
         "storage capabilities backend=%s tier=%s identity=%s",
         storage_backend.backend_name,
