@@ -27,6 +27,18 @@ def test_runtime_capabilities_are_explicit(monkeypatch) -> None:
     assert capabilities["thumbnails"] is True
 
 
+def test_public_health_reports_the_probed_storage_tier(client: TestClient) -> None:
+    response = client.get("/api/v1/health")
+
+    assert response.status_code == 200
+    storage = response.json()["storage"]
+    assert storage["provider"] == "local"
+    assert storage["tier"] == "verified"
+    assert storage["capabilities"]["object_identity"] == "inode"
+    assert storage["warnings"] == []
+    assert isinstance(storage["diagnostics"], dict)
+
+
 # --------------------------------------------------------------------------- #
 # _database_probe
 # --------------------------------------------------------------------------- #

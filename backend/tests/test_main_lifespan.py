@@ -115,6 +115,9 @@ def test_lifespan_starts_background_tasks_and_shuts_down_cleanly(
 
         liveness = client.get("/api/v1/health")
         assert liveness.status_code == 200
+        public_storage = liveness.json()["storage"]
+        assert public_storage["tier"] == "verified"
+        assert len(public_storage["diagnostics"]["roots"]) == 2
 
     # Shutdown (TestClient.__exit__) must cancel every background task.
     assert app.state.fleet_scheduler_task.cancelled()
