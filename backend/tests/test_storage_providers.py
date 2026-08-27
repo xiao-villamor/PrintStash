@@ -74,6 +74,22 @@ def test_resolves_nextcloud_dav_path() -> None:
     assert spec.namespace == "webdav/Print Stash"
 
 
+def test_resolves_self_hosted_s3_with_path_style_addressing() -> None:
+    spec = resolve_transport(
+        S3ProviderConfig(
+            provider="s3_self_hosted",
+            bucket="models",
+            endpoint_url="https://minio.example.test",
+            region="us-east-1",
+            access_key="access",
+            secret_key="secret",
+        )
+    )
+
+    assert spec.options["endpoint_url"] == "https://minio.example.test"
+    assert spec.options["path_style"] is True
+
+
 @pytest.mark.parametrize("root", ["", ".", "..", "safe/../escape"])
 def test_rejects_invalid_provider_roots(root: str) -> None:
     with pytest.raises(ValidationError, match="storage_root"):

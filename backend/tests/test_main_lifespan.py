@@ -214,6 +214,34 @@ def test_storage_composition_accepts_acknowledged_unguarded_backend(
     assert app_main._compose_storage_backend() is backend
 
 
+def test_storage_composition_warns_without_blocking_guarded_backend(
+    _local_storage: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from app.services import inbox
+
+    backend = storage_backend.LocalStorageBackend()
+    backend._capabilities = StorageCapabilities(  # noqa: SLF001
+        conditional_create=True,
+        object_identity=ObjectIdentity.ETAG,
+        verified_delete=False,
+        conditional_replace=False,
+        namespace_ownership=True,
+        direct_path=False,
+    )
+    monkeypatch.setattr(backend, "ensure_setup", lambda: None)
+    monkeypatch.setattr(app_main, "LocalStorageBackend", lambda: backend)
+    monkeypatch.setattr(app_main, "bind_backend", lambda value: value)
+    monkeypatch.setattr(inbox, "reconcile_storage_publications", lambda: 0)
+
+    with caplog.at_level("WARNING"):
+        assert app_main._compose_storage_backend() is backend
+
+    assert "storage capability warning" in caplog.text
+    assert "cannot conditionally replace" in caplog.text
+
+
 def test_storage_composition_recovers_cover_published_before_restart_binding(
     _local_storage: None, db_session
 ) -> None:
