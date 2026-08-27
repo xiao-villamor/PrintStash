@@ -293,13 +293,15 @@ def _operator_for(spec: TransportSpec):
             password=str(options["password"]),
         )
     kwargs: dict[str, str] = {
-        "endpoint": f"sftp://{options['host']}:{options['port']}",
+        "endpoint": f"ssh://{options['host']}:{options['port']}",
         "root": str(options["root"]),
         "user": str(options["username"]),
-        "known_hosts_strategy": "Strict",
+        # Trust on first use: accept a previously unseen host, but let OpenSSH
+        # reject a changed host key on later connections.
+        "known_hosts_strategy": "Accept",
     }
     if "private_key_path" in options:
-        kwargs["key"] = Path(str(options["private_key_path"])).read_text()
+        kwargs["key"] = str(options["private_key_path"])
     if "password" in options:
         kwargs["password"] = str(options["password"])
     try:

@@ -121,3 +121,26 @@ def test_backend_runtime_uv_fallback_uses_user_writable_cache() -> None:
     assert dockerfile.index(runtime_cache) > dockerfile.index("useradd")
     assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
     assert "/app/.venv/bin/python -m app.db.migrate" in entrypoint
+
+
+def test_full_image_builds_pinned_opendal_sftp_binding() -> None:
+    dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+    assert "ARG OPENDAL_SOURCE_VERSION=0.58.2" in dockerfile
+    assert (
+        "ARG OPENDAL_SOURCE_SHA256="
+        "476b0358ddc2a644dd4448552331af0d814279b0c1aaf5da755510b34645a764"
+        in dockerfile
+    )
+    assert "services-memory,services-webdav,services-sftp" in dockerfile
+    assert "uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl" in dockerfile
+
+
+def test_lite_image_uses_dependency_stage_without_opendal() -> None:
+    dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+    lite_stage = dockerfile.split("FROM base AS dependencies-lite", maxsplit=1)[1].split(
+        "FROM base AS dependencies-full", maxsplit=1
+    )[0]
+    assert "opendal" not in lite_stage
+    assert "openssh-client" not in lite_stage

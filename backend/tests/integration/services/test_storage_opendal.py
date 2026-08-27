@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 from urllib.request import urlopen
 
+import asyncssh
 import pytest
 
 from app.services.storage_backend import StorageCollisionError
@@ -60,6 +61,41 @@ def webdav_endpoint(tmp_path: Path):
         process.wait(timeout=5)
 
 
+@pytest.fixture
+def sftp_endpoint(tmp_path: Path):
+    port = _free_port()
+    private_key = tmp_path / "client-key"
+    authorized_keys = tmp_path / "authorized_keys"
+    key = asyncssh.generate_private_key("ssh-ed25519")
+    private_key.write_bytes(key.export_private_key("openssh"))
+    private_key.chmod(0o600)
+    authorized_keys.write_bytes(key.export_public_key("openssh"))
+    process = subprocess.Popen(
+        [
+            str(Path(__file__).parents[3] / ".venv" / "bin" / "python"),
+            "-m",
+            "tests.e2e.fakes.mock_sftp",
+            "--port",
+            str(port),
+            "--root",
+            str(tmp_path / "server"),
+            "--authorized-keys",
+            str(authorized_keys),
+        ],
+        cwd=Path(__file__).parents[3],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "READY"
+        yield port, private_key
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+
 def _spec(endpoint: str = "memory://") -> TransportSpec:
     return TransportSpec(
         kind=TransportKind.WEBDAV,
@@ -69,6 +105,21 @@ def _spec(endpoint: str = "memory://") -> TransportSpec:
             "endpoint_url": endpoint,
             "username": "user",
             "password": "password",
+            "root": "vault-data",
+        },
+    )
+
+
+def _sftp_spec(port: int, private_key: Path) -> TransportSpec:
+    return TransportSpec(
+        kind=TransportKind.SFTP,
+        provider="sftp",
+        namespace="sftp/vault-data",
+        options={
+            "host": "127.0.0.1",
+            "port": port,
+            "username": "printstash",
+            "private_key_path": str(private_key),
             "root": "vault-data",
         },
     )
@@ -90,6 +141,21 @@ def test_webdav_stream_create_read_and_evidence_round_trip(
     assert backend.capabilities.tier.value == "unguarded"
     with pytest.raises(StorageCollisionError):
         backend.create_bytes(b"replacement", key)
+
+
+def test_sftp_mounted_key_stream_round_trip(sftp_endpoint) -> None:
+    port, private_key = sftp_endpoint
+    backend = OpenDALStorageBackend(_sftp_spec(port, private_key))
+    backend.ensure_setup()
+    key = backend.blob_key("sftp-widget", 1, "widget.3mf")
+    payload = b"sftp-model" * (1024 * 1024)
+
+    receipt = backend.create_stream(BytesIO(payload), key)
+
+    assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
+    assert receipt.size == len(payload)
+    assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
+    assert backend.capabilities.tier.value == "unguarded"
 
 
 class _RenameFailure:

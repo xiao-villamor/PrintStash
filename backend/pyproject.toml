@@ -49,6 +49,7 @@ storage-opendal = [
     "opendal==0.47.6",
 ]
 dev = [
+    "asyncssh>=2.21,<3",
     "bandit>=1.8",
     "deptry>=0.23,<1",
     "httpx2>=2.10,<3",
