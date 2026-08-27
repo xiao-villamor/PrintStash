@@ -296,7 +296,11 @@ async def test_named_api_key_verifies_browser_extension_connection(
 
     health = await api.get("/api/v1/health")
     assert health.status_code == 200
-    assert health.json() == {"status": "ok", "name": "PrintStash"}
+    health_body = health.json()
+    assert health_body["status"] == "ok"
+    assert health_body["name"] == "PrintStash"
+    assert health_body["storage"]["provider"] == "local"
+    assert health_body["storage"]["tier"] in {"verified", "guarded", "unguarded"}
 
     login = await api.post(
         "/api/v1/auth/login",

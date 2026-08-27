@@ -94,12 +94,25 @@ def test_default_cors_rejects_unconfigured_origin(client: TestClient) -> None:
     assert "access-control-allow-origin" not in response.headers
 
 
-def test_public_health_discloses_only_liveness(client: TestClient) -> None:
+def test_public_health_discloses_only_liveness_and_storage_safety(
+    client: TestClient,
+) -> None:
     response = client.get("/api/v1/health")
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {"status": "ok", "name": "PrintStash"}
+    assert set(body) == {"status", "name", "storage"}
+    assert body["status"] == "ok"
+    assert body["name"] == "PrintStash"
+    assert set(body["storage"]) == {
+        "provider",
+        "capabilities",
+        "tier",
+        "diagnostics",
+        "warnings",
+    }
+    assert body["storage"]["provider"] == "local"
+    assert body["storage"]["tier"] in {"verified", "guarded", "unguarded"}
 
 
 def test_detailed_health_requires_admin_and_reports_release_components(
