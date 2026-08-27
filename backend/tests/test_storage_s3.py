@@ -20,6 +20,7 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
+import boto3
 import pytest
 
 from app.core.config import _overlay
@@ -35,25 +36,36 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def s3_backend() -> Iterator[S3StorageBackend]:
     bucket = f"printstash-test-{uuid.uuid4().hex[:12]}"
+    access_key = os.environ.get("PRINTSTASH_TEST_S3_ACCESS_KEY", "printstash")
+    secret_key = os.environ.get(
+        "PRINTSTASH_TEST_S3_SECRET_KEY", "printstash-secret"
+    )
+    test_client = boto3.client(
+        "s3",
+        endpoint_url=_ENDPOINT,
+        region_name="us-east-1",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+    )
+    # Test infrastructure owns bucket administration. Production setup only
+    # verifies that the operator-provisioned bucket is reachable.
+    test_client.create_bucket(Bucket=bucket)
     _overlay.update(
         {
             "s3_bucket": bucket,
             "s3_endpoint_url": _ENDPOINT,
             "s3_region": "us-east-1",
-            "s3_access_key": os.environ.get(
-                "PRINTSTASH_TEST_S3_ACCESS_KEY", "printstash"
-            ),
-            "s3_secret_key": os.environ.get(
-                "PRINTSTASH_TEST_S3_SECRET_KEY", "printstash-secret"
-            ),
+            "s3_access_key": access_key,
+            "s3_secret_key": secret_key,
         }
     )
-    backend = S3StorageBackend()  # creates the bucket (_ensure_bucket)
+    backend = S3StorageBackend()
     try:
         yield backend
     finally:
         for key in backend.list_keys():
             backend._client.delete_object(Bucket=bucket, Key=key)
+        test_client.delete_bucket(Bucket=bucket)
         for field in (
             "s3_bucket",
             "s3_endpoint_url",
@@ -219,12 +231,12 @@ def test_presigned_download_url_is_fetchable(s3_backend: S3StorageBackend):
 
 def test_health_probe_reports_ok_for_reachable_bucket(s3_backend: S3StorageBackend):
     probe = s3_backend.health_probe()
-    assert probe == {
-        "backend": "s3",
-        "ok": True,
-        "bucket": s3_backend._bucket,
-        "endpoint": _ENDPOINT,
-    }
+    assert probe["backend"] == "s3"
+    assert probe["ok"] is True
+    assert probe["bucket"] == s3_backend._bucket
+    assert probe["endpoint"] == _ENDPOINT
+    assert probe["capabilities"] == s3_backend.capabilities.as_dict()
+    assert probe["diagnostics"] == s3_backend.probe_diagnostics
 
 
 def test_health_probe_reports_error_for_missing_bucket(s3_backend: S3StorageBackend):
