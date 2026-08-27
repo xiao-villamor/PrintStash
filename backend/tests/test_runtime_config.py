@@ -137,6 +137,53 @@ def test_apply_overlay_clears_stale_keys_not_in_config(db_session: Session) -> N
     assert "some_stale_key_from_a_prior_boot" not in _overlay
 
 
+def test_storage_provider_resolution_precedence(
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(settings._frozen, "storage_provider", "webdav")  # noqa: SLF001
+    monkeypatch.setattr(
+        settings._frozen,  # noqa: SLF001
+        "storage_provider_config",
+        '{"provider":"webdav","endpoint_url":"https://dav.example.test",'
+        '"username":"env-user","root":"env-root"}',
+    )
+    monkeypatch.setattr(
+        settings._frozen,  # noqa: SLF001
+        "storage_provider_secrets",
+        '{"password":"env-secret"}',
+    )
+
+    runtime_config.apply_environment_storage_provider(db_session)
+    assert settings.storage_provider == "webdav"
+
+    row = runtime_config.get_or_create(db_session)
+    row.storage_backend = "local"
+    row.data_dir = str(tmp_path / "legacy-files")
+    row.thumb_dir = str(tmp_path / "legacy-thumbs")
+    db_session.add(row)
+    db_session.commit()
+    runtime_config.apply_overlay(db_session)
+    assert settings.storage_provider == ""
+    assert settings.storage_backend == "local"
+    assert settings.data_dir == tmp_path / "legacy-files"
+
+    runtime_config.update_storage_provider(
+        db_session,
+        provider="local",
+        raw_config={
+            "provider": "local",
+            "data_dir": str(tmp_path / "new-files"),
+            "thumb_dir": str(tmp_path / "new-thumbs"),
+            "root": "models",
+        },
+    )
+    runtime_config.apply_overlay(db_session)
+    assert settings.storage_provider == "local"
+    assert settings.data_dir == tmp_path / "new-files"
+
+
 def test_ensure_jwt_secret_noop_when_env_var_is_set(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -78,6 +78,10 @@ def _merge_config_overlay(config: SystemConfig) -> None:
     if config.thumb_dir and not config.storage_provider:
         _overlay["thumb_dir"] = Path(config.thumb_dir)
     if not config.storage_provider:
+        if config.storage_backend:
+            # An explicit legacy DB backend outranks the new provider env input.
+            # The empty overlay value intentionally shadows the frozen env value.
+            _overlay["storage_provider"] = ""
         _set("storage_backend", config.storage_backend)
         _set("s3_bucket", config.s3_bucket)
         _set("s3_endpoint_url", config.s3_endpoint_url)
