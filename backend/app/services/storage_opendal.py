@@ -122,26 +122,29 @@ class OpenDALStorageBackend(StorageBackend):
         temporary = f".printstash-tmp/{uuid.uuid4().hex}"
         published = False
         try:
-            # WebDAV in the pinned binding uses a one-shot HTTP writer. Spool
-            # incoming chunks to an anonymous local file, then expose it as a
-            # zero-copy memoryview for the single remote PUT. This keeps model
-            # payloads out of Python heap memory while retaining the remote
-            # temporary-key publication protocol.
-            with tempfile.TemporaryFile() as staged:
-                while chunk := src.read(1024 * 1024):
-                    staged.write(chunk)
-                size = staged.tell()
-                staged.flush()
-                if size:
-                    mapped = mmap.mmap(staged.fileno(), 0, access=mmap.ACCESS_READ)
-                    view = memoryview(mapped)
-                    try:
-                        self._operator.write(temporary, view)
-                    finally:
-                        view.release()
-                        mapped.close()
-                else:
-                    self._operator.write(temporary, b"")
+            if self._spec.kind is TransportKind.SFTP:
+                with self._operator.open(temporary, "wb") as writer:
+                    while chunk := src.read(1024 * 1024):
+                        writer.write(chunk)
+            else:
+                # OpenDAL's WebDAV service exposes a one-shot writer. Spool to
+                # disk and map the result so large models never occupy Python
+                # heap memory during the single remote PUT.
+                with tempfile.TemporaryFile() as staged:
+                    while chunk := src.read(1024 * 1024):
+                        staged.write(chunk)
+                    size = staged.tell()
+                    staged.flush()
+                    if size:
+                        mapped = mmap.mmap(staged.fileno(), 0, access=mmap.ACCESS_READ)
+                        view = memoryview(mapped)
+                        try:
+                            self._operator.write(temporary, view)
+                        finally:
+                            view.release()
+                            mapped.close()
+                    else:
+                        self._operator.write(temporary, b"")
             if self._operator.exists(destination):
                 raise StorageCollisionError(key)
             self._operator.rename(temporary, destination)

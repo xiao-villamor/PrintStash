@@ -28,6 +28,10 @@ def _free_port() -> int:
 def webdav_endpoint(tmp_path: Path):
     executable = shutil.which("wsgidav")
     if executable is None:
+        venv_executable = Path(__file__).parents[3] / ".venv" / "bin" / "wsgidav"
+        if venv_executable.is_file():
+            executable = str(venv_executable)
+    if executable is None:
         pytest.skip("WsgiDAV contract dependency is not installed")
     port = _free_port()
     process = subprocess.Popen(
