@@ -113,6 +113,26 @@ def test_public_provider_catalogue_needs_no_auth(client: TestClient) -> None:
     }
 
 
+def test_remote_providers_remain_visible_when_optional_binding_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.storage_providers.find_spec", lambda _name: None)
+
+    providers = {
+        provider.id: provider
+        for provider in provider_catalogue()
+        if provider.id in {"nextcloud", "webdav", "sftp"}
+    }
+
+    assert set(providers) == {"nextcloud", "webdav", "sftp"}
+    assert all(not provider.available for provider in providers.values())
+    assert all(not provider.selectable for provider in providers.values())
+    assert all(
+        provider.disabled_reason == "Requires the full image"
+        for provider in providers.values()
+    )
+
+
 def test_provider_secrets_are_encrypted_and_sanitized(
     db_session: Session,
 ) -> None:
@@ -137,3 +157,49 @@ def test_provider_secrets_are_encrypted_and_sanitized(
     assert provider == "webdav"
     assert sanitized["secret_fields_set"] == ["password"]
     assert "password" not in sanitized
+
+
+def test_same_provider_omission_preserves_secret_and_provider_change_clears_it(
+    db_session: Session,
+    tmp_path,
+) -> None:
+    row = runtime_config.update_storage_provider(
+        db_session,
+        provider="webdav",
+        raw_config={
+            "provider": "webdav",
+            "endpoint_url": "https://dav.example.test",
+            "username": "user",
+            "password": "top-secret",
+            "root": "models",
+        },
+    )
+
+    preserved = runtime_config.resolve_requested_storage_provider(
+        row,
+        provider="webdav",
+        raw_config={
+            "provider": "webdav",
+            "endpoint_url": "https://dav.example.test",
+            "username": "user",
+            "root": "models",
+        },
+    )
+    assert isinstance(preserved, WebDAVProviderConfig)
+    assert preserved.password == "top-secret"
+
+    runtime_config.update_storage_provider(
+        db_session,
+        provider="local",
+        raw_config={
+            "provider": "local",
+            "data_dir": str(tmp_path / "files"),
+            "thumb_dir": str(tmp_path / "thumbs"),
+            "root": "models",
+        },
+    )
+    _, sanitized = runtime_config.get_sanitized_storage_provider(db_session) or (
+        "",
+        {},
+    )
+    assert sanitized["secret_fields_set"] == []
