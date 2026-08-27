@@ -102,8 +102,15 @@ describe("production extension capture against a real backend", () => {
         }),
       ],
     });
-    const candidate = capture.candidates[0];
-    if (!candidate) throw new Error("Provider adapter did not produce a capture candidate");
+    // Printables deliberately exposes metadata only: signed download URLs from
+    // page JSON-LD are not trusted. This fixture represents the file the user
+    // selected locally after the adapter requested a manual attachment.
+    expect(capture.state).toBe("manual_file_required");
+    expect(capture.candidates).toEqual([]);
+    const candidate = {
+      id: "321:benchy.3mf",
+      filename: "benchy.3mf",
+    };
 
     const captureResult = await captureRichFiles({
       vault,

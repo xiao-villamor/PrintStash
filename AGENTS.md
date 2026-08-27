@@ -55,12 +55,13 @@ the coordinator does not take over code implementation.
 - Full stack: `docker compose -f docker-compose.light.yml up` (prebuilt image — src edits need vite dev server).
 
 ## Testing
-Four layers: unit/integration (`backend/tests/test_*.py`), backend e2e
-(`backend/tests/e2e/`, real app + contract fakes under `e2e/fakes/`, part of
-`./scripts/test.sh full`), mock-API Playwright (`frontend/tests/e2e/`, `pnpm test:e2e`),
-real-backend Playwright (`frontend/tests/e2e-real/`, `pnpm test:e2e:real`).
+Backend tiers are directory-owned: `backend/tests/{unit,integration,contract,e2e}/`;
+shared protocol fakes live in `backend/tests/fakes/`. The canonical tier policy,
+mirrored layout, and lane definitions live in `.claude/skills/create-tests/`.
+Mock-API Playwright lives in `frontend/tests/e2e/` (`pnpm test:e2e`) and
+real-backend Playwright in `frontend/tests/e2e-real/` (`pnpm test:e2e:real`).
 Printer emulators run standalone for manual testing, e.g.
-`cd backend && uv run python -m tests.e2e.fakes.mock_printer --port 7125 --print-seconds 5`
+`cd backend && uv run python -m tests.fakes.mock_printer --port 7125 --print-seconds 5`
 (see `references/backend.md` for per-provider flags). **Rule: every change
 to production code ships with tests in the same PR — features, fixes,
 refactors, config, migrations alike. A new feature adds one e2e test for its

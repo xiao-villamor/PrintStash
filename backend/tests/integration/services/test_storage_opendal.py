@@ -81,7 +81,7 @@ def sftp_endpoint(tmp_path: Path):
         [
             str(Path(__file__).parents[3] / ".venv" / "bin" / "python"),
             "-m",
-            "tests.e2e.fakes.mock_sftp",
+            "tests.fakes.mock_sftp",
             "--port",
             str(port),
             "--root",

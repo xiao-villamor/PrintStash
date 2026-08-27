@@ -1,7 +1,7 @@
 import { test, expect } from "./helpers";
 import { modelCard, uploadGcodeModel } from "./util";
 
-// Fleet (0.11.0): a real, live Moonraker emulator (backend/tests/e2e/fakes/
+// Fleet (0.11.0): a real, live Moonraker emulator (backend/tests/fakes/
 // mock_printer.py, booted standalone by playwright.real.config.ts's webServer
 // on :7530) comes online after being added, accepts a queued print through the
 // send dialog, and shows up in the Queue / Maintenance views. Drain is toggled

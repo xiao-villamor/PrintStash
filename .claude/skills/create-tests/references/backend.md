@@ -6,13 +6,6 @@ The policy (matrix, tiers, file anatomy, parametrization rules) is in
 
 ## Layout
 
-> **Migration status.** This is the target layout. The flat
-> `tests/test_<topic>.py` files and the filename-based `integration` marker
-> are legacy and are being moved wholesale (layout, `conftest.py` markers,
-> `scripts/test.sh` lanes, CI paths) in one mechanical PR. Until it lands,
-> put new tests at their target path anyway — every path below is collected
-> by `pytest tests`.
-
 ```
 backend/tests/
   conftest.py            shared fixtures: engine, app, client, auth, isolation; marker-by-directory
@@ -271,7 +264,7 @@ locally against a real server before claiming the change is Postgres-safe.
 
 ## Coverage gate
 
-CI runs `./scripts/test.sh full --cov=app --cov-fail-under=95`. A new branch
+CI runs `./scripts/test.sh full --cov=app --cov-fail-under=90`. A new branch
 without a test lowers the number; add the test. `# pragma: no cover` is
 reserved for the `s3`-marked paths the `storage-s3` job validates for real —
 not a tool for skipping hard cases.

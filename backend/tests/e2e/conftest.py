@@ -33,10 +33,9 @@ from app.core import url_safety
 from app.core.config import _overlay
 from app.db.session import SQLiteSessionFactory, override_session_factory
 from app.services import notification_renderers as renderers
-
-from .fakes.provider_targets import build_provider_app
-from .fakes.recorder import Recorder
-from .fakes.server import RunningServer, start_server
+from tests.fakes.provider_targets import build_provider_app
+from tests.fakes.recorder import Recorder
+from tests.fakes.server import RunningServer, start_server
 
 
 @dataclass

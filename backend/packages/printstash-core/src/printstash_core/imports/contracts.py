@@ -51,10 +51,12 @@ _PROVIDER_PAGE_HOSTS: dict[str, frozenset[str]] = {
     "makerworld": frozenset({"makerworld.com"}),
     "thingiverse": frozenset({"thingiverse.com", "www.thingiverse.com"}),
     "cults": frozenset({"cults3d.com", "www.cults3d.com"}),
-    "myminifactory": frozenset({
-        "myminifactory.com",
-        "www.myminifactory.com",
-    }),
+    "myminifactory": frozenset(
+        {
+            "myminifactory.com",
+            "www.myminifactory.com",
+        }
+    ),
 }
 
 
@@ -229,7 +231,9 @@ def canonicalize_provider_url(
         split = urlsplit(normalized)
         port = split.port
     except ValueError as error:
-        raise CaptureContractError("canonical_url provider binding is invalid") from error
+        raise CaptureContractError(
+            "canonical_url provider binding is invalid"
+        ) from error
     hostname = split.hostname
     if (
         not hostname

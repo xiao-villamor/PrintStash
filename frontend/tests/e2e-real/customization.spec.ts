@@ -1,5 +1,17 @@
 import { test, expect } from "./helpers";
 
+test("theme toggle flips and persists across reload", async ({ page }) => {
+  await page.goto("/");
+  const isDark = () => page.evaluate(() => document.documentElement.classList.contains("dark"));
+  const before = await isDark();
+
+  await page.getByRole("button", { name: "Toggle theme" }).first().click();
+  await expect.poll(isDark).toBe(!before);
+
+  await page.reload();
+  await expect.poll(isDark).toBe(!before);
+});
+
 test("model metadata visibility toggle persists across reload", async ({ page }) => {
   await page.goto("/settings");
   await page.getByRole("button", { name: "Design" }).click();
