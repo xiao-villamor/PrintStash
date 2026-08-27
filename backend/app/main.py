@@ -115,6 +115,14 @@ def _compose_storage_backend() -> StorageBackend:
     else:
         storage_backend = LocalStorageBackend()
     storage_backend.ensure_setup()
+    logger.info(
+        "storage capabilities backend=%s tier=%s identity=%s",
+        storage_backend.backend_name,
+        storage_backend.capabilities.tier.value,
+        storage_backend.capabilities.object_identity.value,
+    )
+    for warning in storage_backend.capabilities.warnings:
+        logger.warning("storage capability warning: %s", warning)
     bound = bind_backend(storage_backend)
     from app.services.inbox import reconcile_storage_publications
 

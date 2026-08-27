@@ -203,12 +203,27 @@ def test_health_probe_reports_ok_when_both_dirs_exist(
 
     result = LocalStorageBackend().health_probe()
 
-    assert result == {
-        "backend": "local",
-        "ok": True,
-        "data_dir": str(data_dir),
-        "thumb_dir": str(thumb_dir),
-    }
+    assert result["backend"] == "local"
+    assert result["ok"] is True
+    assert result["data_dir"] == str(data_dir)
+    assert result["thumb_dir"] == str(thumb_dir)
+
+
+def test_health_probe_reports_storage_capabilities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir = tmp_path / "files"
+    thumb_dir = tmp_path / "thumbs"
+    data_dir.mkdir()
+    thumb_dir.mkdir()
+    monkeypatch.setattr(storage_backend, "settings", _FakeSettings(data_dir, thumb_dir))
+    backend = LocalStorageBackend()
+    backend.ensure_setup()
+
+    result = backend.health_probe()
+
+    assert result["capabilities"]["tier"] == "verified"
+    assert result["diagnostics"]["probed"] is True
 
 
 def test_health_probe_reports_not_ok_when_a_dir_is_missing(

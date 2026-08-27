@@ -13,6 +13,7 @@ from app.core.security import require_superuser
 from app.db.models import Collection, Document, File, Model
 from app.db.session import get_session
 from app.services import runtime_config
+from app.services.storage_backend import get_backend
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -53,6 +54,10 @@ class VaultConfigRead(BaseModel):
     oidc_display_name: str = "Single sign-on"
     oidc_redirect_uri: str = ""
     oidc_allow_insecure_http: bool = False
+    storage_tier: str = "unguarded"
+    storage_capabilities: dict[str, object] = Field(default_factory=dict)
+    storage_warnings: list[str] = Field(default_factory=list)
+    storage_probe_diagnostics: dict[str, object] = Field(default_factory=dict)
 
 
 class VaultConfigUpdate(BaseModel):
@@ -104,6 +109,13 @@ def get_config(
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
     cfg = runtime_config.get_effective_config(session)
+    backend = get_backend()
+    cfg.update(
+        storage_tier=backend.capabilities.tier.value,
+        storage_capabilities=backend.capabilities.as_dict(),
+        storage_warnings=list(backend.capabilities.warnings),
+        storage_probe_diagnostics=backend.probe_diagnostics,
+    )
     return VaultConfigRead(**cfg)
 
 
@@ -329,4 +341,11 @@ def update_config(
     )
 
     cfg = runtime_config.get_effective_config(session)
+    backend = get_backend()
+    cfg.update(
+        storage_tier=backend.capabilities.tier.value,
+        storage_capabilities=backend.capabilities.as_dict(),
+        storage_warnings=list(backend.capabilities.warnings),
+        storage_probe_diagnostics=backend.probe_diagnostics,
+    )
     return VaultConfigRead(**cfg)
