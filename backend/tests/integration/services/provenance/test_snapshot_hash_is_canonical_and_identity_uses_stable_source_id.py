@@ -6,6 +6,7 @@ A regression could attach source identity or portable metadata to the wrong arti
 from __future__ import annotations
 
 from ._provenance_shared import (
+    ArtifactProvenanceLink,
     File,
     FileType,
     MagicMock,
@@ -42,6 +43,44 @@ def test_snapshot_hash_is_canonical_and_identity_uses_stable_source_id() -> None
     )
     assert provenance.snapshot_sha256(first) == provenance.snapshot_sha256(second)
     assert provenance.identity_key(first) == provenance.identity_key(second)
+
+
+def test_attach_existing_artifact_persists_one_link_to_its_capture(
+    db_session: Session,
+) -> None:
+    model = _model(db_session)
+    artifact = File(
+        model_id=model.id,
+        path="provenance/linked.stl",
+        original_filename="linked.stl",
+        file_type=FileType.STL,
+        size_bytes=1,
+        sha256="b" * 64,
+    )
+    db_session.add(artifact)
+    db_session.flush()
+    context = provenance.ProvenanceContext(
+        manifest=_capture(),
+        source_file_id="42:file-a",
+        source_filename="linked.stl",
+        blob_sha256=artifact.sha256,
+    )
+
+    result = provenance.attach_existing_artifact(db_session, artifact, context)
+    db_session.commit()
+
+    link = db_session.exec(
+        select(ArtifactProvenanceLink).where(
+            ArtifactProvenanceLink.file_id == artifact.id
+        )
+    ).one()
+    capture = db_session.exec(
+        select(ProvenanceCapture).where(
+            ProvenanceCapture.provenance_source_id == link.provenance_source_id
+        )
+    ).one()
+    assert link.provenance_source_id == result.link.provenance_source_id
+    assert capture.source_revision is None
 
 
 @pytest.mark.parametrize(

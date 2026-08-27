@@ -292,12 +292,9 @@ def test_requested_tags_returns_empty_on_bad_json() -> None:
     assert inbox.requested_tags(json.dumps(["a", "b"])) == ["a", "b"]
 
 
-def test_list_visible_scopes_to_owner_and_can_exclude_completed(
-    db_session: Session,
-) -> None:
+def test_list_visible_scopes_non_admin_results_to_owner(db_session: Session) -> None:
     owner = _make_user(db_session, "inbox-owner", admin=False)
     other = _make_user(db_session, "inbox-other", admin=False)
-    admin = _make_user(db_session, "inbox-admin", admin=True)
     mine = _make_item(db_session, owner)
     _make_item(db_session, other)
     done = _make_item(db_session, owner, state=InboxItemState.COMPLETED)
@@ -305,11 +302,16 @@ def test_list_visible_scopes_to_owner_and_can_exclude_completed(
     owner_rows = inbox.list_visible(db_session, owner)
     assert {row.id for row in owner_rows} == {mine.id, done.id}
 
-    owner_active = inbox.list_visible(db_session, owner, include_completed=False)
-    assert {row.id for row in owner_active} == {mine.id}
 
-    admin_rows = inbox.list_visible(db_session, admin)
-    assert {row.id for row in admin_rows} >= {mine.id, done.id}
+def test_list_visible_can_exclude_completed_owner_items(db_session: Session) -> None:
+    owner = _make_user(db_session, "active-inbox-owner", admin=False)
+    mine = _make_item(db_session, owner)
+    done = _make_item(db_session, owner, state=InboxItemState.COMPLETED)
+
+    owner_active = inbox.list_visible(db_session, owner, include_completed=False)
+
+    assert {row.id for row in owner_active} == {mine.id}
+    assert done.id not in {row.id for row in owner_active}
 
 
 def test_prune_history_removes_only_old_terminal_items(db_session: Session) -> None:

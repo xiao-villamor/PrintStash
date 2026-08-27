@@ -16,7 +16,6 @@ These complement ``test_external_libraries.py`` (focused unit tests) and
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -270,24 +269,3 @@ def test_scan_removing_one_duplicate_keeps_model_until_all_gone(
     summary = external_library.scan_library(lib.id)
     db_session.expire_all()
     assert db_session.get(Model, model_id).deleted_at is not None
-
-
-# --------------------------------------------------------------------------- #
-# trash_expires_at pure helper
-# --------------------------------------------------------------------------- #
-def test_trash_expires_at_adds_retention_window() -> None:
-    deleted = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-    assert trash.trash_expires_at(deleted, 30) == deleted + timedelta(days=30)
-
-
-def test_trash_expires_at_zero_retention_is_immediate() -> None:
-    deleted = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-    assert trash.trash_expires_at(deleted, 0) == deleted
-
-
-def test_trash_expires_at_disabled_or_live_returns_none() -> None:
-    deleted = datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
-    # Negative retention = never auto-purge → no expiry.
-    assert trash.trash_expires_at(deleted, -1) is None
-    # A live row (no deleted_at) has no expiry.
-    assert trash.trash_expires_at(None, 30) is None

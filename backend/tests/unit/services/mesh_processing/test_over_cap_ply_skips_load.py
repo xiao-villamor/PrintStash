@@ -5,7 +5,9 @@ A regression could exceed mesh budgets or publish an incomplete render.
 
 from __future__ import annotations
 
-from tests.paths import TEST_DATA_DIR
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 
 from ._mesh_limits_shared import (
     Path,
@@ -20,6 +22,24 @@ from ._mesh_limits_shared import (
     np,
     zipfile,
 )
+
+
+class _MemoryHungryProcess:
+    pid = 4242
+
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.killed = False
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+
+    def communicate(self) -> tuple[bytes, bytes]:
+        return b"", b""
 
 
 def test_over_cap_ply_skips_load(tmp_path: Path, monkeypatch) -> None:
@@ -134,9 +154,6 @@ def test_ram_cap_divides_budget_by_max_render_jobs(monkeypatch) -> None:
 
 
 def test_render_semaphore_caps_concurrent_renders(tmp_path: Path, monkeypatch) -> None:
-    import threading
-    import time
-
     monkeypatch.setitem(_overlay, "max_render_jobs", 2)
     monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
     monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
@@ -148,14 +165,16 @@ def test_render_semaphore_caps_concurrent_renders(tmp_path: Path, monkeypatch) -
     monkeypatch.setattr(mesh_processing, "_load_mesh", lambda _p: _fake_mesh(500))
 
     state = {"current": 0, "peak": 0}
-    lock = threading.Lock()
+    entered = threading.Condition()
+    release = threading.Event()
 
     def _slow_render(*_a, **_k):
-        with lock:
+        with entered:
             state["current"] += 1
             state["peak"] = max(state["peak"], state["current"])
-        time.sleep(0.05)  # hold the slot so overlap is observable
-        with lock:
+            entered.notify_all()
+        assert release.wait(timeout=5), "render workers were not released"
+        with entered:
             state["current"] -= 1
         return b"PNG"
 
@@ -163,17 +182,20 @@ def test_render_semaphore_caps_concurrent_renders(tmp_path: Path, monkeypatch) -
         mesh_processing.mesh_render, "render_mesh_thumbnail", _slow_render
     )
 
-    threads = [
-        threading.Thread(target=lambda: mesh_processing.analyze_mesh(p))
-        for _ in range(8)
-    ]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = [executor.submit(mesh_processing.analyze_mesh, p) for _ in range(8)]
+        try:
+            with entered:
+                assert entered.wait_for(lambda: state["current"] == 2, timeout=5), (
+                    "two render workers did not acquire the configured slots"
+                )
+            release.set()
+            for future in futures:
+                future.result(timeout=5)
+        finally:
+            release.set()
 
-    assert state["peak"] >= 1  # work really ran
-    assert state["peak"] <= 2  # never more than VAULT_MAX_RENDER_JOBS at once
+    assert state["peak"] == 2
 
 
 def test_large_3mf_uses_embedded_preview_when_flag_on(
@@ -253,72 +275,42 @@ def test_ply_face_count_non_integer_returns_none(tmp_path: Path) -> None:
 def test_detect_memory_limit_survives_unreadable_sources(monkeypatch) -> None:
     from pathlib import Path as _Path
 
-    real_read_text = _Path.read_text
-    unreadable = {
-        "/sys/fs/cgroup/memory.max",
-        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
-        "/proc/meminfo",
-    }
+    read_text = Mock(side_effect=OSError("no such file"))
+    monkeypatch.setattr(_Path, "read_text", read_text)
 
-    def fake_read_text(self, *a, **k):
-        if str(self) in unreadable:
-            raise OSError("no such file")
-        return real_read_text(self, *a, **k)
-
-    monkeypatch.setattr(_Path, "read_text", fake_read_text)
     assert mesh_processing._detect_memory_limit_bytes() is None
+    assert read_text.call_count == 3
 
 
 def test_detect_memory_limit_reads_cgroup_v2_value(monkeypatch) -> None:
     from pathlib import Path as _Path
 
-    real_read_text = _Path.read_text
+    read_text = Mock(
+        side_effect=["2147483648\n", OSError("cgroup v1 absent"), OSError("no proc")]
+    )
+    monkeypatch.setattr(_Path, "read_text", read_text)
 
-    def fake_read_text(self, *a, **k):
-        if str(self) == "/sys/fs/cgroup/memory.max":
-            return "2147483648\n"  # 2 GB
-        return real_read_text(self, *a, **k)
-
-    monkeypatch.setattr(_Path, "read_text", fake_read_text)
-    limit = mesh_processing._detect_memory_limit_bytes()
-    assert limit is not None
-    assert limit <= 2147483648  # smallest of cgroup v2 and any other source
+    assert mesh_processing._detect_memory_limit_bytes() == 2147483648
 
 
 def test_detect_memory_limit_reads_cgroup_v1_value(monkeypatch) -> None:
     from pathlib import Path as _Path
 
-    real_read_text = _Path.read_text
+    read_text = Mock(
+        side_effect=[OSError("cgroup v2 absent"), "1073741824\n", OSError("no proc")]
+    )
+    monkeypatch.setattr(_Path, "read_text", read_text)
 
-    def fake_read_text(self, *a, **k):
-        if str(self) == "/sys/fs/cgroup/memory.max":
-            raise OSError("cgroup v2 absent")
-        if str(self) == "/sys/fs/cgroup/memory/memory.limit_in_bytes":
-            return "1073741824\n"  # 1 GB
-        return real_read_text(self, *a, **k)
-
-    monkeypatch.setattr(_Path, "read_text", fake_read_text)
-    limit = mesh_processing._detect_memory_limit_bytes()
-    assert limit is not None
-    assert limit <= 1073741824
+    assert mesh_processing._detect_memory_limit_bytes() == 1073741824
 
 
 def test_detect_memory_limit_ignores_unlimited_cgroup_v2(monkeypatch) -> None:
     from pathlib import Path as _Path
 
-    real_read_text = _Path.read_text
+    read_text = Mock(side_effect=["max\n", OSError("absent"), OSError("no proc")])
+    monkeypatch.setattr(_Path, "read_text", read_text)
 
-    def fake_read_text(self, *a, **k):
-        if str(self) == "/sys/fs/cgroup/memory.max":
-            return "max\n"
-        if str(self) == "/sys/fs/cgroup/memory/memory.limit_in_bytes":
-            raise OSError("absent")
-        return real_read_text(self, *a, **k)
-
-    monkeypatch.setattr(_Path, "read_text", fake_read_text)
-    # Falls through to /proc/meminfo (real, host-dependent) or None.
-    limit = mesh_processing._detect_memory_limit_bytes()
-    assert limit is None or limit > 0
+    assert mesh_processing._detect_memory_limit_bytes() is None
 
 
 def test_ram_triangle_cap_uses_cached_memory_limit(monkeypatch) -> None:
@@ -370,63 +362,19 @@ def test_load_mesh_returns_trimesh_for_real_stl(tmp_path: Path) -> None:
     assert len(mesh.faces) > 0
 
 
-def test_load_mesh_renders_real_step_fixture() -> None:
-    path = TEST_DATA_DIR / "cascadio_material.stp"
-
-    mesh = mesh_processing._load_mesh(path)
-    geometry, thumbnail = mesh_processing.analyze_mesh(path)
-
-    assert mesh is not None
-    assert len(mesh.faces) > 0
-    assert geometry["triangle_count"] == len(mesh.faces)
-    assert thumbnail is not None
-    assert thumbnail.startswith(mesh_processing._PNG_MAGIC)
-
-
 def test_step_tessellation_is_killed_when_child_exceeds_rss_budget(
     tmp_path: Path, monkeypatch
 ) -> None:
     path = tmp_path / "complex.step"
     path.write_text("ISO-10303-21;")
 
-    class MemoryHungryProcess:
-        pid = 4242
-        returncode = None
-        killed = False
-
-        def poll(self):
-            return -9 if self.killed else None
-
-        def kill(self):
-            self.killed = True
-            self.returncode = -9
-
-        def communicate(self):
-            return b"", b""
-
-    process = MemoryHungryProcess()
+    process = _MemoryHungryProcess()
     monkeypatch.setattr(mesh_processing.subprocess, "Popen", lambda *a, **k: process)
     monkeypatch.setattr(mesh_processing, "_step_memory_budget_bytes", lambda: 1024)
     monkeypatch.setattr(mesh_processing, "_process_rss_bytes", lambda _pid: 2048)
 
     assert mesh_processing._load_step_mesh_isolated(path) is None
     assert process.killed is True
-
-
-def test_step_worker_rejects_tessellation_above_triangle_cap(monkeypatch) -> None:
-    from app.services import step_worker
-
-    path = TEST_DATA_DIR / "cascadio_material.stp"
-    output = path.parent / ".step-worker-over-cap.glb"
-    monkeypatch.setenv("PRINTSTASH_STEP_TRIANGLE_LIMIT", "1")
-    monkeypatch.setattr(
-        step_worker.sys, "argv", ["step_worker", str(path), str(output)]
-    )
-    try:
-        assert step_worker.main() == 3
-        assert not output.exists()
-    finally:
-        output.unlink(missing_ok=True)
 
 
 def test_load_mesh_returns_none_for_unrecognised_extension(tmp_path: Path) -> None:

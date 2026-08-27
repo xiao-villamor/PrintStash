@@ -1,11 +1,11 @@
-"""Defends binary stl triangle count is exact at the services mesh processing unit boundary.
+"""Bounded STL sampling preserves useful geometry without trusting hostile input.
 
 A regression could exceed mesh budgets or publish an incomplete render.
 """
 
 from __future__ import annotations
 
-from ._mesh_limits_shared import (
+from ..mesh_processing._mesh_limits_shared import (
     Path,
     _largest_component_fraction,
     _overlay,
@@ -305,18 +305,16 @@ def test_ascii_fallback_caps_total_facets_and_bytes(
 
     monkeypatch.setattr(stl_fallback, "_MAX_SAMPLED_TRIANGLES", 4)
     path = tmp_path / "ascii-budget.stl"
-    facets = []
-    for index in range(10):
-        facets.append(
-            "facet normal 0 0 1\n"
-            "outer loop\n"
-            f"vertex {index} 0 0\n"
-            f"vertex {index + 1} 0 0\n"
-            f"vertex {index} 1 0\n"
-            "endloop\n"
-            "endfacet\n"
-        )
-    path.write_text("solid budget\n" + "".join(facets) + "endsolid budget\n")
+    facet = (
+        "facet normal 0 0 1\n"
+        "outer loop\n"
+        "vertex 0 0 0\n"
+        "vertex 1 0 0\n"
+        "vertex 0 1 0\n"
+        "endloop\n"
+        "endfacet\n"
+    )
+    path.write_text("solid budget\n" + facet * 10 + "endsolid budget\n")
 
     result = stl_fallback.render_stl_thumbnail(
         path, width=64, height=48, max_triangles=1_000
@@ -332,6 +330,7 @@ def test_ascii_fallback_caps_total_facets_and_bytes(
 @pytest.mark.parametrize(
     "pending_vertices",
     ["vertex 2 2 2\n", "vertex 2 2 2\nvertex 3 3 3\n"],
+    ids=["one-pending-vertex", "two-pending-vertices"],
 )
 def test_ascii_pending_vertices_at_eof_are_incomplete(
     tmp_path: Path, monkeypatch, pending_vertices: str

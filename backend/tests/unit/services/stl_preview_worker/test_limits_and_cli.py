@@ -1,11 +1,11 @@
-"""Defends worker rejects pdeathsig install race or failure at the services stl streaming unit boundary.
+"""The STL worker rejects weakened isolation, malformed input, and partial output.
 
 A regression could accept an incomplete preview or weaken worker isolation.
 """
 
 from __future__ import annotations
 
-from ._stl_streaming_shared import (
+from ..stl_streaming._stl_streaming_shared import (
     _RECORD,
     Path,
     STLStreamingLimits,
@@ -27,12 +27,18 @@ from ._stl_streaming_shared import (
 
 
 @pytest.mark.parametrize(
-    ("ppids", "expected_parent_pid", "prctl_result"),
+    ("ppids", "expected_parent_pid", "prctl_result", "expected_observed"),
     [
-        ((4343, 4343), 4242, 0),
-        ((4242, 4343), 4242, 0),
-        ((4242, 1), 4242, 0),
-        ((4242, 4242), 4242, -1),
+        ((4343, 4343), 4242, 0, []),
+        ((4242, 4343), 4242, 0, [(1, signal.SIGKILL, 0, 0, 0)]),
+        ((4242, 1), 4242, 0, [(1, signal.SIGKILL, 0, 0, 0)]),
+        ((4242, 4242), 4242, -1, [(1, signal.SIGKILL, 0, 0, 0)]),
+    ],
+    ids=[
+        "parent-mismatch-before-prctl",
+        "parent-changes-after-prctl",
+        "parent-becomes-init-after-prctl",
+        "prctl-fails",
     ],
 )
 def test_worker_rejects_pdeathsig_install_race_or_failure(
@@ -40,6 +46,7 @@ def test_worker_rejects_pdeathsig_install_race_or_failure(
     ppids: tuple[int, int],
     expected_parent_pid: int,
     prctl_result: int,
+    expected_observed: list[tuple[object, ...]],
 ) -> None:
     import ctypes
     import resource
@@ -66,10 +73,7 @@ def test_worker_rejects_pdeathsig_install_race_or_failure(
             expected_parent_pid=expected_parent_pid,
         )
 
-    if ppids[0] == expected_parent_pid:
-        assert observed == [(1, signal.SIGKILL, 0, 0, 0)]
-    else:
-        assert observed == []
+    assert observed == expected_observed
 
 
 def test_worker_accepts_legitimate_pid_one_parent(

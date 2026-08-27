@@ -5,6 +5,10 @@ A regression could import partial library data or lose provenance across instanc
 
 from __future__ import annotations
 
+import hashlib
+
+from app.db.models import File, FileType
+
 from ._library_transfer_shared import (
     ArtifactProvenanceLink,
     CaptureManifestV2,
@@ -29,7 +33,7 @@ from ._library_transfer_shared import (
 )
 
 
-def test_library_archive_manifest_blobs_and_idempotent_import(
+def test_library_archive_contains_versioned_manifest_and_owned_blob(
     db_session: Session, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
     user, _, file_row = _seed(db_session, tmp_path)
@@ -41,15 +45,66 @@ def test_library_archive_manifest_blobs_and_idempotent_import(
             artifact = manifest["models"][0]["artifacts"][0]
             assert artifact["sha256"] == file_row.sha256
             assert archive.read(artifact["entry"]) == Path(file_row.path).read_bytes()
-        result = library_transfer.import_archive(db_session, archive_path, user)
-        assert result == {
-            "created_models": 0,
-            "created_files": 0,
-            "skipped_files": 1,
-            "imported_jobs": 0,
-        }
     finally:
         archive_path.unlink(missing_ok=True)
+
+
+def test_library_archive_reimport_skips_existing_artifact_without_mutation(
+    db_session: Session, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    user, _, _ = _seed(db_session, tmp_path)
+    archive_path = library_transfer.create_archive(db_session, user)
+
+    try:
+        result = library_transfer.import_archive(db_session, archive_path, user)
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+    assert result == {
+        "created_models": 0,
+        "created_files": 0,
+        "skipped_files": 1,
+        "imported_jobs": 0,
+    }
+
+
+def test_library_archive_manifest_preserves_revision_hashes_and_recommendation(
+    db_session: Session, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    user, model, first = _seed(db_session, tmp_path)
+    revision_bytes = b"G28\n; second revision\n"
+    revision_path = tmp_path / "files" / model.slug / "v2" / "revision.gcode"
+    revision_path.parent.mkdir(parents=True)
+    revision_path.write_bytes(revision_bytes)
+    revision = File(
+        model_id=model.id,
+        path=str(revision_path),
+        original_filename="revision.gcode",
+        file_type=FileType.GCODE,
+        version=2,
+        size_bytes=len(revision_bytes),
+        sha256=hashlib.sha256(revision_bytes).hexdigest(),
+        revision_label="Second slice",
+        is_recommended=True,
+    )
+    db_session.add(revision)
+    db_session.commit()
+    archive_path = library_transfer.create_archive(db_session, user)
+
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            artifacts = json.loads(archive.read("manifest.json"))["models"][0][
+                "artifacts"
+            ]
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+    assert [(row["version"], row["sha256"]) for row in artifacts] == [
+        (1, first.sha256),
+        (2, revision.sha256),
+    ]
+    assert [row["is_recommended"] for row in artifacts] == [False, True]
+    assert artifacts[1]["revision_label"] == "Second slice"
 
 
 def test_library_archive_emits_optional_prevalidated_provenance_sidecar(

@@ -424,6 +424,22 @@ def test_rollback_receipt_cannot_delete_a_replaced_destination(
     assert destination.read_bytes() == b"replacement"
 
 
+def test_rollback_receipt_deletes_its_matching_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir = tmp_path / "files"
+    thumb_dir = tmp_path / "thumbs"
+    data_dir.mkdir()
+    thumb_dir.mkdir()
+    monkeypatch.setattr(storage_backend, "settings", _FakeSettings(data_dir, thumb_dir))
+    backend = LocalStorageBackend()
+    destination = data_dir / "part.stl"
+    receipt = backend.create_bytes(b"created", str(destination))
+
+    assert backend.rollback_create(receipt) is True
+    assert destination.exists() is False
+
+
 def test_rollback_race_after_quarantine_preserves_new_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -447,7 +463,7 @@ def test_rollback_race_after_quarantine_preserves_new_destination(
     assert destination.read_bytes() == b"new-user-file"
 
 
-def test_explicit_replace_requires_current_creation_receipt(
+def test_explicit_replace_publishes_bytes_with_a_current_creation_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_dir = tmp_path / "files"
@@ -463,6 +479,21 @@ def test_explicit_replace_requires_current_creation_receipt(
 
     assert destination.read_bytes() == b"second"
     assert backend.creation_matches(replacement)
+
+
+def test_explicit_replace_rejects_a_stale_creation_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir = tmp_path / "files"
+    thumb_dir = tmp_path / "thumbs"
+    data_dir.mkdir()
+    thumb_dir.mkdir()
+    monkeypatch.setattr(storage_backend, "settings", _FakeSettings(data_dir, thumb_dir))
+    backend = LocalStorageBackend()
+    destination = data_dir / "thumbnail.webp"
+    receipt = backend.create_bytes(b"first", str(destination))
+    backend.replace_bytes(b"second", receipt)
+
     with pytest.raises(StorageCollisionError):
         backend.replace_bytes(b"stale", receipt)
     assert destination.read_bytes() == b"second"

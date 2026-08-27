@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
 from sqlmodel import Session, select
@@ -335,9 +336,22 @@ class TestCancelAudit:
 
 
 class TestRepairFinding:
-    def test_repairs_a_repairable_open_finding(self, client, auth_headers, db_session):
-        user = db_session.exec(select(User).where(User.username == "test-writer")).one()
-        run = _run(db_session, user.id)
+    def test_repairs_a_repairable_open_finding(self, client, db_session):
+        actor_uuid = uuid4()
+        actor_id = 2**62 + actor_uuid.int % (2**62 - 1)
+        actor = User(
+            id=actor_id,
+            username=f"maintenance-repair-{actor_uuid.hex}",
+            hashed_password=hash_password("obviously-fake-maintenance-password"),
+            is_active=True,
+            is_superuser=True,
+        )
+        db_session.add(actor)
+        db_session.commit()
+        db_session.refresh(actor)
+        token = create_access_token(actor.id, actor.username, scope="admin")
+        actor_headers = {"Authorization": f"Bearer {token}"}
+        run = _run(db_session, actor.id)
         model = Model(name="Repair", slug="repair", hash="a" * 64)
         db_session.add(model)
         db_session.commit()
@@ -358,18 +372,38 @@ class TestRepairFinding:
             repair_action="restore_recommended_revision",
             details_json=json.dumps({"model_id": model.id}),
         )
+        db_session.add(
+            AuditLog(
+                actor_id=actor.id,
+                action="audit.repair",
+                resource_type="vault_audit_finding",
+                resource_id=999999,
+            )
+        )
+        db_session.commit()
 
         response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/repair", headers=auth_headers
+            f"/api/v1/maintenance/findings/{finding.id}/repair", headers=actor_headers
         )
 
         db_session.expire_all()
         assert response.status_code == 200, response.text
         assert response.json()["state"] == "resolved"
         assert db_session.get(File, file_row.id).is_recommended is True
-        assert db_session.exec(
-            select(AuditLog).where(AuditLog.action == "audit.repair")
+        repair_log = db_session.exec(
+            select(AuditLog).where(
+                AuditLog.action == "audit.repair",
+                AuditLog.resource_type == "vault_audit_finding",
+                AuditLog.resource_id == finding.id,
+                AuditLog.actor_id == actor.id,
+            )
         ).one()
+        assert (
+            repair_log.action,
+            repair_log.resource_type,
+            repair_log.resource_id,
+            repair_log.actor_id,
+        ) == ("audit.repair", "vault_audit_finding", finding.id, actor.id)
 
     def test_handles_a_repeated_finding_repair_idempotently(
         self, client, auth_headers, db_session

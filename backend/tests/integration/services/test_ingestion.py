@@ -5,8 +5,8 @@ files in the repo ``testdata/`` folder (real STL/3MF meshes and real slicer
 g-code), so a regression in mesh geometry extraction, slicer-metadata parsing,
 embedded-thumbnail handling, dedup, or revision bookkeeping fails loudly here.
 
-Tests skip automatically when a given file is absent, so the folder can grow or
-shrink without breaking the suite.
+The real fixtures are repository-owned test inputs. If one is missing, its test
+must fail loudly rather than silently reducing integration coverage.
 
 Safety: ingestion *moves* the staged blob into vault storage, so every test
 stages a **copy** of the real file — the originals under ``testdata/`` are never
@@ -15,6 +15,7 @@ moved, overwritten, or deleted.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import uuid
 from pathlib import Path
@@ -23,8 +24,19 @@ import pytest
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
-from app.db.models import File, FileType, Metadata, Model
+from app.db.models import (
+    ArtifactProvenanceLink,
+    File,
+    FileType,
+    Metadata,
+    Model,
+    ModelProvenanceField,
+    ModelProvenanceSource,
+    ProvenanceCapture,
+)
 from app.db.scopes import live
+from app.schemas.provenance import CaptureManifestV2
+from app.services import ingestion, provenance
 from app.services.ingestion import (
     add_gcode_revision_to_model,
     ingest_mesh,
@@ -45,10 +57,6 @@ SPATULA_GCODE = TESTDATA / "Spatula_Printables_0.4n_0.15mm_PLA_MK4IS_MK3.9IS_27m
 BENCHY_STL = TESTDATA / "benchy" / "3dbenchy.stl"
 BENCHY_GCODE_A = TESTDATA / "benchy" / "3dbenchy_PLA_1h12m.gcode"
 BENCHY_GCODE_B = TESTDATA / "benchy" / "3dbenchy_PLA_1h13m.gcode"
-
-
-def _requires(path: Path):
-    return pytest.mark.skipif(not path.exists(), reason=f"missing real fixture {path}")
 
 
 # --------------------------------------------------------------------------- #
@@ -121,7 +129,6 @@ def _ingest_gcode(
 # --------------------------------------------------------------------------- #
 # Mesh ingestion — real STL / 3MF
 # --------------------------------------------------------------------------- #
-@_requires(CUBE_STL)
 def test_ingest_real_stl_extracts_geometry_and_thumbnail(
     tmp_path: Path, db_session: Session
 ) -> None:
@@ -134,6 +141,7 @@ def test_ingest_real_stl_extracts_geometry_and_thumbnail(
     assert f.size_bytes == CUBE_STL.stat().st_size
     assert f.is_external is False
     assert f.path.startswith(str(_overlay["data_dir"]))  # copied into the vault
+    assert Path(f.path).exists()
 
     md = _metadata_for(db_session, f.id)
     # A 20mm calibration cube, ~252 triangles.
@@ -145,9 +153,10 @@ def test_ingest_real_stl_extracts_geometry_and_thumbnail(
     # A thumbnail was rendered and adopted by the model.
     assert model.thumbnail_path is not None
     assert model.thumbnail_file_id == f.id
+    assert Path(model.thumbnail_path).suffix == ".webp"
+    assert Path(model.thumbnail_path).exists()
 
 
-@_requires(SPATULA_3MF)
 def test_ingest_real_3mf_extracts_geometry(tmp_path: Path, db_session: Session) -> None:
     _configure_storage(tmp_path)
     model, f = _ingest_mesh(
@@ -167,7 +176,6 @@ def test_ingest_real_3mf_extracts_geometry(tmp_path: Path, db_session: Session) 
 # --------------------------------------------------------------------------- #
 # G-code ingestion — real slicer output
 # --------------------------------------------------------------------------- #
-@_requires(CUBE_GCODE)
 def test_ingest_real_gcode_parses_slicer_metadata(
     tmp_path: Path, db_session: Session
 ) -> None:
@@ -187,7 +195,101 @@ def test_ingest_real_gcode_parses_slicer_metadata(
     assert md.filament_weight_g == pytest.approx(4.61, abs=0.05)
 
 
-@_requires(SPATULA_GCODE)
+def test_ingest_minimal_gcode_persists_unknown_metadata_without_inventing_values(
+    tmp_path: Path, db_session: Session
+) -> None:
+    _configure_storage(tmp_path)
+    source = tmp_path / "minimal.gcode"
+    source.write_bytes(b"G28\n")
+
+    _, file_row = _ingest_gcode(db_session, source, model_name="Minimal G-code")
+
+    metadata = _metadata_for(db_session, file_row.id)
+    assert Path(file_row.path).exists()
+    assert metadata.estimated_time_s is None
+    assert metadata.layer_height_mm is None
+    assert metadata.filament_weight_g is None
+
+
+def test_persist_artifact_commits_provenance_link_and_capture_with_file(
+    tmp_path: Path, db_session: Session
+) -> None:
+    _configure_storage(tmp_path)
+    model = Model(name="Captured bracket", slug="captured-bracket", hash="d" * 64)
+    db_session.add(model)
+    db_session.commit()
+    db_session.refresh(model)
+    staged = Path(_overlay["staging_dir"]) / "_incoming" / "captured.gcode"
+    staged.write_bytes(b"G28\n")
+    digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+    manifest = CaptureManifestV2.from_dict(
+        {
+            "schema_version": 2,
+            "kind": "model_files",
+            "source": {
+                "provider": "printables",
+                "canonical_url": "https://printables.com/model/42",
+                "source_item_id": "42",
+                "source_revision": "r1",
+                "adapter_version": "test",
+                "fields": {
+                    "title": {"value": "Captured bracket", "origin": "confirmed"}
+                },
+                "tags": [],
+            },
+            "files": [
+                {
+                    "id": "42:gcode",
+                    "name": "captured.gcode",
+                    "file_type": "gcode",
+                    "size": staged.stat().st_size,
+                }
+            ],
+            "selected_ids": ["42:gcode"],
+        }
+    )
+    context = provenance.ProvenanceContext(
+        manifest=manifest,
+        source_file_id="42:gcode",
+        source_filename="captured.gcode",
+        blob_sha256=digest,
+    )
+
+    file_row = ingestion.persist_artifact(
+        db_session,
+        model=model,
+        staged_path=staged,
+        original_filename="captured.gcode",
+        file_type=FileType.GCODE,
+        blob_hash=digest,
+        meta={},
+        thumb_bytes=None,
+        overwrite_thumbnail=False,
+        provenance_context=context,
+    )
+
+    assert db_session.get(File, file_row.id) is not None
+    link = db_session.exec(
+        select(ArtifactProvenanceLink).where(
+            ArtifactProvenanceLink.file_id == file_row.id
+        )
+    ).one()
+    source = db_session.get(ModelProvenanceSource, link.provenance_source_id)
+    assert source is not None and source.model_id == model.id
+    assert db_session.exec(
+        select(ProvenanceCapture).where(
+            ProvenanceCapture.provenance_source_id == source.id
+        )
+    ).one()
+    title = db_session.exec(
+        select(ModelProvenanceField).where(
+            ModelProvenanceField.provenance_source_id == source.id,
+            ModelProvenanceField.field_name == "title",
+        )
+    ).one()
+    assert provenance.effective_value(title) == "Captured bracket"
+
+
 def test_ingest_real_prusa_gcode_extracts_embedded_thumbnail(
     tmp_path: Path, db_session: Session
 ) -> None:
@@ -206,7 +308,6 @@ def test_ingest_real_prusa_gcode_extracts_embedded_thumbnail(
 # --------------------------------------------------------------------------- #
 # Dedup — identical real bytes collapse to one model
 # --------------------------------------------------------------------------- #
-@_requires(CUBE_STL)
 def test_reingesting_identical_real_file_dedups_to_one_model(
     tmp_path: Path, db_session: Session
 ) -> None:
@@ -235,8 +336,6 @@ def test_reingesting_identical_real_file_dedups_to_one_model(
 # --------------------------------------------------------------------------- #
 # Revisions — real benchy g-code variants
 # --------------------------------------------------------------------------- #
-@_requires(BENCHY_GCODE_A)
-@_requires(BENCHY_GCODE_B)
 def test_real_gcode_revisions_version_and_keep_first_recommended(
     tmp_path: Path, db_session: Session
 ) -> None:
@@ -274,8 +373,6 @@ def test_real_gcode_revisions_version_and_keep_first_recommended(
     assert recommended[0].id == first.id
 
 
-@_requires(BENCHY_GCODE_A)
-@_requires(BENCHY_GCODE_B)
 def test_marking_new_real_revision_recommended_clears_previous(
     tmp_path: Path, db_session: Session
 ) -> None:

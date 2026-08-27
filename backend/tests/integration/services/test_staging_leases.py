@@ -354,6 +354,46 @@ def test_capture_slot_stream_uses_exact_owned_spool(
     assert digest == hashlib.sha256(data).hexdigest()
 
 
+def test_capture_slot_prepare_rejects_a_foreign_path_collision(
+    db_session: Session, tmp_path: Path
+) -> None:
+    _overlay["staging_dir"] = tmp_path / "staging"
+    user = _user(db_session)
+    inbox = _inbox(db_session, user)
+    slot, _lease = _capture_slot(
+        db_session, user, inbox, slot_id="foreign-collision", data=b"owned"
+    )
+    path = staging_leases.capture_slot_staging_path(slot.id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"foreign")
+
+    with pytest.raises(staging_leases.StagingLeaseError, match="staging_collision"):
+        staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+
+    assert path.read_bytes() == b"foreign"
+
+
+def test_capture_slot_open_truncates_the_owned_inode_in_place(
+    db_session: Session, tmp_path: Path
+) -> None:
+    _overlay["staging_dir"] = tmp_path / "staging"
+    user = _user(db_session)
+    inbox = _inbox(db_session, user)
+    slot, _lease = _capture_slot(
+        db_session, user, inbox, slot_id="owned-open", data=b"replacement"
+    )
+    path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+    inode = path.stat().st_ino
+
+    with staging_leases.open_capture_slot_staging(
+        db_session, slot_id=slot.id
+    ) as target:
+        target.write(b"replacement")
+
+    assert path.stat().st_ino == inode
+    assert path.read_bytes() == b"replacement"
+
+
 def test_capture_slot_removal_preserves_replaced_spool(
     db_session: Session, tmp_path: Path
 ) -> None:

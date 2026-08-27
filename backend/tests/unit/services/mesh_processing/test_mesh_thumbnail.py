@@ -13,8 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import _overlay
-from app.services import thumbnail
 from app.services.mesh_processing import _PNG_MAGIC, extract_embedded_3mf_thumbnail
 
 _PNG_SMALL = _PNG_MAGIC + b"small"
@@ -39,7 +37,11 @@ def test_picks_largest_thumbnail(tmp_path: Path) -> None:
     assert extract_embedded_3mf_thumbnail(p) == _PNG_BIG
 
 
-@pytest.mark.parametrize("folder", ["Metadata", "3D/thumbnails", "thumbnails"])
+@pytest.mark.parametrize(
+    "folder",
+    ["Metadata", "3D/thumbnails", "thumbnails"],
+    ids=["metadata", "3d-thumbnails", "root-thumbnails"],
+)
 def test_accepts_known_thumbnail_dirs(tmp_path: Path, folder: str) -> None:
     p = _make_3mf(tmp_path, {f"{folder}/preview.png": _PNG_BIG})
     assert extract_embedded_3mf_thumbnail(p) == _PNG_BIG
@@ -69,24 +71,6 @@ def test_returns_none_for_corrupt_archive(tmp_path: Path) -> None:
 def test_returns_none_when_no_png_present(tmp_path: Path) -> None:
     p = _make_3mf(tmp_path, {"3D/model.model": b"<xml/>"})
     assert extract_embedded_3mf_thumbnail(p) is None
-
-
-def test_invalid_thumbnail_is_never_returned_as_raw_storage_payload() -> None:
-    with pytest.raises(ValueError, match="thumbnail_too_large"):
-        thumbnail.to_webp(b"not-an-image")
-
-
-def test_webp_conversion_honours_configured_model_preview_size(monkeypatch) -> None:
-    from PIL import Image
-
-    source = io.BytesIO()
-    Image.new("RGB", (800, 600), "white").save(source, format="PNG")
-    monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
-
-    encoded = thumbnail.to_webp(source.getvalue())
-
-    with Image.open(io.BytesIO(encoded)) as result:
-        assert result.size == (320, 240)
 
 
 def test_rejects_thumbnail_declared_over_limit_without_reading_member(

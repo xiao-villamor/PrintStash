@@ -35,7 +35,7 @@ from ._inbox_api_shared import (
 )
 
 
-def test_capture_slots_are_owner_scoped_idempotent_and_finalize_gated(
+def test_capture_slots_are_owner_scoped_and_idempotent(
     db_session: Session,
 ) -> None:
     owner = _user(db_session, "slot-owner")
@@ -44,8 +44,6 @@ def test_capture_slots_are_owner_scoped_idempotent_and_finalize_gated(
     slot = slots[0]
     with pytest.raises(HTTPException, match="not_found"):
         inbox.require_capture_slot(db_session, other, slot.id)
-    with pytest.raises(HTTPException, match="incomplete"):
-        inbox.finalize_capture_upload(db_session, owner, row.id)
     first = inbox.upload_capture_slot(
         db_session,
         slot,
@@ -66,12 +64,33 @@ def test_capture_slots_are_owner_scoped_idempotent_and_finalize_gated(
             stream=BytesIO(b"different!"),
             media_type="application/octet-stream",
         )
+
+    assert row.owner_user_id == owner.id
+    assert replay.id == slot.id
+
+
+def test_finalize_capture_upload_requires_every_slot_then_enters_review(
+    db_session: Session,
+) -> None:
+    owner = _user(db_session, "slot-finalize-owner")
+    row, slots = inbox.create_capture_upload_slots(db_session, owner, _slot_payload())
+    slot = slots[0]
+    with pytest.raises(HTTPException, match="incomplete"):
+        inbox.finalize_capture_upload(db_session, owner, row.id)
+    uploaded = inbox.upload_capture_slot(
+        db_session,
+        slot,
+        stream=BytesIO(b"slot-owned"),
+        media_type="application/octet-stream",
+    )
+
     finalized = inbox.finalize_capture_upload(db_session, owner, row.id)
+
     assert finalized.state == InboxItemState.REVIEW
     with pytest.raises(ValueError, match="not_uploadable"):
         inbox.upload_capture_slot(
             db_session,
-            replay,
+            uploaded,
             stream=BytesIO(b"slot-owned"),
             media_type="application/octet-stream",
         )

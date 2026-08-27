@@ -96,6 +96,19 @@ def test_upload_file_then_download_to_path(
     assert dest.read_bytes() == b"payload bytes"
 
 
+def test_remote_local_path_materializes_and_cleans_up_temporary_bytes(
+    s3_backend: S3StorageBackend,
+):
+    key = "models/materialized.bin"
+    s3_backend.write_bytes(b"temporary bytes", key)
+
+    with s3_backend.local_path(key) as local:
+        materialized = local
+        assert local.read_bytes() == b"temporary bytes"
+
+    assert materialized.exists() is False
+
+
 def test_move_in_uploads_and_removes_staged_file(
     s3_backend: S3StorageBackend, tmp_path: Path
 ):

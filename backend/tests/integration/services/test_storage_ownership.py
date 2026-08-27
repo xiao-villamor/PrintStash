@@ -1,14 +1,19 @@
-"""Direct safety coverage for the storage ownership ledger seam."""
+"""Storage ownership is positive operation proof, never a path-name guess.
+
+The ledger must refresh only after create-only publication and every replace or
+delete must fail closed when current bytes no longer match persisted proof.
+"""
 
 from __future__ import annotations
 
-from dataclasses import replace
+import hashlib
+from pathlib import Path
 
 import pytest
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from app.db.models import OwnedStorageObject
-from app.services.storage_backend import CreationReceipt
+from app.services.storage_backend import CreationReceipt, get_backend
 from app.services.storage_ownership import (
     UnsafeStorageDeleteError,
     delete_owned_key,
@@ -19,276 +24,336 @@ from app.services.storage_ownership import (
 )
 
 
-def _receipt(key: str = "files/model.stl") -> CreationReceipt:
-    return CreationReceipt(
-        key=key,
-        size=4,
-        token="token-1",
-        backend="local",
-        namespace="data:/tmp/vault",
-        etag="etag-1",
-        device=1,
-        inode=2,
-        ctime_ns=3,
-    )
+def _created_receipt(
+    name: str = "owned.stl", data: bytes = b"owned"
+) -> CreationReceipt:
+    backend = get_backend()
+    key = backend.blob_key("ownership", 1, name)
+    return backend.create_bytes(data, key)
 
 
-class _LedgerBackend:
-    def __init__(self) -> None:
-        self.matches = True
-        self.adopted = False
-        self.fail_adopt = False
-        self.replaced: list[tuple[bytes, CreationReceipt]] = []
-        self.matched: list[CreationReceipt] = []
-        self.rollback_calls: list[CreationReceipt] = []
-        self.rollback: bool | Exception = True
-        self.replacement: CreationReceipt | None = None
+def _replace_out_of_band(
+    receipt: CreationReceipt, data: bytes = b"replacement"
+) -> Path:
+    direct = get_backend().direct_path(receipt.key)
+    assert direct is not None
+    direct.unlink()
+    direct.write_bytes(data)
+    return direct
 
-    def creation_matches(self, receipt: CreationReceipt) -> bool:
-        self.matched.append(receipt)
-        return self.matches
 
-    def adopt_existing(
-        self, key: str, *, expected_size: int, expected_sha256: str
-    ) -> CreationReceipt:
-        del expected_size, expected_sha256
-        if self.fail_adopt:
-            raise OSError("cannot prove legacy bytes")
-        self.adopted = True
-        return replace(_receipt(key), token="adopted-token")
+class TestRecordCreation:
+    def test_records_every_backend_native_creation_field(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt()
 
-    def replace_bytes(self, data: bytes, receipt: CreationReceipt) -> CreationReceipt:
-        self.replaced.append((data, receipt))
-        return self.replacement or replace(
-            receipt,
-            token="replacement-token",
-            size=len(data),
-            etag="replacement-etag",
-            version_id="replacement-version",
-            device=11,
-            inode=22,
-            ctime_ns=33,
+        row = record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+        db_session.refresh(row)
+
+        assert (
+            row.backend,
+            row.namespace,
+            row.key,
+            row.object_kind,
+            row.token,
+            row.size_bytes,
+            row.etag,
+            row.version_id,
+            row.device,
+            row.inode,
+            row.ctime_ns,
+        ) == (
+            receipt.backend,
+            receipt.namespace,
+            receipt.key,
+            "artifact",
+            receipt.token,
+            receipt.size,
+            receipt.etag,
+            receipt.version_id,
+            receipt.device,
+            receipt.inode,
+            receipt.ctime_ns,
         )
 
-    def rollback_create(self, receipt: CreationReceipt) -> bool:
-        self.rollback_calls.append(receipt)
-        if isinstance(self.rollback, Exception):
-            raise self.rollback
-        return self.rollback
+    def test_refreshes_one_stale_row_after_create_only_republication(
+        self, db_session: Session
+    ) -> None:
+        first_receipt = _created_receipt()
+        first = record_creation(db_session, first_receipt, object_kind="artifact")
+        db_session.commit()
+        first_id = first.id
+        direct = _replace_out_of_band(first_receipt, b"second")
+        direct.unlink()
+        second_receipt = get_backend().create_bytes(b"second", first_receipt.key)
+
+        refreshed = record_creation(db_session, second_receipt, object_kind="thumbnail")
+        db_session.commit()
+
+        assert refreshed.id == first_id
+        assert refreshed.token == second_receipt.token
+        assert refreshed.object_kind == "thumbnail"
+        assert db_session.exec(select(OwnedStorageObject)).all() == [refreshed]
 
 
-def test_record_creation_refreshes_an_existing_locator(db_session) -> None:
-    initial = _receipt()
-    first = record_creation(db_session, initial, object_kind="artifact")
-    db_session.commit()
-    db_session.refresh(first)
+class TestRequireOwnedKey:
+    def test_accepts_current_positive_proof(self, db_session: Session) -> None:
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
 
-    refreshed_receipt = replace(
-        initial,
-        token="refreshed-token",
-        size=9,
-        etag="refreshed-etag",
-        version_id="refreshed-version",
-        device=101,
-        inode=202,
-        ctime_ns=303,
-    )
-    refreshed = record_creation(
-        db_session,
-        refreshed_receipt,
-        object_kind="thumbnail",
-    )
-    db_session.commit()
-    db_session.refresh(refreshed)
+        result = require_owned_key(db_session, get_backend(), receipt.key)
 
-    assert refreshed.id == first.id
-    assert refreshed.backend == refreshed_receipt.backend
-    assert refreshed.namespace == refreshed_receipt.namespace
-    assert refreshed.key == refreshed_receipt.key
-    assert refreshed.object_kind == "thumbnail"
-    assert refreshed.token == refreshed_receipt.token
-    assert refreshed.size_bytes == refreshed_receipt.size
-    assert refreshed.etag == refreshed_receipt.etag
-    assert refreshed.version_id == refreshed_receipt.version_id
-    assert refreshed.device == refreshed_receipt.device
-    assert refreshed.inode == refreshed_receipt.inode
-    assert refreshed.ctime_ns == refreshed_receipt.ctime_ns
+        assert result is None
+        assert get_backend().read_bytes(receipt.key) == b"owned"
 
+    def test_rejects_an_unclaimed_key(self, db_session: Session) -> None:
+        with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
+            require_owned_key(db_session, get_backend(), "unclaimed.stl")
 
-def test_require_owned_key_distinguishes_missing_mismatch_and_verification_error(
-    db_session,
-) -> None:
-    backend = _LedgerBackend()
-    with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
-        require_owned_key(db_session, backend, "unclaimed")
+        assert db_session.exec(select(OwnedStorageObject)).all() == []
 
-    stored = _receipt()
-    record_creation(db_session, stored, object_kind="artifact")
-    db_session.commit()
-    backend.matches = True
-    require_owned_key(db_session, backend, stored.key)
-    assert backend.matched[-1] == stored
+    def test_rejects_proof_after_the_object_is_replaced(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+        direct = _replace_out_of_band(receipt)
 
-    backend.matches = False
-    with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
-        require_owned_key(db_session, backend, stored.key)
-    assert backend.matched[-1] == stored
+        with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
+            require_owned_key(db_session, get_backend(), receipt.key)
 
-    class ExplodingBackend(_LedgerBackend):
-        def creation_matches(self, receipt: CreationReceipt) -> bool:
-            del receipt
-            raise RuntimeError("probe failed")
+        assert direct.read_bytes() == b"replacement"
 
-    with pytest.raises(UnsafeStorageDeleteError, match="verification_failed"):
-        require_owned_key(db_session, ExplodingBackend(), _receipt().key)
+    def test_translates_a_backend_verification_failure(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = get_backend()
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+
+        def fail_verification(_receipt: CreationReceipt) -> bool:
+            raise OSError("storage unavailable")
+
+        monkeypatch.setattr(backend, "creation_matches", fail_verification)
+
+        with pytest.raises(UnsafeStorageDeleteError, match="verification_failed"):
+            require_owned_key(db_session, backend, receipt.key)
+
+        assert Path(receipt.key).read_bytes() == b"owned"
 
 
-def test_require_or_adopt_legacy_artifact_only_claims_untracked_matching_bytes(
-    db_session,
-) -> None:
-    backend = _LedgerBackend()
-    require_or_adopt_legacy_artifact(
-        db_session,
-        backend,
-        "files/legacy.stl",
-        expected_size=4,
-        expected_sha256="sha256",
-    )
-    db_session.commit()
-    assert backend.adopted is True
-    row = db_session.exec(
-        select(OwnedStorageObject).where(OwnedStorageObject.key == "files/legacy.stl")
-    ).one()
-    assert row.object_kind == "legacy_artifact"
+class TestRequireOrAdoptLegacyArtifact:
+    def test_adopts_matching_pre_ledger_bytes(self, db_session: Session) -> None:
+        backend = get_backend()
+        content = b"legacy"
+        receipt = _created_receipt(data=content)
 
-    # Existing rows are verified, never silently replaced by adoption.
-    backend.matches = True
-    require_or_adopt_legacy_artifact(
-        db_session,
-        backend,
-        "files/legacy.stl",
-        expected_size=4,
-        expected_sha256="different-sha",
-    )
-
-    backend.fail_adopt = True
-    with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
         require_or_adopt_legacy_artifact(
             db_session,
             backend,
-            "files/unverifiable.stl",
-            expected_size=4,
-            expected_sha256="sha256",
+            receipt.key,
+            expected_size=len(content),
+            expected_sha256=hashlib.sha256(content).hexdigest(),
         )
+        db_session.commit()
 
+        row = db_session.exec(select(OwnedStorageObject)).one()
+        assert row.object_kind == "legacy_artifact"
+        assert row.key == receipt.key
+        assert backend.read_bytes(receipt.key) == content
 
-def test_replace_owned_bytes_requires_current_proof_and_updates_receipt(
-    db_session,
-) -> None:
-    backend = _LedgerBackend()
-    with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
-        replace_owned_bytes(
-            db_session, backend, "unclaimed", b"bytes", object_kind="thumbnail"
-        )
+    def test_rejects_legacy_bytes_with_the_wrong_digest(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt(data=b"legacy")
 
-    stored = _receipt()
-    record_creation(db_session, stored, object_kind="artifact")
-    db_session.commit()
-    backend.matches = False
-    with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
-        replace_owned_bytes(
-            db_session, backend, stored.key, b"bytes", object_kind="thumbnail"
-        )
+        with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
+            require_or_adopt_legacy_artifact(
+                db_session,
+                get_backend(),
+                receipt.key,
+                expected_size=6,
+                expected_sha256="0" * 64,
+            )
 
-    backend.matches = True
-    replacement_receipt = replace(
-        stored,
-        token="replacement-token",
-        size=9,
-        etag="replacement-etag",
-        version_id="replacement-version",
-        device=11,
-        inode=22,
-        ctime_ns=33,
-    )
-    backend.replacement = replacement_receipt
-    replacement = replace_owned_bytes(
-        db_session, backend, stored.key, b"new-bytes", object_kind="thumbnail"
-    )
-    db_session.commit()
-    assert backend.matched[-1] == stored
-    assert backend.replaced[0][1] == stored
-    assert replacement == replacement_receipt
-    assert backend.replaced[0][0] == b"new-bytes"
-    row = db_session.exec(
-        select(OwnedStorageObject).where(OwnedStorageObject.key == stored.key)
-    ).one()
-    assert row.object_kind == "thumbnail"
-    assert row.backend == replacement_receipt.backend
-    assert row.namespace == replacement_receipt.namespace
-    assert row.key == replacement_receipt.key
-    assert row.size_bytes == replacement_receipt.size
-    assert row.token == replacement_receipt.token
-    assert row.etag == replacement_receipt.etag
-    assert row.version_id == replacement_receipt.version_id
-    assert row.device == replacement_receipt.device
-    assert row.inode == replacement_receipt.inode
-    assert row.ctime_ns == replacement_receipt.ctime_ns
-
-
-@pytest.mark.parametrize(
-    ("required", "rollback", "expected"),
-    [
-        (False, True, True),
-        (False, False, False),
-        (True, True, True),
-    ],
-)
-def test_delete_owned_key_handles_positive_and_non_destructive_results(
-    db_session, required: bool, rollback: bool, expected: bool
-) -> None:
-    backend = _LedgerBackend()
-    stored = _receipt()
-    record_creation(db_session, stored, object_kind="artifact")
-    db_session.commit()
-    backend.rollback = rollback
-
-    assert (
-        delete_owned_key(db_session, backend, stored.key, required_proof=required)
-        is expected
-    )
-    db_session.commit()
-    if expected:
         assert db_session.exec(select(OwnedStorageObject)).all() == []
-    else:
-        assert db_session.exec(select(OwnedStorageObject)).one().key == stored.key
-    assert backend.rollback_calls[-1] == stored
+        assert get_backend().read_bytes(receipt.key) == b"legacy"
+
+    def test_never_replaces_an_existing_stale_claim_by_adoption(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt(data=b"legacy")
+        row = record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+        original_token = row.token
+        direct = _replace_out_of_band(receipt, b"replacement")
+
+        with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
+            require_or_adopt_legacy_artifact(
+                db_session,
+                get_backend(),
+                receipt.key,
+                expected_size=11,
+                expected_sha256=hashlib.sha256(b"replacement").hexdigest(),
+            )
+
+        db_session.refresh(row)
+        assert row.token == original_token
+        assert direct.read_bytes() == b"replacement"
 
 
-def test_delete_owned_key_fails_closed_only_when_proof_is_required(db_session) -> None:
-    backend = _LedgerBackend()
-    stored = _receipt()
-    record_creation(db_session, stored, object_kind="artifact")
-    db_session.commit()
-    backend.rollback = OSError("delete failed")
+class TestReplaceOwnedBytes:
+    def test_replaces_bytes_and_refreshes_persisted_proof(
+        self, db_session: Session
+    ) -> None:
+        backend = get_backend()
+        receipt = _created_receipt()
+        row = record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
 
-    assert delete_owned_key(db_session, backend, stored.key) is False
-    with pytest.raises(UnsafeStorageDeleteError, match="storage_delete_failed"):
-        delete_owned_key(db_session, backend, stored.key, required_proof=True)
-    assert backend.rollback_calls[-1] == stored
+        replacement = replace_owned_bytes(
+            db_session,
+            backend,
+            receipt.key,
+            b"new-bytes",
+            object_kind="thumbnail",
+        )
+        db_session.commit()
+        db_session.refresh(row)
 
-    assert delete_owned_key(db_session, backend, "unclaimed") is False
-    with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
-        delete_owned_key(db_session, backend, "unclaimed", required_proof=True)
+        assert backend.read_bytes(receipt.key) == b"new-bytes"
+        assert (row.token, row.size_bytes, row.object_kind) == (
+            replacement.token,
+            len(b"new-bytes"),
+            "thumbnail",
+        )
+
+    def test_rejects_replacement_without_a_claim(self, db_session: Session) -> None:
+        with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
+            replace_owned_bytes(
+                db_session,
+                get_backend(),
+                "unclaimed.bin",
+                b"new",
+                object_kind="thumbnail",
+            )
+
+        assert db_session.exec(select(OwnedStorageObject)).all() == []
+
+    def test_preserves_replacement_bytes_when_persisted_proof_is_stale(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt()
+        row = record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+        original_proof = (row.token, row.object_kind)
+        direct = _replace_out_of_band(receipt)
+
+        with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
+            replace_owned_bytes(
+                db_session,
+                get_backend(),
+                receipt.key,
+                b"new",
+                object_kind="thumbnail",
+            )
+
+        db_session.refresh(row)
+        assert direct.read_bytes() == b"replacement"
+        assert (row.token, row.object_kind) == original_proof
 
 
-def test_delete_owned_key_rejects_a_nonmatching_required_proof(db_session) -> None:
-    backend = _LedgerBackend()
-    stored = _receipt()
-    record_creation(db_session, stored, object_kind="artifact")
-    db_session.commit()
-    backend.rollback = False
+class TestDeleteOwnedKey:
+    def test_deletes_matching_bytes_and_consumes_their_claim(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
 
-    with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
-        delete_owned_key(db_session, backend, stored.key, required_proof=True)
-    assert backend.rollback_calls[-1] == stored
+        removed = delete_owned_key(
+            db_session, get_backend(), receipt.key, required_proof=True
+        )
+        db_session.commit()
+
+        assert removed is True
+        assert get_backend().exists(receipt.key) is False
+        assert db_session.exec(select(OwnedStorageObject)).all() == []
+
+    def test_treats_an_unclaimed_optional_key_as_a_noop(
+        self, db_session: Session
+    ) -> None:
+        removed = delete_owned_key(db_session, get_backend(), "unclaimed.bin")
+
+        assert removed is False
+        assert db_session.exec(select(OwnedStorageObject)).all() == []
+
+    def test_rejects_an_unclaimed_required_key(self, db_session: Session) -> None:
+        with pytest.raises(UnsafeStorageDeleteError, match="ownership_unverified"):
+            delete_owned_key(
+                db_session,
+                get_backend(),
+                "unclaimed.bin",
+                required_proof=True,
+            )
+
+        assert db_session.exec(select(OwnedStorageObject)).all() == []
+
+    def test_rejects_required_deletion_after_object_replacement(
+        self, db_session: Session
+    ) -> None:
+        receipt = _created_receipt()
+        row = record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+        original_proof = (row.token, row.object_kind)
+        direct = _replace_out_of_band(receipt)
+
+        with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
+            delete_owned_key(
+                db_session, get_backend(), receipt.key, required_proof=True
+            )
+
+        db_session.refresh(row)
+        assert direct.read_bytes() == b"replacement"
+        assert (row.token, row.object_kind) == original_proof
+
+    def test_returns_false_when_optional_backend_deletion_fails(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = get_backend()
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+
+        def fail_delete(_receipt: CreationReceipt) -> bool:
+            raise OSError("storage unavailable")
+
+        monkeypatch.setattr(backend, "rollback_create", fail_delete)
+
+        removed = delete_owned_key(db_session, backend, receipt.key)
+
+        assert removed is False
+        assert Path(receipt.key).read_bytes() == b"owned"
+
+    def test_raises_when_required_backend_deletion_fails(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = get_backend()
+        receipt = _created_receipt()
+        record_creation(db_session, receipt, object_kind="artifact")
+        db_session.commit()
+
+        def fail_delete(_receipt: CreationReceipt) -> bool:
+            raise OSError("storage unavailable")
+
+        monkeypatch.setattr(backend, "rollback_create", fail_delete)
+
+        with pytest.raises(UnsafeStorageDeleteError, match="storage_delete_failed"):
+            delete_owned_key(db_session, backend, receipt.key, required_proof=True)
+
+        assert Path(receipt.key).read_bytes() == b"owned"
