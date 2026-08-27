@@ -15,8 +15,16 @@ from sqlmodel import Session, select
 
 from app.db.models import OwnedStorageObject, StorageObjectState
 from app.db.session import get_session_factory
-from app.services.storage_backend import LocalStorageBackend, get_backend
-from app.services.storage_ownership import publish_bytes, sweep_orphaned_publications
+from app.services.storage_backend import (
+    LocalStorageBackend,
+    StorageCollisionError,
+    get_backend,
+)
+from app.services.storage_ownership import (
+    publish_bytes,
+    reserve_creation,
+    sweep_orphaned_publications,
+)
 
 FROZEN_NOW = datetime(2026, 1, 3, tzinfo=UTC)
 STALE_CREATED_AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -28,7 +36,60 @@ class _FailingLocalStorageBackend(LocalStorageBackend):
         raise OSError("disk full")
 
 
+class _TransientReclaimBackend(LocalStorageBackend):
+    def reclaim_unverified(
+        self, key: str, *, expected_size: int, expected_etag: str | None
+    ) -> bool:
+        del key, expected_size, expected_etag
+        raise OSError("storage temporarily unavailable")
+
+
 class TestPublishBytes:
+    def test_reserves_the_key_durably_before_storage_publication(
+        self,
+        db_session: Session,
+    ) -> None:
+        backend = get_backend()
+        key = backend.thumbnail_key(900)
+
+        reservation_id = reserve_creation(
+            db_session,
+            backend,
+            key,
+            object_kind="thumbnail",
+            expected_size=5,
+        )
+
+        with get_session_factory().session() as independent:
+            row = independent.get(OwnedStorageObject, reservation_id)
+            assert row is not None
+            assert row.state is StorageObjectState.PENDING
+        assert not backend.exists(key)
+
+    def test_rejects_a_duplicate_pending_reservation(
+        self,
+        db_session: Session,
+    ) -> None:
+        backend = get_backend()
+        key = backend.thumbnail_key(899)
+        first_id = reserve_creation(
+            db_session,
+            backend,
+            key,
+            object_kind="thumbnail",
+        )
+
+        with pytest.raises(StorageCollisionError):
+            reserve_creation(
+                db_session,
+                backend,
+                key,
+                object_kind="thumbnail",
+            )
+
+        with get_session_factory().session() as independent:
+            assert independent.get(OwnedStorageObject, first_id) is not None
+
     def test_commits_ownership_with_the_callers_transaction(
         self,
         db_session: Session,
@@ -201,6 +262,68 @@ class TestSweepOrphanedPublications:
         assert result.blocked == 1
         assert row.state is StorageObjectState.BLOCKED
         assert path.read_bytes() == b"someone-elses-bytes"
+
+    def test_blocks_a_large_orphan_without_sufficient_proof(
+        self,
+        db_session: Session,
+    ) -> None:
+        backend = get_backend()
+        key = backend.thumbnail_key(909)
+        path = Path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        size = 16 * 1024 * 1024 + 1
+        with path.open("wb") as handle:
+            handle.truncate(size)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            size_bytes=size,
+            sha256="a" * 64,
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        db_session.refresh(row)
+        assert result.blocked == 1
+        assert row.state is StorageObjectState.BLOCKED
+        assert path.exists()
+
+    def test_retries_a_transient_reclaim_failure(
+        self,
+        db_session: Session,
+    ) -> None:
+        backend = _TransientReclaimBackend()
+        key = backend.thumbnail_key(910)
+        payload = b"owned"
+        path = Path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            size_bytes=len(payload),
+            sha256="f5e6d024c05c9cc2746a3e127408b91a8b7a7f2a30da0c259bc54265502ddef4",
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        db_session.refresh(row)
+        assert result.pending == 1
+        assert row.state is StorageObjectState.PENDING
+        assert row.last_error == "OSError"
+        assert path.exists()
 
     def test_never_sweeps_committed_ownership(
         self,
