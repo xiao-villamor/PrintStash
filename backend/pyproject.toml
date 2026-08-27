@@ -64,7 +64,6 @@ dev = [
     "wsproto>=1.3,<2",
     "WsgiDAV>=4.3,<5",
     "cheroot>=11,<12",
-    "asyncssh>=2.21,<3",
     "ty>=0.0.1",
 ]
 
