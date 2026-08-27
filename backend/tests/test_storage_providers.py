@@ -106,6 +106,7 @@ def test_rejects_invalid_provider_roots(root: str) -> None:
     "credentials",
     [
         {},
+        {"password": "secret"},
         {"password": "secret", "private_key_path": "/run/keys/id_ed25519"},
         {"passphrase": "secret"},
         {"private_key_path": "-----BEGIN PRIVATE KEY-----"},

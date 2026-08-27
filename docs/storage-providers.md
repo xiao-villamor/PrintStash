@@ -12,7 +12,7 @@ PrintStash probes the configured storage at startup. The expected tier below is 
 | [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
 | [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Unguarded | `endpoint_url`, `username`, `password` (secret), `root` |
 | [WebDAV](#webdav) | Nextcloud and WebDAV | Unguarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [SFTP](#sftp) | NAS over SFTP | Unguarded | `host`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
+| [SFTP](#sftp) | NAS over SFTP | Unguarded | `host`, `port`, `username`, `private_key_path`, `root` |
 
 ## Safety tiers
 
@@ -78,7 +78,7 @@ Expected tier: **Unguarded**. SFTP cannot prove conditional ownership.
 
 ## Credentials and upgrades
 
-Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one of a password or a mounted private-key path; inline private-key material is rejected.
+Secrets are write-only: configuration reads expose only which secret fields are set. SFTP uses a mounted, unencrypted service-key path; inline private-key material is rejected. The current transport does not support password authentication or encrypted keys.
 
 PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.
 

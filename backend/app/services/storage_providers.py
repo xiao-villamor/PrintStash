@@ -89,19 +89,11 @@ class SFTPProviderConfig(_ProviderConfig):
     host: str = Field(min_length=1)
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1)
-    password: str | None = None
-    private_key_path: str | None = None
-    passphrase: str | None = None
+    private_key_path: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_auth(self):
-        password = bool(self.password)
-        key_path = bool(self.private_key_path)
-        if password == key_path:
-            raise ValueError("sftp_exactly_one_auth_method_required")
-        if self.passphrase and not key_path:
-            raise ValueError("sftp_passphrase_requires_private_key_path")
-        if self.private_key_path and "BEGIN " in self.private_key_path:
+        if "BEGIN " in self.private_key_path:
             raise ValueError("sftp_inline_private_key_forbidden")
         return self
 
@@ -246,13 +238,7 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
             "port": config.port,
             "username": config.username,
             "root": root,
-            **({"password": config.password} if config.password else {}),
-            **(
-                {"private_key_path": config.private_key_path}
-                if config.private_key_path
-                else {}
-            ),
-            **({"passphrase": config.passphrase} if config.passphrase else {}),
+            "private_key_path": config.private_key_path,
         },
     )
 
@@ -434,27 +420,10 @@ def provider_catalogue() -> list[StorageProvider]:
                 _field("port", "Port", "SFTP port", input_type="number", default=22),
                 _field("username", "Username", "SFTP account username"),
                 _field(
-                    "password",
-                    "Password",
-                    "Use password or a mounted key path",
-                    input_type="password",
-                    required=False,
-                    secret=True,
-                ),
-                _field(
                     "private_key_path",
                     "Private key path",
-                    "Mounted key path; inline key material is forbidden",
+                    "Mounted unencrypted service-key path; inline key material is forbidden",
                     input_type="path",
-                    required=False,
-                ),
-                _field(
-                    "passphrase",
-                    "Key passphrase",
-                    "Optional mounted-key passphrase",
-                    input_type="password",
-                    required=False,
-                    secret=True,
                 ),
                 _field(
                     "root", "Root", "Non-empty managed folder", default="vault-data"
@@ -517,7 +486,7 @@ def render_storage_provider_docs() -> str:
         [
             "## Credentials and upgrades",
             "",
-            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one of a password or a mounted private-key path; inline private-key material is rejected.",
+            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP uses a mounted, unencrypted service-key path; inline private-key material is rejected. The current transport does not support password authentication or encrypted keys.",
             "",
             "PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.",
             "",
