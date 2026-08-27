@@ -403,6 +403,11 @@ def provider_catalogue() -> list[StorageProvider]:
                 fields=remote_common,
             )
         )
+    sftp_available = remote_available
+    if remote_available:
+        from app.services.storage_opendal import opendal_transport_available
+
+        sftp_available = opendal_transport_available(TransportKind.SFTP)
     entries.append(
         StorageProvider(
             id="sftp",
@@ -415,9 +420,15 @@ def provider_catalogue() -> list[StorageProvider]:
                 "Startup acknowledgement and purge confirmation are required."
             ],
             documentation_url="/docs/storage-providers.md#sftp",
-            available=remote_available,
-            selectable=remote_available,
-            disabled_reason=remote_reason,
+            available=sftp_available,
+            selectable=sftp_available,
+            disabled_reason=(
+                remote_reason
+                if not remote_available
+                else None
+                if sftp_available
+                else "SFTP transport is unavailable in this full image"
+            ),
             fields=[
                 _field("host", "Host", "SFTP hostname"),
                 _field("port", "Port", "SFTP port", input_type="number", default=22),

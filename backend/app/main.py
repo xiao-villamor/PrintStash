@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -116,7 +117,18 @@ def _safe_db_url(value: str) -> str:
 
 def _compose_storage_backend() -> StorageBackend:
     """Bind and recover the configured backend before serving requests."""
-    if settings.storage_backend == "s3":
+    if settings.storage_backend in {"nextcloud", "webdav", "sftp"}:
+        from app.services.storage_opendal import OpenDALStorageBackend
+        from app.services.storage_providers import (
+            parse_provider_config,
+            resolve_transport,
+        )
+
+        provider_config = parse_provider_config(
+            json.loads(str(settings.storage_provider_config))
+        )
+        storage_backend = OpenDALStorageBackend(resolve_transport(provider_config))
+    elif settings.storage_backend == "s3":
         storage_backend: StorageBackend = S3StorageBackend()
     else:
         storage_backend = LocalStorageBackend()
