@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Back up before upgrading. This release includes additive database migrations
+and storage configuration/safety changes. Existing S3-compatible buckets must
+be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
+
 ### Added
 
 - **Runtime-probed storage capability tiers and remote providers.** Local and
@@ -20,9 +24,23 @@
   or partial captures, and preserve per-Artifact source snapshots, confirmed or
   inferred fields, and explicit user overrides. Portable library archives carry
   optional provenance sidecars while remaining compatible with earlier exports.
+- **Authenticated marketplace capture in the browser extension.** Printables
+  file selection and MakerWorld package selection now use the browser's own
+  authenticated session, with guided pairing, revocable named devices,
+  localhost permission setup, build identification, and clear partial/failure
+  states. PrintStash does not receive the marketplace session cookies.
 - **Capture provider connections and browser pairing.** Per-user MyMiniFactory
   OAuth and Cults metadata connections, plus named and revocable paired browser
   devices, support source-aware capture without sharing source-site sessions.
+- **Bambu LAN reproducibility evidence.** Externally started Bambu jobs now
+  preserve the task, subtask, project, profile, plate, layer, nozzle, and G-code
+  identities the printer actually reports. PrintStash makes a bounded,
+  best-effort capture of exact G-code or project 3MF files while they remain in
+  the printer's FTPS cache, labels exact/metadata/basic evidence honestly, and
+  can preview archived G-code contained in a captured 3MF
+  ([#69](https://github.com/xiao-villamor/PrintStash/issues/69),
+  [#70](https://github.com/xiao-villamor/PrintStash/issues/70),
+  [#82](https://github.com/xiao-villamor/PrintStash/issues/82)).
 
 ### Security
 
@@ -38,6 +56,12 @@
 
 ### Changed
 
+- **Storage ownership is data-plane only.** PrintStash no longer creates S3
+  buckets or changes lifecycle policies. It inspects versioning/lifecycle state
+  to report safety, keeps backup S3 configuration independent, and requires an
+  explicit acknowledgement before starting on Unguarded storage. Legacy
+  `VAULT_STORAGE_BACKEND`/S3 settings remain accepted; new deployments use typed
+  provider configuration.
 - **Dense STL previews preserve surface coverage.** Oversized binary and ASCII
   meshes now use an isolated, bounded two-pass streaming renderer before the
   deterministic sampled fallback, keeping previews coherent without loading the
@@ -45,6 +69,15 @@
 - **Embedded 3MF previews take precedence.** Valid slicer-provided PNG previews
   bypass mesh regeneration, while invalid or oversized candidates are skipped
   safely in favour of the next bounded candidate.
+- **Authenticated package downloads moved out of the API.** Server-side
+  marketplace authentication has been retired in favour of paired-browser
+  transfer, keeping source-site credentials in the user's browser.
+- **Shared domain and UI packages now own reusable behaviour.** Archive, G-code,
+  mesh, networking, notification, import, and printer logic is consolidated in
+  `printstash-core`; frontend domain helpers and UI primitives live in internal
+  workspace packages. Application startup now composes storage, queues,
+  realtime, sessions, and printer providers explicitly while retaining the
+  local-first defaults and existing API contracts.
 - **Frontend toolchain moved to oxc.** ESLint and `typescript-eslint` are
   replaced by [oxlint](https://oxc.rs), formatting is now enforced by
   [oxfmt](https://oxc.rs) (the frontend was previously unformatted), and
@@ -60,9 +93,21 @@
   now enforced.
 - The i18n coverage test parses JSX with `oxc-parser` instead of the TypeScript
   compiler API, which TypeScript 7 no longer exposes.
+- **Tests now mirror production ownership.** Backend tests are separated into
+  unit, integration, live-contract, and end-to-end lanes; frontend app, shared
+  packages, browser extension, mock-API Playwright, real-backend Playwright,
+  storage-provider E2E, migration convergence, and branch-coverage floors are
+  independent gates. A Docker pre-release harness covers PostgreSQL, S3,
+  Spoolman, Authentik, and printer emulators, and arm64 images build on native
+  runners.
 
 ### Fixed
 
+- Uploads at exactly the configured per-file limit now reach the route's precise
+  `upload_too_large` response instead of being rejected as an oversized request.
+  The API and reverse proxy retain a separate bounded multipart headroom above
+  that per-file cap
+  ([#94](https://github.com/xiao-villamor/PrintStash/pull/94)).
 - API containers now honour positive numeric `PUID` and `PGID` values for
   bind-mounted data, repair ownership when that identity changes, and reject
   invalid or root IDs before migrations start
@@ -70,10 +115,24 @@
 - 3MF previews now preserve component and build transforms used by 3D Builder
   projects when producing the browser's STL representation
   ([#84](https://github.com/xiao-villamor/PrintStash/issues/84)).
-- Pending Imports can now be dismissed after a completed capture without
-  affecting its imported Model or Artifacts; expired terminal import jobs no
-  longer make a subsequent upload fail during pruning, and dismissed items
-  leave the visible inbox.
+- Pending Imports now preserve completed/partial outcomes across polling,
+  refreshes, retries, and cleanup; can be dismissed after capture without
+  affecting imported Models or Artifacts; block deletion while resolution is
+  active; recover legacy staging indexes; and no longer let expired terminal
+  jobs break a later upload.
+- Bambu LAN now uses persistent report-topic subscriptions without losing
+  request-topic commands, merges partial reports, reconciles evolving job
+  identities without conflating printers or print cycles, retains project-file
+  hints, and retries FTPS capture only for explicit transport faults.
+- Legacy local Artifacts can be adopted safely into the storage-ownership
+  ledger, while garbage collection and permanent deletion continue to preserve
+  bytes that PrintStash cannot prove it owns.
+- Fleet scheduling and printer queues now exclude deleted jobs, and fleet editor
+  selections are validated instead of being accepted through stale UI state.
+- Frontend hardening uncovered and fixed a missing-`starred` Model-card crash,
+  an upload dialog that could overwrite the user's Collection choice after a
+  query resolved, and error-message lookups that could traverse object
+  prototypes.
 - **`greenlet` is now declared directly, so the async database capability works
   on Apple Silicon.** SQLAlchemy requires `greenlet` for every asyncio code path
   but declares it only for `platform_machine` in `AMD64`, `WIN32`, `aarch64`,
