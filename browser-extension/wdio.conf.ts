@@ -18,7 +18,11 @@ if (
 
 const chromeOptions = {
   binary: browserBinary,
-  args: ["--headless=new", `--load-extension=${extensionDirectory}`],
+  args: [
+    "--headless=new",
+    `--disable-extensions-except=${extensionDirectory}`,
+    `--load-extension=${extensionDirectory}`,
+  ],
 };
 
 const firefoxOptions = {
