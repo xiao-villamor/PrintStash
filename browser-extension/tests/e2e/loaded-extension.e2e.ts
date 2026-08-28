@@ -10,6 +10,7 @@ interface LoadedExtensionBrowser {
   capabilities: { browserName?: string };
   execute<Result>(script: () => Result): Promise<Result>;
   installAddOn(path: string | undefined, temporary: boolean): Promise<string>;
+  pause(milliseconds: number): Promise<void>;
   url(destination: string | undefined): Promise<void>;
 }
 
@@ -30,22 +31,26 @@ describe("loaded extension", () => {
       await browser.url(process.env.PRINTSTASH_EXTENSION_POPUP_URL);
     } else {
       await browser.url("chrome://extensions/");
-      const extension = await browser.execute(() => {
-        const manager = document.querySelector("extensions-manager");
-        const list = manager?.shadowRoot?.querySelector("extensions-item-list");
-        const item = [...(list?.shadowRoot?.querySelectorAll("extensions-item") || [])].find(
-          (candidate) =>
-            candidate.shadowRoot?.querySelector("#name")?.textContent?.trim() ===
-            "PrintStash Model Importer",
-        );
-        return item
-          ? { id: item.id, name: item.shadowRoot?.querySelector("#name")?.textContent?.trim() }
-          : null;
-      });
+      let extension: { id: string; name?: string } | null = null;
+      for (let attempt = 0; attempt < 40 && extension === null; attempt += 1) {
+        extension = await browser.execute(() => {
+          const manager = document.querySelector("extensions-manager");
+          const list = manager?.shadowRoot?.querySelector("extensions-item-list");
+          const item = [...(list?.shadowRoot?.querySelectorAll("extensions-item") || [])].find(
+            (candidate) =>
+              candidate.shadowRoot?.querySelector("#name")?.textContent?.trim() ===
+              "PrintStash Model Importer",
+          );
+          return item
+            ? { id: item.id, name: item.shadowRoot?.querySelector("#name")?.textContent?.trim() }
+            : null;
+        });
+        if (extension === null) await browser.pause(250);
+      }
 
-      assert.equal(extension?.name, "PrintStash Model Importer");
-      assert.match(extension?.id || "", /^[a-p]{32}$/);
       if (extension === null) throw new Error("Loaded Chrome extension was not found");
+      assert.equal(extension.name, "PrintStash Model Importer");
+      assert.match(extension.id, /^[a-p]{32}$/);
       await browser.url(`chrome-extension://${extension.id}/popup.html`);
     }
 
