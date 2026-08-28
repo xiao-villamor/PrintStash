@@ -424,8 +424,8 @@ jobs:
       - name: Check frontend formatting
         run: pnpm format:check
 
-      - name: Unit test frontend
-        run: pnpm test
+      - name: Unit test frontend with coverage floors
+        run: pnpm test:coverage
 
       - name: Build frontend
         run: pnpm build
@@ -627,6 +627,10 @@ jobs:
       - name: Real-backend E2E
         working-directory: frontend
         run: pnpm test:e2e:real
+
+      - name: Storage-provider E2E
+        working-directory: frontend
+        run: pnpm test:e2e:storage
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}

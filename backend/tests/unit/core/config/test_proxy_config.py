@@ -97,7 +97,9 @@ def test_runtime_images_use_unprivileged_users() -> None:
     backend = (root / "backend" / "Dockerfile").read_text()
     frontend = (root / "frontend" / "Dockerfile").read_text()
 
-    assert "gosu printstash" in (root / "backend" / "docker-entrypoint.sh").read_text()
+    assert 'gosu "$requested_identity"' in (
+        root / "backend" / "docker-entrypoint.sh"
+    ).read_text()
     assert "useradd" in backend
     assert "nginxinc/nginx-unprivileged:alpine" in frontend
 

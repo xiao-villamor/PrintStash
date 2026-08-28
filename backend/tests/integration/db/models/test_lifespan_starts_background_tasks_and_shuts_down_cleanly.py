@@ -112,6 +112,16 @@ def test_storage_composition_runs_publication_recovery_after_binding(
     events: list[str] = []
 
     class _Backend:
+        backend_name = "local"
+        capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.INODE,
+            verified_delete=True,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=True,
+        )
+
         def ensure_setup(self) -> None:
             events.append("ensure")
 

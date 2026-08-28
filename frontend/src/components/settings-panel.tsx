@@ -361,6 +361,8 @@ export function SettingsPanel() {
   const [modelThumbnailWidth, setModelThumbnailWidth] = useState(640);
   const [previewBusy, setPreviewBusy] = useState<"quality" | "rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
+  const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
+  const [trashStorageTier, setTrashStorageTier] = useState("verified");
   const [backingUp, setBackingUp] = useState(false);
   const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
@@ -477,6 +479,7 @@ export function SettingsPanel() {
       const [items, cfg] = await Promise.all([listTrash(), getVaultConfig()]);
       setTrashItems(items);
       setTrashRetentionDays(cfg.trash_retention_days ?? 30);
+      setTrashStorageTier(cfg.storage_tier ?? "unguarded");
     } catch (e) {
       toast.error(e);
     } finally {
@@ -977,7 +980,7 @@ export function SettingsPanel() {
     setPurgeTarget(null);
     setTrashBusy(id);
     try {
-      await purgeModel(id);
+      await purgeModel(id, trashStorageTier !== "verified");
       setTrashItems((current) => current.filter((item) => item.id !== id));
       toast.success("Model permanently deleted.");
     } catch (e) {
@@ -988,9 +991,10 @@ export function SettingsPanel() {
   }
 
   async function purgeExpiredItems() {
+    setPurgeExpiredOpen(false);
     setTrashBusy("expired");
     try {
-      const result = await purgeExpiredTrash();
+      const result = await purgeExpiredTrash(trashStorageTier !== "verified");
       toast.success(
         `${result.purged_count} expired model${result.purged_count === 1 ? "" : "s"} deleted.`,
       );
@@ -1101,8 +1105,25 @@ export function SettingsPanel() {
           onConfirm={confirmPurge}
           busy={isModelPurge(trashBusy)}
           title="Permanently delete?"
-          description="This will delete the model and all its files immediately. This cannot be undone."
+          description={
+            trashStorageTier === "verified"
+              ? "This will delete the model and all its files immediately. This cannot be undone."
+              : `This ${trashStorageTier} storage cannot verify every destructive mutation. Confirm this one-time storage risk acknowledgement to delete the model and its files.`
+          }
           confirmLabel="Delete forever"
+        />
+        <ConfirmModal
+          open={purgeExpiredOpen}
+          onClose={() => setPurgeExpiredOpen(false)}
+          onConfirm={purgeExpiredItems}
+          busy={trashBusy === "expired"}
+          title="Purge expired trash?"
+          description={
+            trashStorageTier === "verified"
+              ? "This permanently deletes every expired model and its stored files. This cannot be undone."
+              : `This ${trashStorageTier} storage cannot verify every destructive mutation. Confirm this one-time storage risk acknowledgement to permanently delete expired models.`
+          }
+          confirmLabel="Purge forever"
         />
         <ConfirmModal
           open={restoreTarget !== null}
@@ -2519,7 +2540,7 @@ export function SettingsPanel() {
                     </button>
                     <button
                       type="button"
-                      onClick={purgeExpiredItems}
+                      onClick={() => setPurgeExpiredOpen(true)}
                       disabled={!user || trashBusy === "expired" || trashRetentionDays < 0}
                       className={BTN_SECONDARY}
                     >

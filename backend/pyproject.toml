@@ -42,10 +42,12 @@ step = [
     "cascadio>=0.1.1,<0.2",
 ]
 full = [
+    "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
     "opendal==0.47.6",
 ]
 storage-opendal = [
+    "asyncssh>=2.21,<3",
     "opendal==0.47.6",
 ]
 dev = [

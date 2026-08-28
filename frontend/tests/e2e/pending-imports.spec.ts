@@ -111,7 +111,6 @@ test("URL capture is reviewable, reports a partial result, and restores a source
   page,
 }) => {
   const problems = await collectPageProblems(page);
-
   await page.goto("/");
   await page.getByRole("button", { name: "Upload", exact: true }).click();
   await page.getByRole("button", { name: "From URL" }).click();
@@ -130,12 +129,15 @@ test("URL capture is reviewable, reports a partial result, and restores a source
   await expect(page.getByRole("heading", { name: "Results" })).toBeVisible();
   await expect(page.getByText("capture-bracket.3mf")).toBeVisible();
   await expect(page.getByRole("button", { name: "Retry failed files" })).toBeVisible();
+  expect(problems, "before opening the imported model").toEqual([]);
 
   await page.getByRole("link", { name: "Open model" }).click();
+  expect(problems, "before opening the Source tab").toEqual([]);
   await page.getByRole("tab", { name: "Source" }).click();
   await expect(page.getByText("Fixture maker")).toBeVisible();
   await expect(page.getByText("CC BY 4.0")).toBeVisible();
   await expect(page.getByText("Print with supports.")).toBeVisible();
+  expect(problems, "after opening the Source tab").toEqual([]);
   const creatorField = page
     .getByRole("heading", { name: "Creator", exact: true, level: 3 })
     .locator("../..");
@@ -144,6 +146,7 @@ test("URL capture is reviewable, reports a partial result, and restores a source
   await creatorField.getByRole("button", { name: "Save" }).click();
   await expect(page.getByText("Corrected maker")).toBeVisible();
   await expect(page.getByText("Edited")).toBeVisible();
+  expect(problems, "after saving the override").toEqual([]);
   await creatorField.getByRole("button", { name: "Edit" }).click();
   await creatorField.getByRole("button", { name: "Restore captured value" }).click();
   const dialog = page.getByRole("dialog", { name: "Restore captured value?" });

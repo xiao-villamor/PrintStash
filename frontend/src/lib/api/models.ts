@@ -265,8 +265,9 @@ export function restoreModel(id: number): Promise<ModelRead> {
   return sendJson<ModelRead>(`/api/v1/models/${id}/restore`, "POST", {});
 }
 
-export async function purgeModel(id: number): Promise<TrashPurgeRead> {
-  const res = await fetch(getUrl(`/api/v1/models/${id}/purge`), {
+export async function purgeModel(id: number, confirmStorageRisk = false): Promise<TrashPurgeRead> {
+  const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
+  const res = await fetch(getUrl(`/api/v1/models/${id}/purge${query}`), {
     method: "DELETE",
     headers: authHeaders(),
   });
@@ -274,8 +275,9 @@ export async function purgeModel(id: number): Promise<TrashPurgeRead> {
   return handleResponse<TrashPurgeRead>(res);
 }
 
-export async function purgeExpiredTrash(): Promise<TrashPurgeRead> {
-  const res = await fetch(getUrl("/api/v1/models/trash/expired"), {
+export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<TrashPurgeRead> {
+  const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
+  const res = await fetch(getUrl(`/api/v1/models/trash/expired${query}`), {
     method: "DELETE",
     headers: authHeaders(),
   });

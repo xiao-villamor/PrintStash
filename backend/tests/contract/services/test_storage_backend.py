@@ -24,7 +24,7 @@ import boto3
 import pytest
 
 from app.core.config import _overlay
-from app.services.storage_backend import S3StorageBackend
+from app.services.storage_backend import S3StorageBackend, StorageConfigurationError
 
 _ENDPOINT = os.environ.get("PRINTSTASH_TEST_S3_ENDPOINT")
 
@@ -263,6 +263,29 @@ def test_health_probe_reports_error_for_missing_bucket(s3_backend: S3StorageBack
         # leaving it pointed at a bucket that was never created would break
         # that cleanup, not this test.
         s3_backend._bucket = real_bucket
+
+
+def test_ensure_setup_fails_actionably_for_missing_bucket(
+    s3_backend: S3StorageBackend,
+) -> None:
+    real_bucket = s3_backend._bucket
+    s3_backend._bucket = f"does-not-exist-{uuid.uuid4().hex[:12]}"
+    try:
+        with pytest.raises(StorageConfigurationError, match="create it with"):
+            s3_backend.ensure_setup()
+    finally:
+        s3_backend._bucket = real_bucket
+
+
+def test_ensure_setup_never_creates_a_bucket(
+    s3_backend: S3StorageBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _unexpected_create(**_kwargs: object) -> None:
+        pytest.fail("production storage setup attempted to create the S3 bucket")
+
+    monkeypatch.setattr(s3_backend._client, "create_bucket", _unexpected_create)
+
+    s3_backend.ensure_setup()
 
 
 def test_ensure_setup_never_mutates_bucket_lifecycle_automatically(

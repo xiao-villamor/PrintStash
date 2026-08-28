@@ -106,7 +106,6 @@ def test_rejects_invalid_provider_roots(root: str) -> None:
     "credentials",
     [
         {},
-        {"password": "secret"},
         {"password": "secret", "private_key_path": "/run/keys/id_ed25519"},
         {"passphrase": "secret"},
         {"private_key_path": "-----BEGIN PRIVATE KEY-----"},
@@ -120,6 +119,34 @@ def test_rejects_invalid_sftp_auth(credentials: dict[str, str]) -> None:
             username="printstash",
             **credentials,
         )
+
+
+@pytest.mark.parametrize(
+    "credentials",
+    [
+        {"password": "secret"},
+        {"private_key_path": "/run/keys/id_ed25519"},
+        {
+            "private_key_path": "/run/keys/id_ed25519",
+            "passphrase": "key-secret",
+        },
+    ],
+)
+def test_accepts_exactly_one_sftp_authentication_mode(
+    credentials: dict[str, str],
+) -> None:
+    config = SFTPProviderConfig(
+        provider="sftp",
+        host="nas.example.test",
+        username="printstash",
+        **credentials,
+    )
+
+    spec = resolve_transport(config)
+
+    assert spec.options.get("password") == credentials.get("password")
+    assert spec.options.get("private_key_path") == credentials.get("private_key_path")
+    assert spec.options.get("passphrase") == credentials.get("passphrase")
 
 
 def test_public_provider_catalogue_needs_no_auth(client: TestClient) -> None:
@@ -220,3 +247,37 @@ def test_same_provider_omission_preserves_secret_and_provider_change_clears_it(
         {},
     )
     assert sanitized["secret_fields_set"] == []
+
+
+def test_sftp_authentication_mode_change_clears_old_secrets(
+    db_session: Session,
+) -> None:
+    row = runtime_config.update_storage_provider(
+        db_session,
+        provider="sftp",
+        raw_config={
+            "provider": "sftp",
+            "host": "nas.example.test",
+            "username": "printstash",
+            "password": "old-password",
+            "root": "models",
+        },
+    )
+
+    changed = runtime_config.resolve_requested_storage_provider(
+        row,
+        provider="sftp",
+        raw_config={
+            "provider": "sftp",
+            "host": "nas.example.test",
+            "username": "printstash",
+            "private_key_path": "/run/keys/id_ed25519",
+            "passphrase": "new-passphrase",
+            "root": "models",
+        },
+    )
+
+    assert isinstance(changed, SFTPProviderConfig)
+    assert changed.password == ""
+    assert changed.private_key_path == "/run/keys/id_ed25519"
+    assert changed.passphrase == "new-passphrase"

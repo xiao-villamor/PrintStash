@@ -25,11 +25,15 @@ from app.db.models import (
     ModelSourceCover,
     OwnedStorageObject,
     StagingLease,
-    StorageObjectState,
     StorageDeleteIntent,
+    StorageObjectState,
     User,
 )
-from app.db.session import SQLiteSessionFactory, _set_sqlite_pragmas, get_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+)
 from app.services import inbox, source_covers, staging_leases, trash
 from app.services.source_cover_processing import process_source_cover_upload
 from app.services.storage_backend import (

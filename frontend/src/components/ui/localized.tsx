@@ -267,6 +267,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ["Allow HTTP issuer on trusted LAN", "Permitir emisor HTTP en una LAN de confianza"],
   ["Permanently delete?", "¿Eliminar permanentemente?"],
+  ["Purge expired trash?", "¿Vaciar la papelera caducada?"],
   [
     "This will delete the model and all its files immediately. This cannot be undone.",
     "Esto eliminará inmediatamente el modelo y todos sus archivos. No se puede deshacer.",
@@ -735,6 +736,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Refresh", "Actualizar"],
   ["Restore", "Restaurar"],
   ["Delete forever", "Eliminar definitivamente"],
+  ["Purge forever", "Vaciar definitivamente"],
   ["Delete", "Eliminar"],
   ["Download & enable", "Descargar y activar"],
   ["Backup", "Copia de seguridad"],

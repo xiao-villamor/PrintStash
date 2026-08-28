@@ -8,11 +8,22 @@ This is the difference from `tests/e2e/` (the fast mock-API smoke suite).
 pnpm test:e2e:real
 ```
 
-`playwright.real.config.ts` boots two web servers:
+`playwright.real.config.ts` boots the application plus its printer emulator:
 
 - `scripts/start-backend.sh` — wipes state, runs Alembic, launches uvicorn on
   `:8410` against a temp DB under `.data/` (gitignored).
 - Vite on `:3310` with `VITE_API_URL` pointed at that backend.
+- The standalone Moonraker/Spoolman emulator used by fleet scenarios.
+
+Storage-provider setup is deliberately isolated because it must begin with an
+unconfigured instance and restart after changing transports:
+
+```bash
+pnpm test:e2e:storage
+```
+
+`playwright.storage.config.ts` owns a separate backend, Vite server, and
+loopback WebDAV server. CI runs both real-backend suites.
 
 `helpers.ts` seeds the first admin via `/setup` once and injects a real JWT into
 the browser, so tests boot authenticated. The suite runs serially on one DB, so

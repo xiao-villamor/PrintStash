@@ -18,7 +18,7 @@
     "test:happy-dom": "vitest run --environment happy-dom",
     "test:jsdom": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && pnpm --filter @printstash/ui test:coverage && pnpm --filter @printstash/domain test:coverage",
     "test:e2e": "playwright test",
     "test:e2e:bundle": "PLAYWRIGHT_BUNDLED_DEV=1 playwright test",
     "test:e2e:real": "playwright test --config=playwright.real.config.ts",

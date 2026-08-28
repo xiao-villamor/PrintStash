@@ -1919,6 +1919,7 @@ dev = [
     { name = "wsproto" },
 ]
 full = [
+    { name = "asyncssh" },
     { name = "cascadio" },
     { name = "opendal" },
 ]
@@ -1926,6 +1927,7 @@ step = [
     { name = "cascadio" },
 ]
 storage-opendal = [
+    { name = "asyncssh" },
     { name = "opendal" },
 ]
 
@@ -1934,6 +1936,8 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'async-db'", specifier = ">=0.22,<1" },
     { name = "alembic", specifier = ">=1.19,<2" },
     { name = "asyncssh", marker = "extra == 'dev'", specifier = ">=2.21,<3" },
+    { name = "asyncssh", marker = "extra == 'full'", specifier = ">=2.21,<3" },
+    { name = "asyncssh", marker = "extra == 'storage-opendal'", specifier = ">=2.21,<3" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "boto3", specifier = ">=1.43,<2" },
     { name = "botocore", specifier = ">=1.43,<2" },

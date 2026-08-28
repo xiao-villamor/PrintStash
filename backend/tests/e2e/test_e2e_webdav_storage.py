@@ -31,10 +31,9 @@ def _free_port() -> int:
 
 @pytest.fixture
 def webdav_endpoint(tmp_path: Path):
-    pytest.importorskip("opendal")
     executable = shutil.which("wsgidav")
     if executable is None:
-        pytest.skip("WsgiDAV contract dependency is not installed")
+        pytest.fail("WsgiDAV E2E dependency is not installed; install the dev extra")
     port = _free_port()
     remote_root = tmp_path / "webdav"
     remote_root.mkdir()
@@ -98,6 +97,11 @@ async def test_artifact_upload_is_committed_and_readable_through_webdav(
     assert setup.status_code == 201, setup.text
     headers = {"Authorization": f"Bearer {setup.json()['access_token']}"}
 
+    health = await api.get("/api/v1/health")
+    assert health.status_code == 200, health.text
+    assert health.json()["storage"]["provider"] == "local"
+    assert health.json()["storage"]["tier"] == "verified"
+
     from app.services.storage_backend import bind_backend
     from app.services.storage_opendal import OpenDALStorageBackend
     from app.services.storage_providers import TransportKind, TransportSpec
@@ -136,3 +140,12 @@ async def test_artifact_upload_is_committed_and_readable_through_webdav(
         )
     ).one()
     assert ownership.state == StorageObjectState.COMMITTED
+
+    trashed = await api.delete(f"/api/v1/models/{artifact.model_id}", headers=headers)
+    assert trashed.status_code == 204, trashed.text
+    rejected = await api.delete(
+        f"/api/v1/models/{artifact.model_id}/purge", headers=headers
+    )
+    assert rejected.status_code == 409, rejected.text
+    assert rejected.json()["detail"]["code"] == "storage_risk_confirmation_required"
+    assert backend.exists(artifact.path)

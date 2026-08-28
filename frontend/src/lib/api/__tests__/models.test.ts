@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ingestUrl, selectCollectionMembers, selectModelFiles } from "@/lib/api/models";
+import {
+  ingestUrl,
+  purgeExpiredTrash,
+  purgeModel,
+  selectCollectionMembers,
+  selectModelFiles,
+} from "@/lib/api/models";
 import { invalidateApiCache } from "@/lib/api/request";
 
 /**
@@ -72,6 +78,18 @@ describe("ingestUrl", () => {
       url: "https://www.printables.com/@u/collections/3525050",
       review: true,
     });
+  });
+});
+
+describe("storage-risk purge acknowledgement", () => {
+  it("adds the one-shot confirmation only when requested", async () => {
+    respondWith({ purged_model_ids: [7], purged_count: 1 });
+
+    await purgeModel(7, true);
+    expect(lastCall().url).toBe("/api/v1/models/7/purge?confirm_storage_risk=true");
+
+    await purgeExpiredTrash(false);
+    expect(lastCall().url).toBe("/api/v1/models/trash/expired");
   });
 });
 

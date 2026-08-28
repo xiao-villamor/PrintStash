@@ -2281,10 +2281,19 @@ function CollectionFolderCard({
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   return (
     <Localized>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         data-collection-path={collection.path}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (selectable) onToggleSelect?.(collection.id);
+            else onSelect(collection.path);
+          }
+        }}
         {...handlers}
         className={`animate-card-in group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
           selected
@@ -2316,7 +2325,7 @@ function CollectionFolderCard({
             {collection.name}
           </p>
         </div>
-      </button>
+      </div>
     </Localized>
   );
 }
@@ -2339,10 +2348,19 @@ function CollectionListRow({
   const { dragOver, handlers } = useModelDropTarget(collection.path, onDropModel);
   return (
     <Localized>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         data-collection-path={collection.path}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            if (selectable) onToggleSelect?.(collection.id);
+            else onSelect(collection.path);
+          }
+        }}
         {...handlers}
         className={`flex items-center gap-2 md:gap-3 px-4 py-3 border-b text-left transition-colors group ${
           selected
@@ -2380,7 +2398,7 @@ function CollectionListRow({
         <span className="w-8 flex justify-center">
           <ChevronRight className="h-4 w-4 text-muted-foreground/50 opacity-60 group-hover:opacity-100" />
         </span>
-      </button>
+      </div>
     </Localized>
   );
 }

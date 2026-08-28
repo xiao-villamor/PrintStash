@@ -404,7 +404,7 @@ def test_load_mesh_flattens_scene_with_multiple_geometries(
     p = tmp_path / "scene.3mf"
     scene.export(p, file_type="3mf")
 
-    monkeypatch.setattr(trimesh, "load_mesh", lambda *a, **k: scene)
+    monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
     mesh = mesh_processing._load_mesh(p)
     assert mesh is not None
     # Concatenated geometry from both boxes.
@@ -419,7 +419,7 @@ def test_load_mesh_scene_with_no_trimesh_geometry_returns_none(
     empty_scene = trimesh.Scene()  # no geometry at all
     p = tmp_path / "empty.3mf"
     p.write_bytes(b"placeholder")
-    monkeypatch.setattr(trimesh, "load_mesh", lambda *a, **k: empty_scene)
+    monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: empty_scene)
     assert mesh_processing._load_mesh(p) is None
 
 
@@ -433,7 +433,7 @@ def test_load_mesh_scene_with_single_geometry_returns_it_directly(
     scene.add_geometry(box, node_name="a")
     p = tmp_path / "single.3mf"
     p.write_bytes(b"placeholder")
-    monkeypatch.setattr(trimesh, "load_mesh", lambda *a, **k: scene)
+    monkeypatch.setattr(trimesh, "load_scene", lambda *a, **k: scene)
     mesh = mesh_processing._load_mesh(p)
     assert mesh is not None
     assert len(mesh.faces) == 12
@@ -468,7 +468,7 @@ def test_load_mesh_uses_typed_loader_without_processing(
         calls.append((args, kwargs))
         return expected
 
-    monkeypatch.setattr(trimesh, "load_mesh", typed_loader)
+    monkeypatch.setattr(trimesh, "load_scene", typed_loader)
     path = tmp_path / "typed.stl"
     path.write_bytes(b"placeholder")
 

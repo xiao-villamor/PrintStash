@@ -379,9 +379,8 @@ class TestFileAsStl:
         mesh = trimesh.load_mesh(
             io.BytesIO(response.content), file_type="stl", process=False
         )
-        assert mesh.bounds.tolist() == pytest.approx(
-            [[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]
-        )
+        assert mesh.bounds[0].tolist() == pytest.approx([110.0, 220.0, 330.0])
+        assert mesh.bounds[1].tolist() == pytest.approx([112.0, 223.0, 334.0])
 
     def test_conversion_failure_500(
         self, client: TestClient, db_session: Session, auth_headers, monkeypatch

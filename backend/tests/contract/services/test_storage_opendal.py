@@ -1,3 +1,10 @@
+"""Real loopback contracts for the WebDAV and SFTP storage transports.
+
+Run with ``cd backend && ./scripts/test.sh contract -q``.  These tests own the
+external-process lifecycle and prove the transport behavior against actual
+protocol servers rather than mocks.
+"""
+
 from __future__ import annotations
 
 import shutil
@@ -6,19 +13,18 @@ import subprocess
 import time
 from io import BytesIO
 from pathlib import Path
-from urllib.request import urlopen
 
 import asyncssh
+import opendal
 import pytest
 
 from app.services.storage_backend import (
     StorageCollisionError,
-    StorageConfigurationError,
 )
 from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_providers import TransportKind, TransportSpec
 
-opendal = pytest.importorskip("opendal")
+pytestmark = pytest.mark.contract
 
 
 def _free_port() -> int:
@@ -35,7 +41,7 @@ def webdav_endpoint(tmp_path: Path):
         if venv_executable.is_file():
             executable = str(venv_executable)
     if executable is None:
-        pytest.skip("WsgiDAV contract dependency is not installed")
+        pytest.fail("WsgiDAV contract dependency is not installed; install the dev extra")
     port = _free_port()
     process = subprocess.Popen(
         [
@@ -48,20 +54,26 @@ def webdav_endpoint(tmp_path: Path):
             "--quiet",
         ],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
     )
     endpoint = f"http://127.0.0.1:{port}"
     try:
-        for _ in range(100):
+        for _ in range(200):
             if process.poll() is not None:
                 pytest.fail("WsgiDAV contract server exited during startup")
             try:
-                urlopen(endpoint, timeout=0.2).close()  # noqa: S310
+                with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                    pass
                 break
             except Exception:
                 time.sleep(0.05)
         else:
-            pytest.fail("WsgiDAV contract server did not become ready")
+            process.terminate()
+            _stdout, stderr = process.communicate(timeout=5)
+            pytest.fail(
+                "WsgiDAV contract server did not become ready: "
+                + stderr.decode(errors="replace")[-1000:]
+            )
         yield endpoint
     finally:
         process.terminate()
@@ -98,6 +110,35 @@ def sftp_endpoint(tmp_path: Path):
         assert process.stdout is not None
         assert process.stdout.readline().strip() == "READY"
         yield port, private_key
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+
+@pytest.fixture
+def sftp_password_endpoint(tmp_path: Path):
+    port = _free_port()
+    process = subprocess.Popen(
+        [
+            str(Path(__file__).parents[3] / ".venv" / "bin" / "python"),
+            "-m",
+            "tests.fakes.mock_sftp",
+            "--port",
+            str(port),
+            "--root",
+            str(tmp_path / "password-server"),
+            "--password",
+            "contract-secret",
+        ],
+        cwd=Path(__file__).parents[3],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "READY"
+        yield port
     finally:
         process.terminate()
         process.wait(timeout=5)
@@ -165,13 +206,28 @@ def test_sftp_mounted_key_stream_round_trip(sftp_endpoint) -> None:
     assert backend.capabilities.tier.value == "unguarded"
 
 
-def test_sftp_password_authentication_fails_with_actionable_guidance() -> None:
-    spec = _sftp_spec(22, Path("/unused"))
-    spec.options.pop("private_key_path")
-    spec.options["password"] = "secret"
+def test_sftp_password_stream_round_trip(sftp_password_endpoint: int) -> None:
+    spec = TransportSpec(
+        kind=TransportKind.SFTP,
+        provider="sftp",
+        namespace="sftp/vault-data",
+        options={
+            "host": "127.0.0.1",
+            "port": sftp_password_endpoint,
+            "username": "printstash",
+            "password": "contract-secret",
+            "root": "vault-data",
+        },
+    )
+    backend = OpenDALStorageBackend(spec)
+    backend.ensure_setup()
+    key = backend.blob_key("password-widget", 1, "widget.3mf")
+    payload = b"password-sftp-model" * (1024 * 1024)
 
-    with pytest.raises(StorageConfigurationError, match="mounted private key"):
-        OpenDALStorageBackend(spec)
+    receipt = backend.create_stream(BytesIO(payload), key)
+
+    assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
+    assert receipt.size == len(payload)
 
 
 class _RenameFailure:

@@ -13,6 +13,9 @@ const mockPrinterPort = Number(process.env.PLAYWRIGHT_MOCK_PRINTER_PORT ?? 7530)
 
 export default defineConfig({
   testDir: "./tests/e2e-real",
+  // Storage-provider setup owns a separate throwaway backend and WebDAV
+  // server; including it here would point it at this already-configured app.
+  testIgnore: ["storage/**/*.spec.ts"],
   // Generous: some specs upload a file and wait on real async ingestion.
   timeout: 120_000,
   expect: { timeout: 15_000 },

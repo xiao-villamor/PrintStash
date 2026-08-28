@@ -89,12 +89,22 @@ class SFTPProviderConfig(_ProviderConfig):
     host: str = Field(min_length=1)
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1)
-    private_key_path: str = Field(min_length=1)
+    password: str = ""
+    private_key_path: str = ""
+    passphrase: str = ""
 
     @model_validator(mode="after")
     def validate_auth(self):
-        if "BEGIN " in self.private_key_path:
+        password = self.password.strip()
+        key_path = self.private_key_path.strip()
+        if bool(password) == bool(key_path):
+            raise ValueError("sftp_exactly_one_authentication_required")
+        if self.passphrase and not key_path:
+            raise ValueError("sftp_passphrase_requires_private_key")
+        if "BEGIN " in key_path:
             raise ValueError("sftp_inline_private_key_forbidden")
+        self.password = password
+        self.private_key_path = key_path
         return self
 
 
@@ -229,17 +239,23 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
                 "root": root,
             },
         )
+    options: dict[str, str | int | bool] = {
+        "host": config.host,
+        "port": config.port,
+        "username": config.username,
+        "root": root,
+    }
+    if config.password:
+        options["password"] = config.password
+    else:
+        options["private_key_path"] = config.private_key_path
+        if config.passphrase:
+            options["passphrase"] = config.passphrase
     return TransportSpec(
         kind=TransportKind.SFTP,
         provider=config.provider,
         namespace=f"sftp/{root}",
-        options={
-            "host": config.host,
-            "port": config.port,
-            "username": config.username,
-            "root": root,
-            "private_key_path": config.private_key_path,
-        },
+        options=options,
     )
 
 
@@ -420,10 +436,27 @@ def provider_catalogue() -> list[StorageProvider]:
                 _field("port", "Port", "SFTP port", input_type="number", default=22),
                 _field("username", "Username", "SFTP account username"),
                 _field(
+                    "password",
+                    "Password",
+                    "Use either a password or a mounted private-key path",
+                    input_type="password",
+                    required=False,
+                    secret=True,
+                ),
+                _field(
                     "private_key_path",
                     "Private key path",
-                    "Mounted unencrypted service-key path; inline key material is forbidden",
+                    "Mounted service-key path; inline key material is forbidden",
                     input_type="path",
+                    required=False,
+                ),
+                _field(
+                    "passphrase",
+                    "Key passphrase",
+                    "Optional passphrase for the mounted private key",
+                    input_type="password",
+                    required=False,
+                    secret=True,
                 ),
                 _field(
                     "root", "Root", "Non-empty managed folder", default="vault-data"
@@ -486,7 +519,7 @@ def render_storage_provider_docs() -> str:
         [
             "## Credentials and upgrades",
             "",
-            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP uses a mounted, unencrypted service-key path; inline private-key material is rejected. The current transport does not support password authentication or encrypted keys.",
+            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one authentication mode: password, or a mounted private-key path with an optional passphrase. Inline private-key material is rejected.",
             "",
             "PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.",
             "",

@@ -14,9 +14,9 @@ if (( delta < minimum_delta )); then
 fi
 
 docker run --rm --entrypoint /app/.venv/bin/python "$full_image" -c \
-  'import importlib.util as i; assert not i.find_spec("patchright"); assert all(i.find_spec(x) for x in ("cascadio", "numpy", "PIL", "trimesh"))'
+  'import importlib.util as i; assert not i.find_spec("patchright"); assert all(i.find_spec(x) for x in ("asyncssh", "cascadio", "numpy", "opendal", "PIL", "trimesh"))'
 docker run --rm --entrypoint /app/.venv/bin/python "$lite_image" -c \
-  'import importlib.util as i; assert not i.find_spec("patchright"); assert not i.find_spec("cascadio"); assert not i.find_spec("aiosqlite"); assert all(i.find_spec(x) for x in ("numpy", "PIL", "trimesh"))'
+  'import importlib.util as i; assert not i.find_spec("patchright"); assert not i.find_spec("cascadio"); assert not i.find_spec("aiosqlite"); assert not i.find_spec("asyncssh"); assert not i.find_spec("opendal"); assert all(i.find_spec(x) for x in ("numpy", "PIL", "trimesh"))'
 
 startup_median_ms() {
   local image="$1"

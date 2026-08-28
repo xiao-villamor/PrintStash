@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import mmap
+import posixpath
 import tempfile
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import BinaryIO, Iterator
 
 from app.services.storage_backend import (
@@ -40,7 +44,12 @@ def opendal_transport_available(kind: TransportKind) -> bool:
 
         opendal.Operator("sftp")
     except Exception as exc:
-        return "scheme is not registered" not in str(exc)
+        if "scheme is not registered" not in str(exc):
+            return True
+        try:
+            import asyncssh  # noqa: F401
+        except ImportError:
+            return False
     return True
 
 
@@ -123,7 +132,9 @@ class OpenDALStorageBackend(StorageBackend):
         temporary = f".printstash-tmp/{uuid.uuid4().hex}"
         published = False
         try:
-            if self._spec.kind is TransportKind.SFTP:
+            if hasattr(self._operator, "write_stream"):
+                self._operator.write_stream(temporary, src)
+            elif self._spec.kind is TransportKind.SFTP:
                 with self._operator.open(temporary, "wb") as writer:
                     while chunk := src.read(1024 * 1024):
                         writer.write(chunk)
@@ -189,6 +200,9 @@ class OpenDALStorageBackend(StorageBackend):
         return bytes(self._operator.read(self._relative(key)))
 
     def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        if hasattr(self._operator, "stream_chunks"):
+            yield from self._operator.stream_chunks(self._relative(key), chunk_size)
+            return
         with self._operator.open(self._relative(key), "rb") as reader:
             while chunk := reader.read(chunk_size):
                 yield bytes(chunk)
@@ -305,14 +319,8 @@ def _operator_for(spec: TransportSpec):
             username=str(options["username"]),
             password=str(options["password"]),
         )
-    if "password" in options:
-        raise StorageConfigurationError(
-            "SFTP password authentication is unavailable; use a mounted private key"
-        )
-    if "passphrase" in options:
-        raise StorageConfigurationError(
-            "Encrypted SFTP private keys are unavailable; mount an unencrypted service key"
-        )
+    if "password" in options or "passphrase" in options:
+        return _AsyncSSHSFTPOperator(options)
     kwargs: dict[str, str] = {
         "endpoint": f"ssh://{options['host']}:{options['port']}",
         "root": str(options["root"]),
@@ -326,6 +334,176 @@ def _operator_for(spec: TransportSpec):
     try:
         return opendal.Operator("sftp", **kwargs)
     except Exception as exc:
+        if "scheme is not registered" in str(exc):
+            return _AsyncSSHSFTPOperator(options)
         raise StorageConfigurationError(
             "SFTP transport is unavailable in this full image"
         ) from exc
+
+
+@dataclass(frozen=True)
+class _AsyncSSHMetadata:
+    content_length: int
+    etag: None = None
+
+
+class _AsyncSSHSFTPOperator:
+    """Synchronous SFTP operator for auth modes OpenDAL 0.58.2 cannot express.
+
+    Apache OpenDAL remains the remote storage adapter and owns mounted-key SFTP.
+    Its 0.58.2 SFTP service delegates to OpenSSH and has no password/passphrase
+    configuration axes, so these two catalogue-supported auth modes use the
+    same operator-shaped seam until upstream exposes them.
+    """
+
+    def __init__(self, options: dict[str, str | int | bool]) -> None:
+        try:
+            import asyncssh  # noqa: F401
+        except ImportError as exc:
+            raise StorageConfigurationError("Requires the full image") from exc
+        self._host = str(options["host"])
+        self._port = int(options["port"])
+        self._username = str(options["username"])
+        self._password = str(options.get("password") or "")
+        self._key_path = str(options.get("private_key_path") or "")
+        self._passphrase = str(options.get("passphrase") or "")
+        self._root = str(options["root"]).strip("/")
+
+    def _connection_options(self) -> dict[str, object]:
+        options: dict[str, object] = {
+            "host": self._host,
+            "port": self._port,
+            "username": self._username,
+            # OpenDAL's mounted-key transport uses its Accept strategy. Keep
+            # equivalent first-connection behavior for the auth fallback.
+            "known_hosts": None,
+        }
+        if self._password:
+            options["password"] = self._password
+            options["client_keys"] = None
+        else:
+            options["client_keys"] = [self._key_path]
+            if self._passphrase:
+                options["passphrase"] = self._passphrase
+        return options
+
+    def _path(self, relative: str) -> str:
+        cleaned = relative.strip("/")
+        return posixpath.join(self._root, cleaned) if cleaned else self._root
+
+    async def _perform(self, operation):
+        import asyncssh
+
+        async with asyncssh.connect(**self._connection_options()) as connection:
+            async with connection.start_sftp_client() as client:
+                return await operation(client)
+
+    def _run(self, operation):
+        return asyncio.run(self._perform(operation))
+
+    def check(self) -> None:
+        async def operation(client) -> None:
+            await client.makedirs(self._root, exist_ok=True)
+            await client.stat(self._root)
+
+        self._run(operation)
+
+    def exists(self, relative: str) -> bool:
+        async def operation(client) -> bool:
+            return bool(await client.exists(self._path(relative)))
+
+        return bool(self._run(operation))
+
+    def write_stream(self, relative: str, source: BinaryIO) -> None:
+        async def operation(client) -> None:
+            path = self._path(relative)
+            parent = posixpath.dirname(path)
+            if parent:
+                await client.makedirs(parent, exist_ok=True)
+            writer = await client.open(path, "wb")
+            try:
+                while chunk := source.read(1024 * 1024):
+                    await writer.write(chunk)
+            finally:
+                await writer.close()
+
+        self._run(operation)
+
+    def write(self, relative: str, data: bytes) -> None:
+        from io import BytesIO
+
+        self.write_stream(relative, BytesIO(data))
+
+    def rename(self, source: str, destination: str) -> None:
+        async def operation(client) -> None:
+            target = self._path(destination)
+            parent = posixpath.dirname(target)
+            if parent:
+                await client.makedirs(parent, exist_ok=True)
+            await client.rename(self._path(source), target)
+
+        self._run(operation)
+
+    def stat(self, relative: str) -> _AsyncSSHMetadata:
+        async def operation(client) -> int:
+            attrs = await client.stat(self._path(relative))
+            return int(attrs.size or 0)
+
+        return _AsyncSSHMetadata(content_length=int(self._run(operation)))
+
+    def read(self, relative: str) -> bytes:
+        async def operation(client) -> bytes:
+            return bytes(await client.read(self._path(relative)))
+
+        return bytes(self._run(operation))
+
+    def stream_chunks(self, relative: str, chunk_size: int) -> Iterator[bytes]:
+        import asyncssh
+
+        loop = asyncio.new_event_loop()
+        connection = loop.run_until_complete(
+            asyncssh.connect(**self._connection_options())
+        )
+        client = loop.run_until_complete(connection.start_sftp_client())
+        reader = loop.run_until_complete(client.open(self._path(relative), "rb"))
+        try:
+            while chunk := loop.run_until_complete(reader.read(chunk_size)):
+                yield bytes(chunk)
+        finally:
+            loop.run_until_complete(reader.close())
+            client.exit()
+            loop.run_until_complete(client.wait_closed())
+            connection.close()
+            loop.run_until_complete(connection.wait_closed())
+            loop.close()
+
+    def delete(self, relative: str) -> None:
+        async def operation(client) -> None:
+            path = self._path(relative)
+            if await client.exists(path):
+                await client.remove(path)
+
+        self._run(operation)
+
+    def scan(self, relative: str):
+        import asyncssh
+
+        async def operation(client) -> list[SimpleNamespace]:
+            found: list[SimpleNamespace] = []
+
+            async def walk(directory: str) -> None:
+                path = self._path(directory)
+                if not await client.exists(path):
+                    return
+                async for entry in client.scandir(path):
+                    name = str(entry.filename)
+                    child = posixpath.join(directory.strip("/"), name).strip("/")
+                    if entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
+                        await walk(child)
+                    else:
+                        found.append(SimpleNamespace(path=child))
+
+            await walk(relative)
+            return found
+
+        return self._run(operation)

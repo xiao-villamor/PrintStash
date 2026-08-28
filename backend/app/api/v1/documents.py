@@ -49,10 +49,8 @@ from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_deletion import process_storage_delete_intents
 from app.services.storage_ownership import (
     UnsafeStorageDeleteError,
-    complete_publication,
-    fail_publication,
     publish_bytes,
-    reserve_creation,
+    publish_stream,
 )
 from app.services.trash import (
     StorageRiskConfirmationRequired,
@@ -328,21 +326,15 @@ async def upload_document(
     backend = get_backend()
     key = backend.document_file_key(doc.id, safe)
     receipt = None
-    reservation_id = None
     try:
-        reservation_id = reserve_creation(
+        receipt = await run_in_threadpool(
+            publish_stream,
             session,
             backend,
             key,
-            object_kind="document",
+            file.file,
+            object_kind="document_file",
             expected_size=file.size,
-        )
-        receipt = await run_in_threadpool(backend.create_stream, file.file, key)
-        complete_publication(
-            session,
-            reservation_id,
-            receipt,
-            object_kind="document",
             sha256=None,
         )
         if receipt.size > settings.max_upload_bytes:
@@ -357,10 +349,8 @@ async def upload_document(
             status_code=status.HTTP_409_CONFLICT,
             detail="storage_destination_exists",
         ) from exc
-    except Exception as exc:
+    except Exception:
         session.rollback()
-        if reservation_id is not None:
-            fail_publication(session, reservation_id, exc)
         if receipt is not None:
             backend.rollback_create(receipt)
         raise

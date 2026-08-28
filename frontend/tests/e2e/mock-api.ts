@@ -780,6 +780,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     ]);
     return;
   }
+  if (url.pathname === "/api/v1/models/trash/expired" && req.method === "DELETE") {
+    sendJson(res, { purged_model_ids: [91], purged_count: 1 });
+    return;
+  }
   if (url.pathname === "/api/v1/models/stats") {
     sendJson(res, {
       model_count: modelList.length,

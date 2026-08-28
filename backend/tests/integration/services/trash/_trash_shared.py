@@ -32,7 +32,11 @@ from app.db.models import (
     VaultAuditRun,
 )
 from app.services import trash
-from app.services.storage_backend import ObjectIdentity, StorageCapabilities, get_backend
+from app.services.storage_backend import (
+    ObjectIdentity,
+    StorageCapabilities,
+    get_backend,
+)
 from app.services.storage_ownership import record_creation
 from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
 

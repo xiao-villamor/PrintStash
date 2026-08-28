@@ -246,11 +246,16 @@ def resolve_requested_storage_provider(
     raw_config: dict[str, Any],
 ) -> StorageProviderConfig:
     prior_secrets = _json_object(config.storage_provider_secret_json)
-    merged = (
-        {**prior_secrets, **raw_config}
-        if config.storage_provider == provider
-        else raw_config
-    )
+    if config.storage_provider == provider:
+        merged = {**prior_secrets, **raw_config}
+        if provider == "sftp":
+            if raw_config.get("password"):
+                merged.pop("private_key_path", None)
+                merged.pop("passphrase", None)
+            elif raw_config.get("private_key_path"):
+                merged.pop("password", None)
+    else:
+        merged = raw_config
     return parse_provider_config(merged)
 
 

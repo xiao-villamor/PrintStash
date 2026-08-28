@@ -153,7 +153,9 @@ test("mobile More exposes secondary actions with valid checked states", async ({
   await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
 });
 
-test("mobile Saved Views owns picker keys, restores focus, and applies a view", async ({ page }) => {
+test("mobile Saved Views owns picker keys, restores focus, and applies a view", async ({
+  page,
+}) => {
   await page.route("**/api/v1/saved-views", async (route) => {
     await route.fulfill({
       contentType: "application/json",
@@ -179,7 +181,7 @@ test("mobile Saved Views owns picker keys, restores focus, and applies a view", 
   await gotoMobileVault(page);
 
   const menu = await openMobileMore(page);
-  const savedViewsItem = menu.getByRole("menuitem", { name: /Ready to print/ });
+  const savedViewsItem = menu.getByRole("menuitem", { name: /Saved views/ });
   await savedViewsItem.click();
   const dialog = page.getByRole("dialog");
   const search = page.getByRole("textbox", { name: "Find a saved view" });

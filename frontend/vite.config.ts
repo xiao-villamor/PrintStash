@@ -52,15 +52,14 @@ export default defineConfig(({ mode }) => ({
       reporter: ["text", "html"],
       include: ["src/lib/**/*.{ts,tsx}"],
       exclude: ["src/**/*.{test,spec}.{ts,tsx}", "src/**/*.d.ts"],
-      // Informative floor set just under the current baseline (measured
-      // 2026-07: stmts 52.9 / branches 50.9 / funcs 43.5 / lines 54.6). It
-      // guards against regressions today; ratchet these up toward the real
-      // gate as `src/lib` coverage grows.
+      // Enforced floor set just under the current baseline. Keep statement
+      // and branch coverage ratcheted together so happy-path-only tests cannot
+      // disguise a regression in error and edge-case behaviour.
       thresholds: {
-        statements: 50,
-        branches: 48,
-        functions: 40,
-        lines: 52,
+        statements: 67,
+        branches: 65,
+        functions: 55,
+        lines: 69,
       },
     },
   },

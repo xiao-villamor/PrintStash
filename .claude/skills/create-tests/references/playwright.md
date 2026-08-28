@@ -1,12 +1,13 @@
 # Playwright tests
 
-Two suites with different jobs. Policy is in [SKILL.md](../SKILL.md); this is
+Three suites with different jobs. Policy is in [SKILL.md](../SKILL.md); this is
 the runtime-specific how.
 
 | Suite | Dir | Config | Backend | Job |
 | --- | --- | --- | --- | --- |
 | **Real** | `frontend/tests/e2e-real/` | `playwright.real.config.ts` | real uvicorn on a throwaway SQLite (`scripts/start-backend.sh`), Vite, standalone mock printer on `:7530` | the **one e2e test per headline UI capability** AGENTS.md requires; anything with persistence |
 | **Mock-API** | `frontend/tests/e2e/` | `playwright.config.ts` | `mock-api.ts` (node `http` server) | route smoke: every page renders with no console/page errors; PWA |
+| **Performance** | `frontend/tests/performance/` | `playwright.performance.config.ts` | production preview + mock API | repeatable browser performance comparisons; never a correctness gate |
 
 Branch coverage never goes here — it goes to vitest. A Playwright spec proves
 the marquee flow works end to end; the matrix's other rows live in the unit
@@ -75,6 +76,8 @@ specs against the experimental bundled dev server).
 
 ## CI
 
-Both suites run per PR and in the nightly full-matrix rerun
-(`.github/workflows/ci.yml`). `retries` are on in CI only; a spec that needs
-the retry to pass is flaky — fix the wait, don't lean on the retry.
+The real and mock-API correctness suites run per PR and in the nightly
+full-matrix rerun (`.github/workflows/ci.yml`). The performance suite is invoked
+explicitly for baseline/compiler comparisons. `retries` are on in CI only; a
+spec that needs the retry to pass is flaky — fix the wait, don't lean on the
+retry.

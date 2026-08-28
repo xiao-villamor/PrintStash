@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 import pytest
 from sqlmodel import Session, select
 
-from app.db.models import File, FileType, Model, OwnedStorageObject
+from app.db.models import (
+    File,
+    FileType,
+    Model,
+    OwnedStorageObject,
+    StorageObjectState,
+)
 from app.services import thumbnail_repair
 from app.services.storage_backend import get_backend
 from app.services.storage_ownership import (
@@ -276,4 +282,6 @@ class TestRegenerateModelThumbnail:
         ).all()
         assert model.thumbnail_file_id is None
         assert model.thumbnail_path is None
-        assert ownership == []
+        assert len(ownership) == 1
+        assert ownership[0].state is StorageObjectState.PENDING
+        assert ownership[0].last_error == "OSError"
