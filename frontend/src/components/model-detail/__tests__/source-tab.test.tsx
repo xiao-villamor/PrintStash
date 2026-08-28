@@ -1,3 +1,25 @@
+/*
+ * Where a model came from, rendered from data a third-party page supplied.
+ *
+ * Every value on this tab was scraped from somebody else's website, so it is
+ * attacker-shaped by construction and the two URL rows are the security half:
+ * only `http`/`https` links render as links, and a canonical source URL is
+ * normalized before it becomes an anchor. A `javascript:` URL that reached the
+ * DOM here is stored XSS triggered by clicking a model's source link. What each
+ * URL shape is judged to be is `safeHttpUrl`'s own contract, tested next to it in
+ * `source-url.test.ts`; what is asserted here is that this tab consults it before
+ * rendering an anchor.
+ *
+ * The i18n rows are the other axis, and the rule is the same as everywhere: the
+ * *interface* is translated, the captured values are not. A provider name, a tag,
+ * a scraped title are the user's or the source's words — translating them
+ * corrupts the record. The English origin labels are the deliberate fallback when
+ * no provider is known, not a missing translation.
+ *
+ * Cover controls stay out of a view-only tab. Rendering them for a user without
+ * write access offers an action that 403s.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -5,8 +27,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ModelProvenanceRead, ProvenanceFieldRead } from "@/types";
 import { SourceTab, type SourceTabApi } from "@/components/model-detail/source-tab";
-import { safeHttpUrl } from "@/components/model-detail/source-url";
 import { I18nProvider, messageCatalogs } from "@/lib/i18n";
+
+/** Written as a code point so the fixture survives every editor and diff tool. */
+const NUL = String.fromCharCode(0);
 
 const deleteCover = vi.fn<SourceTabApi["deleteCover"]>();
 const getCover = vi.fn<SourceTabApi["getCover"]>();
@@ -78,7 +102,7 @@ const provenance: ModelProvenanceRead = {
   ],
 };
 
-describe("SourceTab representative cover", () => {
+describe("SourceTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getProvenance.mockResolvedValue(provenance);
@@ -92,42 +116,27 @@ describe("SourceTab representative cover", () => {
     });
   });
 
-  it("accepts only safe HTTP(S) provenance links", () => {
-    expect(safeHttpUrl("https://example.test/creator")).toBe("https://example.test/creator");
-    expect(safeHttpUrl("http://example.test/license")).toBe("http://example.test/license");
-    for (const unsafe of [
-      "javascript:alert(1)",
-      "data:text/html,boom",
-      "file:///etc/passwd",
-      "https://user:secret@example.test/",
-      "https://example.test/\u0000trick",
-    ]) {
-      expect(safeHttpUrl(unsafe)).toBeNull();
-    }
+  it.each([
+    ["a javascript: URL", "javascript:alert(1)"],
+    ["a data: URL", "data:text/html,boom"],
+    ["a file: URL", "file:///etc/passwd"],
+    ["credentials hiding the real host", "https://user:secret@example.test/"],
+    ["a control character smuggled into the path", `https://example.test/${NUL}trick`],
+  ])("shows %s as text rather than as a link", async (_case, canonicalUrl) => {
+    getProvenance.mockResolvedValue({
+      sources: [{ ...provenance.sources[0], canonical_url: canonicalUrl }],
+    });
+
+    render(<SourceTab modelId={1} canEdit={false} api={api} />);
+
+    expect((await screen.findByText(canonicalUrl)).closest("a")).toBeNull();
   });
 
-  it("renders only safe canonical source URLs as normalized links", async () => {
-    const unsafeCanonicalUrls = [
-      "javascript:alert(1)",
-      "data:text/html,boom",
-      "file:///etc/passwd",
-      "https://user:secret@example.test/",
-      "https://example.test/\u0000trick",
-    ];
-
-    for (const canonicalUrl of unsafeCanonicalUrls) {
-      getProvenance.mockResolvedValue({
-        sources: [{ ...provenance.sources[0], canonical_url: canonicalUrl }],
-      });
-      const { unmount } = render(<SourceTab modelId={1} canEdit={false} api={api} />);
-
-      expect((await screen.findByText(canonicalUrl)).closest("a")).toBeNull();
-      unmount();
-    }
-
+  it("normalizes a safe canonical URL into its link", async () => {
     getProvenance.mockResolvedValue({
       sources: [{ ...provenance.sources[0], canonical_url: "HTTPS://EXAMPLE.TEST/canonical" }],
     });
+
     render(<SourceTab modelId={1} canEdit={false} api={api} />);
 
     expect(
@@ -215,9 +224,9 @@ describe("SourceTab representative cover", () => {
     expect(screen.getByText(/does not grant, interpret, or expand rights/i)).toBeInTheDocument();
   });
 
-  it("displays, saves, and restores a source field override", async () => {
-    const user = userEvent.setup();
-    const overridden: ModelProvenanceRead = {
+  /** The same provenance with the title carrying a user override. */
+  function withOverriddenTitle(): ModelProvenanceRead {
+    return {
       ...provenance,
       sources: provenance.sources.map((source) => ({
         ...source,
@@ -234,32 +243,89 @@ describe("SourceTab representative cover", () => {
         ),
       })),
     };
-    getProvenance.mockResolvedValue(overridden);
-    patchProvenance.mockResolvedValueOnce(overridden).mockResolvedValueOnce(provenance);
+  }
+
+  it("names each field's edit control after that field", async () => {
+    // Every row renders one, so the visible word alone leaves a screen-reader
+    // user hearing "Edit" five times over — and it is what let a Playwright test
+    // drive the wrong one for months.
+    getProvenance.mockResolvedValue(withOverriddenTitle());
+
+    render(<SourceTab modelId={1} canEdit api={api} />);
+
+    expect(await screen.findByRole("button", { name: "Edit Title" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Description" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit License" })).toBeInTheDocument();
+  });
+
+  it("shows the overridden value rather than the captured one", async () => {
+    getProvenance.mockResolvedValue(withOverriddenTitle());
 
     render(<SourceTab modelId={1} canEdit api={api} />);
 
     expect(await screen.findByText("Edited title")).toBeInTheDocument();
-    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+  });
+
+  it("saves an edited field as a user override", async () => {
+    const user = userEvent.setup();
+    const overridden = withOverriddenTitle();
+    getProvenance.mockResolvedValue(overridden);
+    patchProvenance.mockResolvedValue(overridden);
+    render(<SourceTab modelId={1} canEdit api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Edit Title" }));
     const input = screen.getByRole("textbox", { name: "Title override" });
     await user.clear(input);
     await user.type(input, "Edited title");
+
     await user.click(screen.getByRole("button", { name: "Save" }));
+
     await waitFor(() => {
-      expect(patchProvenance).toHaveBeenNthCalledWith(1, 1, 8, {
+      expect(patchProvenance).toHaveBeenCalledWith(1, 8, {
         overrides: { title: "Edited title" },
         clear_overrides: [],
       });
     });
+  });
 
-    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+  it("clears the override when the captured value is restored", async () => {
+    const user = userEvent.setup();
+    getProvenance.mockResolvedValue(withOverriddenTitle());
+    patchProvenance.mockResolvedValue(provenance);
+    render(<SourceTab modelId={1} canEdit api={api} />);
+    await user.click(await screen.findByRole("button", { name: "Edit Title" }));
+
     await user.click(screen.getByRole("button", { name: "Restore captured value" }));
     await user.click(screen.getByRole("button", { name: /^Restore$/ }));
+
     await waitFor(() => {
-      expect(patchProvenance).toHaveBeenNthCalledWith(2, 1, 8, {
+      expect(patchProvenance).toHaveBeenCalledWith(1, 8, {
         overrides: {},
         clear_overrides: ["title"],
       });
     });
+  });
+  it("refuses a cover in a format the vault does not store", async () => {
+    // The picker's `accept` is a hint the OS can be told to ignore; the check
+    // has to happen here or a GIF reaches the server and 415s after the upload.
+    const user = userEvent.setup();
+    render(<SourceTab modelId={1} canEdit api={api} />);
+    const input = await screen.findByLabelText("Upload cover");
+
+    await user.upload(input, new File(["x"], "cover.gif", { type: "image/gif" }));
+
+    expect(putCover).not.toHaveBeenCalled();
+  });
+
+  it("refuses a cover larger than the limit", async () => {
+    // Rejecting after the bytes have gone up wastes the upload and the wait.
+    const user = userEvent.setup();
+    render(<SourceTab modelId={1} canEdit api={api} />);
+    const input = await screen.findByLabelText("Upload cover");
+    const huge = new File([new Uint8Array(1)], "cover.png", { type: "image/png" });
+    Object.defineProperty(huge, "size", { value: 16 * 1024 * 1024 });
+
+    await user.upload(input, huge);
+
+    expect(putCover).not.toHaveBeenCalled();
   });
 });

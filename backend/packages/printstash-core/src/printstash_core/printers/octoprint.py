@@ -243,7 +243,11 @@ class OctoPrintClient:
 
     async def list_files(self) -> list[Mapping[str, Any]]:
         body = await self._request("GET", "/api/files?recursive=true")
-        files = body.get("files", body if isinstance(body, list) else [])
+        # `body.get` is evaluated before any inline fallback, so the list case
+        # has to be tested first: a bare array — which a plugin or a proxy in
+        # front of the printer can return — would otherwise raise AttributeError
+        # out of the poll loop instead of listing nothing.
+        files = body if isinstance(body, list) else body.get("files", [])
         if not isinstance(files, list):
             return []
         return self._flatten_files(files)

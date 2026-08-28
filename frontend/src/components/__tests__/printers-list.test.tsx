@@ -1,3 +1,26 @@
+/*
+ * Adding a printer, which is where five providers' credential sets collide in
+ * one form.
+ *
+ * One `Printer` row carries the fields for every provider, so the form is a set
+ * of branches over one shape — and the failure mode is *mixing*: submitting
+ * PrusaLink digest credentials alongside an empty Moonraker URL, or an Elegoo
+ * Neptune 4 as its own provider rather than as a Moonraker variant. Every one of
+ * those inserts happily and produces a printer that cannot connect, with an error
+ * that names a transport rather than a wrong field.
+ *
+ * The double-submit case is separate and worth its own test: adding a printer is
+ * not idempotent, so a second click before the request resolves creates two.
+ *
+ * The card half is about the display *preference* being honoured while a page is
+ * already mounted. A preference read only at mount means the user toggles printer
+ * artwork in settings, comes back, and nothing changed until a reload.
+ *
+ * Model detection has three outcomes and all three are here, because the fallback
+ * is the one users hit: a printer whose model we cannot detect must still be
+ * nameable, or the fleet view shows an unlabelled machine forever.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -139,7 +162,7 @@ async function openForm() {
   await userEvent.click(screen.getByRole("button", { name: /add printer/i }));
 }
 
-describe("printer setup", () => {
+describe("PrinterSetupForm", () => {
   it("submits only once when add is triggered twice before request resolves", async () => {
     let resolveCreate!: () => void;
     fetchMock.mockImplementation((_input, init) =>
@@ -251,7 +274,7 @@ describe("printer setup", () => {
   });
 });
 
-describe("printer card", () => {
+describe("PrinterCard", () => {
   it("switches to global queue empty state", async () => {
     renderPrintersPage();
     await userEvent.click(screen.getByRole("tab", { name: "Queue" }));
@@ -335,5 +358,81 @@ describe("printer card", () => {
     expect(patched.url).toBe("/api/v1/printers/1");
     const payload: PrinterUpdate = JSON.parse(patched.body);
     expect(payload).toEqual({ model_name: "Homebrew CoreXY" });
+  });
+});
+
+describe("PrintersPage", () => {
+  describe("removing a printer", () => {
+    it("asks before removing", async () => {
+      // Removing a printer takes its access grants and its job history with it.
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+
+    it("names the printer it is about to remove", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+
+      expect(
+        await screen.findByText('"Voron 2.4" will be removed from PrintStash.'),
+      ).toBeInTheDocument();
+    });
+
+    it("removes it once confirmed", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+      await userEvent.click(screen.getByRole("button", { name: /Remove/ }));
+      const dialog = await screen.findByRole("dialog");
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+
+      await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(1));
+      expect(requestsWithMethod("DELETE")[0]!.url).toBe("/api/v1/printers/1");
+    });
+
+    it("offers no removal to somebody who may not administer it", async () => {
+      // The control says "Restricted" rather than disappearing, so a viewer can
+      // see the action exists and is not theirs.
+      renderPrintersPage({
+        printers: [
+          makePrinter({
+            access: {
+              role: "print",
+              can_view: true,
+              can_print: true,
+              can_control: false,
+              can_admin: false,
+            },
+          }),
+        ],
+      });
+
+      expect(screen.getByRole("button", { name: /Restricted/ })).toBeDisabled();
+    });
+  });
+
+  describe("the fleet tabs", () => {
+    it("offers the queue to somebody who may print", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      expect(screen.getByRole("tab", { name: "Queue" })).toBeInTheDocument();
+    });
+
+    it("offers maintenance to somebody who may administer a printer", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      expect(screen.getByRole("tab", { name: "Maintenance" })).toBeInTheDocument();
+    });
+
+    it("opens the queue when it is chosen", async () => {
+      renderPrintersPage({ printers: [makePrinter()] });
+
+      await userEvent.click(screen.getByRole("tab", { name: "Queue" }));
+
+      expect(screen.getByRole("tab", { name: "Queue" })).toHaveAttribute("aria-selected", "true");
+    });
   });
 });

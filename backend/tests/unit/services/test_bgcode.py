@@ -12,13 +12,11 @@ import struct
 import zlib
 from pathlib import Path
 
-import pytest
-
 from app.services import bgcode, thumbnail
 from app.services.gcode_parser import parse
-from tests.paths import REPO_ROOT
+from tests.paths import TESTDATA_DIR, require_fixtures
 
-_REAL_FIXTURE = REPO_ROOT / "testdata" / "benchy" / "BenchyRules_PLA_14m.bgcode"
+_REAL_FIXTURE = TESTDATA_DIR / "benchy" / "BenchyRules_PLA_14m.bgcode"
 
 # Block types.
 _FILE_META, _GCODE, _SLICER_META, _PRINTER_META, _PRINT_META, _THUMBNAIL = (
@@ -199,9 +197,7 @@ class TestMalformedEdges:
         assert bgcode.read_metadata_text(p) is None
         assert list(bgcode.iter_thumbnails(p)) == []
 
-    def test_unknown_block_type_has_no_params_and_is_skipped(
-        self, tmp_path: Path
-    ) -> None:
+    def test_an_unknown_block_type_is_skipped(self, tmp_path: Path) -> None:
         # _block_param_len falls through to 0 for block types it doesn't
         # recognize (line 81), and the walker still parses what follows.
         assert bgcode._block_param_len(99) == 0
@@ -352,9 +348,9 @@ class TestMalformedEdges:
         assert list(bgcode.iter_thumbnails(p)) == []
 
 
-@pytest.mark.skipif(
-    not _REAL_FIXTURE.exists(), reason="real .bgcode fixture not present"
-)
+require_fixtures(_REAL_FIXTURE)
+
+
 class TestRealFixture:
     def test_parse_real_prusaslicer_bgcode(self) -> None:
         result = parse(_REAL_FIXTURE)

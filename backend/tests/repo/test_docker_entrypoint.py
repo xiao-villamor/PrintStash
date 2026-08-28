@@ -117,7 +117,25 @@ def _run_entrypoint(
 
 
 class TestDockerEntrypointIdentity:
-    def test_default_identity_runs_migration_and_command_after_drop(
+    def test_runs_the_migration_as_the_unprivileged_default(
+        self, tmp_path: Path
+    ) -> None:
+        """Migration is the first thing to touch the vault, so it sets the owner.
+
+        Running it as root writes a database the dropped-to user cannot then open,
+        and the container dies on its second start rather than its first.
+        """
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(script, fake_bin, server, tmp_path=tmp_path)
+
+        assert result.returncode == 0, result.stderr
+        assert any(
+            line.startswith("migration:10001:10001:")
+            for line in log.read_text().splitlines()
+        )
+
+    def test_starts_the_server_as_the_unprivileged_default(
         self, tmp_path: Path
     ) -> None:
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
@@ -125,13 +143,20 @@ class TestDockerEntrypointIdentity:
         result = _run_entrypoint(script, fake_bin, server, tmp_path=tmp_path)
 
         assert result.returncode == 0, result.stderr
-        lines = log.read_text().splitlines()
-        assert any(line.startswith("migration:10001:10001:") for line in lines)
-        assert any(line.startswith("server:10001:10001:") for line in lines)
+        assert any(
+            line.startswith("server:10001:10001:")
+            for line in log.read_text().splitlines()
+        )
 
-    def test_explicit_identity_owns_directories_and_preserves_command_args(
+    def test_re_owns_every_data_root_for_the_requested_identity(
         self, tmp_path: Path
     ) -> None:
+        """All five roots, not the ones a contributor remembered.
+
+        A root left owned by the previous uid is one the container can read and
+        not write, which surfaces later as a single feature failing — thumbnails,
+        or backups — rather than as a startup error.
+        """
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
 
         result = _run_entrypoint(
@@ -144,16 +169,32 @@ class TestDockerEntrypointIdentity:
         )
 
         assert result.returncode == 0, result.stderr
-        lines = log.read_text().splitlines()
         ownership_repair = next(
-            line for line in lines if line.startswith("chown:-hR 1234:2345 ")
+            line
+            for line in log.read_text().splitlines()
+            if line.startswith("chown:-hR 1234:2345 ")
         )
-        assert str(tmp_path / "files") in ownership_repair
-        assert str(tmp_path / "thumbs") in ownership_repair
-        assert str(tmp_path / "staging") in ownership_repair
-        assert str(tmp_path / "backups") in ownership_repair
-        assert str(tmp_path / "db") in ownership_repair
-        assert "server:1234:2345:operator-arg" in lines
+        for root in ("files", "thumbs", "staging", "backups", "db"):
+            assert str(tmp_path / root) in ownership_repair
+
+    def test_passes_the_operator_command_through_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        # The re-exec goes through `gosu "-e" ""`, so a lost argument would
+        # silently start the default server instead of what the operator asked for.
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            puid="001234",
+            pgid="002345",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "server:1234:2345:operator-arg" in log.read_text().splitlines()
 
     def test_identity_change_repairs_ownership_before_drop(
         self, tmp_path: Path

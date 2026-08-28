@@ -239,9 +239,13 @@ class PrusaLinkClient:
 
     async def list_files(self) -> list[Mapping[str, Any]]:
         body = await self._request("GET", "/api/v1/files/local/")
-        files = body.get(
-            "children", body.get("files", body if isinstance(body, list) else [])
-        )
+        # The list case is tested first because `body.get` is evaluated before
+        # any inline fallback: a bare array would otherwise raise AttributeError
+        # out of the poll loop rather than listing nothing.
+        if isinstance(body, list):
+            files: Any = body
+        else:
+            files = body.get("children", body.get("files", []))
         if not isinstance(files, list):
             return []
         result: list[Mapping[str, Any]] = []

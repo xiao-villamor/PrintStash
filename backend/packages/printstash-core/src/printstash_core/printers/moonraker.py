@@ -348,6 +348,14 @@ class MoonrakerClient:
                             raw = await asyncio.wait_for(websocket.recv(), timeout=60.0)
                         except asyncio.TimeoutError:
                             await websocket.ping()
+                            # Python 3.12 reimplemented `asyncio.wait_for` to
+                            # await the coroutine directly instead of wrapping
+                            # it in a task, so a `recv()` that finishes without
+                            # suspending no longer yields to the event loop.
+                            # Without this hop the receive/ping loop can spin
+                            # and starve the rest of the process — including
+                            # the stop event this loop is watching for.
+                            await asyncio.sleep(0)
                             continue
                         try:
                             message = cast(dict[str, Any], json.loads(raw))

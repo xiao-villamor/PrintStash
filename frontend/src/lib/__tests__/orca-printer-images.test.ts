@@ -1,3 +1,12 @@
+/*
+ * Every curated printer model has artwork, and custom models fall back locally.
+ *
+ * The covers come from OrcaSlicer's catalog, so a model in our curated list with
+ * no matching image renders an empty card in the fleet view — which reads as a
+ * failed load rather than as a gap in a mapping. The local fallback is what keeps
+ * a user's custom printer from looking broken next to the recognised ones.
+ */
+
 import { describe, expect, it } from "vitest";
 import { printerArtwork } from "@/lib/orca-printer-images";
 import { PRINTER_MODEL_OPTIONS } from "@/lib/printer-providers";

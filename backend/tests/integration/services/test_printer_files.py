@@ -1,6 +1,25 @@
-"""Defends ``TestTraceableFilename`` behavior for the ``services`` production unit.
+"""Deciding whether a file on the printer is one of ours, without guessing.
 
-A failure means this boundary no longer preserves its observable contract.
+A printer's storage contains files PrintStash uploaded and files the user put
+there by SD card. Matching them back to library artifacts is what makes "already
+on this printer" work — and a wrong match is worse than no match, because it
+attributes somebody's print to the wrong model and then offers to delete the
+wrong bytes.
+
+So the matching is a strict ladder, and this file pins the order:
+
+1. **Upload history** — we recorded sending this exact file. Strongest evidence.
+2. **A vault marker** embedded in the G-code. Ours by construction.
+3. **Filename**, last and weakest, because two models can produce `cube.gcode`.
+
+The refusals matter as much as the ladder. A marker that is present but does not
+match reports a *mismatch* rather than falling through to filename — falling
+through would silently accept the weaker evidence exactly when the stronger
+evidence says no. And an externally-started job is never treated as upload
+history, since we did not send it and cannot claim what it printed.
+
+A file that stops appearing is marked missing rather than deleted: the printer
+may simply be offline, and forgetting the association would lose the link.
 """
 
 from __future__ import annotations
@@ -9,12 +28,13 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, select
 
-from app.db.models import File, Model, Printer, PrinterFile, PrintJob
+from app.db.models import File, Model, PrinterFile
 from app.services import printer_files as pf
 from app.services.printer_files import (
     build_traceable_remote_filename,
     sync_printer_files,
 )
+from tests.factories import build_file, build_model, build_print_job, build_printer
 
 
 class _FakeFile:
@@ -76,13 +96,13 @@ class TestTraceableFilename:
 
 
 class TestRemoteFieldParsers:
-    def test_remote_name_prefers_path_and_strips_leading_slash(self) -> None:
+    def test_remote_name_prefers_the_path_with_no_leading_slash(self) -> None:
         assert pf._remote_name({"path": "/sub/a.gcode"}) == "sub/a.gcode"
         assert pf._remote_name({"filename": "b.gcode"}) == "b.gcode"
         assert pf._remote_name({"name": "  c.gcode  "}) == "c.gcode"
         assert pf._remote_name({}) is None
 
-    def test_remote_size_coerces_and_tolerates_garbage(self) -> None:
+    def test_remote_size_coerces_whatever_the_printer_reported(self) -> None:
         assert pf._remote_size({"size": "456"}) == 456
         assert pf._remote_size({"size_bytes": 789}) == 789
         assert pf._remote_size({"size": "not-a-number"}) is None
@@ -95,7 +115,7 @@ class TestRemoteFieldParsers:
         assert got == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
         assert got.tzinfo is not None
 
-    def test_remote_modified_handles_missing_and_bad(self) -> None:
+    def test_remote_modified_is_none_for_an_unusable_timestamp(self) -> None:
         assert pf._remote_modified({}) is None
         assert pf._remote_modified({"modified": "bad"}) is None
 
@@ -107,165 +127,150 @@ def _make_gcode(
     size: int = 123,
     model_slug: str = "part",
 ) -> tuple[Model, File]:
-    model = Model(name=model_slug.title(), slug=model_slug, hash=model_slug[0] * 64)
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-    f = File(
-        model_id=model.id,
+    model = build_model(
+        session, name=model_slug.title(), slug=model_slug, hash=model_slug[0] * 64
+    )
+    f = build_file(
+        session,
+        model,
         path=f"/data/{name}",
-        original_filename=name,
+        filename=name,
         file_type="gcode",
         version=1,
         size_bytes=size,
         sha256="f" * 64,
     )
-    session.add(f)
-    session.commit()
-    session.refresh(f)
     return model, f
 
 
-def test_sync_matches_upload_history_first(db_session: Session):
-    _, f = _make_gcode(db_session)
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
-    job = PrintJob(
-        printer_id=printer.id,
-        file_id=f.id,
-        model_id=f.model_id,
-        remote_filename="folder/custom-name.gcode",
-    )
-    db_session.add(job)
-    db_session.commit()
+class TestSyncPrinterFiles:
+    def test_sync_matches_upload_history_first(self, db_session: Session):
+        _, f = _make_gcode(db_session)
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
+        build_print_job(
+            db_session,
+            f,
+            printer_id=printer.id,
+            remote_filename="folder/custom-name.gcode",
+        )
 
-    rows = sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[{"path": "folder/custom-name.gcode", "size": 999}],
-    )
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": "folder/custom-name.gcode", "size": 999}],
+        )
 
-    assert len(rows) == 1
-    assert rows[0].file_id == f.id
-    assert rows[0].matched_by == "upload_history"
+        assert len(rows) == 1
+        assert rows[0].file_id == f.id
+        assert rows[0].matched_by == "upload_history"
 
+    def test_sync_matches_vault_marker_before_filename(self, db_session: Session):
+        _, marked = _make_gcode(
+            db_session,
+            name="same-name.gcode",
+            size=111,
+            model_slug="marked",
+        )
+        _, newer_same_name = _make_gcode(
+            db_session,
+            name="same-name.gcode",
+            size=222,
+            model_slug="newer",
+        )
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
 
-def test_sync_matches_vault_marker_before_filename(db_session: Session):
-    _, marked = _make_gcode(
-        db_session,
-        name="same-name.gcode",
-        size=111,
-        model_slug="marked",
-    )
-    _, newer_same_name = _make_gcode(
-        db_session,
-        name="same-name.gcode",
-        size=222,
-        model_slug="newer",
-    )
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
+        remote_filename = build_traceable_remote_filename(marked)
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[
+                {
+                    "path": f"subdir/{remote_filename}",
+                    "size": newer_same_name.size_bytes,
+                }
+            ],
+        )
 
-    remote_filename = build_traceable_remote_filename(marked)
-    rows = sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[
-            {
-                "path": f"subdir/{remote_filename}",
-                "size": newer_same_name.size_bytes,
-            }
-        ],
-    )
+        assert rows[0].file_id == marked.id
+        assert rows[0].matched_by == "vault_marker"
 
-    assert rows[0].file_id == marked.id
-    assert rows[0].matched_by == "vault_marker"
+    def test_sync_reports_marker_mismatch_without_guessing(self, db_session: Session):
+        _, f = _make_gcode(db_session)
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
 
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[
+                {
+                    "path": f"part__vault-f{f.id}-{'0' * 12}.gcode",
+                    "size": f.size_bytes,
+                }
+            ],
+        )
 
-def test_sync_reports_marker_mismatch_without_guessing(db_session: Session):
-    _, f = _make_gcode(db_session)
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
+        assert rows[0].file_id is None
+        assert rows[0].matched_by == "vault_marker_mismatch"
 
-    rows = sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[
-            {
-                "path": f"part__vault-f{f.id}-{'0' * 12}.gcode",
-                "size": f.size_bytes,
-            }
-        ],
-    )
+    def test_sync_does_not_match_external_job_as_upload_history(
+        self, db_session: Session
+    ):
+        _, f = _make_gcode(db_session)
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
+        build_print_job(
+            db_session,
+            f,
+            printer_id=printer.id,
+            remote_filename="external-name.gcode",
+            source="external",
+        )
 
-    assert rows[0].file_id is None
-    assert rows[0].matched_by == "vault_marker_mismatch"
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": "external-name.gcode", "size": 999}],
+        )
 
+        assert rows[0].file_id is None
+        assert rows[0].matched_by == "external"
 
-def test_sync_does_not_match_external_job_as_upload_history(db_session: Session):
-    _, f = _make_gcode(db_session)
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
-    job = PrintJob(
-        printer_id=printer.id,
-        file_id=f.id,
-        model_id=f.model_id,
-        remote_filename="external-name.gcode",
-        source="external",
-    )
-    db_session.add(job)
-    db_session.commit()
+    def test_sync_matches_filename_then_marks_missing(self, db_session: Session):
+        _, f = _make_gcode(db_session, name="bracket.gcode", size=456)
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
 
-    rows = sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[{"path": "external-name.gcode", "size": 999}],
-    )
+        rows = sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": "subdir/bracket.gcode", "size": 456}],
+        )
+        assert rows[0].file_id == f.id
+        assert rows[0].matched_by == "filename"
+        assert rows[0].missing_since is None
 
-    assert rows[0].file_id is None
-    assert rows[0].matched_by == "external"
+        rows = sync_printer_files(db_session, printer_id=printer.id, remote_files=[])
+        assert rows[0].missing_since is not None
 
+    def test_sync_keeps_unmatched_external_file(self, db_session: Session):
+        printer = build_printer(
+            db_session, name="Ender", moonraker_url="http://10.0.0.1:7125"
+        )
 
-def test_sync_matches_filename_then_marks_missing(db_session: Session):
-    _, f = _make_gcode(db_session, name="bracket.gcode", size=456)
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
+        sync_printer_files(
+            db_session,
+            printer_id=printer.id,
+            remote_files=[{"path": "external.gcode", "size": 789}],
+        )
 
-    rows = sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[{"path": "subdir/bracket.gcode", "size": 456}],
-    )
-    assert rows[0].file_id == f.id
-    assert rows[0].matched_by == "filename"
-    assert rows[0].missing_since is None
-
-    rows = sync_printer_files(db_session, printer_id=printer.id, remote_files=[])
-    assert rows[0].missing_since is not None
-
-
-def test_sync_keeps_unmatched_external_file(db_session: Session):
-    printer = Printer(name="Ender", moonraker_url="http://10.0.0.1:7125")
-    db_session.add(printer)
-    db_session.commit()
-    db_session.refresh(printer)
-
-    sync_printer_files(
-        db_session,
-        printer_id=printer.id,
-        remote_files=[{"path": "external.gcode", "size": 789}],
-    )
-
-    row = db_session.exec(select(PrinterFile)).one()
-    assert row.file_id is None
-    assert row.matched_by == "external"
+        row = db_session.exec(select(PrinterFile)).one()
+        assert row.file_id is None
+        assert row.matched_by == "external"

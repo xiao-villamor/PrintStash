@@ -1,4 +1,29 @@
+/*
+ * The extension actually installs, and its popup actually runs.
+ *
+ * Everything else in this package is tested against `@webext-core/fake-browser`,
+ * which is fast and proves the logic but cannot prove the thing that breaks most
+ * often: that the *manifest* is acceptable to a real browser, and that the APIs
+ * the popup calls exist in the context the browser gives it. A manifest error, a
+ * permission a browser silently drops, or an MV3 API missing from a popup are all
+ * invisible to a fake and fatal in a release.
+ *
+ * So this spec installs the built extension into a real browser and opens the
+ * real popup. Two browsers, two mechanisms — Firefox takes a signed XPI over
+ * WebDriver's `installAddOn`, Chrome takes an unpacked directory over CDP — and
+ * both end at the same assertions, because the point is what the popup can do
+ * rather than how it got there.
+ *
+ * The APIs asserted at the end are the ones the capture flow depends on:
+ * `chrome.permissions.contains` for the optional-host grant the importer asks
+ * for, and `chrome.scripting.executeScript` for reading the page. Both are MV3
+ * spellings; if either is missing, capture fails at the moment a user clicks, and
+ * nothing before this point would have noticed.
+ */
+
 import assert from "node:assert/strict";
+
+import { installChromeExtension } from "./_chrome_extension";
 
 interface LoadedExtensionElement {
   getText(): Promise<string>;
@@ -7,10 +32,14 @@ interface LoadedExtensionElement {
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
-  capabilities: { browserName?: string };
+  capabilities: { "goog:chromeOptions"?: { debuggerAddress?: string } };
   execute<Result>(script: () => Result): Promise<Result>;
+  /**
+   * WebdriverIO 9 exposes the browser under test as a flag; the
+   * `getCapabilities()` call earlier versions had no longer exists.
+   */
+  isFirefox: boolean;
   installAddOn(path: string | undefined, temporary: boolean): Promise<string>;
-  pause(milliseconds: number): Promise<void>;
   url(destination: string | undefined): Promise<void>;
 }
 
@@ -20,38 +49,32 @@ declare const chrome: {
   scripting?: { executeScript?: unknown };
 };
 
+const EXTENSION_NAME = "PrintStash Model Importer";
+const FIREFOX_ADDON_ID = "printstash-model-importer@printstash.local";
+
 describe("loaded extension", () => {
   it("installs the manifest and opens a popup extension context", async () => {
-    if (browser.capabilities.browserName === "firefox") {
+    if (browser.isFirefox) {
       const addOnId = await browser.installAddOn(process.env.PRINTSTASH_EXTENSION_XPI, true);
-      assert.equal(addOnId, "printstash-model-importer@printstash.local");
+
+      // Firefox reads the id straight out of the manifest, so a mismatch here
+      // means the built XPI is not the extension this repo describes.
+      assert.equal(addOnId, FIREFOX_ADDON_ID);
       await browser.url("about:debugging#/runtime/this-firefox");
       await browser.$("body").waitForExist();
-      assert.match(await browser.$("body").getText(), /PrintStash Model Importer/);
+      assert.match(await browser.$("body").getText(), new RegExp(EXTENSION_NAME));
       await browser.url(process.env.PRINTSTASH_EXTENSION_POPUP_URL);
     } else {
-      await browser.url("chrome://extensions/");
-      let extension: { id: string; name?: string } | null = null;
-      for (let attempt = 0; attempt < 40 && extension === null; attempt += 1) {
-        extension = await browser.execute(() => {
-          const manager = document.querySelector("extensions-manager");
-          const list = manager?.shadowRoot?.querySelector("extensions-item-list");
-          const item = [...(list?.shadowRoot?.querySelectorAll("extensions-item") || [])].find(
-            (candidate) =>
-              candidate.shadowRoot?.querySelector("#name")?.textContent?.trim() ===
-              "PrintStash Model Importer",
-          );
-          return item
-            ? { id: item.id, name: item.shadowRoot?.querySelector("#name")?.textContent?.trim() }
-            : null;
-        });
-        if (extension === null) await browser.pause(250);
-      }
+      const extensionId = await installChromeExtension(
+        browser,
+        process.env.PRINTSTASH_EXTENSION_DIST as string,
+      );
 
-      if (extension === null) throw new Error("Loaded Chrome extension was not found");
-      assert.equal(extension.name, "PrintStash Model Importer");
-      assert.match(extension.id, /^[a-p]{32}$/);
-      await browser.url(`chrome-extension://${extension.id}/popup.html`);
+      // Chrome assigns the id, and `Extensions.loadUnpacked` returns it — so the
+      // popup URL is derived rather than discovered, and an install that failed
+      // shows up as an install error instead of as a missing DOM node.
+      assert.match(extensionId, /^[a-p]{32}$/);
+      await browser.url(`chrome-extension://${extensionId}/popup.html`);
     }
 
     await browser.$("#connection-status").waitForExist();
@@ -59,6 +82,7 @@ describe("loaded extension", () => {
       permissions: typeof chrome.permissions?.contains,
       scripting: typeof chrome.scripting?.executeScript,
     }));
+
     assert.deepEqual(apis, { permissions: "function", scripting: "function" });
   });
 });

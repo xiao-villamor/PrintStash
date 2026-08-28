@@ -1,3 +1,16 @@
+/*
+ * Handing the browser extension its credentials, through the page.
+ *
+ * The setup package crosses from the app to an extension, so it is written
+ * same-origin and short-lived: a long-lived package sitting in storage is an API
+ * key any script on the page can read, for as long as the tab exists.
+ *
+ * Incomplete credentials are rejected rather than stored partially. A package
+ * missing its key would be picked up by the extension, fail to authenticate, and
+ * present as the extension being broken rather than as a setup that never
+ * finished.
+ */
+
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -6,7 +19,7 @@ import {
   prepareBrowserExtensionSetup,
 } from "@/lib/browser-extension-setup";
 
-describe("browser extension setup", () => {
+describe("storeExtensionSetupPackage", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
   });

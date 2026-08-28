@@ -1,3 +1,23 @@
+/*
+ * Which caches a write invalidates — the mapping that decides whether the UI
+ * agrees with the database after a mutation.
+ *
+ * Under-invalidating is the failure users report as "I have to refresh". It is
+ * almost always a *derived* cache somebody forgot: a model write changes the
+ * vault totals and the collection counts, and a collection rename changes every
+ * model card that shows a label. So the rows here are mostly about second-order
+ * keys rather than the obvious one.
+ *
+ * The prefix-collision cases are the sharp ones. `/filament-profiles` and
+ * `/printer-profiles` both start with a path a naive check would read as
+ * `/printers`, so a substring match busts the wrong cache and leaves the right
+ * one stale — asserted in both directions, because either mistake looks like the
+ * mapping working.
+ *
+ * An unrecognised path invalidates nothing rather than everything. Blanket
+ * invalidation would hide every one of the bugs above.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {

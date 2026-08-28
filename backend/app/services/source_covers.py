@@ -317,7 +317,15 @@ def _discard_cover_if_absent(
         )
     ).all():
         session.delete(proof)
+    # Two flushes, lease first. `staging_leases.model_source_cover_id` is
+    # `ON DELETE CASCADE` on both schemas, so deleting the cover would take the lease
+    # with it — but only in the database. The ORM would not know, and a caller
+    # holding this session would keep reading a lease that no longer exists. Letting
+    # the ORM delete the row itself keeps the identity map honest, and doing it
+    # before the cover means the cascade never has a row left to race for (which is
+    # what produced "expected to delete 1 row(s); 0 were matched").
     session.delete(lease)
+    session.flush()
     session.delete(cover)
     session.flush()
     return True
@@ -339,16 +347,10 @@ def expire_pending(
         return False
     cover = session.get(ModelSourceCover, lease.model_source_cover_id)
     if cover is None:
-        if lease.destination_key:
-            for proof in session.exec(
-                select(OwnedStorageObject).where(
-                    OwnedStorageObject.key == lease.destination_key
-                )
-            ).all():
-                session.delete(proof)
-        session.delete(lease)
-        session.flush()
-        return True
+        # Unreachable: the cover cascade removes this lease with its cover, on both
+        # schemas. Kept as a guard rather than a code path, because the alternative
+        # is an AttributeError on `cover.storage_key` two lines down.
+        return False
     try:
         recovered = _recover_pending_cover(session, backend, cover=cover, lease=lease)
     except Exception:
@@ -377,14 +379,7 @@ def reconcile_pending(session: Session, backend: StorageBackend) -> int:
             continue
         cover = session.get(ModelSourceCover, lease.model_source_cover_id)
         if cover is None:
-            if lease.destination_key:
-                for proof in session.exec(
-                    select(OwnedStorageObject).where(
-                        OwnedStorageObject.key == lease.destination_key
-                    )
-                ).all():
-                    session.delete(proof)
-            session.delete(lease)
+            # Unreachable, same cascade as in `expire_pending`.
             continue
         try:
             receipt = _recover_pending_cover(session, backend, cover=cover, lease=lease)

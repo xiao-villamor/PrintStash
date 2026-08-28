@@ -63,40 +63,51 @@ from app.db.session import (  # noqa: E402
     override_session_factory,
 )
 from app.services.printer_hub import PrinterHub  # noqa: E402
-from tests.paths import TEST_DATA_DIR  # noqa: E402
+from tests import containers  # noqa: E402
+
+_TIER_MARKERS = {"contract": "contract", "e2e": "e2e"}
+_RESOURCE_DIRS = {"postgres": "postgres"}
+# Each resource marker names the service it needs. Containers are the only path
+# and their absence is an error rather than a skip — see `tests/containers.py`.
+_RESOURCES = {
+    "postgres": containers.POSTGRES_RESOURCE,
+    "s3": containers.S3_RESOURCE,
+}
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Apply tier and resource policy from the test directory layout."""
-    tests_root = Path(__file__).parent.resolve()
-    postgres_available = bool(os.environ.get("PRINTSTASH_TEST_POSTGRES_URL"))
-    s3_available = bool(os.environ.get("PRINTSTASH_TEST_S3_ENDPOINT"))
+    """Mark the tiers that have their own lane, and refuse to run without a service.
 
+    The tier of a test is the directory it lives in, so the marker is derived from the
+    path — never from the filename. ``unit`` and ``integration`` get no marker at all:
+    the ``fast`` lane selects them by path, which is exact, whereas a name-shaped
+    heuristic (``*_integration.py``, ``"migration" in name``) silently mis-tiered any
+    file that did not happen to match.
+
+    ``postgres`` and ``s3`` are *resource* markers, not tiers: they gate a subset
+    inside a tier and get their service from a container. If a selected test carries
+    one and Docker is not running, the **session stops here** rather than skipping —
+    a green run with those tests quietly absent verified none of what it claimed.
+    Checking at collection means the failure arrives before any test runs, naming
+    the prerequisite once instead of twenty-one times.
+    """
+    # Markers first, in their own pass: the `postgres` marker comes from the
+    # *directory* rather than a `pytestmark`, so computing what is needed before
+    # adding them would miss every postgres test.
     for item in items:
-        path = Path(str(item.path)).resolve()
-        try:
-            tier = path.relative_to(tests_root).parts[0]
-        except (ValueError, IndexError):
-            continue
+        parts = Path(str(item.path)).parts
+        for directory, marker in {**_TIER_MARKERS, **_RESOURCE_DIRS}.items():
+            if directory in parts:
+                item.add_marker(getattr(pytest.mark, marker))
 
-        if tier == "e2e":
-            item.add_marker(pytest.mark.e2e)
-        elif tier == "contract":
-            item.add_marker(pytest.mark.contract)
+    for marker, resource in sorted(_RESOURCES.items()):
+        if any(marker in item.keywords for item in items):
+            containers.require_docker(resource)
 
-        if "postgres" in path.parts:
-            item.add_marker(pytest.mark.postgres)
 
-        if item.get_closest_marker("postgres") and not postgres_available:
-            item.add_marker(
-                pytest.mark.skip(
-                    reason="PRINTSTASH_TEST_POSTGRES_URL is not configured"
-                )
-            )
-        if item.get_closest_marker("s3") and not s3_available:
-            item.add_marker(
-                pytest.mark.skip(reason="PRINTSTASH_TEST_S3_ENDPOINT is not configured")
-            )
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Stop any container this session started, once."""
+    containers.shutdown_containers()
 
 
 # The dev shell exports a short VAULT_JWT_SECRET (e.g. "dev-jwt-secret", 14 bytes),
@@ -107,6 +118,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 # still monkeypatch this per-case; they revert to this compliant baseline.
 settings._frozen.jwt_secret = "printstash-test-jwt-secret-0123456789abcdef"  # 43 bytes
 
+TEST_DATA_DIR = Path(__file__).parent / "fixtures"
 TEST_DATA_DIR.mkdir(exist_ok=True)
 
 TEST_DB_URL = "sqlite:///:memory:"
@@ -122,7 +134,8 @@ event.listen(_test_engine, "connect", _set_sqlite_pragmas)
 
 _test_factory = SQLiteSessionFactory(_test_engine)
 
-# A handful of contract tests under ``tests/contract/`` run the real
+# A handful of contract tests (contract/services/test_prusalink.py,
+# test_octoprint.py, test_printer_hub.py) run the *real*
 # PrinterHub polling loop against a real mock HTTP server: it does its DB
 # writes via asyncio.to_thread worker threads, genuinely concurrently with
 # the test's own main-thread session reads. StaticPool hands every session
@@ -165,74 +178,50 @@ _init_test_db(_test_engine)
 _init_test_db(_threaded_engine)
 
 
-_TRUNCATE_TABLES_ORDER = [
-    "storage_delete_intents",
-    "staging_leases",
-    "capture_upload_slots",
-    "owned_storage_objects",
-    "inbox_item_results",
-    "artifact_provenance_links",
-    "model_source_covers",
-    "model_provenance_fields",
-    "provenance_captures",
-    "vault_audit_findings",
-    "vault_audit_runs",
-    "inbox_items",
-    "background_jobs",
-    "model_stars",
-    "saved_views",
-    "notification_deliveries",
-    "notification_channels",
-    "printer_files",
-    "printer_permissions",
-    "printer_maintenance_logs",
-    "printer_maintenance_windows",
-    "print_jobs",
-    "print_batches",
-    "printer_material_slots",
-    "printer_tools",
-    "printers",
-    "printer_profiles",
-    "filament_profiles",
-    "share_links",
-    "artifact_material_requirements",
-    "files",
-    "model_provenance_sources",
-    "model_tags",
-    "tags",
-    "metadata",
-    "models",
-    "external_libraries",
-    "documents",
-    "collection_permissions",
-    "collections",
-    "api_keys",
-    "browser_devices",
-    "browser_pairing_codes",
-    "provider_oauth_states",
-    "provider_connections",
-    "refresh_tokens",
-    "users",
-    "system_config",
-]
+def _all_table_names() -> list[str]:
+    """Every mapped table, so a new model cannot silently escape the wipe.
+
+    This used to be a hand-maintained list. ``audit_logs`` was missing from it, and
+    because ``AuditLog.user_id`` is a plain (non-cascading) FK, audit rows survived the
+    wipe and pinned recycled user ids: the next test that hard-deleted a user got
+    ``sqlite3.IntegrityError: FOREIGN KEY constraint failed``, from a row it never
+    created. Deriving the list from the metadata makes that class of leak impossible.
+    """
+    import app.db.models  # noqa: F401 — registers every table on SQLModel.metadata
+
+    # Insertion order, not `sorted_tables`: the `files` <-> `models` cycle makes a
+    # topological sort impossible, and SQLAlchemy responds by warning and giving up
+    # on the ordering as a whole rather than only on those two. So there is no
+    # dependency order to delete in, which is why `_truncate_all` suspends
+    # enforcement for the wipe instead of trying to order around it.
+    return list(SQLModel.metadata.tables)
 
 
 def _truncate_all(engine: Engine = _test_engine) -> None:
-    """Truncate all tables between tests.
+    """Wipe every table between tests, leaving foreign keys enforced afterwards.
 
-    FK enforcement is off for the wipe: this is a teardown, not a delete path,
-    and the listed order doesn't satisfy every constraint (metadata references
-    files, which go first). Leaving it on made the DELETEs fail silently and
-    leak rows into the next test.
+    Constraints are suspended for the wipe and restored immediately after, which is
+    the ordinary shape of a bulk teardown — the same thing `TRUNCATE ... CASCADE`
+    does on PostgreSQL and Django's `flush` does everywhere. There is no dependency
+    order to delete in instead: the `files` <-> `models` cycle makes a topological
+    sort impossible, and one does not exist to be gotten right.
+
+    What matters is that enforcement is live for every *test body*, and for a long
+    time it was not. This helper used to issue both pragmas inside `engine.begin()`,
+    and SQLite ignores `PRAGMA foreign_keys` while a transaction is open: the `OFF`
+    did nothing the author intended and the `ON` restored nothing. Enforcement was
+    off from the first test of the session onward, so the suite could not fail on a
+    foreign-key violation at all — and `DELETE /api/v1/libraries/{id}`, which returns
+    500 on a real installation, passed here. `AUTOCOMMIT` is what makes the pragmas
+    take effect; `tests/repo/test_db_parity.py` is what stops this regressing again.
     """
-    with engine.begin() as conn:
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("PRAGMA foreign_keys=OFF")
-        for table in _TRUNCATE_TABLES_ORDER:
-            try:
+        try:
+            for table in _all_table_names():
                 conn.exec_driver_sql(f"DELETE FROM {table}")
-            except Exception:
-                pass
-        conn.exec_driver_sql("PRAGMA foreign_keys=ON")
+        finally:
+            conn.exec_driver_sql("PRAGMA foreign_keys=ON")
     # Re-create sentinel rows.
     _ensure_test_sentinels(engine)
 
@@ -289,6 +278,42 @@ def _reset_test_storage() -> None:
                 child.unlink(missing_ok=True)
 
 
+def _reset_every_rate_limiter() -> None:
+    """Clear every route's rate-limit window.
+
+    A limiter built by ``rate_limit()`` is a module-level singleton holding one
+    process-wide window, so a test that exhausts one leaves the next test to get
+    a 429 out of nowhere — and only when the two land on the same xdist worker in
+    the same order, which is the worst kind of flake to chase. The limiters are
+    discovered by walking the app's own route tree rather than listed here,
+    because a hand-maintained list silently misses the next route that adds one
+    (which is exactly how the browser-pairing claim limiter came to leak).
+    """
+    from app.main import app as _app
+
+    for limiter in _rate_limiters_in(_app):
+        limiter.reset()
+
+
+def _rate_limiters_in(target: object) -> Iterator[object]:
+    """Every rate limiter reachable from an app or router, mounts included."""
+    for route in getattr(target, "routes", ()):
+        dependant = getattr(route, "dependant", None)
+        if dependant is not None:
+            for dep in [dependant, *dependant.dependencies]:
+                limiter = getattr(dep.call, "limiter", None)
+                if limiter is not None:
+                    yield limiter
+        # A router included with `include_router` shows up as an opaque
+        # `_IncludedRouter` holding the real router; a mount holds a sub-app.
+        for nested in (
+            getattr(route, "original_router", None),
+            getattr(route, "app", None),
+        ):
+            if nested is not None and nested is not target:
+                yield from _rate_limiters_in(nested)
+
+
 @pytest.fixture(autouse=True)
 def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Override the session factory ContextVar to use the in-memory test engine.
@@ -317,14 +342,7 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _http_client_mod._http_client = None
 
-    # Rate limiters are module-level singletons (one process-wide window per
-    # dependency) so state leaks across tests without an explicit reset.
-    from app.api.v1.auth import _login_rate_limit, _refresh_rate_limit
-    from app.api.v1.provider_connections import _claim_limit
-
-    _login_rate_limit.limiter.reset()  # type: ignore[attr-defined]
-    _refresh_rate_limit.limiter.reset()  # type: ignore[attr-defined]
-    _claim_limit.limiter.reset()  # type: ignore[attr-defined]
+    _reset_every_rate_limiter()
 
 
 @pytest.fixture(autouse=True)
@@ -336,6 +354,48 @@ def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     this they land in the repo root instead of pytest's tmp dir.
     """
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture
+def local_storage(tmp_path: Path) -> Iterator[Path]:
+    """Point every storage directory at a throwaway tree for this test.
+
+    Prefer this over calling `use_local_storage` in a test body: it tears the
+    configuration down as well as setting it up. Available in every tier —
+    contract and e2e tests need it too.
+    """
+    from tests._env import clear_local_storage, use_local_storage
+
+    yield use_local_storage(tmp_path)
+    clear_local_storage()
+
+
+@pytest.fixture
+def backup_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A file-based vault the backup service can read and rewrite as real files.
+
+    In the root conftest rather than `integration/` because the unit backup tests
+    need it too — that is why `unit/services/test_backup.py` was importing the
+    fixture out of `integration/services/test_backup.py`, a coupling that made a
+    unit test fail to collect whenever the integration file was edited.
+    """
+    from tests.integration._backup_harness import build_backup_env
+
+    yield from build_backup_env(tmp_path, monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _reset_factory_counters() -> None:
+    """Rewind the `tests.factories` sequence counters between tests.
+
+    The builders derive unique slugs, hashes and names from these, and the
+    database is wiped per test, so rewinding them makes a generated value depend
+    only on the test that asked for it. Without this, `model-1` alone becomes
+    `model-97` in a full run, and a failure message stops being reproducible.
+    """
+    from tests.factories import reset_counters
+
+    reset_counters()
 
 
 @pytest.fixture
@@ -376,36 +436,6 @@ def threaded_hub_db() -> Iterator[None]:
         yield
     finally:
         override_session_factory(_test_factory)
-
-
-@pytest.fixture
-def file_backed_integration_db(_patch_engine: None, tmp_path: Path) -> Iterator[None]:
-    """Use independent SQLite connections for app and background work.
-
-    LocalTaskQueue may commit from a worker while the request and assertion
-    sessions are still alive. A file-backed database with production pragmas
-    gives each session its own connection without changing the application
-    seam exercised by integration tests.
-    """
-    del _patch_engine
-    db_path = tmp_path / "integration.sqlite"
-    db_url = f"sqlite:///{db_path}"
-    engine = create_engine(
-        db_url,
-        connect_args={"check_same_thread": False},
-        poolclass=NullPool,
-    )
-    event.listen(engine, "connect", _set_sqlite_pragmas)
-    _init_test_db(engine)
-    factory = SQLiteSessionFactory(engine)
-    override_session_factory(factory)
-    _overlay["db_url"] = db_url
-    try:
-        yield
-    finally:
-        engine.dispose()
-        override_session_factory(_test_factory)
-        _overlay["db_url"] = TEST_DB_URL
 
 
 @pytest.fixture

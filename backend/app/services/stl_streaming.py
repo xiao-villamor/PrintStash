@@ -231,10 +231,11 @@ def _decode_result(
             if image.format != "PNG" or image.size != (width, height):
                 return None
             image.verify()
+        # `_valid_manifest` ran first and returned early unless both bounds are
+        # three-element lists of finite, non-bool numbers, so re-checking the type
+        # here could only ever add a branch nothing reaches.
         lower_values = manifest["bounds_min"]
         upper_values = manifest["bounds_max"]
-        if not isinstance(lower_values, list) or not isinstance(upper_values, list):
-            return None
         lower = (
             float(lower_values[0]),
             float(lower_values[1]),

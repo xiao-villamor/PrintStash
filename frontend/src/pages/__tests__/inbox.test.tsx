@@ -1,3 +1,21 @@
+/*
+ * The pending-imports queue, which is a work list rather than a log.
+ *
+ * Delete is unavailable while an import is *resolving*, because the item is being
+ * written to by a background job — deleting it mid-flight leaves staged bytes with
+ * no row that owns them. Clearing completed imports must not touch the models they
+ * produced, which is the distinction between tidying a queue and deleting a
+ * library.
+ *
+ * The two failure rows are about not stranding the page. If a delete or a clear
+ * fails while other work is still active, polling has to restart — otherwise the
+ * queue freezes at whatever it was showing, and the user watches an import that
+ * has actually progressed sit still until they reload.
+ *
+ * Localization preserves the dynamic source data, the same rule as everywhere:
+ * the interface is translated, the captured values are not.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -42,7 +60,7 @@ const pendingImport: InboxItem = {
   completion: null,
 };
 
-describe("InboxPage localization", () => {
+describe("InboxPage", () => {
   afterEach(() => {
     vi.useRealTimers();
   });

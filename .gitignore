@@ -17,6 +17,14 @@ backend/_data/
 backend/dev.sqlite*
 *.sqlite
 backend/.coverage
+# Parallel data files (`concurrency`/`parallel` in backend/pyproject.toml) and the
+# reports the coverage lane writes from them.
+backend/.coverage.*
+backend/coverage.json
+backend/.coverage-html/
+backend/packages/printstash-core/.coverage
+backend/packages/printstash-core/coverage.json
+backend/packages/printstash-core/.coverage-html/
 
 # Local-only large sample meshes/gcode for manual mesh/OOM testing (issue #29).
 # Too big to commit; point PRINTSTASH_MESH_CORPUS at them locally instead.
@@ -34,6 +42,7 @@ frontend/tsconfig.tsbuildinfo
 frontend/out/
 frontend/dist/
 frontend/coverage/
+frontend/packages/*/coverage/
 
 # OS / editors
 .DS_Store
@@ -56,17 +65,16 @@ docs/*-internal.md
 **/*-plan.md
 **/*-plans.md
 
-# AI assistant tooling (kept local, not published) — except the shared
-# project skills in .claude/skills/{printstash,create-tests}/
+# AI assistant tooling. `.agents/` is the source of truth and is tracked in full:
+# it holds the shared skills every assistant reads. The per-tool entry points are
+# tracked symlinks into it — `.claude/skills` -> `.agents/skills` and
+# `CLAUDE.md` -> `AGENTS.md` — so a fresh clone works for each tool with no
+# second copy to keep in sync. Everything else here stays local.
 .codex/
 .mcp.json
 .claude/*
-!.claude/skills/
-.claude/skills/*
-!.claude/skills/printstash/
-!.claude/skills/create-tests/
+!.claude/skills
 .opencode/
-.agents/
 skills-lock.json
 docs/agents/
 frontend/test-results/

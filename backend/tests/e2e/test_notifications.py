@@ -19,21 +19,17 @@ import pytest
 from sqlmodel import select
 
 from app.db.models import (
-    File,
     FileType,
-    Model,
     NotificationDelivery,
     NotificationDeliveryStatus,
     NotificationEventType,
-    Printer,
     PrinterProvider,
     PrinterStatus,
     PrintJob,
     PrintJobState,
 )
 from app.services import notifications
-
-pytestmark = pytest.mark.e2e
+from tests.factories import build_file, build_model, build_print_job, build_printer
 
 NOTIF_BASE = "/api/v1/notifications"
 COMPLETED = NotificationEventType.PRINT_COMPLETED.value
@@ -58,175 +54,173 @@ def _seed_completed_job(
     session, *, filename: str, printer_name: str
 ) -> tuple[int, PrintJob]:
     """Insert a printer + model + file + a COMPLETED PrintJob; return (printer_id, job)."""
-    printer = Printer(
+    printer = build_printer(
+        session,
         name=printer_name,
         provider=PrinterProvider.MOONRAKER,
         status=PrinterStatus.READY,
     )
-    session.add(printer)
-    session.commit()
-    session.refresh(printer)
 
-    model = Model(name="Benchy", slug="benchy", hash="a" * 64)
-    session.add(model)
-    session.commit()
-    session.refresh(model)
-    file = File(
-        model_id=model.id,
+    model = build_model(session, name="Benchy", slug="benchy", hash="a" * 64)
+    file = build_file(
+        session,
+        model,
         path="/tmp/benchy.gcode",
-        original_filename=filename,
+        filename=filename,
         file_type=FileType.GCODE,
         version=1,
         size_bytes=1234,
         sha256="b" * 64,
     )
-    session.add(file)
-    session.commit()
-    session.refresh(file)
 
-    job = PrintJob(
+    job = build_print_job(
+        session,
+        file,
         printer_id=printer.id,
         printer_name=printer.name,
-        file_id=file.id,
-        model_id=model.id,
         remote_filename=filename,
         state=PrintJobState.COMPLETED,
         progress=1.0,
         actual_duration_s=3661,
         filament_used_g=12.3,
     )
-    session.add(job)
-    session.commit()
-    session.refresh(job)
     return printer.id, job
 
 
-@pytest.mark.asyncio
-async def test_all_targets_deliver_a_valid_payload_for_a_real_print(
-    api, fakes, superuser_headers, e2e_db
-):
-    """A completed print fans out to all four targets and each accepts the payload."""
-    await _enable(api, superuser_headers)
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="hook",
-        target="webhook",
-        config={"url": fakes.webhook_url},
-    )
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="dc",
-        target="discord",
-        config={"url": fakes.discord_url},
-    )
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="tg",
-        target="telegram",
-        config={"bot_token": "123:ABC", "chat_id": "42"},
-    )
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="nt",
-        target="ntfy",
-        config={"topic": "prints", "server_url": fakes.ntfy_server},
-    )
+class TestNotificationDelivery:
+    @pytest.mark.asyncio
+    async def test_all_targets_deliver_a_valid_payload_for_a_real_print(
+        self, api, fakes, superuser_headers, e2e_db
+    ):
+        """A completed print fans out to all four targets and each accepts the payload."""
+        await _enable(api, superuser_headers)
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="hook",
+            target="webhook",
+            config={"url": fakes.webhook_url},
+        )
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="dc",
+            target="discord",
+            config={"url": fakes.discord_url},
+        )
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="tg",
+            target="telegram",
+            config={"bot_token": "123:ABC", "chat_id": "42"},
+        )
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="nt",
+            target="ntfy",
+            config={"topic": "prints", "server_url": fakes.ntfy_server},
+        )
 
-    # Fire the event exactly as printer_hub does, with a realistic filename.
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="benchy_v2.gcode", printer_name="Voron 2.4"
-    )
-    enqueued = notifications.enqueue_for_event(
-        e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
-    )
-    e2e_db.commit()
-    assert enqueued == 4
+        # Fire the event exactly as printer_hub does, with a realistic filename.
+        printer_id, job = _seed_completed_job(
+            e2e_db, filename="benchy_v2.gcode", printer_name="Voron 2.4"
+        )
+        enqueued = notifications.enqueue_for_event(
+            e2e_db,
+            NotificationEventType.PRINT_COMPLETED,
+            printer_id=printer_id,
+            job=job,
+        )
+        e2e_db.commit()
+        assert enqueued == 4
 
-    sent = await notifications.dispatch_due()
-    assert sent == 4
+        sent = await notifications.dispatch_due()
+        assert sent == 4
 
-    # Every delivery succeeded (no 400 / encoding failure).
-    e2e_db.expire_all()
-    deliveries = e2e_db.exec(select(NotificationDelivery)).all()
-    statuses = {d.event_type: d.status for d in deliveries}
-    assert all(d.status == NotificationDeliveryStatus.SENT for d in deliveries), [
-        (d.id, d.status, d.last_error) for d in deliveries
-    ]
-    assert statuses  # non-empty
+        # Every delivery succeeded (no 400 / encoding failure).
+        e2e_db.expire_all()
+        deliveries = e2e_db.exec(select(NotificationDelivery)).all()
+        statuses = {d.event_type: d.status for d in deliveries}
+        assert all(d.status == NotificationDeliveryStatus.SENT for d in deliveries), [
+            (d.id, d.status, d.last_error) for d in deliveries
+        ]
+        assert statuses  # non-empty
 
-    # Each fake received exactly one request.
-    assert len(fakes.recorder.for_target("webhook")) == 1
-    assert len(fakes.recorder.for_target("discord")) == 1
-    assert len(fakes.recorder.for_target("telegram")) == 1
-    assert len(fakes.recorder.for_target("ntfy")) == 1
+        # Each fake received exactly one request.
+        assert len(fakes.recorder.for_target("webhook")) == 1
+        assert len(fakes.recorder.for_target("discord")) == 1
+        assert len(fakes.recorder.for_target("telegram")) == 1
+        assert len(fakes.recorder.for_target("ntfy")) == 1
 
-    # Payload spot-checks against each provider's contract.
-    discord = fakes.recorder.for_target("discord")[0].json
-    assert "Print completed" in discord["embeds"][0]["title"]
+        # Payload spot-checks against each provider's contract.
+        discord = fakes.recorder.for_target("discord")[0].json
+        assert "Print completed" in discord["embeds"][0]["title"]
 
-    webhook = fakes.recorder.for_target("webhook")[0].json
-    assert webhook["event"] == COMPLETED
-    assert webhook["data"]["filename"] == "benchy_v2.gcode"
+        webhook = fakes.recorder.for_target("webhook")[0].json
+        assert webhook["event"] == COMPLETED
+        assert webhook["data"]["filename"] == "benchy_v2.gcode"
 
-    ntfy = fakes.recorder.for_target("ntfy")[0]
-    assert b"Voron" in (ntfy.body or b"") or "Voron" in str(ntfy.headers)
+        ntfy = fakes.recorder.for_target("ntfy")[0]
+        assert b"Voron" in (ntfy.body or b"") or "Voron" in str(ntfy.headers)
 
+    @pytest.mark.asyncio
+    async def test_telegram_filename_with_underscore_is_accepted(
+        self, api, fakes, superuser_headers, e2e_db
+    ):
+        """Regression: a normal filename with '_' must not break Telegram parsing."""
+        await _enable(api, superuser_headers)
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="tg",
+            target="telegram",
+            config={"bot_token": "123:ABC", "chat_id": "42"},
+        )
+        printer_id, job = _seed_completed_job(
+            e2e_db, filename="my_part_v3.gcode", printer_name="Printer_One"
+        )
+        notifications.enqueue_for_event(
+            e2e_db,
+            NotificationEventType.PRINT_COMPLETED,
+            printer_id=printer_id,
+            job=job,
+        )
+        e2e_db.commit()
 
-@pytest.mark.asyncio
-async def test_telegram_filename_with_underscore_is_accepted(
-    api, fakes, superuser_headers, e2e_db
-):
-    """Regression: a normal filename with '_' must not break Telegram parsing."""
-    await _enable(api, superuser_headers)
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="tg",
-        target="telegram",
-        config={"bot_token": "123:ABC", "chat_id": "42"},
-    )
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="my_part_v3.gcode", printer_name="Printer_One"
-    )
-    notifications.enqueue_for_event(
-        e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
-    )
-    e2e_db.commit()
+        await notifications.dispatch_due()
 
-    await notifications.dispatch_due()
+        e2e_db.expire_all()
+        d = e2e_db.exec(select(NotificationDelivery)).one()
+        assert d.status == NotificationDeliveryStatus.SENT, d.last_error
 
-    e2e_db.expire_all()
-    d = e2e_db.exec(select(NotificationDelivery)).one()
-    assert d.status == NotificationDeliveryStatus.SENT, d.last_error
+    @pytest.mark.asyncio
+    async def test_ntfy_title_with_non_ascii_is_accepted(
+        self, api, fakes, superuser_headers, e2e_db
+    ):
+        """Regression: non-latin-1 chars in the title (incl. the em-dash) must send."""
+        await _enable(api, superuser_headers)
+        await _create_channel(
+            api,
+            superuser_headers,
+            name="nt",
+            target="ntfy",
+            config={"topic": "prints", "server_url": fakes.ntfy_server},
+        )
+        printer_id, job = _seed_completed_job(
+            e2e_db, filename="café_ñandú.gcode", printer_name="Impresora-Ñ"
+        )
+        notifications.enqueue_for_event(
+            e2e_db,
+            NotificationEventType.PRINT_COMPLETED,
+            printer_id=printer_id,
+            job=job,
+        )
+        e2e_db.commit()
 
+        await notifications.dispatch_due()
 
-@pytest.mark.asyncio
-async def test_ntfy_title_with_non_ascii_is_accepted(
-    api, fakes, superuser_headers, e2e_db
-):
-    """Regression: non-latin-1 chars in the title (incl. the em-dash) must send."""
-    await _enable(api, superuser_headers)
-    await _create_channel(
-        api,
-        superuser_headers,
-        name="nt",
-        target="ntfy",
-        config={"topic": "prints", "server_url": fakes.ntfy_server},
-    )
-    printer_id, job = _seed_completed_job(
-        e2e_db, filename="café_ñandú.gcode", printer_name="Impresora-Ñ"
-    )
-    notifications.enqueue_for_event(
-        e2e_db, NotificationEventType.PRINT_COMPLETED, printer_id=printer_id, job=job
-    )
-    e2e_db.commit()
-
-    await notifications.dispatch_due()
-
-    e2e_db.expire_all()
-    d = e2e_db.exec(select(NotificationDelivery)).one()
-    assert d.status == NotificationDeliveryStatus.SENT, d.last_error
+        e2e_db.expire_all()
+        d = e2e_db.exec(select(NotificationDelivery)).one()
+        assert d.status == NotificationDeliveryStatus.SENT, d.last_error

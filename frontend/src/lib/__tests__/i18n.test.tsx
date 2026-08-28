@@ -1,6 +1,26 @@
+/*
+ * Translating the interface without translating the user's own words.
+ *
+ * That line is the whole file. A model called "Bracket", a collection called
+ * "Parts", a filament called "PLA" — these are the user's content, and a
+ * translation layer that rewrites them corrupts data the user typed. So the
+ * catalog is keyed on *complete UI messages*, and a partial or nested match is
+ * deliberately not translated: matching fragments is how "Parts" the collection
+ * becomes "Piezas" on a Spanish install.
+ *
+ * A new browser defaults to English rather than to its own `Accept-Language`.
+ * That is a decision, not an oversight: the backend, the logs and the docs are
+ * English, and a self-hoster debugging a first-run problem in a language they
+ * did not choose has one more thing to fight.
+ *
+ * Accessible labels are asserted alongside visible text because they are the
+ * half that silently stays English — nothing looks wrong on screen when a screen
+ * reader is the only thing reading it.
+ */
+
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { LocaleToggle } from "@/components/locale-toggle";
 import { DomLocalization, Localized } from "@/components/ui/localized";
@@ -12,92 +32,94 @@ function Probe() {
   return <p>{t("auth.welcome")}</p>;
 }
 
-it("defaults a new browser to English regardless of browser language", async () => {
-  localStorage.clear();
-  vi.spyOn(window.navigator, "language", "get").mockReturnValue("es-ES");
+describe("I18nProvider", () => {
+  it("defaults a new browser to English regardless of browser language", async () => {
+    localStorage.clear();
+    vi.spyOn(window.navigator, "language", "get").mockReturnValue("es-ES");
 
-  render(
-    <I18nProvider>
-      <Probe />
-    </I18nProvider>,
-  );
-
-  expect(screen.getByText("Welcome back")).toBeInTheDocument();
-  await waitFor(() => expect(localStorage.getItem("printstash.locale")).toBe("en"));
-  expect(document.documentElement.lang).toBe("en");
-});
-
-it("persists locale and switches typed messages", async () => {
-  localStorage.setItem("printstash.locale", "en");
-  render(
-    <I18nProvider>
-      <LocaleToggle />
-      <Probe />
-    </I18nProvider>,
-  );
-
-  expect(screen.getByText("Welcome back")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: /Language/ }));
-  expect(screen.getByText("Te damos la bienvenida")).toBeInTheDocument();
-  expect(localStorage.getItem("printstash.locale")).toBe("es");
-  expect(document.documentElement.lang).toBe("es");
-});
-
-it("localizes page content and accessible labels", () => {
-  localStorage.setItem("printstash.locale", "es");
-  render(
-    <I18nProvider>
-      <Localized>
-        <section aria-label="Settings sections">
-          <h1>All Models</h1>
-          <p>2 models total</p>
-          <button title="New collection">Storage configuration</button>
-        </section>
-      </Localized>
-    </I18nProvider>,
-  );
-
-  expect(screen.getByRole("heading", { name: "Todos los modelos" })).toBeInTheDocument();
-  expect(screen.getByText("2 modelos en total")).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Secciones de ajustes" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Configuración de almacenamiento" })).toHaveAttribute(
-    "title",
-    "Nueva colección",
-  );
-});
-
-it("only translates complete UI messages and preserves user content", () => {
-  expect(translateUiText("es", "All Models")).toBe("Todos los modelos");
-  expect(translateUiText("es", "My Models collection")).toBe("My Models collection");
-  expect(translateUiText("es", "Model name: Dragon")).toBe("Model name: Dragon");
-  expect(translateUiText("es", "2 models total")).toBe("2 modelos en total");
-});
-
-it("translates nested legacy component text without rewriting user content", async () => {
-  localStorage.setItem("printstash.locale", "es");
-  const container = document.createElement("div");
-  container.id = "root";
-  document.body.append(container);
-
-  function NestedLegacySurface() {
-    return (
-      <section title="No backups available.">
-        <p>No backups available.</p>
-        <p>My Models collection</p>
-      </section>
+    render(
+      <I18nProvider>
+        <Probe />
+      </I18nProvider>,
     );
-  }
 
-  render(
-    <I18nProvider>
-      <NestedLegacySurface />
-      <DomLocalization />
-    </I18nProvider>,
-    { container },
-  );
+    expect(screen.getByText("Welcome back")).toBeInTheDocument();
+    await waitFor(() => expect(localStorage.getItem("printstash.locale")).toBe("en"));
+    expect(document.documentElement.lang).toBe("en");
+  });
 
-  await waitFor(() => expect(screen.getByText("No hay copias disponibles.")).toBeInTheDocument());
-  expect(screen.getByText("My Models collection")).toBeInTheDocument();
-  expect(screen.getByTitle("No hay copias disponibles.")).toBeInTheDocument();
-  container.remove();
+  it("persists locale and switches typed messages", async () => {
+    localStorage.setItem("printstash.locale", "en");
+    render(
+      <I18nProvider>
+        <LocaleToggle />
+        <Probe />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("Welcome back")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /Language/ }));
+    expect(screen.getByText("Te damos la bienvenida")).toBeInTheDocument();
+    expect(localStorage.getItem("printstash.locale")).toBe("es");
+    expect(document.documentElement.lang).toBe("es");
+  });
+
+  it("localizes page content and accessible labels", () => {
+    localStorage.setItem("printstash.locale", "es");
+    render(
+      <I18nProvider>
+        <Localized>
+          <section aria-label="Settings sections">
+            <h1>All Models</h1>
+            <p>2 models total</p>
+            <button title="New collection">Storage configuration</button>
+          </section>
+        </Localized>
+      </I18nProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Todos los modelos" })).toBeInTheDocument();
+    expect(screen.getByText("2 modelos en total")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Secciones de ajustes" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Configuración de almacenamiento" })).toHaveAttribute(
+      "title",
+      "Nueva colección",
+    );
+  });
+
+  it("only translates complete UI messages and preserves user content", () => {
+    expect(translateUiText("es", "All Models")).toBe("Todos los modelos");
+    expect(translateUiText("es", "My Models collection")).toBe("My Models collection");
+    expect(translateUiText("es", "Model name: Dragon")).toBe("Model name: Dragon");
+    expect(translateUiText("es", "2 models total")).toBe("2 modelos en total");
+  });
+
+  it("translates nested legacy component text without rewriting user content", async () => {
+    localStorage.setItem("printstash.locale", "es");
+    const container = document.createElement("div");
+    container.id = "root";
+    document.body.append(container);
+
+    function NestedLegacySurface() {
+      return (
+        <section title="No backups available.">
+          <p>No backups available.</p>
+          <p>My Models collection</p>
+        </section>
+      );
+    }
+
+    render(
+      <I18nProvider>
+        <NestedLegacySurface />
+        <DomLocalization />
+      </I18nProvider>,
+      { container },
+    );
+
+    await waitFor(() => expect(screen.getByText("No hay copias disponibles.")).toBeInTheDocument());
+    expect(screen.getByText("My Models collection")).toBeInTheDocument();
+    expect(screen.getByTitle("No hay copias disponibles.")).toBeInTheDocument();
+    container.remove();
+  });
 });

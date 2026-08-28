@@ -1,3 +1,25 @@
+/*
+ * Whether the exact file that produced a print can still be downloaded — and
+ * saying so honestly when it cannot.
+ *
+ * This panel makes a claim about the past, so every level of evidence is
+ * distinct: an archived artifact we hold the bytes for, a path the printer
+ * reported, a project preview URL, and nothing at all. Only the first is
+ * downloadable. Blurring those is the failure — offering a download for a file we
+ * do not have gives the user a broken link where they expected the G-code that
+ * made the part in their hand.
+ *
+ * A URL from a *failed* capture is blocked outright. It looks like the others and
+ * points at bytes nobody verified.
+ *
+ * The error-code rows are about not showing the machinery: a legacy code has to
+ * become a sentence, and a backend message that already contains the code must not
+ * render it twice. The Spanish rows exist because these strings are assembled
+ * rather than looked up, which is exactly where a translation gets skipped — and
+ * the portaled toolpath preview renders outside the tree, so it needs the i18n
+ * context threaded explicitly or it comes out English on every install.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

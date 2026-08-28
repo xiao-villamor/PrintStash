@@ -1,3 +1,13 @@
+/*
+ * Focus stays inside an open overlay, even when its parent re-renders.
+ *
+ * A focus trap that is rebuilt on re-render drops focus back to the document,
+ * and a modal you can tab out of is a modal a keyboard user cannot use — they
+ * end up interacting with the page behind it while it still looks open. Parent
+ * re-renders are constant in this app (a query settles, a poll returns), so
+ * "across re-renders" is the real condition rather than an edge case.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
 import { useState } from "react";

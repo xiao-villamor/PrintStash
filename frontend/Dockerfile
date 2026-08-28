@@ -25,7 +25,11 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY security-headers.conf /etc/nginx/security-headers.conf
 
-ENV NGINX_CLIENT_MAX_BODY_SIZE=512m
+# The whole-*request* ceiling, not the per-file upload cap: 512 MiB of file plus
+# the 16 MiB of multipart headroom the backend allows (`MULTIPART_OVERHEAD_BYTES`).
+# Set to the per-file number, nginx rejects a file *at* the documented limit with
+# an HTML 413 the SPA cannot read, before the API can say `upload_too_large`.
+ENV NGINX_CLIENT_MAX_BODY_SIZE=528m
 
 EXPOSE 3000
 

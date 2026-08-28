@@ -198,8 +198,7 @@ class BackupVerification:
 _backup_s3: object | None = None
 
 
-def _get_backup_s3():  # pragma: no cover — needs a real S3-compatible endpoint;
-    # verified against SeaweedFS in the storage-s3 CI job (see docs/backend.md).
+def _get_backup_s3():
     """Return a boto3 S3 client for the backup bucket, or None if not configured."""
     global _backup_s3
     if _backup_s3 is not None:
@@ -413,7 +412,9 @@ def create_backup() -> BackupMeta:
                             if written != expected:
                                 raise RuntimeError("backup_blob_size_changed")
                             written_files += 1
-            local_receipt = LocalStorageBackend().move_in(archive_temp, str(archive_path))
+            local_receipt = LocalStorageBackend().move_in(
+                archive_temp, str(archive_path)
+            )
         except Exception:
             archive_temp.unlink(missing_ok=True)
             logger.exception("backup %s failed while streaming owned blobs", backup_id)
@@ -431,7 +432,7 @@ def create_backup() -> BackupMeta:
 
     # Upload to S3 if configured
     s3 = _get_backup_s3()
-    if s3:  # pragma: no cover — see _get_backup_s3
+    if s3:
         try:
             s3_key = _backup_s3_key(archive_name)
             token = uuid.uuid4().hex
@@ -449,9 +450,7 @@ def create_backup() -> BackupMeta:
                     size=final_size,
                     token=token,
                     backend="backup-s3",
-                    namespace=(
-                        f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"
-                    ),
+                    namespace=(f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"),
                     etag=str(response.get("ETag")) if response.get("ETag") else None,
                 )
             )
@@ -515,7 +514,7 @@ def _list_local_backups() -> list[BackupMeta]:
     return results
 
 
-def _list_s3_backups() -> list[BackupMeta]:  # pragma: no cover — see _get_backup_s3
+def _list_s3_backups() -> list[BackupMeta]:
     s3 = _get_backup_s3()
     if not s3:
         return []
@@ -801,7 +800,11 @@ def delete_backup(backup_id: str) -> bool:
     local_key = meta.path if meta.location == "local" else None
     s3 = _get_backup_s3()
     s3_key = next(
-        (candidate.path for candidate in _list_s3_backups() if candidate.id == backup_id),
+        (
+            candidate.path
+            for candidate in _list_s3_backups()
+            if candidate.id == backup_id
+        ),
         None,
     )
 
@@ -818,7 +821,7 @@ def delete_backup(backup_id: str) -> bool:
                 ) from exc
 
         s3_owned: OwnedStorageObject | None = None
-        if s3 and s3_key:  # pragma: no cover — requires real backup S3
+        if s3 and s3_key:
             namespace = f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"
             candidates = session.exec(
                 select(OwnedStorageObject).where(
@@ -828,14 +831,11 @@ def delete_backup(backup_id: str) -> bool:
                 )
             ).all()
             for candidate in candidates:
-                response = s3.head_object(
-                    Bucket=settings.backup_s3_bucket, Key=s3_key
-                )
+                response = s3.head_object(Bucket=settings.backup_s3_bucket, Key=s3_key)
                 if (
                     response.get("Metadata", {}).get("printstash-create-token")
                     == candidate.token
-                    and int(response.get("ContentLength", -1))
-                    == candidate.size_bytes
+                    and int(response.get("ContentLength", -1)) == candidate.size_bytes
                     and (
                         not candidate.etag
                         or str(response.get("ETag", "")) == candidate.etag
@@ -850,7 +850,7 @@ def delete_backup(backup_id: str) -> bool:
         # leak the uncertain backup and retain its ledger row.
         if local_key is not None:
             deleted = delete_owned_key(session, local_backend, local_key) or deleted
-        if s3 and s3_key and s3_owned is not None:  # pragma: no cover
+        if s3 and s3_key and s3_owned is not None:
             try:
                 kwargs = {"Bucket": settings.backup_s3_bucket, "Key": s3_key}
                 if s3_owned.etag:
@@ -880,7 +880,7 @@ def _download_backup_to_local(meta: BackupMeta) -> Path:
     if local_path and local_path.exists():
         return local_path
 
-    if meta.location == "s3":  # pragma: no cover — see _get_backup_s3
+    if meta.location == "s3":
         # Download from S3 to a temp location
         s3 = _get_backup_s3()
         if not s3:
@@ -1015,9 +1015,7 @@ def _rollback_applied_blobs(applied: list[_AppliedBlob]) -> None:
             logger.exception("restore rollback failed for storage key %s", item.key)
 
 
-def _sync_restored_ownership(
-    database_path: Path, applied: list[_AppliedBlob]
-) -> None:
+def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -> None:
     """Replace archived fingerprints with proof from this restore operation."""
     with sqlite3.connect(database_path) as connection:
         for item in applied:
@@ -1102,7 +1100,11 @@ def _validate_restore_key(key: str) -> None:
     direct = backend.direct_path(key)
     if direct is None:
         path = PurePosixPath(key)
-        if path.is_absolute() or ".." in path.parts or not key.startswith("vault-data/"):
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not key.startswith("vault-data/")
+        ):
             raise RuntimeError("backup_restore_key_outside_storage")
         return
 
@@ -1191,9 +1193,7 @@ def restore_backup(backup_id: str) -> dict:
                 # Upgrade the private staged copy before touching live bytes.
                 # This keeps old backups restorable and guarantees the
                 # ownership ledger exists for this operation's receipts.
-                run_migrations(
-                    str(URL.create("sqlite", database=str(database_path)))
-                )
+                run_migrations(str(URL.create("sqlite", database=str(database_path))))
                 rollback_dir = staging_dir / "rollback"
                 rollback_dir.mkdir()
                 applied = _apply_staged_blobs(staged_blobs, rollback_dir)

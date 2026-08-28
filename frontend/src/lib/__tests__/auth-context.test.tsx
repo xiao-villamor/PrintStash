@@ -1,3 +1,18 @@
+/*
+ * Two moments where the React tree and the server have to agree about who is
+ * signed in.
+ *
+ * First-run setup creates the admin and logs them in through a different code
+ * path from the login form, in the same tab. If the provider does not observe
+ * that, the app renders as signed out immediately after a successful setup — the
+ * user is told to log in as the account they just made.
+ *
+ * Logout has to reach the server *before* it clears the browser. Clearing first
+ * and revoking after means a failed revoke leaves a live server session with no
+ * client that knows about it: the cookie still authenticates, and the user
+ * believes they logged out.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 

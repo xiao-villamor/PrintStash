@@ -1,3 +1,20 @@
+/*
+ * The external-library CRUD calls, and the one that must never be cached.
+ *
+ * A library's scan status changes while the user is watching the page, so the
+ * listing is deliberately `fresh` on every call. Serving it from the GET cache
+ * would show a scan as still running for as long as the cache lives — the exact
+ * screen where a user is waiting for a number to move.
+ *
+ * The rest pin method and path, because these routes are addressed by id and a
+ * `PATCH` sent as a `PUT` (or to the collection rather than the member) is a
+ * request the backend answers successfully having changed something else.
+ *
+ * The feature-flag pair is here rather than with the config tests because the
+ * flag is what gates this whole surface: read it wrong and the panel renders for
+ * an installation whose operator never enabled external libraries.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -7,6 +24,7 @@ import {
   scanExternalLibrary,
   updateExternalLibrary,
 } from "@/lib/api/libraries";
+import { getVaultConfig, updateVaultConfig } from "@/lib/api/config";
 import { invalidateApiCache } from "@/lib/api/request";
 
 /**
@@ -147,5 +165,28 @@ describe("scanExternalLibrary", () => {
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/libraries/7/scan");
     expect(init).toMatchObject({ method: "POST" });
+  });
+});
+
+describe("getVaultConfig", () => {
+  it("reads external_libraries_enabled from GET /api/v1/config", async () => {
+    respondWith({ storage_backend: "local", external_libraries_enabled: true });
+
+    const cfg = await getVaultConfig();
+
+    expect(cfg.external_libraries_enabled).toBe(true);
+    expect(lastCall().url).toBe("/api/v1/config");
+  });
+
+  it("PUTs a toggle of external_libraries_enabled", async () => {
+    respondWith({ storage_backend: "local", external_libraries_enabled: false });
+
+    const cfg = await updateVaultConfig({ external_libraries_enabled: false });
+
+    expect(cfg.external_libraries_enabled).toBe(false);
+    const { url, init } = lastCall();
+    expect(url).toBe("/api/v1/config");
+    expect(init).toMatchObject({ method: "PUT" });
+    expect(init.body).toBe(JSON.stringify({ external_libraries_enabled: false }));
   });
 });

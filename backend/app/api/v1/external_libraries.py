@@ -19,8 +19,9 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_superuser
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
+    Collection,
     ExternalLibrary,
     ExternalLibraryCollectionMode,
     ExternalLibraryWatchMode,
@@ -187,6 +188,20 @@ def list_libraries(session: Session = Depends(get_session)) -> list[LibraryRead]
     return [_to_read(lib) for lib in libs]
 
 
+def _require_target_collection(session: Session, collection_id: int | None) -> None:
+    """Refuse a target collection that does not exist, before writing the row.
+
+    `external_libraries.target_collection_id` is a foreign key, so an unknown id is a
+    500 on a fresh installation and a dangling reference on one upgraded from an
+    older release, which is missing the constraint. Neither is an answer to a bad
+    request: 404 is.
+    """
+    if collection_id is None:
+        return
+    if session.get(Collection, collection_id) is None:
+        raise HTTPException(status_code=404, detail="collection_not_found")
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -201,6 +216,7 @@ def create_library(
 ) -> LibraryRead:
     _validate_root_path(body.root_path, session)
     _validate_schedule(body.scan_schedule)
+    _require_target_collection(session, body.target_collection_id)
     lib = ExternalLibrary(
         name=body.name.strip(),
         root_path=body.root_path,
@@ -248,6 +264,7 @@ def update_library(
     if body.collection_mode is not None:
         lib.collection_mode = body.collection_mode
     if body.target_collection_id is not None:
+        _require_target_collection(session, body.target_collection_id)
         lib.target_collection_id = body.target_collection_id
     lib.updated_at = utcnow()
     session.add(lib)
@@ -299,7 +316,11 @@ def scan_now(
     if (
         library.scan_claim_token
         and library.scan_claim_expires_at
-        and library.scan_claim_expires_at > utcnow()
+        # SQLite hands a DateTime column back naive; ``utcnow()`` is aware.
+        # Comparing them directly raised TypeError, which became a 500 on the
+        # common case this branch exists to serve: a second scan request while
+        # one is still running.
+        and ensure_utc(library.scan_claim_expires_at) > utcnow()
         and library.scan_job_id
     ):
         return IngestResponse(

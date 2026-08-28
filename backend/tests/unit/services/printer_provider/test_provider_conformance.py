@@ -27,6 +27,7 @@ from app.services.printer_provider import (
     get_provider_client,
     provider_diagnostic_summary,
 )
+from tests.factories import printer_config
 
 # Credentials that make each provider buildable. A new provider must add its
 # row here — an entry missing from this map fails test_every_provider_is_covered.
@@ -70,22 +71,27 @@ METHOD_ARGS: dict[str, tuple] = {
 }
 
 ALL_PROVIDERS = list(PrinterProvider)
+
 REGISTRY = build_provider_registry()
 
 
 def _printer(provider: PrinterProvider, **overrides) -> Printer:
     fields = {**FULL_CREDENTIALS.get(provider, {}), **overrides}
-    return Printer(name="test", provider=provider, **fields)
+    return printer_config("test", provider=provider, **fields)
 
 
 def _build(provider: PrinterProvider):
     return get_provider_client(_printer(provider), registry=REGISTRY)
 
 
-def test_every_provider_is_covered():
-    """A new PrinterProvider enum member must be registered and credentialed."""
-    assert set(PROVIDERS) == set(ALL_PROVIDERS)
-    assert set(FULL_CREDENTIALS) == set(ALL_PROVIDERS)
+# The providers whose client delegates to an injectable transport. The rest reach the
+# device directly, so there is nothing to make fail on cue — see
+# `test_transport_errors_become_provider_errors`.
+DELEGATING_PROVIDERS = [
+    provider
+    for provider in ALL_PROVIDERS
+    if isinstance(_build(provider), DelegatingProvider)
+]
 
 
 @pytest.mark.parametrize("provider", ALL_PROVIDERS)
@@ -96,7 +102,8 @@ class TestProviderConformance:
     def test_missing_credentials_are_rejected(self, provider):
         with pytest.raises(ProviderError) as exc:
             get_provider_client(
-                Printer(name="empty", provider=provider), registry=REGISTRY
+                printer_config("empty", provider=provider, credentials=False),
+                registry=REGISTRY,
             )
         assert exc.value.code == "provider_credentials_missing"
 
@@ -129,12 +136,49 @@ class TestProviderConformance:
                 await getattr(client, method)(*METHOD_ARGS[method])
             assert exc.value.code == "operation_not_supported_for_provider", method
 
-    @pytest.mark.asyncio
-    async def test_transport_errors_become_provider_errors(self, provider):
-        """Client exceptions never leak past the provider boundary."""
+    def test_methods_are_awaitable(self, provider):
         client = _build(provider)
-        if not isinstance(client, DelegatingProvider):
-            pytest.skip("no delegating client to fault-inject")
+        for method in [*METHOD_ARGS, "info", "subscribe_status"]:
+            assert inspect.iscoroutinefunction(getattr(client, method)), method
+
+
+class TestProviderRegistry:
+    """The registry and the enum agree about which providers exist.
+
+    Every conformance test above is parametrized over the enum, so a provider
+    added to `PrinterProvider` and not to `PROVIDERS` is not a failing test — it
+    is a provider the whole conformance pack silently never runs against.
+    """
+
+    def test_every_provider_is_covered(self):
+        """A new PrinterProvider enum member must be registered and credentialed."""
+        assert set(PROVIDERS) == set(ALL_PROVIDERS)
+        assert set(FULL_CREDENTIALS) == set(ALL_PROVIDERS)
+
+
+class TestTransportFaults:
+    """What a provider does when its transport raises.
+
+    Its own group rather than a case inside `TestProviderConformance`, because it
+    applies to a different set of providers: only the ones whose client delegates to
+    an injectable transport have a transport to break. The class above is
+    parametrized over every provider, and a member of it could only express that by
+    skipping — which reports a test that was never written as a test that was
+    declined.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", DELEGATING_PROVIDERS)
+    async def test_transport_errors_become_provider_errors(self, provider):
+        """Client exceptions never leak past the provider boundary.
+
+        Parametrized over `DELEGATING_PROVIDERS` rather than every provider, and
+        `pytest.skip` deliberately not used: a provider with no delegating client has
+        no transport to inject a fault into, so the case does not exist. Generating it
+        and skipping reports a test that was never written as a test that was declined,
+        and the run then counts a skip that can never become a pass.
+        """
+        client = _build(provider)
         error = type(client).client_error
         caps = capabilities_for_provider(provider)
 
@@ -152,8 +196,3 @@ class TestProviderConformance:
             with pytest.raises(ProviderError) as exc:
                 await getattr(client, method)(*METHOD_ARGS[method])
             assert exc.value.code, method
-
-    def test_methods_are_awaitable(self, provider):
-        client = _build(provider)
-        for method in [*METHOD_ARGS, "info", "subscribe_status"]:
-            assert inspect.iscoroutinefunction(getattr(client, method)), method

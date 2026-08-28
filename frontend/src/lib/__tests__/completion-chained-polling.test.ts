@@ -1,3 +1,18 @@
+/*
+ * Polling a job to completion with exactly one request in flight.
+ *
+ * The naive version is an interval, and it breaks in two directions. Under load
+ * the requests overlap and pile up against the backend; after a stop/restart a
+ * *stale* response arrives and overwrites the state of the poll that replaced it —
+ * so the UI shows a job's earlier progress after the user restarted it.
+ *
+ * Chaining fixes both: the next request is scheduled from the previous result. That
+ * makes the failure paths the interesting ones. A transient error must continue
+ * the chain rather than end it (one dropped request is not a finished job), and a
+ * stop must abort the in-flight request *and* stop scheduling — a chain that
+ * keeps going after stop is a leak that outlives the component.
+ */
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCompletionChainedPoller } from "@/lib/completion-chained-polling";

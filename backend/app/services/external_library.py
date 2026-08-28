@@ -615,6 +615,13 @@ def purge_library_index(session: Session, library_id: int) -> int:
     affected_models: set[int] = set()
     for f in files:
         f.deleted_at = now
+        # The library row is about to be deleted and `files.external_library_id` is a
+        # RESTRICT foreign key, so a file still pointing at it makes that delete fail.
+        # Detaching here rather than relying on the constraint being absent: it is
+        # present on a fresh install and missing on an upgraded one, so leaving it set
+        # meant the endpoint returned 500 or 200 depending on how the operator's
+        # database came to exist.
+        f.external_library_id = None
         session.add(f)
         if f.model_id is not None:
             affected_models.add(f.model_id)

@@ -580,7 +580,13 @@ class BambuClient:
             raise self._ftps_error(
                 "invalid_bambu_artifact_path", action_code="bambu_ftps_path_invalid"
             )
-        if parsed.hostname and parsed.hostname not in {self.host, self.serial}:
+        # `urlparse` lower-cases the host component, and Bambu reports its own
+        # artifact URLs as `ftps://<SERIAL>/cache/...` with the serial in upper
+        # case. Comparing case-sensitively refused every real capture URL.
+        if parsed.hostname and parsed.hostname.lower() not in {
+            self.host.lower(),
+            self.serial.lower(),
+        }:
             raise self._ftps_error(
                 "invalid_bambu_artifact_host", action_code="bambu_ftps_path_invalid"
             )

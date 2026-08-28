@@ -65,6 +65,7 @@ export type {
   PrinterProfileRead,
   PrinterProfileCreate,
   PrinterProfileUpdate,
+  PrintSummaryRead,
 } from "./models";
 
 export type {

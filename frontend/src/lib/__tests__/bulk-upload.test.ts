@@ -1,3 +1,23 @@
+/*
+ * The pure logic behind dropping a folder of models onto the app.
+ *
+ * A bulk upload is a path problem. `dirOf` and `bulkTargetCollection` decide which
+ * collection each file lands in, and getting them wrong scatters somebody's
+ * organised folder tree across the vault — recoverable only by hand, model by
+ * model. So the boundaries are all here: a bare filename, an empty base, both
+ * empty (the vault root), and the nested case.
+ *
+ * `mergeBulkItems` is the other half, and its identity is `folder + name + size`
+ * rather than name alone. Two files called `part.stl` in different folders are
+ * two different models; the same file dropped twice is one. Both directions are
+ * asserted, and so is deduplication *within* one batch — a folder drop can contain
+ * the same file twice.
+ *
+ * `walkEntries` drains the directory reader in batches, because that API returns
+ * children a page at a time and stopping at the first page silently imports part
+ * of a folder.
+ */
+
 import { describe, expect, it } from "vitest";
 
 import {

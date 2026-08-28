@@ -78,18 +78,26 @@ Compare the `PRINTSTASH_PERF` JSON emitted by the two browser timing commands.
 Do not enable React Compiler by default based on build time alone: first triage
 its unsupported diagnostics and require a repeatable interaction-time win.
 
-The backend suite is split into explicit development lanes. All parallel lanes
-use isolated worker databases/storage and xdist work stealing:
+The backend suite is split into lanes, and a lane is a directory: the tier a test
+lives in *is* its tier. All parallel lanes use isolated worker databases/storage
+and xdist work stealing:
 
 ```bash
 cd backend
-./scripts/test.sh fast -q         # usual loop; no service/schema boundaries, real files, or E2E
+./scripts/test.sh --help          # the lane table, with what each one covers
+./scripts/test.sh fast -q         # usual loop: tests/unit + tests/integration, minus `slow`
 ./scripts/test.sh affected -q     # dependency-based selection; first run seeds its cache
-./scripts/test.sh integration -q  # real servers, stores, databases, and large fixtures
-./scripts/test.sh e2e -q          # real app against contract-enforcing fakes
+./scripts/test.sh contract -q     # our clients against fakes over a real loopback socket
+./scripts/test.sh e2e -q          # the whole app over ASGITransport against the fakes
 ./scripts/test.sh full -q         # complete pre-merge gate
 ./scripts/test.sh serial -q       # diagnostic reference only
 ```
+
+The `postgres` and `s3` subsets run against a real PostgreSQL and a real
+SeaweedFS, started as containers for the run — so `full` needs Docker running,
+and stops with a message naming the prerequisite if it is not. There is nothing
+to configure. It is an error rather than a skip because a green run with those
+tests absent verified neither the dialect-sensitive SQL nor the upgrade path.
 
 `affected` stores only local dependency metadata in the ignored `.testmondata`
 file. Treat it as a tight edit/test loop, not a substitute for `full`. Generic

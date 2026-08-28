@@ -1,3 +1,16 @@
+/*
+ * The generated printer catalog still matches the product it describes.
+ *
+ * This file is generated from the backend's provider definitions, so nothing in
+ * the frontend fails when it drifts — the setup form simply stops offering a
+ * provider, or offers one twice. Both are silent: the first looks like the
+ * provider was never supported, the second like a rendering glitch.
+ *
+ * The capability row is the one with behaviour attached. Which buttons a printer
+ * card shows is derived from declared capabilities, so a capability lost in
+ * regeneration hides pause or cancel on a machine that supports them.
+ */
+
 import { describe, expect, it } from "vitest";
 
 import { PRINTER_SETUP_OPTIONS, setupProviderFields } from "@/lib/printer-providers";
@@ -15,7 +28,7 @@ const PROVIDER_IDS = [
   "octoprint",
 ] as const;
 
-describe("generated printer contracts", () => {
+describe("PRINTER_CONTRACTS", () => {
   it("keeps the generated catalog aligned with the product setup overlay", () => {
     expect(
       SHARED_PRINTER_CONTRACT.setupOptions.map(({ value, provider, variant, label }) => [

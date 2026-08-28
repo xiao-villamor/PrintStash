@@ -98,6 +98,10 @@ const ERROR_MESSAGES = {
   unsupported_file_type: "Unsupported file type.",
   file_too_large: "File exceeds the upload size limit.",
   upload_too_large: "File exceeds the upload size limit.",
+  // The backstop, not the upload limit: `BodyLimitMiddleware` bounds the whole
+  // request — which sits above the per-file cap — so a merely-large file gets the
+  // specific `upload_too_large` above and only a runaway body lands here.
+  request_too_large: "Request exceeds the size limit.",
   no_importable_files: "No importable 3D files were found.",
   no_entries_selected: "Select at least one file to import.",
   // URL import

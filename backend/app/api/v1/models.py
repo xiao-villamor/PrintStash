@@ -1403,9 +1403,14 @@ def batch_tag_models(
     # Removal only targets tags that already exist; never create on remove.
     remove_tag_ids: List[int] = []
     for raw in payload.remove:
-        slug = taxonomy.slugify(raw.strip())
-        if not slug:
+        # Guard the *input*, not the slug. `slugify` falls back to "model" for
+        # anything it cannot make a slug out of, so slugging first turned
+        # `remove: ["   "]` into "remove the tag named model" — and the guard
+        # underneath it could never fire.
+        name = raw.strip()
+        if not name:
             continue
+        slug = taxonomy.slugify(name)
         tag = session.exec(select(Tag).where(Tag.slug == slug, live(Tag))).first()
         if tag is not None and tag.id is not None:
             remove_tag_ids.append(tag.id)
@@ -1467,14 +1472,13 @@ def batch_set_revision_labels(
             raise HTTPException(status_code=400, detail="revision_not_supported")
         ordered.append(row)
 
-    models_by_id = {
-        model.id: model
-        for model in _require_all_editable_models(
-            session, current_user, [row.model_id for row in ordered]
-        )
-    }
-    if any(row.model_id not in models_by_id for row in ordered):
-        raise HTTPException(status_code=404, detail="model_not_found")
+    # Called for the authorization it enforces: it raises 404 for a model that is
+    # not there and 403 for one this user may not edit, on the first failure. The
+    # returned rows are not needed here, and a second "did every id come back?"
+    # check after it could never fire.
+    _require_all_editable_models(
+        session, current_user, [row.model_id for row in ordered]
+    )
 
     try:
         model_views.set_revision_labels(session, ordered, payload.revision_label)

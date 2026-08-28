@@ -1,3 +1,21 @@
+/*
+ * The two panels an operator actually drives a print farm from.
+ *
+ * Everything here is about the *call* the UI makes, because the state lives on the
+ * server. Reordering is the sharp case: the queue is ordered by an integer
+ * position, so moving a job up has to send the new position rather than a
+ * direction — a UI that sent "up" and let the server guess would reorder
+ * differently than the list it just animated. Both directions are asserted,
+ * since an off-by-one is symmetric and looks right from one end.
+ *
+ * Deleting confirms first; nothing else does. That asymmetry is deliberate and it
+ * is the only irreversible action in the panel.
+ *
+ * Drain is asserted in both directions too. Toggling it on is what an operator
+ * does before servicing a machine; failing to send `false` on resume leaves a
+ * printer permanently out of rotation with the UI showing it as available.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

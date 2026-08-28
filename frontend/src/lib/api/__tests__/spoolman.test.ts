@@ -1,3 +1,14 @@
+/*
+ * Talking to a Spoolman instance the operator configured, through our backend.
+ *
+ * These are thin calls and the tests are correspondingly thin — method, path,
+ * and the one query parameter that changes what comes back. `include_archived`
+ * is the case worth naming: archived spools are ones the user retired, and
+ * showing them in a picker means offering filament that is gone, while omitting
+ * them from an inventory view hides history the user asked for. Same endpoint,
+ * two intents, one flag.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {

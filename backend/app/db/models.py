@@ -33,6 +33,31 @@ from sqlmodel import Field, Relationship, SQLModel
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
 
+# Deterministic constraint names, applied to every constraint declared below that does
+# not name itself.
+#
+# This is not cosmetic. SQLite cannot `ALTER` a constraint, so Alembic changes one by
+# rebuilding the table — and to rebuild it, it has to `DROP` the old constraint *by
+# name*. An anonymous constraint therefore cannot be altered on SQLite at all:
+# `batch_alter_table` fails with `ValueError: Constraint must have a name`. The
+# convention is what makes a schema migratable on the database this product ships
+# with by default.
+#
+# It also makes the two supported schemas comparable. `create_all` and the migration
+# chain otherwise generate different names for the same constraint, and
+# `tests/integration/db/migrations/test_models_versus_chain.py` cannot tell that
+# apart from a real divergence.
+#
+# `%(column_0_name)s` rather than `%(column_0_label)s`: the label form includes the
+# table name twice for a single-column constraint.
+SQLModel.metadata.naming_convention = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
 
 class FileType(str, Enum):
     STL = "stl"
@@ -1845,7 +1870,9 @@ class VaultAuditFinding(SQLModel, table=True):
     __tablename__ = "vault_audit_findings"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    run_id: int = Field(foreign_key="vault_audit_runs.id", index=True)
+    run_id: int = Field(
+        foreign_key="vault_audit_runs.id", index=True, ondelete="CASCADE"
+    )
     code: str = Field(max_length=64, index=True)
     severity: VaultAuditSeverity = Field(index=True)
     resource_type: str = Field(max_length=64, index=True)

@@ -8,20 +8,19 @@ import pytest
 
 from app.core.config import settings
 
-pytestmark = pytest.mark.e2e
 
+class TestAdminGc:
+    @pytest.mark.asyncio
+    async def test_admin_gc_preserves_preexisting_files_in_configured_data_dir(
+        self, api, superuser_headers, e2e_db
+    ) -> None:
+        del e2e_db  # fixture selects the real on-disk DB and isolated storage paths
+        library_file = Path(settings.data_dir) / "Jonathan" / "3D Prints" / "part.stl"
+        library_file.parent.mkdir(parents=True, exist_ok=True)
+        library_file.write_bytes(b"user-managed model")
 
-@pytest.mark.asyncio
-async def test_admin_gc_preserves_preexisting_files_in_configured_data_dir(
-    api, superuser_headers, e2e_db
-) -> None:
-    del e2e_db  # fixture selects the real on-disk DB and isolated storage paths
-    library_file = Path(settings.data_dir) / "Jonathan" / "3D Prints" / "part.stl"
-    library_file.parent.mkdir(parents=True, exist_ok=True)
-    library_file.write_bytes(b"user-managed model")
+        response = await api.post("/api/v1/admin/gc", headers=superuser_headers)
 
-    response = await api.post("/api/v1/admin/gc", headers=superuser_headers)
-
-    assert response.status_code == 200, response.text
-    assert response.json()["orphan_blobs"] == 0
-    assert library_file.read_bytes() == b"user-managed model"
+        assert response.status_code == 200, response.text
+        assert response.json()["orphan_blobs"] == 0
+        assert library_file.read_bytes() == b"user-managed model"

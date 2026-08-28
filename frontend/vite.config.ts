@@ -41,26 +41,50 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     // Unit tests run in jsdom (localStorage, window) and exclude the Playwright
-    // e2e suite, which has its own runner.
+    // suites, which have their own runner.
+    //
+    // `tests/repo/` is the frontend's `backend/tests/repo/`: invariants over the
+    // repository itself — the suite's own shape, translation coverage, the ban on
+    // native dialogs — which mirror no production module and so have no home under
+    // `src/`. It is listed explicitly rather than by widening to `tests/**`, which
+    // would swallow the Playwright specs.
     globals: true,
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    exclude: ["tests/e2e/**", "node_modules/**"],
+    include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/repo/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["tests/e2e/**", "tests/e2e-real/**", "tests/performance/**", "node_modules/**"],
     coverage: {
       provider: "v8",
-      reporter: ["text", "html"],
-      include: ["src/lib/**/*.{ts,tsx}"],
-      exclude: ["src/**/*.{test,spec}.{ts,tsx}", "src/**/*.d.ts"],
-      // Enforced floor set just under the current baseline. Keep statement
-      // and branch coverage ratcheted together so happy-path-only tests cannot
-      // disguise a regression in error and edge-case behaviour.
-      thresholds: {
-        statements: 67,
-        branches: 65,
-        functions: 55,
-        lines: 69,
-      },
+      // `json-summary` is what scripts/coverage-gate.mjs reads; `html` is what you
+      // read. `text` keeps the number in the terminal where the run happened.
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "coverage",
+      // All of `src/`, not just `src/lib/`. The old include was `src/lib/**`, which
+      // measured 1,655 of the 7,900 statements this app ships and reported 86% —
+      // a number about 21% of the code. Widening it does not make the app worse
+      // tested; it makes the gap visible, which is the only way it gets closed.
+      //
+      // `packages/**` is excluded because its `src/` directories match `src/**` and
+      // each workspace package runs its own suite: measured from here they look
+      // half-covered purely because the app imports some of them.
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: [
+        "packages/**",
+        "src/**/*.{test,spec}.{ts,tsx}",
+        "src/**/__tests__/**",
+        "src/**/*.d.ts",
+        // Generated from the backend contract; its source of truth is the generator.
+        "src/generated/**",
+        // Helpers that exist only for tests.
+        "src/test-support/**",
+        // The bootstrap. Running it *is* starting the app, so a unit test of it
+        // would assert that `createRoot` was called.
+        "src/main.tsx",
+      ],
+      // Floors live in scripts/coverage-gate.mjs, not here: vitest thresholds can
+      // only enforce a lower bound, and a floor nobody is forced to raise stops
+      // being a gate. That script ratchets in both directions and carries a floor
+      // per area of the tree.
     },
   },
 }));

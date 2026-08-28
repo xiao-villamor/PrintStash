@@ -1,32 +1,31 @@
+/**
+ * The deployment-level reads: first-run setup, vault config, health, thumbnails.
+ *
+ * Setup and config are the two endpoints that decide where a whole library lives, so
+ * a mistake here is not a wrong screen — it is a library pointed at the wrong
+ * storage. The URL and the method are the contract, and they are what is pinned.
+ *
+ * Health is the one that must never be cached. It answers "is this install healthy
+ * *right now*", and a stale answer sends an operator looking for a problem that is
+ * already fixed — or, worse, not looking for one that is not. The release check is
+ * the mirror image: the server caches it deliberately to stay off GitHub's rate
+ * limit, so the refresh flag is the only way the "check now" button gets a fresh
+ * answer.
+ */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getVaultConfig, updateVaultConfig } from "@/lib/api/config";
+import {
+  completeSetup,
+  getHealthDetails,
+  getLatestRelease,
+  getSetupStatus,
+  getVaultConfig,
+  rebuildModelThumbnails,
+  updateVaultConfig,
+} from "@/lib/api/config";
 import { invalidateApiCache } from "@/lib/api/request";
 
-const fetchMock = vi.fn<typeof fetch>();
-
-type WireValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly WireValue[]
-  | { readonly [key: string]: WireValue };
-
-function respondWith(data: WireValue): void {
-  fetchMock.mockImplementation(() =>
-    Promise.resolve(
-      new Response(JSON.stringify(data), {
-        headers: { "content-type": "application/json" },
-      }),
-    ),
-  );
-}
-
-function lastCall() {
-  const [url, init] = fetchMock.mock.calls.at(-1)!;
-  return { url, init: init! };
-}
+import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
@@ -39,25 +38,91 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("vault config — external libraries flag", () => {
-  it("reads external_libraries_enabled from GET /api/v1/config", async () => {
-    respondWith({ storage_backend: "local", external_libraries_enabled: true });
+describe("getSetupStatus", () => {
+  it("reads whether the deployment has been set up", async () => {
+    respondWith({ needs_setup: true });
 
-    const cfg = await getVaultConfig();
+    await getSetupStatus();
 
-    expect(cfg.external_libraries_enabled).toBe(true);
-    expect(lastCall().url).toBe("/api/v1/config");
+    expectRequest("/api/v1/setup/status");
+  });
+});
+
+describe("completeSetup", () => {
+  it("POSTs the first-run answers", async () => {
+    respondWith({ access_token: "token" });
+
+    await completeSetup({
+      setup_token: "token",
+      username: "alice",
+      password: "Password123",
+    });
+
+    expectRequest("/api/v1/setup", "POST");
+    expect(lastBody()).toMatchObject({ username: "alice" });
+  });
+});
+
+describe("getVaultConfig", () => {
+  it("reads the current vault configuration", async () => {
+    respondWith({ storage_backend: "local" });
+
+    await getVaultConfig();
+
+    expectRequest("/api/v1/config");
+  });
+});
+
+describe("updateVaultConfig", () => {
+  it("PUTs a change", async () => {
+    respondWith({ storage_backend: "s3" });
+
+    await updateVaultConfig({ storage_backend: "s3" });
+
+    expectRequest("/api/v1/config", "PUT");
+    expect(lastBody()).toEqual({ storage_backend: "s3" });
+  });
+});
+
+describe("getHealthDetails", () => {
+  it("reads the details without caching them", async () => {
+    respondWith({ status: "ok" });
+
+    await getHealthDetails();
+
+    // A stale health answer sends an operator looking for a problem that is
+    // already fixed, or not looking for one that is not.
+    expectRequest("/api/v1/health/details");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+});
+
+describe("getLatestRelease", () => {
+  it("reads the cached release status by default", async () => {
+    respondWith({ status: "up_to_date", update_available: false });
+
+    await getLatestRelease();
+
+    expectRequest("/api/v1/health/releases/latest");
   });
 
-  it("PUTs a toggle of external_libraries_enabled", async () => {
-    respondWith({ storage_backend: "local", external_libraries_enabled: false });
+  it("forces a re-check when the operator asks for one", async () => {
+    respondWith({ status: "up_to_date", update_available: false });
 
-    const cfg = await updateVaultConfig({ external_libraries_enabled: false });
+    await getLatestRelease(true);
 
-    expect(cfg.external_libraries_enabled).toBe(false);
-    const { url, init } = lastCall();
-    expect(url).toBe("/api/v1/config");
-    expect(init).toMatchObject({ method: "PUT" });
-    expect(init.body).toBe(JSON.stringify({ external_libraries_enabled: false }));
+    // The server caches this to stay off GitHub's rate limit; the flag is how
+    // the "check now" button gets past it.
+    expectRequest("/api/v1/health/releases/latest?refresh=true");
+  });
+});
+
+describe("rebuildModelThumbnails", () => {
+  it("asks for a forced rebuild", async () => {
+    respondWith({ job_id: "abc", state: "pending" });
+
+    await rebuildModelThumbnails();
+
+    expectRequest("/api/v1/files/thumbnails/rebuild?force=true", "POST");
   });
 });

@@ -1,3 +1,29 @@
+/*
+ * The single client every request in the app goes through.
+ *
+ * Four things live here and each fails in its own way.
+ *
+ * **URL derivation.** The browser talks to a same-origin proxy, so paths pass
+ * through unchanged and only the WebSocket URL is derived — getting the scheme
+ * wrong (`ws` on an `https` page) is a mixed-content block, which surfaces as a
+ * live view that silently never connects.
+ *
+ * **Download filenames.** `Content-Disposition` arrives in three spellings
+ * (extended `filename*`, quoted, bare) and the value came from a user's upload,
+ * so it is attacker-shaped: a name with a path separator or a newline in it is
+ * what this sanitises before it reaches the download attribute.
+ *
+ * **The GET cache.** Caching is what keeps a navigation from refetching the same
+ * config four times, and the risk is entirely staleness: an in-flight
+ * deduplication that outlives its usefulness, or a cache that survives a
+ * mutation, both show the user data they just changed away. So `fresh: true` and
+ * `invalidateApiCache` are asserted as hard bypasses, and every mutation clears.
+ *
+ * **Auth headers.** No token is read out of legacy browser storage, and no empty
+ * `Authorization` header is sent — the second would look like a malformed
+ * credential to the backend rather than like an anonymous request.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -60,7 +86,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("getUrl / getWsUrl", () => {
+describe("getUrl", () => {
   it("returns the path unchanged in the browser (same-origin proxy)", () => {
     expect(getUrl("/api/v1/models")).toBe("/api/v1/models");
   });
@@ -71,7 +97,7 @@ describe("getUrl / getWsUrl", () => {
   });
 });
 
-describe("download filenames", () => {
+describe("downloadFilename", () => {
   it("parses and sanitizes extended, quoted, and plain Content-Disposition names", () => {
     expect(
       parseContentDispositionFilename("attachment; filename*=UTF-8''%E2%9C%93%20benchy.gcode"),
@@ -142,7 +168,7 @@ describe("download filenames", () => {
   });
 });
 
-describe("getJson caching", () => {
+describe("getJson", () => {
   it("serves a second call from cache without a second fetch", async () => {
     respondWith([{ id: 1 }]);
 
@@ -193,7 +219,7 @@ describe("getJson caching", () => {
   });
 });
 
-describe("auth headers", () => {
+describe("authHeaders", () => {
   it("does not attach a browser-readable token from legacy storage", async () => {
     window.localStorage.setItem("printstash.token", "abc123");
     respondWith([]);
@@ -214,7 +240,7 @@ describe("auth headers", () => {
   });
 });
 
-describe("mutations", () => {
+describe("sendJson", () => {
   it("sendJson issues the right method/body and clears the GET cache", async () => {
     // Prime the cache, then mutate and confirm a follow-up GET refetches.
     respondWith([{ id: 1 }]);

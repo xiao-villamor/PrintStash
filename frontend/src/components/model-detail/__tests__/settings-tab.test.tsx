@@ -1,3 +1,11 @@
+/*
+ * Telling a user why the slicer-settings tab is empty.
+ *
+ * An STL has no slicer settings — there is nothing to show and nothing wrong. An
+ * empty tab with no explanation reads as data that failed to load, so the user
+ * re-uploads the file, or reports a bug. The sentence is the feature.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";

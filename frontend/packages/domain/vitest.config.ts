@@ -8,15 +8,13 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.ts"],
     coverage: {
       provider: "v8",
-      reporter: ["text", "html"],
-      include: ["src/**/*.ts"],
-      exclude: ["src/**/*.{test,spec}.ts", "src/**/*.d.ts"],
-      thresholds: {
-        statements: 88,
-        branches: 82,
-        functions: 90,
-        lines: 94,
-      },
+      // `json-summary` is what ../../scripts/coverage-gate.mjs reads. Floors live
+      // there rather than in `thresholds` here, because thresholds can only enforce
+      // a lower bound and this one has to be raised as the suite improves.
+      reporter: ["text", "html", "json-summary"],
+      reportsDirectory: "coverage",
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/*.{test,spec}.{ts,tsx}", "src/**/__tests__/**", "src/**/*.d.ts"],
     },
   },
 });

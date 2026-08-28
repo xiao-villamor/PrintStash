@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import (
+    ArtifactMaterialRequirement,
     Collection,
     Document,
     File,
@@ -28,6 +29,7 @@ from app.db.models import (
     ModelProvenanceSource,
     ModelSourceCover,
     ModelStar,
+    PrintBatch,
     Printer,
     PrinterFile,
     PrintJob,
@@ -315,9 +317,19 @@ def hard_delete_file(
             replacement.is_recommended = True
             session.add(replacement)
 
+    # Every table with a NOT NULL foreign key to this row, or the delete is refused.
+    # `foreign_keys=ON` is a production pragma and these are all `RESTRICT`, so a
+    # child left behind is a failed purge rather than a dangling id — and the two
+    # rows the ownership ledger cares about are already gone by this point.
     session.exec(delete(PrinterFile).where(PrinterFile.file_id == file_id))
     session.exec(delete(PrintJob).where(PrintJob.file_id == file_id))
     session.exec(delete(Metadata).where(Metadata.file_id == file_id))
+    session.exec(delete(PrintBatch).where(PrintBatch.file_id == file_id))
+    session.exec(
+        delete(ArtifactMaterialRequirement).where(
+            ArtifactMaterialRequirement.file_id == file_id
+        )
+    )
     session.delete(file_row)
 
 

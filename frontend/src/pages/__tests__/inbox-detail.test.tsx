@@ -1,3 +1,24 @@
+/*
+ * Reviewing one captured import before it becomes models.
+ *
+ * The destination collection defaults to the capture's own title, which is the
+ * decision that makes a browser capture one click instead of three. Reusing an
+ * existing collection with that title rather than creating a duplicate is the
+ * other half — without it a user who imports twice from the same source ends up
+ * with "Benchy" and "Benchy (2)".
+ *
+ * Polling stops at a terminal state and not before. An import that answers
+ * "still reviewing" has to be polled again; one that finished must not be, or the
+ * page keeps requesting a job that is done for as long as it stays open.
+ *
+ * Partial results retry *only the failed files*. Retrying everything re-downloads
+ * and re-imports what already succeeded, which duplicates models.
+ *
+ * The source URLs here came from a third-party page, so the same scheme check as
+ * the Source tab applies: safe ones become normalized links, everything else stays
+ * text.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -45,6 +66,17 @@ const reviewItem: InboxItem = {
   completed_at: null,
   completion: null,
 };
+
+/**
+ * A capture in the given state. The parameter is a plain string rather than the
+ * union: this file has to cover a state a newer backend sends that this build's
+ * union does not list, which is the case the fallback exists for.
+ */
+function itemInState(state: string): InboxItem {
+  // SAFETY: `state` is the only field being varied, and every consumer of it in
+  // the page either matches a known value or renders the string as it arrived.
+  return { ...reviewItem, state } as InboxItem;
+}
 
 function renderPage(collections: CollectionRead[] = []) {
   return render(
@@ -267,5 +299,76 @@ describe("InboxDetailPage", () => {
       "focus-visible:ring-offset-2",
       "ring-offset-background",
     );
+  });
+  describe("what the capture is doing", () => {
+    it.each([
+      ["captured", "Captured"],
+      ["resolving", "Resolving"],
+      ["importing", "Importing"],
+      ["failed", "Failed"],
+      ["completed", "Completed"],
+    ])("names the %s state in words", async (state, label) => {
+      // A capture moves through five states on its own; a raw enum tells the
+      // user nothing about whether to wait or to act.
+      vi.mocked(api.getPendingImport).mockResolvedValue(itemInState(state));
+
+      renderPage();
+
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    });
+
+    it("shows an unfamiliar state as it arrived", async () => {
+      // A newer backend can report a state this build has no wording for, and a
+      // blank badge is worse than an unfamiliar word.
+      vi.mocked(api.getPendingImport).mockResolvedValue(itemInState("quarantined"));
+
+      renderPage();
+
+      expect(await screen.findByText("quarantined")).toBeInTheDocument();
+    });
+  });
+
+  describe("where the capture came from", () => {
+    it.each([
+      ["cults3d.com", "Cults3D"],
+      ["makerworld.com", "MakerWorld"],
+      ["myminifactory.com", "MyMiniFactory"],
+      ["printables.com", "Printables"],
+      ["thingiverse.com", "Thingiverse"],
+    ])("names %s properly", async (hostname, label) => {
+      // These are brand names, and rendering "Myminifactory" reads as a bug in
+      // the one place the user is checking they captured the right thing.
+      vi.mocked(api.getPendingImport).mockResolvedValue({
+        ...reviewItem,
+        source_hostname: hostname,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    });
+
+    it("capitalises a host it has no brand name for", async () => {
+      vi.mocked(api.getPendingImport).mockResolvedValue({
+        ...reviewItem,
+        source_hostname: "models.example.com",
+      });
+
+      renderPage();
+
+      expect(await screen.findByText("Example")).toBeInTheDocument();
+    });
+
+    it("says the web when there is no host at all", async () => {
+      vi.mocked(api.getPendingImport).mockResolvedValue({
+        ...reviewItem,
+        source_url: null,
+        source_hostname: null,
+      });
+
+      renderPage();
+
+      expect(await screen.findByText("Web")).toBeInTheDocument();
+    });
   });
 });

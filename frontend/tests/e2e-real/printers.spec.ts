@@ -1,26 +1,35 @@
+/**
+ * Registering a machine and taking it out of the fleet.
+ *
+ * The smallest possible round trip, and the one every other printer test depends on: if
+ * adding a printer through the form does not produce a row the app can then remove, no
+ * amount of control-endpoint coverage matters.
+ */
 import { test, expect } from "./helpers";
 
 // Adds a real Moonraker printer record (it will sit offline — no hardware — but
 // the create/list/remove path is fully exercised against the backend).
-test("add and remove a printer", async ({ page }) => {
-  const name = `e2e-printer-${Date.now()}`;
-  await page.goto("/printers");
-  await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
+test.describe("printers", () => {
+  test("add and remove a printer", async ({ page }) => {
+    const name = `e2e-printer-${Date.now()}`;
+    await page.goto("/printers");
+    await expect(page.getByRole("heading", { name: "Printers" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Add printer" }).click();
-  await page.getByPlaceholder("Voron 2.4").fill(name);
-  await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
-  await page.getByRole("button", { name: "Add printer" }).last().click();
+    await page.getByRole("button", { name: "Add printer" }).click();
+    await page.getByPlaceholder("Voron 2.4").fill(name);
+    await page.getByPlaceholder("http://printer.local:7125").fill("http://127.0.0.1:7125");
+    await page.getByRole("button", { name: "Add printer" }).last().click();
 
-  const card = page.getByRole("link", { name: new RegExp(name) });
-  await expect(card).toBeVisible();
+    const card = page.getByRole("link", { name: new RegExp(name) });
+    await expect(card).toBeVisible();
 
-  // Persisted.
-  await page.reload();
-  await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
+    // Persisted.
+    await page.reload();
+    await expect(page.getByRole("link", { name: new RegExp(name) })).toBeVisible();
 
-  // Remove through the card action and shared confirmation dialog.
-  await card.locator("xpath=ancestor::article").getByRole("button", { name: "Remove" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
-  await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
+    // Remove through the card action and shared confirmation dialog.
+    await card.locator("xpath=ancestor::article").getByRole("button", { name: "Remove" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Remove" }).click();
+    await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
+  });
 });

@@ -16,13 +16,16 @@ if (
   );
 }
 
+// Chrome 137 removed the `--load-extension` switch, and removed it *silently*:
+// the browser still starts, `chrome://extensions` renders an empty list, and every
+// assertion about the extension fails with no hint that nothing was installed.
+// The extension is now installed at runtime over the browser-level CDP endpoint
+// instead (see `installChromeExtension`), which is also better than the old flag:
+// it returns the assigned extension id, so the test no longer has to scrape it out
+// of the settings page's Polymer shadow DOM.
 const chromeOptions = {
   binary: browserBinary,
-  args: [
-    "--headless=new",
-    `--disable-extensions-except=${extensionDirectory}`,
-    `--load-extension=${extensionDirectory}`,
-  ],
+  args: ["--headless=new"],
 };
 
 const firefoxOptions = {

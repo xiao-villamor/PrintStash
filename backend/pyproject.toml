@@ -11,6 +11,13 @@ dependencies = [
     "botocore>=1.43,<2",
     "croniter>=6.2,<7",
     "fastapi>=0.141,<1",
+    # SQLAlchemy needs greenlet for every asyncio path, but declares it only for
+    # platform_machine in (AMD64, WIN32, aarch64, amd64, ppc64le, win32, x86_64).
+    # macOS on Apple Silicon reports arm64, so that marker is False there and a
+    # plain `uv sync` leaves greenlet out — `create_async_engine_for_db` then dies
+    # at runtime on a developer Mac while passing in CI. Declare it ourselves so
+    # the async DB capability is present on every platform we support.
+    "greenlet>=3.5,<4",
     "httpx>=0.28,<0.29",
     "lxml>=6.1,<7",
     "networkx>=3.6,<4",
@@ -51,6 +58,10 @@ storage-opendal = [
     "opendal==0.47.6",
 ]
 dev = [
+    # Shipped as the `async-db` extra for operators; installed for every
+    # developer and CI run so the SQLite async contracts execute instead of
+    # skipping. The capability-absent path is covered by patching find_spec.
+    "aiosqlite>=0.22,<1",
     "asyncssh>=2.21,<3",
     "bandit>=1.8",
     "deptry>=0.23,<1",
@@ -62,8 +73,16 @@ dev = [
     "pytest-testmon>=2.2,<3",
     "pytest-xdist>=3.8,<4",
     "pytest-randomly>=3.15",
+    # Portable RSS for the mesh-reclamation tests. `/proc` is Linux-only, and a
+    # memory test that silently skips on the maintainer's machine is a memory test
+    # nobody runs.
+    "psutil>=6",
     "pyright>=1.1.403",
     "ruff>=0.8",
+    # Provides the real PostgreSQL and SeaweedFS the `postgres`- and `s3`-marked
+    # tests run against. There is no second path: see `tests/containers.py`.
+    # Without a Docker daemon those tests skip, naming the prerequisite.
+    "testcontainers[postgres]>=4.9,<5",
     "wsproto>=1.3,<2",
     "WsgiDAV>=4.3,<5",
     "cheroot>=11,<12",
@@ -71,14 +90,22 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--capture=sys --strict-markers --import-mode=importlib"
-pythonpath = ["."]
+# -ra surfaces every skip and xfail reason in the summary, so a resource-gated subset
+# that silently stopped running is visible rather than invisible.
+addopts = "--capture=sys --strict-markers -ra"
 markers = [
-    "e2e: end-to-end tests that boot the real app against contract-enforcing fakes (slower; run with `pytest tests/e2e`)",
-    "contract: client/provider tests against contract-enforcing fakes over real loopback sockets",
-    "postgres: tests that require PRINTSTASH_TEST_POSTGRES_URL",
-    "s3: tests that require PRINTSTASH_TEST_S3_ENDPOINT",
-    "slow: tests that consume large real files or run long simulations",
+    # Tiers. The directory a test lives in decides these; conftest.py applies them from
+    # the path. unit/ and integration/ carry no marker — the lanes select them by path.
+    "contract: our client against a contract-enforcing fake over a real loopback socket (lane: contract)",
+    "e2e: the whole app over ASGITransport against the fakes (lane: e2e)",
+    # Resources. These gate a subset *inside* a tier and skip when the resource is absent.
+    "postgres: runs against a real PostgreSQL container (tests/containers.py)",
+    "s3: runs against a real SeaweedFS container (tests/containers.py)",
+    "slow: large real fixtures or long simulations; excluded from the fast lane",
+    # Reads the report a finished coverage run wrote, so it cannot run inside the run
+    # it judges. Every lane deselects it; `./scripts/test.sh coverage` runs it alone,
+    # after the measured pass. See scripts/test.sh.
+    "coverage_gate: asserts the coverage floors against coverage.json (lane: coverage)",
 ]
 
 [tool.ruff.lint]
@@ -96,12 +123,64 @@ optional_dependencies_dev_groups = ["dev"]
 DEP002 = [
     "aiosqlite",
     "cascadio",
+    "greenlet",
     "lxml",
     "networkx",
     "psycopg",
     "python-multipart",
     "uvicorn",
 ]
+
+# ---------------------------------------------------------------------------
+# Coverage
+#
+# `branch = true` is the setting that makes the number mean something. Under line
+# coverage an `if x:` whose false path never executes counts as fully covered, so
+# every guard clause in the codebase could be half-tested at 100%. Turning it on
+# moved the measured total from 95% to 93% for the same suite — 614 branches that
+# only ever take one path. That is not a regression; it is the number that was
+# always true.
+#
+# The floors live in `tests/repo/test_coverage_floors.py` rather than in
+# `--cov-fail-under`, because that flag can only check the aggregate and the
+# aggregate is a blunt instrument at 21k statements: a 400-line service can rot
+# from 95% to 70% and move the total by half a percent. That test carries
+# per-module floors and ratchets in both directions.
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["app"]
+# The suite runs under xdist and the app uses worker threads. Without these,
+# coverage loses the lines executed off the main thread — which reads as a gap in
+# exactly the code that is hardest to test.
+concurrency = ["thread", "multiprocessing"]
+parallel = true
+sigterm = true
+omit = ["app/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 2
+exclude_also = [
+    # Never executes at runtime by design.
+    "if TYPE_CHECKING:",
+    # An abstract method's body is the contract, not code that runs.
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    # `...` bodies on Protocol members.
+    "^\\s*\\.\\.\\.$",
+    # Exercised by running the module, not by importing it.
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = ".coverage-html"
+
+[tool.coverage.json]
+# NOT `.coverage.json`: `coverage combine` globs `.coverage.*` for the parallel data
+# files, so a report written there would be picked up as corrupt input on the next run.
+output = "coverage.json"
 
 [tool.uv.sources]
 printstash-core = { workspace = true }

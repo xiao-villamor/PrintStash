@@ -1,18 +1,34 @@
+/*
+ * Sending a model to a printer, with every warning that stands between the user
+ * and a wasted spool.
+ *
+ * The material check has three answers and this component has to show all three
+ * differently. A *proven* mismatch is confirmed explicitly and the override is
+ * recorded, because somebody chose to print PETG on a PLA-loaded machine and that
+ * decision needs an author. A spool with no tracked remaining weight is
+ * *unknown*, not sufficient — assuming it has enough is how a print fails at 90%.
+ * And a compatible spool goes through silently.
+ *
+ * The batch path is separate because it is atomic: asking for four copies must
+ * create one batch, not four independent jobs. Four jobs cannot be cancelled as a
+ * unit, which is the whole reason a user asked for a batch.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
 import { storeLogin } from "@/lib/auth";
+import { aPrinter } from "@/test-support/factories";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/query-client";
 import type {
   MetadataRead,
   PrintBatchRead,
-  PrinterRead,
   PrintJobRead,
   SpoolmanStatus,
   SpoolRead,
@@ -31,39 +47,12 @@ const commands: SendToCommands = {
   sendToPrinter,
 };
 
-const printer: PrinterRead = {
+const printer = aPrinter({
   id: 7,
   name: "Farm printer",
-  provider: "moonraker",
   moonraker_url: "http://farm",
-  has_api_key: false,
-  access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
-  capabilities: {
-    can_start: true,
-    can_pause: true,
-    can_resume: true,
-    can_cancel: true,
-    can_live_status: true,
-    can_upload: true,
-    can_list_files: true,
-    can_send_gcode: true,
-    can_measure_consumption: true,
-    support_level: "stable",
-    support_notes: [],
-    unsupported_actions: [],
-  },
-  notes: null,
-  group: null,
-  is_default: false,
-  drain_mode: false,
-  drain_reason: null,
-  drain_updated_at: null,
-  status: "ready",
   last_seen_at: null,
-  last_error: null,
-  created_at: "2026-07-15T00:00:00Z",
-  updated_at: "2026-07-15T00:00:00Z",
-};
+});
 
 const adminUser = { id: 1, username: "admin", email: null, is_superuser: true };
 
@@ -234,130 +223,187 @@ beforeEach(() => {
   });
 });
 
-it("adds selected G-code to least-busy fleet queue", async () => {
-  renderPanel();
+describe("SendToQueue", () => {
+  it("adds selected G-code to least-busy fleet queue", async () => {
+    renderPanel();
 
-  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-  await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
-  await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
 
-  await waitFor(() =>
-    expect(enqueueFleetJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        file_id: 42,
-        strategy: "least_busy",
-        printer_id: undefined,
-      }),
-    ),
-  );
-});
-
-it("warns when the selected spool doesn't have enough filament left, but doesn't block sending", async () => {
-  renderPanel({
-    metadata: weighing(250),
-    spools: [
-      {
-        id: 1,
-        filament_id: null,
-        name: "Almost empty",
-        filament_name: null,
-        vendor_name: null,
-        material: null,
-        color_hex: null,
-        remaining_weight: 10,
-        used_weight: null,
-        archived: false,
-        location: null,
-      },
-    ],
+    await waitFor(() =>
+      expect(enqueueFleetJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file_id: 42,
+          strategy: "least_busy",
+          printer_id: undefined,
+        }),
+      ),
+    );
   });
 
-  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-  await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+  it("warns when the selected spool doesn't have enough filament left, but doesn't block sending", async () => {
+    renderPanel({
+      metadata: weighing(250),
+      spools: [
+        {
+          id: 1,
+          filament_id: null,
+          name: "Almost empty",
+          filament_name: null,
+          vendor_name: null,
+          material: null,
+          color_hex: null,
+          remaining_weight: 10,
+          used_weight: null,
+          archived: false,
+          location: null,
+        },
+      ],
+    });
 
-  expect(await screen.findByText(/needs ~250g.*10g left/)).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).not.toBeDisabled();
-});
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
 
-it("warns when the spool has no tracked remaining weight instead of assuming it's plenty", async () => {
-  renderPanel({
-    metadata: weighing(250),
-    spools: [
-      {
-        id: 1,
-        filament_id: null,
-        name: "Untracked",
-        filament_name: null,
-        vendor_name: null,
-        material: null,
-        color_hex: null,
-        remaining_weight: null,
-        used_weight: null,
-        archived: false,
-        location: null,
-      },
-    ],
+    expect(await screen.findByText(/needs ~250g.*10g left/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).not.toBeDisabled();
   });
 
-  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-  await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
+  it("warns when the spool has no tracked remaining weight instead of assuming it's plenty", async () => {
+    renderPanel({
+      metadata: weighing(250),
+      spools: [
+        {
+          id: 1,
+          filament_id: null,
+          name: "Untracked",
+          filament_name: null,
+          vendor_name: null,
+          material: null,
+          color_hex: null,
+          remaining_weight: null,
+          used_weight: null,
+          archived: false,
+          location: null,
+        },
+      ],
+    });
 
-  expect(await screen.findByText(/no tracked remaining weight/)).toBeInTheDocument();
-});
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.selectOptions(screen.getByLabelText("Spool"), "1");
 
-it("confirms a known manual mismatch and records the override policy", async () => {
-  checkFleetCompatibility.mockResolvedValue({
-    file_id: 42,
-    requirements: [{ tool_index: 0, material_type: "PLA", color_hex: null }],
-    nozzle_diameter_mm: 0.4,
-    printers: [
-      {
-        printer_id: 7,
-        verdict: "mismatch",
-        reasons: ["material_type_mismatch"],
-        missing_materials: ["pla"],
-        color_advisories: [],
-      },
-    ],
+    expect(await screen.findByText(/no tracked remaining weight/)).toBeInTheDocument();
   });
-  renderPanel();
 
-  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-  await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
-  await userEvent.selectOptions(screen.getByLabelText("Routing"), "manual");
-  await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
-  expect(await screen.findByText("Print with a known material mismatch?")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Print anyway" }));
+  it("confirms a known manual mismatch and records the override policy", async () => {
+    checkFleetCompatibility.mockResolvedValue({
+      file_id: 42,
+      requirements: [{ tool_index: 0, material_type: "PLA", color_hex: null }],
+      nozzle_diameter_mm: 0.4,
+      printers: [
+        {
+          printer_id: 7,
+          verdict: "mismatch",
+          reasons: ["material_type_mismatch"],
+          missing_materials: ["pla"],
+          color_advisories: [],
+        },
+      ],
+    });
+    renderPanel();
 
-  await waitFor(() =>
-    expect(enqueueFleetJob).toHaveBeenCalledWith(
-      expect.objectContaining({
-        compatibility_policy: "allow_mismatch",
-        printer_id: 7,
-      }),
-    ),
-  );
-});
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await userEvent.selectOptions(screen.getByLabelText("Routing"), "manual");
+    await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+    expect(await screen.findByText("Print with a known material mismatch?")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Print anyway" }));
 
-it("creates an atomic batch when copies is greater than one", async () => {
-  renderPanel();
+    await waitFor(() =>
+      expect(enqueueFleetJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          compatibility_policy: "allow_mismatch",
+          printer_id: 7,
+        }),
+      ),
+    );
+  });
 
-  await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
-  await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
-  await userEvent.clear(screen.getByLabelText("Copies"));
-  await userEvent.type(screen.getByLabelText("Copies"), "3");
-  await userEvent.selectOptions(screen.getByLabelText("Priority"), "rush");
-  await userEvent.type(screen.getByLabelText("Printer group"), "Workshop");
-  await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+  it("creates an atomic batch when copies is greater than one", async () => {
+    renderPanel();
 
-  await waitFor(() =>
-    expect(createFleetBatch).toHaveBeenCalledWith(
-      expect.objectContaining({
-        file_id: 42,
-        quantity: 3,
-        priority: "rush",
-        target_group: "Workshop",
-      }),
-    ),
-  );
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add to queue" }));
+    await userEvent.clear(screen.getByLabelText("Copies"));
+    await userEvent.type(screen.getByLabelText("Copies"), "3");
+    await userEvent.selectOptions(screen.getByLabelText("Priority"), "rush");
+    await userEvent.type(screen.getByLabelText("Printer group"), "Workshop");
+    await userEvent.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(createFleetBatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          file_id: 42,
+          quantity: 3,
+          priority: "rush",
+          target_group: "Workshop",
+        }),
+      ),
+    );
+  });
+  it("uploads to every printer the user picked", async () => {
+    // "Send now" is per-printer, unlike the queue: the fleet does not choose,
+    // so each selected machine gets its own upload.
+    sendToPrinter.mockResolvedValue(queuedJob);
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(sendToPrinter).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ file_id: 42, start_print: false }),
+      ),
+    );
+  });
+
+  it("keeps a direct send safe unless the user overrode the check", async () => {
+    // `allow_mismatch` is how a nozzle-incompatible file gets onto a printer;
+    // it must never be the default a plain send carries.
+    sendToPrinter.mockResolvedValue(queuedJob);
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
+
+    await waitFor(() =>
+      expect(sendToPrinter).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ compatibility_policy: "safe" }),
+      ),
+    );
+  });
+
+  it("reports which printer a partly-failed send did not reach", async () => {
+    // "Sent" over a fleet where one machine refused is how somebody walks away
+    // from a print that never started.
+    sendToPrinter.mockRejectedValue(new Error("printer offline"));
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)!);
+
+    expect(await screen.findByText(/Farm printer: printer offline/)).toBeInTheDocument();
+  });
+
+  it("will not send once the user deselects every printer", async () => {
+    // A direct send names its target; with none there is nothing to send to.
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+    await userEvent.click(screen.getByLabelText("Select Farm printer"));
+
+    expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).toBeDisabled();
+  });
 });

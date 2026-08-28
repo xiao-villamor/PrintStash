@@ -1,3 +1,13 @@
+/*
+ * Exactly one G-code revision is marked recommended, even when the data says
+ * otherwise.
+ *
+ * Older releases could leave two revisions flagged, and the invariant is now
+ * enforced on write — but the rows are already in people's databases. The UI has
+ * to pick the newest rather than render both, because two badges reading
+ * "recommended" on one model gives a user no way to know which file to print.
+ */
+
 import { describe, expect, it } from "vitest";
 
 import { normalizeRecommendedGcodeFiles } from "../presentation";

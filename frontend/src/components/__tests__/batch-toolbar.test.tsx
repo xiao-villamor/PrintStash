@@ -1,3 +1,21 @@
+/*
+ * Acting on many models at once, where every action is one the user cannot undo
+ * per-item.
+ *
+ * The toolbar appears only when something is selected — rendering an empty one
+ * leaves a bar of live buttons above a list with no selection, and the first one
+ * clicked applies to nothing or to everything depending on the handler.
+ *
+ * Two cases are about the *destination* rather than the action. Moving to the
+ * root is distinct from moving to a collection (the API takes a null, not an
+ * empty string), and the destination search must exclude the selected folders'
+ * own descendants — moving a folder into itself is a cycle the tree cannot
+ * render and the backend will not refuse.
+ *
+ * Deleting confirms. Everything else applies immediately, which is why delete is
+ * the only one with a gate.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";

@@ -102,15 +102,13 @@ describe("production extension capture against a real backend", () => {
         }),
       ],
     });
-    // Printables deliberately exposes metadata only: signed download URLs from
-    // page JSON-LD are not trusted. This fixture represents the file the user
-    // selected locally after the adapter requested a manual attachment.
+    // Printables is a *manual file* provider: its page does not expose a
+    // downloadable URL, so the adapter deliberately yields no candidates and
+    // reports `manual_file_required` — the browser supplies the bytes and names
+    // them. This test previously read `candidates[0]` and threw, which made it a
+    // test of a code path Printables no longer has.
+    expect(capture.candidates).toHaveLength(0);
     expect(capture.state).toBe("manual_file_required");
-    expect(capture.candidates).toEqual([]);
-    const candidate = {
-      id: "321:benchy.3mf",
-      filename: "benchy.3mf",
-    };
 
     const captureResult = await captureRichFiles({
       vault,
@@ -120,9 +118,9 @@ describe("production extension capture against a real backend", () => {
       captureSource: capture.source,
       files: [
         {
-          id: candidate.id,
+          id: "benchy.3mf",
           file: new Blob(["ci-capture-fixture"], { type: "model/3mf" }),
-          filename: candidate.filename,
+          filename: "benchy.3mf",
           mediaType: "model/3mf",
         },
       ],

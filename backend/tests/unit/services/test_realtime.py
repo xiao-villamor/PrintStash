@@ -21,56 +21,56 @@ class FakeSocket:
         self.received.append(payload)
 
 
-def test_slow_subscriber_does_not_delay_others():
-    async def _run():
-        bus = InProcessBus()
-        slow = FakeSocket(delay=10.0)
-        fast = FakeSocket()
-        await bus.subscribe("printer:1", slow)
-        await bus.subscribe("printer:1", fast)
+class TestPublish:
+    def test_publish_to_empty_channel_is_a_noop(self):
+        async def _run():
+            bus = InProcessBus()
+            await bus.publish("printer:999", {"x": 1})  # must not raise
 
-        async with asyncio.timeout(3.0):
-            await bus.publish("printer:1", {"hello": "world"})
+        asyncio.run(_run())
 
-        assert fast.received == [{"hello": "world"}]
-        assert slow.received == []
+    def test_slow_subscriber_does_not_delay_others(self):
+        async def _run():
+            bus = InProcessBus()
+            slow = FakeSocket(delay=10.0)
+            fast = FakeSocket()
+            await bus.subscribe("printer:1", slow)
+            await bus.subscribe("printer:1", fast)
 
-    asyncio.run(_run())
+            async with asyncio.timeout(3.0):
+                await bus.publish("printer:1", {"hello": "world"})
 
+            assert fast.received == [{"hello": "world"}]
+            assert slow.received == []
 
-def test_slow_subscriber_is_dropped_after_timeout():
-    async def _run():
-        bus = InProcessBus()
-        slow = FakeSocket(delay=10.0)
-        await bus.subscribe("printer:1", slow)
+        asyncio.run(_run())
 
-        async with asyncio.timeout(3.0):
-            await bus.publish("printer:1", {"hello": "world"})
+    def test_dead_subscriber_is_dropped(self):
+        async def _run():
+            bus = InProcessBus()
+            dead = FakeSocket(raises=True)
+            alive = FakeSocket()
+            await bus.subscribe("printer:1", dead)
+            await bus.subscribe("printer:1", alive)
 
-        assert slow not in bus._subscribers["printer:1"]
+            await bus.publish("printer:1", {"x": 1})
 
-    asyncio.run(_run())
+            assert dead not in bus._subscribers["printer:1"]
+            assert alive.received == [{"x": 1}]
 
-
-def test_dead_subscriber_is_dropped():
-    async def _run():
-        bus = InProcessBus()
-        dead = FakeSocket(raises=True)
-        alive = FakeSocket()
-        await bus.subscribe("printer:1", dead)
-        await bus.subscribe("printer:1", alive)
-
-        await bus.publish("printer:1", {"x": 1})
-
-        assert dead not in bus._subscribers["printer:1"]
-        assert alive.received == [{"x": 1}]
-
-    asyncio.run(_run())
+        asyncio.run(_run())
 
 
-def test_publish_to_empty_channel_is_a_noop():
-    async def _run():
-        bus = InProcessBus()
-        await bus.publish("printer:999", {"x": 1})  # must not raise
+class TestTimeout:
+    def test_slow_subscriber_is_dropped_after_timeout(self):
+        async def _run():
+            bus = InProcessBus()
+            slow = FakeSocket(delay=10.0)
+            await bus.subscribe("printer:1", slow)
 
-    asyncio.run(_run())
+            async with asyncio.timeout(3.0):
+                await bus.publish("printer:1", {"hello": "world"})
+
+            assert slow not in bus._subscribers["printer:1"]
+
+        asyncio.run(_run())

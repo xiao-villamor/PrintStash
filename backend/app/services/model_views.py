@@ -1353,12 +1353,12 @@ def export_payload(session: Session, user: User) -> dict:
                 ).all()
             }
         for source in source_rows:
-            if source.id is None or source.model_id is None:
-                continue
+            # `id` is the primary key and `model_id` is NOT NULL, and these rows came
+            # straight out of a SELECT — the same holds for `link.file_id` below. The
+            # guards that used to stand here could not fire on any row this loop can
+            # see, so they were statements no test could ever reach.
             artifacts = []
             for link in links_by_source[source.id]:
-                if link.file_id is None:
-                    continue
                 artifacts.append(
                     {
                         "artifact_id": link.file_id,
@@ -1380,7 +1380,7 @@ def export_payload(session: Session, user: User) -> dict:
             ]
             cover = covers_by_source.get(source.id)
             cover_summary = None
-            if cover is not None and source.model_id is not None:
+            if cover is not None:
                 cover_summary = {
                     "api_ref": f"/api/v1/models/{source.model_id}/provenance/{source.id}/cover",
                     "content_api_ref": f"/api/v1/models/{source.model_id}/provenance/{source.id}/cover/content",

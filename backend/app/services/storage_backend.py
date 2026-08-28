@@ -1014,8 +1014,7 @@ def _raise_s3_missing_object(exc: Exception, key: str) -> None:
     raise exc
 
 
-class S3StorageBackend(StorageBackend):  # pragma: no cover — needs a real S3-compatible
-    # endpoint; verified against SeaweedFS in the storage-s3 CI job (see docs).
+class S3StorageBackend(StorageBackend):
     backend_name = "s3"
 
     def __init__(self) -> None:

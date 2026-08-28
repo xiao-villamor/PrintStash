@@ -1,3 +1,18 @@
+/*
+ * Four version numbers that must agree, checked by reading all four.
+ *
+ * `frontend/package.json`, `backend/pyproject.toml`, the backend runtime constant
+ * and the newest changelog entry describe the same release. Nothing at runtime
+ * compares them, so a release cut with three of the four bumped ships a UI that
+ * reports the wrong version — and the version is what a self-hoster quotes in
+ * every bug report.
+ *
+ * The integrity rows keep the changelog machine-readable: entries sorted
+ * newest-first with unique versions, each with at least one change. The "newest
+ * entry" check above reads the file positionally, so an unsorted changelog makes
+ * it assert against the wrong release.
+ */
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -44,7 +59,7 @@ if (!backendConfigVersionMatch) {
 }
 const backendConfigVersion = backendConfigVersionMatch[1];
 
-describe("changelog ↔ package.json", () => {
+describe("APP_VERSION", () => {
   it("APP_VERSION is the newest changelog entry", () => {
     expect(APP_VERSION).toBe(CHANGELOG[0].version);
   });
@@ -64,7 +79,7 @@ describe("changelog ↔ package.json", () => {
   });
 });
 
-describe("changelog integrity", () => {
+describe("CHANGELOG", () => {
   it("every entry is well-formed and has at least one change", () => {
     for (const entry of CHANGELOG) {
       expect(entry.version).toMatch(/^\d+\.\d+\.\d+$/);

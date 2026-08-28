@@ -1,3 +1,8 @@
+/**
+ * StorageProviderPicker presents the provider catalogue without overstating its guarantees.
+ * It keeps category filtering, expected tiers, unavailable-provider reasons, and write-only
+ * secret handling visible before an operator commits a storage configuration.
+ */
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";

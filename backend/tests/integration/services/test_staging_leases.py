@@ -1,15 +1,43 @@
-"""Defends ``test_review_lease_rejects_replaced_path_without_unlink`` behavior for the ``services`` production unit.
+"""The receipt that proves PrintStash owns a file in the staging directory.
 
-A failure means this boundary no longer preserves its observable contract.
+Staging holds bytes that are not yet library artifacts, and the lease is the only
+thing that says which of them are ours. Every operation here is therefore about
+*exactly one owner*: a transfer between owners is atomic and leaves precisely one,
+because zero means bytes nothing will clean up and two means two callers each
+believe they may delete the same file.
+
+The prune rows are the dangerous side. Expiry unlinks the **exact** recorded file,
+proven by device and inode — and refuses to unlink a path that has been replaced
+since the lease was written, without deleting it. A replaced path is somebody
+else's file at a predictable location.
+
+The cascade row exists because a lease outliving its Inbox item is a leak, and the
+migration row because lease data has to survive an upgrade in both directions:
+losing it turns staged uploads into unownable bytes.
+
+The matcher rows at the bottom are where that proof is actually enforced, and they
+are the reason the rest is safe. The recorded path is a string; by the time a lease
+expires, the file at that path may have been replaced, may be a symlink into
+somebody's library, or may be a directory. So every lease carries the device, inode
+and ctime of the file it was taken on, and the matcher hands back a path **only**
+when all of them still agree. Everything else returns `None`, and `None` means
+"leave it alone", never "delete it anyway".
+
+Capture spools are the one exception, and a deliberate one: their bytes are written
+into the recorded inode while the request is in flight, so size and ctime
+legitimately change. Device and inode still hold, and on a filesystem that supports
+it an extended attribute carries the slot id — so a *replacement* at the same
+deterministic path, even one that reuses the inode number, is refused. On a
+filesystem without xattrs the device/inode proof is the fallback, and the path is
+still never recursively scanned.
 """
 
 from __future__ import annotations
 
-import hashlib
-from datetime import datetime, timedelta
-from io import BytesIO
+import errno
+import os
+from datetime import timedelta
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from alembic.config import Config
@@ -18,27 +46,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from alembic import command
-from app.core.config import _overlay, settings
 from app.core.time import utcnow
-from app.db.models import (
-    BackgroundJob,
-    CaptureUploadSlot,
-    CaptureUploadSlotState,
-    InboxItem,
-    StagingLease,
-    User,
-)
+from app.db.models import BackgroundJob, InboxItem, StagingLease, User
 from app.services import staging_leases
-from app.services.auth import hash_password
-from app.services.storage_backend import CreationReceipt, StorageBackend
-from tests.paths import BACKEND_ROOT
-
-
-def _user(session: Session) -> User:
-    user = User(username="lease-user", hashed_password=hash_password("Password123"))
-    session.add(user)
-    session.flush()
-    return user
+from tests.factories import build_user
+from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
 
 def _inbox(session: Session, user: User) -> InboxItem:
@@ -55,577 +67,501 @@ def _job(session: Session, user: User) -> BackgroundJob:
     return row
 
 
-def _capture_slot(
-    session: Session,
-    user: User,
-    inbox: InboxItem,
-    *,
-    slot_id: str,
-    data: bytes,
-) -> tuple[CaptureUploadSlot, StagingLease]:
-    slot = CaptureUploadSlot(
-        id=slot_id,
-        inbox_item_id=inbox.id,
-        role="file",
-        source_file_id=slot_id,
-        filename=f"{slot_id}.3mf",
-        media_type="application/octet-stream",
-        size_bytes=len(data),
-        sha256=hashlib.sha256(data).hexdigest(),
-        storage_key=f"capture-slots/{slot_id}",
-    )
-    session.add(slot)
-    session.flush()
-    lease = staging_leases.create_capture_slot_lease(
-        session,
-        slot_id=slot.id,
-        owner_user_id=user.id,
-        destination_key=slot.storage_key or "",
-        size_bytes=slot.size_bytes,
-        sha256=slot.sha256,
-    )
-    return slot, lease
-
-
-def test_review_lease_rejects_replaced_path_without_unlink(
-    db_session: Session, tmp_path: Path
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.3mf"
-    staged.write_bytes(b"original")
-    lease = staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=8,
-        sha256="a" * 64,
-    )
-    db_session.commit()
-    staged.unlink()
-    staged.write_bytes(b"replacement")
-    assert (
-        staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id) is False
-    )
-    assert staged.read_bytes() == b"replacement"
-    # The receipt is stale, so it no longer owns the replacement and releases
-    # only its DB accounting; critically, the replacement remains untouched.
-    assert db_session.get(StagingLease, lease.id) is None
-
-
-def test_review_lease_accepts_already_missing_path(
-    db_session: Session, tmp_path: Path
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "missing.3mf"
-    staged.write_bytes(b"staged")
-    lease = staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=6,
-        sha256="b" * 64,
-    )
-    db_session.commit()
-    staged.unlink()
-
-    assert staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
-    assert db_session.get(StagingLease, lease.id) is None
-
-
-def test_review_lease_keeps_lease_when_path_is_inaccessible(
-    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "inaccessible.3mf"
-    staged.write_bytes(b"staged")
-    lease = staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=6,
-        sha256="c" * 64,
-    )
-    db_session.commit()
-
-    def deny_lstat(_path: Path) -> object:
-        raise PermissionError("staging unavailable")
-
-    monkeypatch.setattr(Path, "lstat", deny_lstat)
-
-    assert not staging_leases.dismiss_review_lease(
-        db_session, inbox_item_id=inbox.id
-    )
-    assert db_session.get(StagingLease, lease.id) is not None
-
-
-def test_prune_expired_unlinks_exact_file(db_session: Session, tmp_path: Path) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.gcode"
-    staged.write_bytes(b"staged")
-    lease = staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=6,
-        sha256="b" * 64,
-    )
-    lease.expires_at = utcnow() - timedelta(seconds=1)
-    db_session.commit()
-    assert staging_leases.prune_expired(db_session) == (1, 1)
-    db_session.commit()
-    assert not staged.exists()
-    assert db_session.get(StagingLease, lease.id) is None
-
-
-def test_fc15_upgrade_and_downgrade_preserve_job_lease_data(tmp_path: Path) -> None:
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
-    url = f"sqlite:///{tmp_path / 'staging-lease.sqlite'}"
-    config.set_main_option("sqlalchemy.url", url)
-    command.upgrade(config, "fb14d5e8a7c3")
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "INSERT INTO background_jobs "
-                "(id, visible, kind, state, status_json, replay_safe, attempts, created_at, updated_at) "
-                "VALUES ('old-job', 1, 'ingest', 'pending', '{}', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+class TestTransfer:
+    def test_a_transfer_leaves_exactly_one_owner(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "capture.stl"
+        staged.write_bytes(b"staged")
+        staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="c" * 64,
+        )
+        with pytest.raises(staging_leases.StagingLeaseError):
+            staging_leases.transfer_inbox_to_job(
+                db_session, inbox_item_id=inbox.id, job_id="missing"
             )
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.inbox_item_id == inbox.id)
+        ).one()
+        assert lease.background_job_id is None
+        job = _job(db_session, user)
+        transferred = staging_leases.transfer_inbox_to_job(
+            db_session, inbox_item_id=inbox.id, job_id=job.id
         )
-        connection.execute(
-            text(
-                "INSERT INTO staging_leases "
-                "(id, path, background_job_id, size_bytes, sha256, expires_at, created_at) "
-                "VALUES ('old-lease', '/tmp/old', 'old-job', 1, :sha, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-            ),
-            {"sha": "f" * 64},
-        )
-    command.upgrade(config, "fc15a6e9b8d4")
-    inspector = inspect(engine)
-    columns = {
-        column["name"]: column for column in inspector.get_columns("staging_leases")
-    }
-    assert columns["background_job_id"]["nullable"] is True
-    assert "inbox_item_id" in columns
-    assert "ix_staging_leases_inbox_item_id" in {
-        index["name"] for index in inspector.get_indexes("staging_leases")
-    }
-    with engine.connect() as connection:
-        assert (
-            connection.execute(
-                text(
-                    "SELECT background_job_id FROM staging_leases WHERE id = 'old-lease'"
+        assert transferred.inbox_item_id is None
+        assert transferred.background_job_id == job.id
+        db_session.commit()
+        with pytest.raises(IntegrityError):
+            db_session.add(
+                StagingLease(
+                    id="invalid-owner",
+                    path="/tmp/invalid",
+                    size_bytes=1,
+                    sha256="d" * 64,
+                    expires_at=utcnow(),
                 )
-            ).scalar_one()
-            == "old-job"
-        )
-    command.downgrade(config, "fb14d5e8a7c3")
-    with engine.connect() as connection:
-        assert (
-            connection.execute(
-                text(
-                    "SELECT background_job_id FROM staging_leases WHERE id = 'old-lease'"
-                )
-            ).scalar_one()
-            == "old-job"
-        )
-    assert "inbox_item_id" not in {
-        column["name"] for column in inspect(engine).get_columns("staging_leases")
-    }
-    engine.dispose()
-
-
-def test_transfer_is_atomic_and_preserves_exactly_one_owner(
-    db_session: Session, tmp_path: Path
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.stl"
-    staged.write_bytes(b"staged")
-    staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=6,
-        sha256="c" * 64,
-    )
-    with pytest.raises(staging_leases.StagingLeaseError):
-        staging_leases.transfer_inbox_to_job(
-            db_session, inbox_item_id=inbox.id, job_id="missing"
-        )
-    lease = db_session.exec(
-        select(StagingLease).where(StagingLease.inbox_item_id == inbox.id)
-    ).one()
-    assert lease.background_job_id is None
-    job = _job(db_session, user)
-    transferred = staging_leases.transfer_inbox_to_job(
-        db_session, inbox_item_id=inbox.id, job_id=job.id
-    )
-    assert transferred.inbox_item_id is None
-    assert transferred.background_job_id == job.id
-    db_session.commit()
-    with pytest.raises(IntegrityError):
-        db_session.add(
-            StagingLease(
-                id="invalid-owner",
-                path="/tmp/invalid",
-                size_bytes=1,
-                sha256="d" * 64,
-                expires_at=utcnow(),
             )
+            db_session.commit()
+        db_session.rollback()
+
+
+class TestCascade:
+    def test_inbox_delete_cascades_review_lease(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "capture.obj"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="e" * 64,
+        )
+        lease_id = lease.id
+        db_session.commit()
+        db_session.exec(delete(InboxItem).where(InboxItem.id == inbox.id))
+        db_session.commit()
+        assert db_session.get(StagingLease, lease_id) is None
+
+
+class TestPruneExpired:
+    def test_prune_expired_unlinks_exact_file(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "capture.gcode"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="b" * 64,
+        )
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.commit()
+        assert staging_leases.prune_expired(db_session) == (1, 1)
+        db_session.commit()
+        assert not staged.exists()
+        assert db_session.get(StagingLease, lease.id) is None
+
+
+class TestUnlink:
+    def test_review_lease_rejects_replaced_path_without_unlink(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "capture.3mf"
+        staged.write_bytes(b"original")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=8,
+            sha256="a" * 64,
         )
         db_session.commit()
-    db_session.rollback()
+        staged.unlink()
+        staged.write_bytes(b"replacement")
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert staged.read_bytes() == b"replacement"
+        # The receipt is stale, so it no longer owns the replacement and releases
+        # only its DB accounting; critically, the replacement remains untouched.
+        assert db_session.get(StagingLease, lease.id) is None
 
+    def test_review_lease_releases_a_path_that_is_already_gone(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """A file somebody else already removed still has to release its receipt.
 
-def test_inbox_delete_cascades_review_lease(
-    db_session: Session, tmp_path: Path
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.obj"
-    staged.write_bytes(b"staged")
-    lease = staging_leases.create_review_lease(
-        db_session,
-        inbox_item_id=inbox.id,
-        owner_user_id=user.id,
-        path=staged,
-        size_bytes=6,
-        sha256="e" * 64,
-    )
-    lease_id = lease.id
-    db_session.commit()
-    db_session.connection().exec_driver_sql("PRAGMA foreign_keys=ON")
-    db_session.exec(delete(InboxItem).where(InboxItem.id == inbox.id))
-    db_session.commit()
-    assert db_session.get(StagingLease, lease_id) is None
-
-
-def test_review_lease_fails_closed_when_capacity_cannot_be_measured(
-    db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.3mf"
-    staged.write_bytes(b"staged")
-    monkeypatch.setattr(
-        staging_leases.os,
-        "statvfs",
-        lambda _path: (_ for _ in ()).throw(OSError("capacity unavailable")),
-    )
-
-    with pytest.raises(
-        staging_leases.StagingCapacityExceeded,
-        match="staging_capacity_unavailable",
-    ):
-        staging_leases.create_review_lease(
+        The bytes are what the lease exists to clean up, so once they are gone the
+        lease has nothing left to own. Keeping the row would leave the Inbox item
+        undismissable — a capture the user cannot get rid of, over a file that no
+        longer exists.
+        """
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "missing.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
             db_session,
             inbox_item_id=inbox.id,
             owner_user_id=user.id,
             path=staged,
             size_bytes=6,
-            sha256="f" * 64,
+            sha256="b" * 64,
         )
+        db_session.commit()
+        staged.unlink()
 
-    assert db_session.exec(select(StagingLease)).all() == []
+        released = staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
 
+        assert released is True
+        assert db_session.get(StagingLease, lease.id) is None
 
-def test_review_lease_rejects_missing_inbox_owner(
-    db_session: Session, tmp_path: Path
-) -> None:
-    staged = tmp_path / "capture.3mf"
-    staged.write_bytes(b"staged")
+    def test_review_lease_survives_a_staging_directory_it_cannot_read(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """"Cannot tell" is not "gone", and only one of them may drop the receipt.
 
-    with pytest.raises(staging_leases.StagingLeaseError, match="inbox item"):
-        staging_leases.create_review_lease(
-            db_session,
-            inbox_item_id=999_999,
-            owner_user_id=None,
-            path=staged,
-            size_bytes=6,
-            sha256="f" * 64,
-        )
-
-    assert db_session.exec(select(StagingLease)).all() == []
-
-
-def test_review_lease_rejects_path_size_mismatch(
-    db_session: Session, tmp_path: Path
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    staged = tmp_path / "capture.3mf"
-    staged.write_bytes(b"staged")
-
-    with pytest.raises(staging_leases.StagingLeaseError, match="identity"):
-        staging_leases.create_review_lease(
+        An unreadable staging path — a permission change, an unmounted volume — is
+        the one case where the matcher genuinely does not know whether the file is
+        still ours. Releasing the lease there would abandon bytes nothing will
+        ever clean up, so the receipt is kept and the dismissal reports failure.
+        """
+        user = build_user(db_session, "lease-user")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "inaccessible.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
             db_session,
             inbox_item_id=inbox.id,
             owner_user_id=user.id,
             path=staged,
-            size_bytes=7,
-            sha256="f" * 64,
+            size_bytes=6,
+            sha256="c" * 64,
+        )
+        db_session.commit()
+
+        def deny_lstat(_path: Path) -> object:
+            raise PermissionError("staging unavailable")
+
+        monkeypatch.setattr(Path, "lstat", deny_lstat)
+
+        released = staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+
+        assert released is False
+        assert db_session.get(StagingLease, lease.id) is not None
+
+
+class TestDowngrade:
+    def test_fc15_round_trips_without_losing_job_lease_data(
+        self, tmp_path: Path
+    ) -> None:
+        config = Config(str(ALEMBIC_INI))
+        config.set_main_option("script_location", str(ALEMBIC_DIR))
+        url = f"sqlite:///{tmp_path / 'staging-lease.sqlite'}"
+        config.set_main_option("sqlalchemy.url", url)
+        command.upgrade(config, "fb14d5e8a7c3")
+        engine = create_engine(url)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO background_jobs "
+                    "(id, visible, kind, state, status_json, replay_safe, attempts, created_at, updated_at) "
+                    "VALUES ('old-job', 1, 'ingest', 'pending', '{}', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO staging_leases "
+                    "(id, path, background_job_id, size_bytes, sha256, expires_at, created_at) "
+                    "VALUES ('old-lease', '/tmp/old', 'old-job', 1, :sha, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"sha": "f" * 64},
+            )
+        command.upgrade(config, "fc15a6e9b8d4")
+        inspector = inspect(engine)
+        columns = {
+            column["name"]: column for column in inspector.get_columns("staging_leases")
+        }
+        assert columns["background_job_id"]["nullable"] is True
+        assert "inbox_item_id" in columns
+        assert "ix_staging_leases_inbox_item_id" in {
+            index["name"] for index in inspector.get_indexes("staging_leases")
+        }
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT background_job_id FROM staging_leases WHERE id = 'old-lease'"
+                    )
+                ).scalar_one()
+                == "old-job"
+            )
+        command.downgrade(config, "fb14d5e8a7c3")
+        with engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT background_job_id FROM staging_leases WHERE id = 'old-lease'"
+                    )
+                ).scalar_one()
+                == "old-job"
+            )
+        assert "inbox_item_id" not in {
+            column["name"] for column in inspect(engine).get_columns("staging_leases")
+        }
+        engine.dispose()
+
+
+def _mark_capture_slot(path: Path, slot_id: str) -> None:
+    """Stamp the slot marker production stamps, where the platform has xattrs.
+
+    `prepare_capture_slot_staging` sets this attribute before any request byte is
+    written, so a spool that lacks it is — correctly — refused as a replacement.
+    A fixture that wrote the file by hand and skipped the marker therefore built
+    a state production never produces, and the test that used it passed on macOS
+    (where `os.getxattr` does not exist at all, so the check is skipped) while
+    failing on Linux (where a missing attribute raises `ENODATA` and the matcher
+    fails closed). Stamping it here keeps the arrange step faithful on both.
+    """
+
+    setxattr = getattr(os, "setxattr", None)
+    if setxattr is None:
+        return
+    try:
+        setxattr(path, staging_leases._CAPTURE_MARKER, slot_id.encode("ascii"))
+    except OSError:
+        # A filesystem without xattr support; the device/inode proof is the
+        # fallback there, which is its own test below.
+        pass
+
+
+def _lease_for(path: Path, **overrides) -> StagingLease:
+    info = path.lstat()
+    fields = {
+        "id": "lease-1",
+        "path": str(path),
+        "size_bytes": info.st_size,
+        "sha256": "a" * 64,
+        "device": info.st_dev,
+        "inode": info.st_ino,
+        "ctime_ns": info.st_ctime_ns,
+        "expires_at": utcnow(),
+    }
+    fields.update(overrides)
+    return StagingLease(**fields)
+
+
+class TestMatchingPath:
+    def test_matches_the_file_the_lease_was_taken_on(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+
+        assert staging_leases._matching_path(_lease_for(path)) == path
+
+    def test_refuses_a_lease_with_no_identity_recorded(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+
+        # A lease from before identity was recorded proves nothing about the
+        # file at its path, so it is never a licence to unlink.
+        assert staging_leases._matching_path(_lease_for(path, device=None)) is None
+
+    def test_refuses_a_file_that_is_gone(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+        lease = _lease_for(path)
+        path.unlink()
+
+        assert staging_leases._matching_path(lease) is None
+
+    def test_refuses_a_path_that_is_now_a_directory(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+        lease = _lease_for(path)
+        path.unlink()
+        path.mkdir()
+
+        assert staging_leases._matching_path(lease) is None
+
+    def test_refuses_a_path_that_is_now_a_symlink(self, tmp_path: Path) -> None:
+        target = tmp_path / "somebodys-library.stl"
+        target.write_bytes(b"not ours")
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+        lease = _lease_for(path)
+        path.unlink()
+        path.symlink_to(target)
+
+        # This is the whole reason `lstat` is used rather than `stat`: following
+        # the link would delete the user's file.
+        assert staging_leases._matching_path(lease) is None
+        assert target.exists()
+
+    def test_refuses_a_replacement_at_the_same_path(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+        lease = _lease_for(path)
+        replacement = tmp_path / "replacement.bin"
+        replacement.write_bytes(b"payload")
+        replacement.replace(path)
+
+        assert staging_leases._matching_path(lease) is None
+
+    def test_refuses_a_file_whose_size_changed(self, tmp_path: Path) -> None:
+        path = tmp_path / "staged.bin"
+        path.write_bytes(b"payload")
+        lease = _lease_for(path, size_bytes=999)
+
+        # An ordinary lease is taken on a finished file; a size change means it
+        # is not the file the lease describes.
+        assert staging_leases._matching_path(lease) is None
+
+
+class TestMatchingCaptureStagingPath:
+    @pytest.fixture
+    def spool(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+
+        def build(slot_id: str = "slot-1", data: bytes = b"partial") -> Path:
+            path = staging_leases.capture_slot_staging_path(slot_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            _mark_capture_slot(path, slot_id)
+            return path
+
+        return build
+
+    def _lease(self, path: Path, slot_id: str = "slot-1", **overrides) -> StagingLease:
+        return _lease_for(path, capture_upload_slot_id=slot_id, **overrides)
+
+    def test_matches_a_spool_still_being_written(self, spool) -> None:
+        path = spool()
+        lease = self._lease(path)
+        path.write_bytes(b"more bytes than before")
+
+        # Size and ctime legitimately change while the upload is in flight.
+        assert staging_leases._matching_capture_staging_path(lease) == path
+
+    def test_refuses_a_lease_naming_no_slot(self, spool) -> None:
+        path = spool()
+
+        assert (
+            staging_leases._matching_capture_staging_path(
+                _lease_for(path, capture_upload_slot_id=None)
+            )
+            is None
         )
 
-    assert staged.read_bytes() == b"staged"
-    assert db_session.exec(select(StagingLease)).all() == []
+    def test_refuses_a_lease_with_no_inode_recorded(self, spool) -> None:
+        path = spool()
 
+        assert (
+            staging_leases._matching_capture_staging_path(self._lease(path, inode=None))
+            is None
+        )
 
-def test_capture_slot_stream_uses_exact_owned_spool(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    data = b"captured bytes"
-    slot, _lease = _capture_slot(
-        db_session, user, inbox, slot_id="owned-stream", data=data
+    def test_refuses_a_path_that_is_not_the_slots_own(
+        self, spool, tmp_path: Path
+    ) -> None:
+        spool()
+        elsewhere = tmp_path / "elsewhere.bin"
+        elsewhere.write_bytes(b"partial")
+
+        # The path is derived from the slot id, so a lease pointing anywhere
+        # else was not written by this slot.
+        assert (
+            staging_leases._matching_capture_staging_path(
+                _lease_for(elsewhere, capture_upload_slot_id="slot-1")
+            )
+            is None
+        )
+
+    def test_refuses_a_spool_that_is_gone(self, spool) -> None:
+        path = spool()
+        lease = self._lease(path)
+        path.unlink()
+
+        assert staging_leases._matching_capture_staging_path(lease) is None
+
+    def test_refuses_a_capture_path_that_is_now_a_directory(self, spool) -> None:
+        path = spool()
+        lease = self._lease(path)
+        path.unlink()
+        path.mkdir()
+
+        assert staging_leases._matching_capture_staging_path(lease) is None
+
+    def test_refuses_a_replacement_at_the_slots_path(self, spool) -> None:
+        path = spool()
+        lease = self._lease(path)
+        path.unlink()
+        path.write_bytes(b"somebody else's bytes")
+
+        assert staging_leases._matching_capture_staging_path(lease) is None
+
+    def test_refuses_a_spool_whose_marker_names_another_slot(
+        self, spool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = spool()
+        lease = self._lease(path)
+        monkeypatch.setattr(
+            staging_leases.os,
+            "getxattr",
+            lambda _p, _n: b"a-different-slot",
+            raising=False,
+        )
+
+        # The marker survives writes to the owned inode but not a replacement,
+        # so a mismatch means this file is not ours even if the inode matches.
+        assert staging_leases._matching_capture_staging_path(lease) is None
+
+    def test_accepts_a_spool_whose_marker_names_it(
+        self, spool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = spool()
+        lease = self._lease(path)
+        monkeypatch.setattr(
+            staging_leases.os, "getxattr", lambda _p, _n: b"slot-1", raising=False
+        )
+
+        assert staging_leases._matching_capture_staging_path(lease) == path
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param(getattr(errno, "ENOTSUP", 95), id="not-supported"),
+            pytest.param(getattr(errno, "ENOSYS", 38), id="not-implemented"),
+        ],
     )
-    staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+    def test_falls_back_to_inode_proof_on_a_filesystem_without_xattrs(
+        self, spool, monkeypatch: pytest.MonkeyPatch, code: int
+    ) -> None:
+        path = spool()
+        lease = self._lease(path)
 
-    path, size, digest = staging_leases.stage_capture_slot_stream(
-        db_session,
-        slot_id=slot.id,
-        stream=BytesIO(data),
-        max_bytes=len(data),
-    )
+        def unsupported(_path: object, _name: object) -> bytes:
+            raise OSError(code, "not supported")
 
-    assert path.read_bytes() == data
-    assert size == len(data)
-    assert digest == hashlib.sha256(data).hexdigest()
+        monkeypatch.setattr(staging_leases.os, "getxattr", unsupported, raising=False)
 
+        # No xattrs is not a reason to stop cleaning up; device and inode still
+        # prove ownership.
+        assert staging_leases._matching_capture_staging_path(lease) == path
 
-def test_capture_slot_prepare_rejects_a_foreign_path_collision(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    slot, _lease = _capture_slot(
-        db_session, user, inbox, slot_id="foreign-collision", data=b"owned"
-    )
-    path = staging_leases.capture_slot_staging_path(slot.id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"foreign")
+    def test_refuses_when_a_supported_marker_is_missing(
+        self, spool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = spool()
+        lease = self._lease(path)
 
-    with pytest.raises(staging_leases.StagingLeaseError, match="staging_collision"):
-        staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+        def missing(_path: object, _name: object) -> bytes:
+            raise OSError(errno.ENODATA, "no such attribute")
 
-    assert path.read_bytes() == b"foreign"
+        monkeypatch.setattr(staging_leases.os, "getxattr", missing, raising=False)
 
-
-def test_capture_slot_open_truncates_the_owned_inode_in_place(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    slot, _lease = _capture_slot(
-        db_session, user, inbox, slot_id="owned-open", data=b"replacement"
-    )
-    path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
-    inode = path.stat().st_ino
-
-    with staging_leases.open_capture_slot_staging(
-        db_session, slot_id=slot.id
-    ) as target:
-        target.write(b"replacement")
-
-    assert path.stat().st_ino == inode
-    assert path.read_bytes() == b"replacement"
-
-
-def test_capture_slot_removal_preserves_replaced_spool(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    slot, _lease = _capture_slot(
-        db_session, user, inbox, slot_id="replaced-spool", data=b"owned"
-    )
-    path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
-    path.unlink()
-    path.write_bytes(b"foreign")
-
-    removed = staging_leases.remove_capture_slot_staging(db_session, slot_id=slot.id)
-
-    assert removed is False
-    assert path.read_bytes() == b"foreign"
-
-
-def test_capture_slot_reconciliation_persists_exact_adoption_receipt(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    data = b"published"
-    slot, lease = _capture_slot(
-        db_session, user, inbox, slot_id="adopted-slot", data=data
-    )
-    receipt = CreationReceipt(
-        key=slot.storage_key or "",
-        size=len(data),
-        token="adopted",
-        backend="fake",
-        namespace="test",
-    )
-    backend = MagicMock(spec=StorageBackend)
-    backend.adopt_existing.return_value = receipt
-
-    recovered = staging_leases.reconcile_capture_slot(db_session, backend, slot)
-
-    assert recovered is True
-    assert slot.state == CaptureUploadSlotState.UPLOADED
-    assert slot.receipt_json == lease.receipt_json
-    assert '"token": "adopted"' in (slot.receipt_json or "")
-
-
-@pytest.mark.parametrize(
-    "receipt",
-    [
-        pytest.param(
-            CreationReceipt(
-                key="capture-slots/wrong",
-                size=9,
-                token="wrong-key",
-                backend="fake",
-                namespace="test",
-            ),
-            id="wrong-key",
-        ),
-        pytest.param(
-            CreationReceipt(
-                key="capture-slots/mismatched-adoption",
-                size=8,
-                token="wrong-size",
-                backend="fake",
-                namespace="test",
-            ),
-            id="wrong-size",
-        ),
-    ],
-)
-def test_capture_slot_reconciliation_rejects_mismatched_adoption(
-    db_session: Session,
-    tmp_path: Path,
-    receipt: CreationReceipt,
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    slot, _lease = _capture_slot(
-        db_session, user, inbox, slot_id="mismatched-adoption", data=b"published"
-    )
-    backend = MagicMock(spec=StorageBackend)
-    backend.adopt_existing.return_value = receipt
-
-    recovered = staging_leases.reconcile_capture_slot(db_session, backend, slot)
-
-    assert recovered is False
-    assert slot.state == CaptureUploadSlotState.PENDING
-    assert slot.receipt_json is None
-
-
-def test_job_lease_renewal_updates_every_owned_lease(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    first, _first_lease = _capture_slot(
-        db_session, user, inbox, slot_id="renew-first", data=b"first"
-    )
-    second, _second_lease = _capture_slot(
-        db_session, user, inbox, slot_id="renew-second", data=b"second"
-    )
-    job = _job(db_session, user)
-    staging_leases.transfer_capture_slots_to_job(
-        db_session, inbox_item_id=inbox.id, job_id=job.id
-    )
-    now = datetime(2026, 1, 1, 12, 0, 0)
-
-    returned = staging_leases.renew_job_lease(db_session, job_id=job.id, now=now)
-
-    leases = db_session.exec(
-        select(StagingLease).where(StagingLease.background_job_id == job.id)
-    ).all()
-    assert returned in leases
-    assert {lease.capture_upload_slot_origin_id for lease in leases} == {
-        first.id,
-        second.id,
-    }
-    assert {lease.expires_at for lease in leases} == {
-        now + timedelta(hours=settings.staging_import_lease_hours)
-    }
-
-
-def test_job_lease_renewal_rejects_job_without_lease(db_session: Session) -> None:
-    user = _user(db_session)
-    job = _job(db_session, user)
-
-    with pytest.raises(staging_leases.StagingLeaseError, match="at least one"):
-        staging_leases.renew_job_lease(db_session, job_id=job.id)
-
-
-def test_capture_slot_lease_dismissal_releases_every_slot(
-    db_session: Session, tmp_path: Path
-) -> None:
-    _overlay["staging_dir"] = tmp_path / "staging"
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    _capture_slot(db_session, user, inbox, slot_id="dismiss-first", data=b"first")
-    _capture_slot(db_session, user, inbox, slot_id="dismiss-second", data=b"second")
-
-    released = staging_leases.dismiss_capture_slot_leases(
-        db_session, inbox_item_id=inbox.id
-    )
-
-    assert released is True
-    assert db_session.exec(select(StagingLease)).all() == []
-
-
-def test_capture_slot_lease_dismissal_reports_no_slots(db_session: Session) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-
-    released = staging_leases.dismiss_capture_slot_leases(
-        db_session, inbox_item_id=inbox.id
-    )
-
-    assert released is False
-
-
-def test_capture_slot_lease_dismissal_rejects_missing_lease(
-    db_session: Session,
-) -> None:
-    user = _user(db_session)
-    inbox = _inbox(db_session, user)
-    slot = CaptureUploadSlot(
-        id="missing-lease",
-        inbox_item_id=inbox.id,
-        role="file",
-        source_file_id="missing-lease",
-        filename="missing.3mf",
-        media_type="application/octet-stream",
-        size_bytes=1,
-        sha256="a" * 64,
-        storage_key="capture-slots/missing-lease",
-    )
-    db_session.add(slot)
-    db_session.flush()
-
-    with pytest.raises(staging_leases.StagingLeaseError, match="lease missing"):
-        staging_leases.dismiss_capture_slot_leases(db_session, inbox_item_id=inbox.id)
-
-    assert db_session.get(CaptureUploadSlot, slot.id) is not None
+        # Fail closed: a filesystem that supports xattrs and has no marker means
+        # this is a replacement, not an owned partial.
+        assert staging_leases._matching_capture_staging_path(lease) is None

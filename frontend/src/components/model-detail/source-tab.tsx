@@ -204,7 +204,15 @@ function SourceField({
                     : (i18n?.t("source.useDescription") ?? "Use source description")}
                 </Button>
               )}
-              <Button size="xs" variant="ghost" onClick={() => setEditing(true)}>
+              {/* Every field renders one of these, so the visible word alone leaves a
+                  screen-reader user hearing "Edit" five times with no way to tell them
+                  apart — and it is what let a Playwright test drive the wrong one. */}
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label={t("source.editField", `Edit ${label}`, { field: label })}
+                onClick={() => setEditing(true)}
+              >
                 {t("source.edit", "Edit")}
               </Button>
             </div>

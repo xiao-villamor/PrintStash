@@ -109,3 +109,6 @@ export async function authedContext(
 }
 
 export { expect };
+// Specs import `test`, `expect` and `Page` from here rather than from
+// `@playwright/test`, so this module has to re-export the type too.
+export type { Page };

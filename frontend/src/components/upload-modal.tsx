@@ -22,8 +22,6 @@ import {
   ingestOrca,
   listExternalLibraries,
   selectArchiveEntries,
-  selectCollectionMembers,
-  selectModelFiles,
 } from "@/lib/api";
 import { useCollections, useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
@@ -54,12 +52,10 @@ import {
 } from "@/lib/bulk-upload";
 import {
   ArchiveManifest,
-  CollectionManifest,
   CollectionRead,
   ExternalLibrary,
   IngestJobResult,
   IngestJobStatus,
-  ModelFilesManifest,
 } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
@@ -152,12 +148,10 @@ export function UploadModal({
   const [zipFile, setZipFile] = useState<File | null>(null);
   const zipRef = useRef<HTMLInputElement>(null);
   const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
-  const [filesManifest, setFilesManifest] = useState<ModelFilesManifest | null>(null);
-  const [collectionManifest, setCollectionManifest] = useState<CollectionManifest | null>(null);
   // Selected ids: archive entry names, model file ids, or collection member ids
   // — only one manifest is ever active at a time, so a single set is enough.
   const [selectedEntries, setSelectedEntries] = useState<Set<string>>(new Set());
-  const reviewing = Boolean(manifest || filesManifest || collectionManifest);
+  const reviewing = manifest !== null;
   const [modelName, setModelName] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -300,8 +294,6 @@ export function UploadModal({
     setUrlValue("");
     setZipFile(null);
     setManifest(null);
-    setFilesManifest(null);
-    setCollectionManifest(null);
     setSelectedEntries(new Set());
     setModelName("");
     setPickedCollection(null);
@@ -580,50 +572,6 @@ export function UploadModal({
     }
   }
 
-  async function doImportFiles() {
-    if (!filesManifest || submitting) return;
-    const fileIds = [...selectedEntries];
-    if (fileIds.length === 0) {
-      toast.warning("Nothing selected", "Pick at least one file to import.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const res = await selectModelFiles(filesManifest.files_token, {
-        file_ids: fileIds,
-        collection: collectionPath || undefined,
-        tags: selectedTags.length ? selectedTags.join(",") : undefined,
-      });
-      startImportTask(res.job_id, `Import ${filesManifest.page_title}`);
-      close();
-    } catch (err) {
-      toast.error(err);
-      setSubmitting(false);
-    }
-  }
-
-  async function doImportMembers() {
-    if (!collectionManifest || submitting) return;
-    const memberIds = [...selectedEntries];
-    if (memberIds.length === 0) {
-      toast.warning("Nothing selected", "Pick at least one model to import.");
-      return;
-    }
-    setSubmitting(true);
-    try {
-      const res = await selectCollectionMembers(collectionManifest.collection_token, {
-        member_ids: memberIds,
-        collection: collectionPath || undefined,
-        tags: selectedTags.length ? selectedTags.join(",") : undefined,
-      });
-      startImportTask(res.job_id, `Import ${collectionManifest.collection_name}`);
-      close();
-    } catch (err) {
-      toast.error(err);
-      setSubmitting(false);
-    }
-  }
-
   async function doInspectZip() {
     if (!collectionGate() || submitting || !zipFile) return;
     setSubmitting(true);
@@ -680,14 +628,6 @@ export function UploadModal({
     if (submitting) return;
     if (manifest) {
       void doImportSelected();
-      return;
-    }
-    if (filesManifest) {
-      void doImportFiles();
-      return;
-    }
-    if (collectionManifest) {
-      void doImportMembers();
       return;
     }
     if (mode === "url") {
@@ -846,41 +786,6 @@ export function UploadModal({
                 setManifest(null);
                 setSelectedEntries(new Set());
               }}
-            />
-          ) : filesManifest ? (
-            <SelectionList
-              title={filesManifest.page_title}
-              count={`${filesManifest.files.length} file${filesManifest.files.length === 1 ? "" : "s"}`}
-              items={filesManifest.files.map((f) => ({
-                id: f.file_id,
-                label: f.name,
-                badge: f.file_type,
-                detail: f.size != null ? formatBytes(f.size) : undefined,
-              }))}
-              selected={selectedEntries}
-              onToggle={toggleEntry}
-              onBack={() => {
-                setFilesManifest(null);
-                setSelectedEntries(new Set());
-              }}
-              emptyLabel="No files on this page."
-            />
-          ) : collectionManifest ? (
-            <SelectionList
-              title={collectionManifest.collection_name}
-              count={`${collectionManifest.members.length} model${collectionManifest.members.length === 1 ? "" : "s"} → ${collectionManifest.target_collection}`}
-              items={collectionManifest.members.map((m) => ({
-                id: m.source_id,
-                label: m.title,
-                detail: m.page_url,
-              }))}
-              selected={selectedEntries}
-              onToggle={toggleEntry}
-              onBack={() => {
-                setCollectionManifest(null);
-                setSelectedEntries(new Set());
-              }}
-              emptyLabel="No models in this collection."
             />
           ) : mode === "files" ? (
             <div className="space-y-3">
@@ -1504,80 +1409,6 @@ function ManifestList({
               <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0">
                 {formatBytes(e.size_bytes)}
               </span>
-            </label>
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface SelectionItem {
-  id: string;
-  label: string;
-  badge?: string;
-  detail?: string;
-}
-
-function SelectionList({
-  title,
-  count,
-  items,
-  selected,
-  onToggle,
-  onBack,
-  emptyLabel,
-}: {
-  title: string;
-  count: string;
-  items: SelectionItem[];
-  selected: Set<string>;
-  onToggle: (id: string) => void;
-  onBack: () => void;
-  emptyLabel: string;
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2 gap-2">
-        <span className="font-mono text-3xs text-on-surface-variant tracking-wider uppercase truncate">
-          {title} · {count}
-        </span>
-        <button
-          type="button"
-          onClick={onBack}
-          className="font-mono text-3xs text-on-surface-variant uppercase tracking-wider hover:text-on-surface flex-shrink-0"
-        >
-          Back
-        </button>
-      </div>
-      <div className="rounded border border-outline-variant divide-y divide-outline-variant max-h-56 overflow-y-auto">
-        {items.length === 0 ? (
-          <div className="px-3 py-3 font-mono text-2xs text-on-surface-variant/70">
-            {emptyLabel}
-          </div>
-        ) : (
-          items.map((it) => (
-            <label
-              key={it.id}
-              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-surface-container-low"
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(it.id)}
-                onChange={() => onToggle(it.id)}
-                className="accent-primary"
-              />
-              <span className="text-xs text-on-surface truncate flex-1">{it.label}</span>
-              {it.badge && (
-                <span className="font-mono text-3xs uppercase text-on-surface-variant flex-shrink-0">
-                  {it.badge}
-                </span>
-              )}
-              {it.detail && (
-                <span className="font-mono text-3xs text-on-surface-variant flex-shrink-0 max-w-[40%] truncate">
-                  {it.detail}
-                </span>
-              )}
             </label>
           ))
         )}

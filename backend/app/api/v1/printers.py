@@ -322,28 +322,6 @@ def _require_file_role(
     rbac.require_model_collection_role(session, user, model.collection_id, minimum)
 
 
-def _visible_model_ids(session: Session, user: User) -> set[int]:
-    if user.is_superuser:
-        return {
-            int(row)
-            for row in session.exec(select(Model.id).where(live(Model))).all()
-            if row is not None
-        }
-    collection_ids = rbac.accessible_collection_ids(session, user)
-    if not collection_ids:
-        return set()
-    return {
-        int(row)
-        for row in session.exec(
-            select(Model.id).where(
-                live(Model),
-                Model.collection_id.in_(collection_ids),  # type: ignore[union-attr]
-            )
-        ).all()
-        if row is not None
-    }
-
-
 async def _diagnostic_check(
     name: str,
     action: Callable[[], Awaitable[object]],
@@ -474,9 +452,10 @@ async def printer_diagnostics(
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
+    # `require_printer_role` above selects `live(Printer)` and raises the same 404,
+    # so a trashed printer never reaches here. It owns that check; repeating it
+    # here only produced a statement no request could execute.
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
 
     summary = provider_diagnostic_summary(p.provider)
     checks: list[dict[str, object]] = []
@@ -534,8 +513,6 @@ async def printer_config(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     if p.provider != PrinterProvider.MOONRAKER:
         raise HTTPException(
             status_code=409,
@@ -572,8 +549,6 @@ def get_printer(
         session, current_user, printer_id, PrinterRole.VIEW
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     return _to_read(p, role)
 
 
@@ -1249,9 +1224,10 @@ async def cancel_printer(
 
 
 def _require_gcode_provider(request: Request, session: Session, printer_id: int):
+    # Every caller runs `require_printer_role` first, which selects `live(Printer)`
+    # and raises this same 404 for a trashed printer, so the liveness check has one
+    # owner rather than two and this helper cannot hold a branch nothing reaches.
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     provider = _provider_client(request, p)
     if not provider.capabilities.can_send_gcode:
         raise HTTPException(
@@ -1499,7 +1475,10 @@ def list_jobs(
     return [
         PrintJobRead(
             **j.model_dump(
-                exclude={"artifact_capture_error_code", "artifact_capture_error_message"}
+                exclude={
+                    "artifact_capture_error_code",
+                    "artifact_capture_error_message",
+                }
             ),
             **reproducibility_payload(
                 j,
@@ -1524,9 +1503,6 @@ def create_ws_ticket(
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.VIEW
     )
-    printer = session.get(Printer, printer_id)
-    if printer is None or printer.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     return {
         "ticket": ws_tickets.issue(current_user.id, printer_id),
         "expires_in": ws_tickets.TTL_SECONDS,

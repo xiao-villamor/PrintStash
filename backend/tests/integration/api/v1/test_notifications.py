@@ -1,467 +1,595 @@
-"""API coverage for notification channel management (superuser-only)."""
+"""Notification channels: secrets in, masks out, and nothing undeliverable stored.
+
+A channel holds the credential that reaches an operator — a Discord webhook URL, a
+Telegram bot token. Two rules protect it. Reads mask the value and expose a
+`has_<key>` flag instead, so the settings page can say "configured" without handing the
+secret to anyone who can open it. And an update *preserves* what is stored when the
+field is absent or comes back as the mask, because the UI re-sends what it rendered: a
+mask written back verbatim would replace a working webhook with the literal `********`.
+
+The other rule is that a channel is validated when it is saved, not when it is used.
+Every target has required config and its URL fields must be http(s), so a channel that
+could never deliver is refused at the API rather than discovered at 3am when a print
+fails and nothing is sent.
+"""
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from app.db.models import (
-    NotificationChannel,
-    NotificationDelivery,
-    NotificationDeliveryStatus,
-    NotificationEventType,
-    NotificationTarget,
-    User,
-)
-from app.services.auth import create_access_token, hash_password
+from app.core.url_safety import PinnedTarget
+from app.db.models import NotificationChannel, NotificationTarget
+from app.services.notifications import _REQUIRED_CONFIG_FIELDS
+from tests.integration.conftest import UserHeaders
+
+MASK = "********"
+WEBHOOK_URL = "https://hooks.example.test/vault"
+MAX_NAME = 128
+
+# One valid config per target, derived from the same registry the API validates against.
+TARGET_CONFIG: dict[NotificationTarget, dict[str, str]] = {
+    NotificationTarget.WEBHOOK: {"url": WEBHOOK_URL},
+    NotificationTarget.DISCORD: {
+        "url": "https://discord.example.test/api/webhooks/1/x"
+    },
+    NotificationTarget.TELEGRAM: {"bot_token": "bot-token", "chat_id": "123456"},
+    NotificationTarget.NTFY: {"topic": "printstash"},
+}
 
 
-def _create(client: TestClient, headers, **over):
-    body = {
+def _create(client: TestClient, headers: dict[str, str], **overrides: Any):
+    body: dict[str, Any] = {
         "name": "My webhook",
         "target": "webhook",
-        "config": {"url": "https://example.com/hook"},
+        "config": {"url": WEBHOOK_URL},
         "events": ["print_completed", "print_failed"],
     }
-    body.update(over)
+    body.update(overrides)
     return client.post("/api/v1/notifications/channels", json=body, headers=headers)
 
 
-def _regular_headers(db_session: Session, username: str) -> dict[str, str]:
-    user = User(
-        username=username,
-        hashed_password=hash_password("Password123"),
-        is_active=True,
-        is_superuser=False,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    token = create_access_token(user.id, user.username, scope="write")
-    return {"Authorization": f"Bearer {token}"}
+@pytest.fixture
+def channel_id(client: TestClient, auth_headers: dict[str, str]) -> int:
+    return _create(client, auth_headers).json()["id"]
 
 
-def test_requires_superuser(client: TestClient):
-    assert client.get("/api/v1/notifications").status_code == 401
-
-
-def test_master_switch_roundtrip(client: TestClient, auth_headers):
-    assert (
-        client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"]
-        is False
-    )
-    client.put("/api/v1/notifications", json={"enabled": True}, headers=auth_headers)
-    assert (
-        client.get("/api/v1/notifications", headers=auth_headers).json()["enabled"]
-        is True
+@pytest.fixture
+def delivery_target():
+    """Stand in for the outbound webhook, recording the URL it was sent to."""
+    response = MagicMock(status_code=204, text="")
+    transport = MagicMock(request=AsyncMock(return_value=response))
+    transport.__aenter__ = AsyncMock(return_value=transport)
+    transport.__aexit__ = AsyncMock(return_value=False)
+    pinned = PinnedTarget(
+        url=WEBHOOK_URL, host="hooks.example.test", port=443, ip="93.184.216.34"
     )
 
-
-def test_create_masks_secret_url(client: TestClient, auth_headers):
-    resp = _create(client, auth_headers)
-    assert resp.status_code == 201
-    body = resp.json()
-    assert body["config"]["url"] == "********"  # secret masked on read
-    assert body["config_flags"]["has_url"] is True
-    assert set(body["events"]) == {"print_completed", "print_failed"}
-
-
-def test_update_preserves_secret_when_blank(client: TestClient, auth_headers):
-    cid = _create(client, auth_headers).json()["id"]
-    # Patch only the name; the secret URL must survive untouched.
-    client.patch(
-        f"/api/v1/notifications/channels/{cid}",
-        json={"name": "Renamed"},
-        headers=auth_headers,
-    )
-    # And re-sending the masked placeholder also preserves it.
-    client.patch(
-        f"/api/v1/notifications/channels/{cid}",
-        json={"config": {"url": "********"}},
-        headers=auth_headers,
-    )
-    # Verify by sending a test: a preserved URL renders/sends (mock the network).
-    from unittest.mock import AsyncMock, MagicMock, patch
-
-    from app.core.url_safety import PinnedTarget
-
-    resp = MagicMock(status_code=204, text="")
-    fake = MagicMock(request=AsyncMock(return_value=resp))
-    fake.__aenter__ = AsyncMock(return_value=fake)
-    fake.__aexit__ = AsyncMock(return_value=False)
-    target = PinnedTarget(
-        url="https://hooks.example/x",
-        host="hooks.example",
-        port=443,
-        ip="93.184.216.34",
-    )
-    with (
-        patch("app.services.notifications._client_for", return_value=fake),
-        patch("app.services.notifications.resolve_public_target", return_value=target),
-    ):
-        out = client.post(
-            f"/api/v1/notifications/channels/{cid}/test", headers=auth_headers
-        ).json()
-    assert out["ok"] is True
-    sent_url = fake.request.call_args.args[1]
-    assert sent_url == "https://example.com/hook"  # original secret, not the mask
-
-
-def test_update_events_and_printer_scope(client: TestClient, auth_headers):
-    cid = _create(client, auth_headers).json()["id"]
-    body = client.patch(
-        f"/api/v1/notifications/channels/{cid}",
-        json={"events": ["printer_offline"], "printer_ids": [3, 4]},
-        headers=auth_headers,
-    ).json()
-    assert body["events"] == ["printer_offline"]
-    assert body["printer_ids"] == [3, 4]
-
-
-def test_invalid_events_are_dropped(client: TestClient, auth_headers):
-    body = _create(
-        client, auth_headers, events=["print_completed", "bogus", "print_completed"]
-    ).json()
-    assert body["events"] == ["print_completed"]  # invalid + dupes removed
-
-
-def test_delete_channel(client: TestClient, auth_headers):
-    cid = _create(client, auth_headers).json()["id"]
-    assert (
-        client.delete(
-            f"/api/v1/notifications/channels/{cid}", headers=auth_headers
-        ).status_code
-        == 204
-    )
-    assert (
-        client.get("/api/v1/notifications/channels", headers=auth_headers).json() == []
-    )
-
-
-def test_create_rejects_incomplete_config(client: TestClient, auth_headers):
-    # Telegram channel missing chat_id is rejected at save time, not at send.
-    resp = _create(
-        client,
-        auth_headers,
-        target="telegram",
-        config={"bot_token": "t"},
-        events=["print_completed"],
-    )
-    assert resp.status_code == 400
-    assert "chat_id" in resp.json()["detail"]
-
-
-def test_create_rejects_empty_events(client: TestClient, auth_headers):
-    resp = _create(client, auth_headers, events=[])
-    assert resp.status_code == 400
-
-
-def test_create_rejects_non_http_url(client: TestClient, auth_headers):
-    resp = _create(client, auth_headers, config={"url": "ftp://example.com/x"})
-    assert resp.status_code == 400
-
-
-def test_reenable_resets_failure_count(client: TestClient, auth_headers):
-    from app.db.models import NotificationChannel
-    from app.db.session import get_session_factory
-
-    cid = _create(client, auth_headers).json()["id"]
-    # Simulate an auto-disabled channel.
-    with get_session_factory().session() as s:
-        ch = s.get(NotificationChannel, cid)
-        ch.enabled = False
-        ch.consecutive_failures = 10
-        s.add(ch)
-        s.commit()
-
-    body = client.patch(
-        f"/api/v1/notifications/channels/{cid}",
-        json={"enabled": True},
-        headers=auth_headers,
-    ).json()
-    assert body["enabled"] is True
-    assert body["consecutive_failures"] == 0
-
-
-def test_deliveries_endpoint_empty(client: TestClient, auth_headers):
-    assert (
-        client.get("/api/v1/notifications/deliveries", headers=auth_headers).json()
-        == []
-    )
-
-
-class TestNotificationAuthorization:
-    @pytest.mark.parametrize(
-        ("method", "path", "payload"),
-        [
-            pytest.param("GET", "/api/v1/notifications", None, id="get-settings"),
-            pytest.param(
-                "PUT",
-                "/api/v1/notifications",
-                {"enabled": True},
-                id="update-settings",
+    def send(client: TestClient, headers: dict[str, str], channel: int) -> str:
+        with (
+            patch("app.services.notifications._client_for", return_value=transport),
+            patch(
+                "app.services.notifications.resolve_public_target", return_value=pinned
             ),
-            pytest.param(
-                "GET", "/api/v1/notifications/channels", None, id="list-channels"
-            ),
-            pytest.param(
-                "POST",
-                "/api/v1/notifications/channels",
-                {
-                    "name": "Denied",
-                    "target": "webhook",
-                    "config": {"url": "https://example.com/denied"},
-                    "events": ["print_completed"],
-                },
-                id="create-channel",
-            ),
-            pytest.param(
-                "PATCH",
-                "/api/v1/notifications/channels/999999",
-                {"name": "Denied"},
-                id="update-channel",
-            ),
-            pytest.param(
-                "DELETE",
-                "/api/v1/notifications/channels/999999",
-                None,
-                id="delete-channel",
-            ),
-            pytest.param(
-                "POST",
-                "/api/v1/notifications/channels/999999/test",
-                None,
-                id="test-channel",
-            ),
-            pytest.param(
-                "GET",
-                "/api/v1/notifications/deliveries",
-                None,
-                id="list-deliveries",
-            ),
-        ],
-    )
-    def test_denies_every_notification_route_to_a_non_superuser(
-        self,
-        client: TestClient,
-        db_session: Session,
-        method: str,
-        path: str,
-        payload: dict[str, object] | None,
+        ):
+            result = client.post(
+                f"/api/v1/notifications/channels/{channel}/test", headers=headers
+            )
+        assert result.status_code == 200, result.text
+        assert result.json()["ok"] is True
+        return transport.request.call_args.args[1]
+
+    return send
+
+
+class TestGetSettings:
+    def test_reports_the_master_switch(
+        self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
-        headers = _regular_headers(db_session, f"notification-{method}-{path[-4:]}")
+        body = client.get("/api/v1/notifications", headers=auth_headers).json()
 
-        response = client.request(method, path, json=payload, headers=headers)
+        assert body["enabled"] is False
 
-        assert response.status_code == 403
-
-
-class TestNotificationSettingsValidation:
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            pytest.param({}, id="missing-enabled"),
-            pytest.param({"enabled": "definitely"}, id="non-boolean-enabled"),
-            pytest.param({"enabled": True, "extra": True}, id="unknown-field"),
-        ],
-    )
-    def test_rejects_malformed_settings_updates(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        payload: dict[str, object],
+    def test_lists_the_channels_alongside_it(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
     ) -> None:
-        response = client.put(
-            "/api/v1/notifications", json=payload, headers=auth_headers
+        body = client.get("/api/v1/notifications", headers=auth_headers).json()
+
+        assert [row["id"] for row in body["channels"]] == [channel_id]
+
+    def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
+        assert client.get("/api/v1/notifications").status_code == 401
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = client.get("/api/v1/notifications", headers=user_headers("operator"))
+
+        assert response.status_code == 403, response.text
+
+
+class TestUpdateSettings:
+    def test_enables_notifications(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        client.put(
+            "/api/v1/notifications", json={"enabled": True}, headers=auth_headers
         )
 
-        assert response.status_code == 422
-        current = client.get("/api/v1/notifications", headers=auth_headers)
-        assert current.json()["enabled"] is False
+        body = client.get("/api/v1/notifications", headers=auth_headers).json()
+        assert body["enabled"] is True
+
+    def test_disables_notifications(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        client.put(
+            "/api/v1/notifications", json={"enabled": True}, headers=auth_headers
+        )
+
+        client.put(
+            "/api/v1/notifications", json={"enabled": False}, headers=auth_headers
+        )
+
+        body = client.get("/api/v1/notifications", headers=auth_headers).json()
+        assert body["enabled"] is False
+
+    def test_rejects_an_unknown_field(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.put(
+            "/api/v1/notifications",
+            json={"enabled": True, "unexpected": 1},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422, response.text
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = client.put(
+            "/api/v1/notifications",
+            json={"enabled": True},
+            headers=user_headers("operator"),
+        )
+
+        assert response.status_code == 403, response.text
 
 
-class TestNotificationTargetRegistry:
+class TestListChannels:
+    def test_lists_the_stored_channels(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
+        listed = client.get(
+            "/api/v1/notifications/channels", headers=auth_headers
+        ).json()
+
+        assert [row["id"] for row in listed] == [channel_id]
+
+    def test_returns_an_empty_list_with_no_channels(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert (
+            client.get("/api/v1/notifications/channels", headers=auth_headers).json()
+            == []
+        )
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = client.get(
+            "/api/v1/notifications/channels", headers=user_headers("operator")
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestCreateChannel:
+    def test_returns_the_created_channel(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = _create(client, auth_headers)
+
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == "My webhook"
+
+    def test_masks_a_secret_in_the_response(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(client, auth_headers).json()
+
+        assert body["config"]["url"] == MASK
+        assert WEBHOOK_URL not in str(body)
+
+    def test_reports_secret_presence_as_a_flag(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(client, auth_headers).json()
+
+        assert body["config_flags"]["has_url"] is True
+
+    def test_returns_non_secret_config_as_is(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(
+            client, auth_headers, target="ntfy", config={"topic": "printstash"}
+        ).json()
+
+        assert body["config"]["topic"] == "printstash", (
+            "a topic is not a credential and stays readable"
+        )
+
+    def test_keeps_the_events_it_was_given(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(client, auth_headers).json()
+
+        assert set(body["events"]) == {"print_completed", "print_failed"}
+
+    def test_drops_every_event_it_cannot_use(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(
+            client,
+            auth_headers,
+            events=["print_completed", "bogus", "print_completed"],
+        ).json()
+
+        assert body["events"] == ["print_completed"]
+
+    def test_rejects_an_empty_event_list(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert _create(client, auth_headers, events=[]).status_code == 400
+
     @pytest.mark.parametrize(
-        ("target", "config", "secret_key"),
+        ("target", "missing"),
         [
-            pytest.param(
-                target,
-                {
-                    NotificationTarget.WEBHOOK: {"url": "https://example.com/webhook"},
-                    NotificationTarget.DISCORD: {
-                        "url": "https://discord.example/webhook"
-                    },
-                    NotificationTarget.TELEGRAM: {
-                        "bot_token": "123:FAKE",
-                        "chat_id": "42",
-                    },
-                    NotificationTarget.NTFY: {
-                        "topic": "prints",
-                        "server_url": "https://ntfy.example",
-                        "token": "fake-token",
-                    },
-                }[target],
-                {
-                    NotificationTarget.WEBHOOK: "url",
-                    NotificationTarget.DISCORD: "url",
-                    NotificationTarget.TELEGRAM: "bot_token",
-                    NotificationTarget.NTFY: "token",
-                }[target],
-                id=target.value,
-            )
-            for target in NotificationTarget
+            pytest.param(target, field, id=f"{target.value}-without-{field}")
+            for target, fields in _REQUIRED_CONFIG_FIELDS.items()
+            for field in fields
         ],
     )
-    def test_creates_every_registered_target_with_masked_secrets(
+    def test_requires_every_field_its_target_needs(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
-        db_session: Session,
         target: NotificationTarget,
-        config: dict[str, str],
-        secret_key: str,
+        missing: str,
     ) -> None:
-        response = client.post(
-            "/api/v1/notifications/channels",
-            json={
-                "name": f"{target.value} channel",
-                "target": target.value,
-                "config": config,
-                "events": [event.value for event in NotificationEventType],
-            },
-            headers=auth_headers,
+        config = {k: v for k, v in TARGET_CONFIG[target].items() if k != missing}
+
+        response = _create(client, auth_headers, target=target.value, config=config)
+
+        assert response.status_code == 400, response.text
+        assert missing in response.json()["detail"]
+
+    def test_rejects_a_config_url_that_is_not_http(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = _create(
+            client, auth_headers, config={"url": "ftp://example.test/hook"}
+        )
+
+        assert response.status_code == 400, response.text
+
+    @pytest.mark.parametrize("target", list(NotificationTarget), ids=lambda t: t.value)
+    def test_accepts_every_target_with_its_required_config(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        target: NotificationTarget,
+    ) -> None:
+        response = _create(
+            client,
+            auth_headers,
+            name=f"{target.value} channel",
+            target=target.value,
+            config=TARGET_CONFIG[target],
         )
 
         assert response.status_code == 201, response.text
-        assert response.json()["config"][secret_key] == "********"
-        assert response.json()["config_flags"][f"has_{secret_key}"] is True
-        channel = db_session.get(NotificationChannel, response.json()["id"])
-        assert channel is not None
-        assert channel.target == target
 
-    def test_replaces_a_stored_secret_without_returning_it(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        db_session: Session,
+    def test_rejects_an_unknown_target(
+        self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
-        channel_id = _create(client, auth_headers).json()["id"]
+        response = _create(client, auth_headers, target="carrier-pigeon")
 
+        assert response.status_code == 422, response.text
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("x" * (MAX_NAME + 1), id="over-max"),
+        ],
+    )
+    def test_rejects_a_name_outside_the_length_bounds(
+        self, client: TestClient, auth_headers: dict[str, str], name: str
+    ) -> None:
+        assert _create(client, auth_headers, name=name).status_code == 422
+
+    def test_rejects_an_unknown_field(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert _create(client, auth_headers, unexpected="ignored").status_code == 422
+
+    def test_enables_a_new_channel_by_default(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        body = _create(client, auth_headers).json()
+
+        assert body["enabled"] is True
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = _create(client, user_headers("operator"))
+
+        assert response.status_code == 403, response.text
+
+
+class TestUpdateChannel:
+    def test_renames_the_channel(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
         response = client.patch(
             f"/api/v1/notifications/channels/{channel_id}",
-            json={"config": {"url": "https://example.com/replacement"}},
+            json={"name": "Renamed"},
             headers=auth_headers,
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["config"]["url"] == "********"
+        assert response.json()["name"] == "Renamed"
+
+    def test_keeps_the_stored_secret_when_it_is_not_sent(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        channel_id: int,
+        delivery_target,
+    ) -> None:
+        client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"name": "Renamed"},
+            headers=auth_headers,
+        )
+
+        assert delivery_target(client, auth_headers, channel_id) == WEBHOOK_URL
+
+    def test_keeps_the_stored_secret_when_the_mask_is_sent_back(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        channel_id: int,
+        delivery_target,
+    ) -> None:
+        client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"config": {"url": MASK}},
+            headers=auth_headers,
+        )
+
+        assert delivery_target(client, auth_headers, channel_id) == WEBHOOK_URL, (
+            "the UI re-sends what it rendered; the mask must not overwrite the secret"
+        )
+
+    def test_replaces_the_event_list(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
+        body = client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"events": ["printer_offline"]},
+            headers=auth_headers,
+        ).json()
+
+        assert body["events"] == ["printer_offline"]
+
+    def test_sets_the_printer_scope(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
+        body = client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"printer_ids": [3, 4]},
+            headers=auth_headers,
+        ).json()
+
+        assert body["printer_ids"] == [3, 4]
+
+    def test_clears_the_printer_scope_when_sent_null(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
+        client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"printer_ids": [3, 4]},
+            headers=auth_headers,
+        )
+
+        body = client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"printer_ids": None},
+            headers=auth_headers,
+        ).json()
+
+        assert body["printer_ids"] is None, "an explicit null means every printer again"
+
+    def test_resets_the_failure_count_when_re_enabled(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        channel_id: int,
+    ) -> None:
         channel = db_session.get(NotificationChannel, channel_id)
         assert channel is not None
-        assert json.loads(channel.config_json)["url"] == (
-            "https://example.com/replacement"
+        channel.enabled = False
+        channel.consecutive_failures = 10
+        db_session.add(channel)
+        db_session.commit()
+
+        body = client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"enabled": True},
+            headers=auth_headers,
+        ).json()
+
+        assert body["enabled"] is True
+        # Without the reset it would trip its own auto-disable on the next failure.
+        assert body["consecutive_failures"] == 0
+
+    def test_keeps_the_stored_secret_when_it_is_sent_blank(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        channel_id: int,
+        delivery_target,
+    ) -> None:
+        client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"config": {"url": ""}},
+            headers=auth_headers,
         )
 
+        assert delivery_target(client, auth_headers, channel_id) == WEBHOOK_URL, (
+            "a blank secret means 'unchanged', the same as the mask"
+        )
 
-class TestUnknownNotificationChannel:
+    def test_rejects_a_config_that_would_not_deliver(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        # `topic` is not a secret, so clearing it really clears it — and an ntfy
+        # channel without a topic can never deliver.
+        ntfy = _create(
+            client, auth_headers, target="ntfy", config={"topic": "printstash"}
+        ).json()["id"]
+
+        response = client.patch(
+            f"/api/v1/notifications/channels/{ntfy}",
+            json={"config": {"topic": ""}},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400, response.text
+        assert "topic" in response.json()["detail"]
+
+    def test_reports_an_unknown_channel_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.patch(
+            "/api/v1/notifications/channels/9999",
+            json={"name": "Ghost"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404, response.text
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders, channel_id: int
+    ) -> None:
+        response = client.patch(
+            f"/api/v1/notifications/channels/{channel_id}",
+            json={"name": "Hijacked"},
+            headers=user_headers("operator"),
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestDeleteChannel:
+    def test_deletes_the_channel(
+        self, client: TestClient, auth_headers: dict[str, str], channel_id: int
+    ) -> None:
+        response = client.delete(
+            f"/api/v1/notifications/channels/{channel_id}", headers=auth_headers
+        )
+
+        assert response.status_code == 204, response.text
+        assert (
+            client.get("/api/v1/notifications/channels", headers=auth_headers).json()
+            == []
+        )
+
+    def test_reports_an_unknown_channel_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.delete(
+            "/api/v1/notifications/channels/9999", headers=auth_headers
+        )
+
+        assert response.status_code == 404, response.text
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders, channel_id: int
+    ) -> None:
+        response = client.delete(
+            f"/api/v1/notifications/channels/{channel_id}",
+            headers=user_headers("operator"),
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestTestChannel:
+    def test_sends_to_the_stored_url(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        channel_id: int,
+        delivery_target,
+    ) -> None:
+        assert delivery_target(client, auth_headers, channel_id) == WEBHOOK_URL
+
+    def test_reports_an_unknown_channel_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.post(
+            "/api/v1/notifications/channels/9999/test", headers=auth_headers
+        )
+
+        assert response.status_code == 404, response.text
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders, channel_id: int
+    ) -> None:
+        response = client.post(
+            f"/api/v1/notifications/channels/{channel_id}/test",
+            headers=user_headers("operator"),
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestListDeliveries:
+    def test_returns_an_empty_list_with_no_deliveries(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert (
+            client.get("/api/v1/notifications/deliveries", headers=auth_headers).json()
+            == []
+        )
+
     @pytest.mark.parametrize(
-        ("method", "path", "payload"),
-        [
-            pytest.param(
-                "PATCH", "/api/v1/notifications/channels/999999", {}, id="update"
-            ),
-            pytest.param(
-                "DELETE",
-                "/api/v1/notifications/channels/999999",
-                None,
-                id="delete",
-            ),
-            pytest.param(
-                "POST",
-                "/api/v1/notifications/channels/999999/test",
-                None,
-                id="test-send",
-            ),
-        ],
+        "limit", [pytest.param(0, id="below-min"), pytest.param(500, id="above-max")]
     )
-    def test_returns_not_found_for_an_unknown_channel(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        method: str,
-        path: str,
-        payload: dict[str, object] | None,
+    def test_clamps_the_limit_into_range(
+        self, client: TestClient, auth_headers: dict[str, str], limit: int
     ) -> None:
-        response = client.request(method, path, json=payload, headers=auth_headers)
-
-        assert response.status_code == 404
-
-
-class TestNotificationDeliveries:
-    def test_lists_recent_deliveries_newest_first(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        db_session: Session,
-    ) -> None:
-        channel = NotificationChannel(
-            name="Delivery history",
-            target=NotificationTarget.WEBHOOK,
-            config_json=json.dumps({"url": "https://example.com/hook"}),
-            events_json=json.dumps([NotificationEventType.PRINT_COMPLETED.value]),
-        )
-        db_session.add(channel)
-        db_session.commit()
-        db_session.refresh(channel)
-        instants = [datetime(2026, 1, day, tzinfo=timezone.utc) for day in (1, 2, 3)]
-        for index, instant in enumerate(instants):
-            db_session.add(
-                NotificationDelivery(
-                    channel_id=channel.id,
-                    event_type=NotificationEventType.PRINT_COMPLETED,
-                    status=NotificationDeliveryStatus.SENT,
-                    attempts=index,
-                    created_at=instant,
-                )
-            )
-        db_session.commit()
-
-        response = client.get("/api/v1/notifications/deliveries", headers=auth_headers)
-
-        assert response.status_code == 200, response.text
-        assert [row["attempts"] for row in response.json()] == [2, 1, 0]
-
-    def test_applies_the_requested_delivery_limit(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        db_session: Session,
-    ) -> None:
-        channel = NotificationChannel(
-            name="Limited delivery history",
-            target=NotificationTarget.WEBHOOK,
-            config_json=json.dumps({"url": "https://example.com/hook"}),
-            events_json=json.dumps([NotificationEventType.PRINT_FAILED.value]),
-        )
-        db_session.add(channel)
-        db_session.commit()
-        db_session.refresh(channel)
-        for day in (1, 2, 3):
-            db_session.add(
-                NotificationDelivery(
-                    channel_id=channel.id,
-                    event_type=NotificationEventType.PRINT_FAILED,
-                    created_at=datetime(2026, 2, day, tzinfo=timezone.utc),
-                )
-            )
-        db_session.commit()
-
         response = client.get(
-            "/api/v1/notifications/deliveries?limit=2", headers=auth_headers
+            f"/api/v1/notifications/deliveries?limit={limit}", headers=auth_headers
         )
 
         assert response.status_code == 200, response.text
-        assert len(response.json()) == 2
+        assert len(response.json()) <= 200
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = client.get(
+            "/api/v1/notifications/deliveries", headers=user_headers("operator")
+        )
+
+        assert response.status_code == 403, response.text

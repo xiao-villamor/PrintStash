@@ -1,3 +1,18 @@
+/*
+ * The G-code preview, reachable by keyboard and honest about failure.
+ *
+ * The layer control is a slider a user scrubs, so it carries a real accessible
+ * name and value: without them the only way to change layers is dragging, and the
+ * viewer becomes mouse-only. The travel and bed toggles expose pressed state for
+ * the same reason — a toggle whose state is only a colour is a toggle a screen
+ * reader reports as a plain button.
+ *
+ * The 401 case is the security half. A download token can expire while the viewer
+ * is open, and the raw failure carries the request URL and its token. What the
+ * user must see is a sentence about signing in again; what must not reach the DOM
+ * is the credential.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

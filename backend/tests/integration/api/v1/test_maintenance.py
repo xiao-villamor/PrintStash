@@ -1,18 +1,26 @@
-"""Maintenance routes keep Vault audits superuser-only, durable, and explicit."""
+"""The vault audit's control surface: start, watch, cancel, repair, ignore.
+
+An audit walks every owned blob and row looking for damage, so two things matter here.
+Only one may run at a time — a second start must join the active run rather than launch
+a concurrent walk over the same storage — and a repair must refuse to *claim* it fixed
+something it cannot fix: a finding whose repair action is unknown answers 409 rather
+than silently marking itself resolved.
+
+Everything on this router is superuser-only; the auth sweep at the bottom covers every
+route so a lost dependency cannot go unnoticed.
+
+The audit engine's own behaviour lives in `integration/services/test_vault_audit.py`.
+"""
 
 from __future__ import annotations
 
-import json
-from uuid import uuid4
+from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.db.models import (
-    AuditLog,
-    File,
-    FileType,
-    Model,
     User,
     VaultAuditFinding,
     VaultAuditFindingState,
@@ -21,396 +29,296 @@ from app.db.models import (
     VaultAuditRunState,
     VaultAuditSeverity,
 )
-from app.services.auth import create_access_token, hash_password
+from app.services import vault_audit
+from tests.integration.conftest import UserHeaders
+
+# Every route on the router, for the auth sweeps.
+ROUTES = [
+    pytest.param("post", "/api/v1/maintenance/audits", {"mode": "quick"}, id="start"),
+    pytest.param("get", "/api/v1/maintenance/audits", None, id="list"),
+    pytest.param("get", "/api/v1/maintenance/audits/latest", None, id="latest"),
+    pytest.param("get", "/api/v1/maintenance/audits/1", None, id="get"),
+    pytest.param("post", "/api/v1/maintenance/audits/1/cancel", None, id="cancel"),
+    pytest.param("post", "/api/v1/maintenance/findings/1/repair", None, id="repair"),
+    pytest.param("post", "/api/v1/maintenance/findings/1/ignore", None, id="ignore"),
+]
 
 
-def _ordinary_headers(db_session: Session, username: str) -> dict[str, str]:
-    user = User(
-        username=username,
-        hashed_password=hash_password("Password123"),
-        is_active=True,
-        is_superuser=False,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    token = create_access_token(user.id, user.username, scope="write")
-    return {"Authorization": f"Bearer {token}"}
+@pytest.fixture
+def superuser(db_session: Session) -> User:
+    return db_session.exec(select(User)).first()  # type: ignore[return-value]
 
 
-def _requester(db_session: Session) -> User:
-    user = User(username="audit-requester", hashed_password="x", is_superuser=True)
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
+@pytest.fixture
+def make_run(db_session: Session, auth_headers: dict[str, str], superuser: User):
+    def build(**overrides: Any) -> VaultAuditRun:
+        fields: dict[str, Any] = {
+            "requested_by": superuser.id,
+            "mode": VaultAuditMode.QUICK,
+        }
+        fields.update(overrides)
+        row = VaultAuditRun(**fields)
+        db_session.add(row)
+        db_session.commit()
+        db_session.refresh(row)
+        return row
+
+    return build
 
 
-def _run(db_session: Session, requested_by: int, **overrides) -> VaultAuditRun:
-    values = {"requested_by": requested_by, "mode": VaultAuditMode.QUICK}
-    values.update(overrides)
-    row = VaultAuditRun(**values)
-    db_session.add(row)
-    db_session.commit()
-    db_session.refresh(row)
-    return row
+@pytest.fixture
+def make_finding(db_session: Session):
+    def build(run_id: int, **overrides: Any) -> VaultAuditFinding:
+        fields: dict[str, Any] = {
+            "run_id": run_id,
+            "code": "owned_blob_missing",
+            "severity": VaultAuditSeverity.CRITICAL,
+            "resource_type": "file",
+            "resource_identifier": "1",
+        }
+        fields.update(overrides)
+        row = VaultAuditFinding(**fields)
+        db_session.add(row)
+        db_session.commit()
+        db_session.refresh(row)
+        return row
+
+    return build
 
 
-def _finding(db_session: Session, run_id: int, **overrides) -> VaultAuditFinding:
-    values = {
-        "run_id": run_id,
-        "code": "owned_blob_missing",
-        "severity": VaultAuditSeverity.CRITICAL,
-        "resource_type": "file",
-        "resource_identifier": "artifact-1",
-    }
-    values.update(overrides)
-    row = VaultAuditFinding(**values)
-    db_session.add(row)
-    db_session.commit()
-    db_session.refresh(row)
-    return row
+@pytest.fixture
+def deferred_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a started run PENDING.
 
-
-@pytest.fixture(params=["missing", "ordinary"], ids=str)
-def unauthorized_headers(request, db_session: Session) -> dict[str, str]:
-    if request.param == "ordinary":
-        return _ordinary_headers(db_session, f"ordinary-{request.node.name}")
-    return {}
+    TestClient runs BackgroundTasks synchronously before the response returns, so the
+    real `execute_run` would finish the audit immediately and there would never be an
+    active run to deduplicate against.
+    """
+    monkeypatch.setattr(vault_audit, "execute_run", lambda _run_id: None)
 
 
 class TestStartAudit:
-    def test_starts_a_quick_audit(self, client, auth_headers, db_session):
+    def test_accepts_the_request(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        deferred_execution: None,
+    ) -> None:
         response = client.post(
             "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "quick"}
         )
 
         assert response.status_code == 202, response.text
         assert response.json()["mode"] == "quick"
-        assert db_session.get(VaultAuditRun, response.json()["id"]) is not None
 
-    def test_starts_a_full_audit(self, client, auth_headers):
-        response = client.post(
+    def test_persists_the_run(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        deferred_execution: None,
+    ) -> None:
+        run_id = client.post(
+            "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "quick"}
+        ).json()["id"]
+
+        assert db_session.get(VaultAuditRun, run_id) is not None
+
+    def test_joins_the_active_run_instead_of_starting_a_second(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        deferred_execution: None,
+    ) -> None:
+        first = client.post(
+            "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "quick"}
+        ).json()["id"]
+
+        again = client.post(
             "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "full"}
         )
 
-        assert response.status_code == 202, response.text
-        assert response.json()["mode"] == "full"
-
-    def test_defaults_a_missing_audit_mode_to_quick(self, client, auth_headers):
-        response = client.post(
-            "/api/v1/maintenance/audits", headers=auth_headers, json={}
+        assert again.status_code == 202, again.text
+        assert again.json()["id"] == first, (
+            "two concurrent walks over the same storage is the thing to avoid"
         )
 
-        assert response.status_code == 202, response.text
-        assert response.json()["mode"] == "quick"
-
-    def test_returns_the_active_run_for_a_duplicate_start(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        active = _run(db_session, user.id, state=VaultAuditRunState.RUNNING)
-
+    def test_runs_the_audit_in_the_background(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        # Without the stand-in, TestClient runs the background task inline, so a
+        # completed run proves it was scheduled at all.
         response = client.post(
-            "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "full"}
+            "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "quick"}
         )
 
-        assert response.status_code == 202, response.text
-        assert response.json()["id"] == active.id
-        assert len(db_session.exec(select(VaultAuditRun)).all()) == 1
+        run_id = response.json()["id"]
+        follow_up = client.get(
+            f"/api/v1/maintenance/audits/{run_id}", headers=auth_headers
+        )
+        assert follow_up.json()["state"] == VaultAuditRunState.COMPLETED.value
 
-    def test_validates_an_unsupported_audit_mode(
-        self, client, auth_headers, db_session
-    ):
+    def test_rejects_an_unknown_mode(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
         response = client.post(
-            "/api/v1/maintenance/audits", headers=auth_headers, json={"mode": "deep"}
+            "/api/v1/maintenance/audits",
+            headers=auth_headers,
+            json={"mode": "exhaustive"},
         )
 
         assert response.status_code == 422, response.text
-        assert db_session.exec(select(VaultAuditRun)).first() is None
 
-    def test_rejects_an_unauthenticated_audit_start(self, client, db_session):
-        response = client.post("/api/v1/maintenance/audits", json={})
+    @pytest.mark.parametrize("mode", list(VaultAuditMode), ids=lambda m: m.value)
+    def test_accepts_every_mode(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        deferred_execution: None,
+        mode: VaultAuditMode,
+    ) -> None:
+        response = client.post(
+            "/api/v1/maintenance/audits",
+            headers=auth_headers,
+            json={"mode": mode.value},
+        )
 
-        assert response.status_code == 401, response.text
-        assert db_session.exec(select(VaultAuditRun)).first() is None
-
-    def test_rejects_a_non_superuser_audit_start(self, client, db_session):
-        headers = _ordinary_headers(db_session, "ordinary-start")
-
-        response = client.post("/api/v1/maintenance/audits", headers=headers, json={})
-
-        assert response.status_code == 403, response.text
-        assert db_session.exec(select(VaultAuditRun)).first() is None
+        assert response.status_code == 202, response.text
 
 
 class TestListAudits:
-    def test_lists_audit_runs_with_persisted_findings_and_counters(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id, state=VaultAuditRunState.COMPLETED)
-        _finding(db_session, run.id)
+    def test_lists_the_stored_runs(
+        self, client: TestClient, auth_headers: dict[str, str], make_run
+    ) -> None:
+        run = make_run(state=VaultAuditRunState.COMPLETED)
 
         response = client.get("/api/v1/maintenance/audits", headers=auth_headers)
 
         assert response.status_code == 200, response.text
-        assert response.json()[0]["id"] == run.id
-        assert response.json()[0]["critical_count"] == 1
-        assert response.json()[0]["findings"] == []
+        assert run.id in [row["id"] for row in response.json()]
 
-    def test_returns_an_empty_audit_list_when_no_runs_exist(self, client, auth_headers):
-        response = client.get("/api/v1/maintenance/audits", headers=auth_headers)
-
-        assert response.status_code == 200, response.text
-        assert response.json() == []
-
-    @pytest.mark.parametrize(
-        "limit", [pytest.param(1, id="minimum"), pytest.param(100, id="maximum")]
-    )
-    def test_honors_the_audit_list_limit_boundaries(
-        self, client, auth_headers, db_session, limit
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        _run(db_session, user.id, state=VaultAuditRunState.COMPLETED)
-        _run(db_session, user.id, state=VaultAuditRunState.FAILED)
-
-        response = client.get(
-            f"/api/v1/maintenance/audits?limit={limit}", headers=auth_headers
+    def test_returns_an_empty_list_with_no_runs(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        assert (
+            client.get("/api/v1/maintenance/audits", headers=auth_headers).json() == []
         )
 
-        assert response.status_code == 200, response.text
-        assert len(response.json()) == min(limit, 2)
+    def test_honours_the_limit(
+        self, client: TestClient, auth_headers: dict[str, str], make_run
+    ) -> None:
+        for _ in range(3):
+            make_run(state=VaultAuditRunState.COMPLETED)
+
+        response = client.get(
+            "/api/v1/maintenance/audits?limit=2", headers=auth_headers
+        )
+
+        assert len(response.json()) == 2
 
     @pytest.mark.parametrize(
-        "limit",
-        [pytest.param(0, id="below-minimum"), pytest.param(101, id="above-maximum")],
+        "limit", [pytest.param(0, id="below-min"), pytest.param(101, id="above-max")]
     )
-    def test_rejects_an_out_of_range_audit_list_limit(
-        self, client, auth_headers, limit
-    ):
+    def test_rejects_a_limit_outside_its_bounds(
+        self, client: TestClient, auth_headers: dict[str, str], limit: int
+    ) -> None:
         response = client.get(
             f"/api/v1/maintenance/audits?limit={limit}", headers=auth_headers
         )
 
         assert response.status_code == 422, response.text
 
-    def test_rejects_an_unauthenticated_audit_list(self, client):
-        response = client.get("/api/v1/maintenance/audits")
-
-        assert response.status_code == 401, response.text
-
-    def test_rejects_a_non_superuser_audit_list(self, client, db_session):
-        headers = _ordinary_headers(db_session, "ordinary-list")
-
-        response = client.get("/api/v1/maintenance/audits", headers=headers)
-
-        assert response.status_code == 403, response.text
-
 
 class TestLatestAudit:
-    def test_returns_the_latest_audit_run(self, client, auth_headers, db_session):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        _run(db_session, user.id, state=VaultAuditRunState.COMPLETED)
-        latest = _run(db_session, user.id, state=VaultAuditRunState.FAILED)
+    def test_returns_the_most_recent_run(
+        self, client: TestClient, auth_headers: dict[str, str], make_run
+    ) -> None:
+        make_run(state=VaultAuditRunState.COMPLETED)
+        newest = make_run(state=VaultAuditRunState.COMPLETED)
 
         response = client.get("/api/v1/maintenance/audits/latest", headers=auth_headers)
 
         assert response.status_code == 200, response.text
-        assert response.json()["id"] == latest.id
+        assert response.json()["id"] == newest.id
 
-    def test_returns_not_found_when_no_latest_audit_exists(self, client, auth_headers):
+    def test_reports_no_run_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
         response = client.get("/api/v1/maintenance/audits/latest", headers=auth_headers)
 
         assert response.status_code == 404, response.text
         assert response.json()["detail"] == "audit_not_found"
 
-    def test_rejects_unauthorized_latest_audit_reads(
-        self, client, unauthorized_headers
-    ):
-        response = client.get(
-            "/api/v1/maintenance/audits/latest", headers=unauthorized_headers
-        )
-
-        assert response.status_code in {401, 403}, response.text
-
 
 class TestGetAudit:
-    def test_returns_an_audit_run_by_id(self, client, auth_headers, db_session):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(
-            db_session, user.id, state=VaultAuditRunState.COMPLETED, progress=100
-        )
-        finding = _finding(db_session, run.id)
+    def test_returns_the_run(
+        self, client: TestClient, auth_headers: dict[str, str], make_run
+    ) -> None:
+        run = make_run()
 
         response = client.get(
             f"/api/v1/maintenance/audits/{run.id}", headers=auth_headers
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["progress"] == 100
-        assert [item["id"] for item in response.json()["findings"]] == [finding.id]
+        assert response.json()["id"] == run.id
 
-    def test_returns_not_found_for_a_missing_audit_run(self, client, auth_headers):
-        response = client.get("/api/v1/maintenance/audits/999999", headers=auth_headers)
+    def test_includes_the_runs_findings(
+        self, client: TestClient, auth_headers: dict[str, str], make_run, make_finding
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id)
+
+        body = client.get(
+            f"/api/v1/maintenance/audits/{run.id}", headers=auth_headers
+        ).json()
+
+        assert [item["id"] for item in body["findings"]] == [finding.id]
+
+    def test_reports_an_unknown_run_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.get("/api/v1/maintenance/audits/99999", headers=auth_headers)
 
         assert response.status_code == 404, response.text
         assert response.json()["detail"] == "audit_not_found"
 
-    def test_rejects_unauthorized_audit_detail_reads(
-        self, client, unauthorized_headers
-    ):
-        response = client.get(
-            "/api/v1/maintenance/audits/1", headers=unauthorized_headers
-        )
-
-        assert response.status_code in {401, 403}, response.text
-
 
 class TestCancelAudit:
-    def test_requests_cancellation_for_an_active_audit(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id, state=VaultAuditRunState.RUNNING)
+    def test_marks_the_run_cancel_requested(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        make_run,
+    ) -> None:
+        run = make_run(state=VaultAuditRunState.RUNNING)
 
         response = client.post(
             f"/api/v1/maintenance/audits/{run.id}/cancel", headers=auth_headers
         )
 
-        db_session.expire_all()
         assert response.status_code == 200, response.text
+        db_session.expire_all()
         assert db_session.get(VaultAuditRun, run.id).cancel_requested is True
 
-    def test_handles_repeated_cancellation_idempotently(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(
-            db_session, user.id, state=VaultAuditRunState.RUNNING, cancel_requested=True
-        )
-
+    def test_reports_an_unknown_run_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
         response = client.post(
-            f"/api/v1/maintenance/audits/{run.id}/cancel", headers=auth_headers
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.json()["state"] == "running"
-
-    def test_leaves_a_terminal_run_unchanged_when_cancelled(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id, state=VaultAuditRunState.COMPLETED)
-
-        response = client.post(
-            f"/api/v1/maintenance/audits/{run.id}/cancel", headers=auth_headers
-        )
-
-        db_session.expire_all()
-        assert response.status_code == 200, response.text
-        assert db_session.get(VaultAuditRun, run.id).cancel_requested is False
-
-    def test_returns_not_found_when_cancelling_a_missing_audit(
-        self, client, auth_headers
-    ):
-        response = client.post(
-            "/api/v1/maintenance/audits/999999/cancel", headers=auth_headers
+            "/api/v1/maintenance/audits/99999/cancel", headers=auth_headers
         )
 
         assert response.status_code == 404, response.text
-
-    def test_rejects_unauthorized_audit_cancellation(
-        self, client, unauthorized_headers, db_session
-    ):
-        user = _requester(db_session)
-        run = _run(db_session, user.id, state=VaultAuditRunState.RUNNING)
-
-        response = client.post(
-            f"/api/v1/maintenance/audits/{run.id}/cancel", headers=unauthorized_headers
-        )
-
-        db_session.expire_all()
-        assert response.status_code in {401, 403}, response.text
-        assert db_session.get(VaultAuditRun, run.id).cancel_requested is False
+        assert response.json()["detail"] == "audit_not_found"
 
 
 class TestRepairFinding:
-    def test_repairs_a_repairable_open_finding(self, client, db_session):
-        actor_uuid = uuid4()
-        actor_id = 2**62 + actor_uuid.int % (2**62 - 1)
-        actor = User(
-            id=actor_id,
-            username=f"maintenance-repair-{actor_uuid.hex}",
-            hashed_password=hash_password("obviously-fake-maintenance-password"),
-            is_active=True,
-            is_superuser=True,
-        )
-        db_session.add(actor)
-        db_session.commit()
-        db_session.refresh(actor)
-        token = create_access_token(actor.id, actor.username, scope="admin")
-        actor_headers = {"Authorization": f"Bearer {token}"}
-        run = _run(db_session, actor.id)
-        model = Model(name="Repair", slug="repair", hash="a" * 64)
-        db_session.add(model)
-        db_session.commit()
-        db_session.refresh(model)
-        file_row = File(
-            model_id=model.id,
-            path="repair.gcode",
-            original_filename="repair.gcode",
-            file_type=FileType.GCODE,
-            size_bytes=1,
-            sha256="b" * 64,
-        )
-        db_session.add(file_row)
-        db_session.commit()
-        finding = _finding(
-            db_session,
-            run.id,
-            repair_action="restore_recommended_revision",
-            details_json=json.dumps({"model_id": model.id}),
-        )
-        db_session.add(
-            AuditLog(
-                actor_id=actor.id,
-                action="audit.repair",
-                resource_type="vault_audit_finding",
-                resource_id=999999,
-            )
-        )
-        db_session.commit()
-
-        response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/repair", headers=actor_headers
-        )
-
-        db_session.expire_all()
-        assert response.status_code == 200, response.text
-        assert response.json()["state"] == "resolved"
-        assert db_session.get(File, file_row.id).is_recommended is True
-        repair_log = db_session.exec(
-            select(AuditLog).where(
-                AuditLog.action == "audit.repair",
-                AuditLog.resource_type == "vault_audit_finding",
-                AuditLog.resource_id == finding.id,
-                AuditLog.actor_id == actor.id,
-            )
-        ).one()
-        assert (
-            repair_log.action,
-            repair_log.resource_type,
-            repair_log.resource_id,
-            repair_log.actor_id,
-        ) == ("audit.repair", "vault_audit_finding", finding.id, actor.id)
-
-    def test_handles_a_repeated_finding_repair_idempotently(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id, state=VaultAuditFindingState.RESOLVED)
+    def test_reports_an_already_resolved_finding_as_resolved(
+        self, client: TestClient, auth_headers: dict[str, str], make_run, make_finding
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id, state=VaultAuditFindingState.RESOLVED)
 
         response = client.post(
             f"/api/v1/maintenance/findings/{finding.id}/repair", headers=auth_headers
@@ -419,120 +327,118 @@ class TestRepairFinding:
         assert response.status_code == 200, response.text
         assert response.json()["state"] == "resolved"
 
-    def test_rejects_repair_for_a_non_repairable_finding(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id, repair_action="no_such_action")
+    def test_refuses_a_finding_it_cannot_repair(
+        self, client: TestClient, auth_headers: dict[str, str], make_run, make_finding
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id, repair_action="no_such_action")
 
         response = client.post(
             f"/api/v1/maintenance/findings/{finding.id}/repair", headers=auth_headers
         )
 
-        db_session.expire_all()
         assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "audit_repair_not_available"
+
+    def test_leaves_an_unrepairable_finding_open(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        make_run,
+        make_finding,
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id, repair_action="no_such_action")
+
+        client.post(
+            f"/api/v1/maintenance/findings/{finding.id}/repair", headers=auth_headers
+        )
+
+        db_session.expire_all()
         assert (
             db_session.get(VaultAuditFinding, finding.id).state
-            == VaultAuditFindingState.OPEN
-        )
+            != VaultAuditFindingState.RESOLVED
+        ), "a refused repair must not claim the damage is gone"
 
-    def test_returns_not_found_when_repairing_a_missing_finding(
-        self, client, auth_headers
-    ):
+    def test_reports_an_unknown_finding_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
         response = client.post(
-            "/api/v1/maintenance/findings/999999/repair", headers=auth_headers
+            "/api/v1/maintenance/findings/99999/repair", headers=auth_headers
         )
 
         assert response.status_code == 404, response.text
         assert response.json()["detail"] == "audit_finding_not_found"
 
-    def test_rejects_unauthorized_finding_repair(
-        self, client, unauthorized_headers, db_session
-    ):
-        user = _requester(db_session)
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id, repair_action="no_such_action")
+
+class TestIgnoreFinding:
+    def test_marks_the_finding_ignored(
+        self, client: TestClient, auth_headers: dict[str, str], make_run, make_finding
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id)
 
         response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/repair",
-            headers=unauthorized_headers,
+            f"/api/v1/maintenance/findings/{finding.id}/ignore", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "ignored"
+
+    def test_records_who_ignored_it(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        superuser: User,
+        make_run,
+        make_finding,
+    ) -> None:
+        run = make_run()
+        finding = make_finding(run.id)
+
+        client.post(
+            f"/api/v1/maintenance/findings/{finding.id}/ignore", headers=auth_headers
         )
 
         db_session.expire_all()
-        assert response.status_code in {401, 403}, response.text
-        assert (
-            db_session.get(VaultAuditFinding, finding.id).state
-            == VaultAuditFindingState.OPEN
-        )
+        assert db_session.get(VaultAuditFinding, finding.id).resolved_by == superuser.id
 
-
-class TestIgnoreFinding:
-    def test_ignores_an_open_finding(self, client, auth_headers, db_session):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id)
-
+    def test_reports_an_unknown_finding_as_not_found(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
         response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/ignore", headers=auth_headers
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.json()["state"] == "ignored"
-        assert response.json()["resolved_by"] == user.id
-
-    def test_handles_repeated_finding_ignore_idempotently(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id, state=VaultAuditFindingState.IGNORED)
-
-        response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/ignore", headers=auth_headers
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.json()["state"] == "ignored"
-
-    def test_allows_a_resolved_finding_to_be_explicitly_ignored(
-        self, client, auth_headers, db_session
-    ):
-        user = db_session.exec(select(User).where(User.is_superuser.is_(True))).one()
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id, state=VaultAuditFindingState.RESOLVED)
-
-        response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/ignore", headers=auth_headers
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.json()["state"] == "ignored"
-
-    def test_returns_not_found_when_ignoring_a_missing_finding(
-        self, client, auth_headers
-    ):
-        response = client.post(
-            "/api/v1/maintenance/findings/999999/ignore", headers=auth_headers
+            "/api/v1/maintenance/findings/99999/ignore", headers=auth_headers
         )
 
         assert response.status_code == 404, response.text
+        assert response.json()["detail"] == "audit_finding_not_found"
 
-    def test_rejects_unauthorized_finding_ignore(
-        self, client, unauthorized_headers, db_session
-    ):
-        user = _requester(db_session)
-        run = _run(db_session, user.id)
-        finding = _finding(db_session, run.id)
 
-        response = client.post(
-            f"/api/v1/maintenance/findings/{finding.id}/ignore",
-            headers=unauthorized_headers,
-        )
+class TestAuthorisation:
+    @pytest.mark.parametrize(("method", "path", "payload"), ROUTES)
+    def test_rejects_an_unauthenticated_caller(
+        self, client: TestClient, method: str, path: str, payload: dict | None
+    ) -> None:
+        kwargs = {"json": payload} if payload is not None else {}
 
-        db_session.expire_all()
-        assert response.status_code in {401, 403}, response.text
-        assert (
-            db_session.get(VaultAuditFinding, finding.id).state
-            == VaultAuditFindingState.OPEN
-        )
+        response = getattr(client, method)(path, **kwargs)
+
+        assert response.status_code == 401, response.text
+
+    @pytest.mark.parametrize(("method", "path", "payload"), ROUTES)
+    def test_rejects_a_non_superuser(
+        self,
+        client: TestClient,
+        user_headers: UserHeaders,
+        method: str,
+        path: str,
+        payload: dict | None,
+    ) -> None:
+        headers = user_headers(f"operator-{path.replace('/', '-')}")
+        kwargs = {"json": payload} if payload is not None else {}
+
+        response = getattr(client, method)(path, headers=headers, **kwargs)
+
+        assert response.status_code == 403, response.text

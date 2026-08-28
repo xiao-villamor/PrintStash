@@ -1,3 +1,26 @@
+/*
+ * The query hooks, and the two properties that decide whether the vault feels
+ * broken.
+ *
+ * **Freshness.** Collections, tags, printers, profiles and vault stats all pass
+ * `fresh: true`, because every one of them changes as a *result* of something the
+ * user just did. A cached collection list after creating a collection shows the
+ * user their new folder missing.
+ *
+ * **Continuity.** When a filter changes, the outliner and the facet groups must
+ * stay mounted while the new data loads. Unmounting them is what produces the
+ * layout collapsing and snapping back on every keystroke in a filter box — the
+ * data is right either way, so nothing but a test like this notices.
+ *
+ * The `enabled` gate is asserted in both directions. A hook that fetches while
+ * disabled is a request against a route the user may have no role on, which
+ * surfaces as a spurious 403 in the console on pages that look fine.
+ *
+ * Pagination is server-owned: the sort goes to the server and the next cursor is
+ * requested only on demand. A client that re-sorted locally would paginate a
+ * different order than the one it displays.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -25,10 +48,10 @@ import type {
   ModelPageRead,
   OutlinerModelRead,
   PrinterProfileRead,
-  PrinterRead,
   TagRead,
   VaultStatsRead,
 } from "@/types";
+import { aPrinter } from "@/test-support/factories";
 
 // The hooks are thin, but they encode two real contracts worth locking down:
 // (1) every shared read passes `{ fresh: true }` so TanStack Query — not the
@@ -67,39 +90,7 @@ const collection: CollectionRead = {
 
 const tag: TagRead = { id: 1, name: "petg", slug: "petg", model_count: 1 };
 
-const printer: PrinterRead = {
-  id: 1,
-  name: "Voron",
-  provider: "moonraker",
-  moonraker_url: "http://10.0.0.1:7125",
-  has_api_key: false,
-  access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
-  capabilities: {
-    can_start: true,
-    can_pause: true,
-    can_resume: true,
-    can_cancel: true,
-    can_live_status: true,
-    can_upload: true,
-    can_list_files: true,
-    can_send_gcode: true,
-    can_measure_consumption: true,
-    support_level: "stable",
-    support_notes: [],
-    unsupported_actions: [],
-  },
-  notes: null,
-  group: null,
-  is_default: false,
-  drain_mode: false,
-  drain_reason: null,
-  drain_updated_at: null,
-  status: "ready",
-  last_seen_at: null,
-  last_error: null,
-  created_at: TIMESTAMP,
-  updated_at: TIMESTAMP,
-};
+const printer = aPrinter({ name: "Voron", moonraker_url: "http://10.0.0.1:7125" });
 
 const printerProfile: PrinterProfileRead = {
   id: 1,

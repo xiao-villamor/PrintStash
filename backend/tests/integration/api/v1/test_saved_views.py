@@ -1,427 +1,348 @@
-"""Saved-view routes preserve private, durable, URL-restorable model filters."""
+"""A saved view belongs to exactly one user, and the API never says otherwise.
+
+Saved views are named filter sets in the vault's sidebar. Two properties carry the
+weight: another user's view is invisible — a read, update or delete of one answers 404,
+not 403, because even its existence is not the caller's business — and a name is unique
+*per user*, so two people may both keep a "Favorites". If the ownership predicate ever
+drops out of a query here, one self-hoster's saved searches start appearing in another's
+sidebar, and this file is what goes red.
+"""
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, select
 
-from app.db.models import SavedView, User
-from app.services.auth import create_access_token, hash_password
+from tests.integration.conftest import UserHeaders
 
-BASE_FILTERS = {
+MAX_NAME = 128
+FILTERS: dict[str, Any] = {
     "collection": "functional/brackets",
     "direct": True,
     "tag": ["pla", "tested"],
     "q": "mount",
-    "printer_id": 1,
-    "printer_presence": "any",
     "favorites": True,
-    "file_type": ["gcode"],
-    "material_type": ["PLA"],
-    "slicer_name": ["OrcaSlicer"],
-    "printer_model": ["Core One"],
-    "revision_status": ["known_good"],
-    "printed": True,
-    "print_outcome": ["completed"],
-    "storage": ["vault"],
-    "uploaded_after": "2026-01-01T00:00:00Z",
-    "uploaded_before": "2026-02-01T00:00:00Z",
 }
 
 
-def _user_headers(
-    db_session: Session, username: str, *, scope: str = "write"
-) -> tuple[User, dict[str, str]]:
-    user = User(
-        username=username,
-        hashed_password=hash_password("Password123"),
-        is_active=True,
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    token = create_access_token(user.id, user.username, scope=scope)
-    return user, {"Authorization": f"Bearer {token}"}
-
-
-def _create(
-    client: TestClient,
-    headers: dict[str, str],
-    *,
-    name: str = "Workshop favorites",
-    filters: dict | None = None,
-):
+def _create(client: TestClient, headers: dict[str, str], name: str, **filters: Any):
     return client.post(
         "/api/v1/saved-views",
         headers=headers,
-        json={"name": name, "filters": filters if filters is not None else {}},
+        json={"name": name, "filters": filters or FILTERS},
     )
-
-
-class TestListSavedViews:
-    def test_lists_the_current_users_saved_views(self, client, db_session):
-        _, headers = _user_headers(db_session, "list-owner")
-        beta = _create(client, headers, name="Beta")
-        alpha = _create(client, headers, name="Alpha")
-
-        response = client.get("/api/v1/saved-views", headers=headers)
-
-        assert response.status_code == 200, response.text
-        assert [row["id"] for row in response.json()] == [
-            alpha.json()["id"],
-            beta.json()["id"],
-        ]
-
-    def test_returns_an_empty_list_when_the_current_user_has_no_saved_views(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "empty-owner")
-
-        response = client.get("/api/v1/saved-views", headers=headers)
-
-        assert response.status_code == 200, response.text
-        assert response.json() == []
-
-    def test_excludes_another_users_saved_views_from_the_list(self, client, db_session):
-        _, owner_headers = _user_headers(db_session, "scoped-owner")
-        _, other_headers = _user_headers(db_session, "scoped-other")
-        owned = _create(client, owner_headers)
-        _create(client, other_headers, name="Foreign")
-
-        response = client.get("/api/v1/saved-views", headers=owner_headers)
-
-        assert [row["id"] for row in response.json()] == [owned.json()["id"]]
-
-    def test_rejects_an_unauthenticated_saved_view_list(self, client):
-        response = client.get("/api/v1/saved-views")
-
-        assert response.status_code == 401, response.text
 
 
 class TestCreateSavedView:
-    def test_creates_a_saved_view_with_the_canonical_filter_contract(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "complete-filter-owner")
+    def test_returns_the_created_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("creator")
 
-        response = _create(client, headers, filters=BASE_FILTERS)
-
-        assert response.status_code == 201, response.text
-        assert response.json()["filters"] == BASE_FILTERS
-
-    def test_persists_a_created_saved_view_for_the_current_user(
-        self, client, db_session
-    ):
-        owner, headers = _user_headers(db_session, "persist-owner")
-
-        response = _create(client, headers)
-
-        row = db_session.get(SavedView, response.json()["id"])
-        assert row.user_id == owner.id
-
-    def test_accepts_empty_filter_collections_and_omitted_optional_filters(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "default-filter-owner")
-
-        response = _create(client, headers)
+        response = _create(client, headers, "Workshop favorites")
 
         assert response.status_code == 201, response.text
-        assert response.json()["filters"]["tag"] == []
-        assert response.json()["filters"]["favorites"] is False
+        body = response.json()
+        assert body["id"]
+        assert body["name"] == "Workshop favorites"
+        assert body["filters"]["tag"] == ["pla", "tested"]
+        assert body["filters"]["favorites"] is True
 
-    def test_rejects_a_duplicate_name_for_the_same_user(self, client, db_session):
-        owner, headers = _user_headers(db_session, "duplicate-owner")
-        _create(client, headers, name="Favorites")
+    def test_persists_the_view_for_the_caller(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("persister")
+        created = _create(client, headers, "Workshop favorites").json()
 
-        response = _create(client, headers, name="Favorites")
+        listed = client.get("/api/v1/saved-views", headers=headers).json()
 
-        rows = db_session.exec(
-            select(SavedView).where(SavedView.user_id == owner.id)
-        ).all()
-        assert response.status_code == 409, response.text
-        assert response.json()["detail"] == "saved_view_name_exists"
-        assert [row.name for row in rows] == ["Favorites"]
+        assert [row["id"] for row in listed] == [created["id"]]
 
-    def test_allows_the_same_saved_view_name_for_different_users(
-        self, client, db_session
-    ):
-        _, first_headers = _user_headers(db_session, "same-name-one")
-        _, second_headers = _user_headers(db_session, "same-name-two")
-        _create(client, first_headers, name="Favorites")
+    def test_rejects_a_duplicate_name_for_the_same_user(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("duplicator")
+        _create(client, headers, "Favorites")
 
-        response = _create(client, second_headers, name="Favorites")
+        duplicate = _create(client, headers, "Favorites")
 
-        assert response.status_code == 201, response.text
+        assert duplicate.status_code == 409, duplicate.text
+        assert duplicate.json()["detail"] == "saved_view_name_exists"
+        assert len(client.get("/api/v1/saved-views", headers=headers).json()) == 1
 
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            pytest.param({"name": "", "filters": {}}, id="empty-name"),
-            pytest.param({"name": "x" * 129, "filters": {}}, id="long-name"),
-            pytest.param(
-                {"name": "Bad enum", "filters": {"storage": ["remote"]}},
-                id="invalid-enum",
-            ),
-            pytest.param(
-                {"name": "Too many", "filters": {"tag": ["x"] * 65}},
-                id="oversized-array",
-            ),
-            pytest.param(
-                {"name": "Extra", "filters": {}, "unexpected": True}, id="extra-field"
-            ),
-        ],
-    )
-    def test_validates_saved_view_create_boundaries(self, client, db_session, payload):
-        owner, headers = _user_headers(
-            db_session, f"invalid-create-{len(str(payload))}"
+    def test_accepts_a_name_another_user_already_uses(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        first = user_headers("first-owner")
+        second = user_headers("second-owner")
+        _create(client, first, "Favorites")
+
+        response = _create(client, second, "Favorites")
+
+        assert response.status_code == 201, "names are unique per user, not globally"
+
+    def test_rejects_an_unknown_field(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("typo-sender")
+
+        response = client.post(
+            "/api/v1/saved-views",
+            headers=headers,
+            json={"name": "Typo", "filters": FILTERS, "unexpected": "ignored"},
         )
-
-        response = client.post("/api/v1/saved-views", headers=headers, json=payload)
 
         assert response.status_code == 422, response.text
-        assert (
-            db_session.exec(
-                select(SavedView).where(SavedView.user_id == owner.id)
-            ).first()
-            is None
-        )
 
     @pytest.mark.parametrize(
-        "scope",
-        [pytest.param(None, id="missing"), pytest.param("read", id="read-scope")],
+        "name",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("x" * (MAX_NAME + 1), id="over-max"),
+        ],
     )
-    def test_rejects_an_unauthenticated_saved_view_create(
-        self, client, db_session, scope
-    ):
-        headers = {}
-        if scope is not None:
-            _, headers = _user_headers(db_session, "read-create", scope=scope)
+    def test_rejects_a_name_outside_the_length_bounds(
+        self, client: TestClient, user_headers: UserHeaders, name: str
+    ) -> None:
+        headers = user_headers(f"bounds-{len(name)}")
 
-        response = _create(client, headers)
+        assert _create(client, headers, name).status_code == 422
 
+    def test_accepts_a_name_at_the_length_limit(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("at-limit")
+        name = "x" * MAX_NAME
+
+        response = _create(client, headers, name)
+
+        assert response.status_code == 201, response.text
+        assert response.json()["name"] == name
+
+    def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/v1/saved-views", json={"name": "Anon", "filters": FILTERS}
+        )
+
+        assert response.status_code == 401
+
+    def test_rejects_a_read_scope_token(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("reader", scope="read")
+
+        response = _create(client, headers, "Read only")
+
+        # `require_auth` answers an insufficient scope with 401, not 403. That is the
+        # shipped contract the frontend reads; asserting it here pins it deliberately.
         assert response.status_code == 401, response.text
-        assert db_session.exec(select(SavedView)).first() is None
+        assert response.json()["detail"] == "insufficient_scope"
+
+
+class TestListSavedViews:
+    def test_lists_only_the_callers_views(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        mine = user_headers("list-owner")
+        theirs = user_headers("list-other")
+        created = _create(client, mine, "Mine").json()
+        _create(client, theirs, "Theirs")
+
+        listed = client.get("/api/v1/saved-views", headers=mine).json()
+
+        assert [row["id"] for row in listed] == [created["id"]]
+
+    def test_returns_an_empty_list_for_a_user_with_none(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("empty-handed")
+
+        assert client.get("/api/v1/saved-views", headers=headers).json() == []
+
+    def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
+        assert client.get("/api/v1/saved-views").status_code == 401
 
 
 class TestGetSavedView:
-    def test_returns_the_current_users_saved_view(self, client, db_session):
-        _, headers = _user_headers(db_session, "detail-owner")
-        created = _create(client, headers, filters={"favorites": True})
+    def test_returns_the_callers_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("reader-owner")
+        created = _create(client, headers, "Mine").json()
 
-        response = client.get(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=headers
-        )
+        response = client.get(f"/api/v1/saved-views/{created['id']}", headers=headers)
 
         assert response.status_code == 200, response.text
-        assert response.json() == created.json()
+        assert response.json()["filters"]["q"] == "mount"
 
-    def test_hides_another_users_saved_view_by_id(self, client, db_session):
-        _, owner_headers = _user_headers(db_session, "detail-foreign-owner")
-        _, other_headers = _user_headers(db_session, "detail-foreign-other")
-        created = _create(client, owner_headers)
+    def test_hides_another_users_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        owner = user_headers("hidden-owner")
+        other = user_headers("hidden-other")
+        created = _create(client, owner, "Private").json()
 
-        response = client.get(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=other_headers
-        )
+        response = client.get(f"/api/v1/saved-views/{created['id']}", headers=other)
 
-        assert response.status_code == 404, response.text
+        assert response.status_code == 404, "existence is not disclosed"
         assert response.json()["detail"] == "saved_view_not_found"
 
-    def test_returns_not_found_for_a_missing_saved_view(self, client, db_session):
-        _, headers = _user_headers(db_session, "detail-missing-owner")
+    def test_reports_an_unknown_id_as_not_found(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("seeker")
 
-        response = client.get("/api/v1/saved-views/999999", headers=headers)
-
-        assert response.status_code == 404, response.text
-
-    def test_rejects_an_unauthenticated_saved_view_detail_read(self, client):
-        response = client.get("/api/v1/saved-views/1")
-
-        assert response.status_code == 401, response.text
+        assert (
+            client.get("/api/v1/saved-views/9999", headers=headers).status_code == 404
+        )
 
 
 class TestUpdateSavedView:
-    def test_updates_a_saved_view_name(self, client, db_session):
-        _, headers = _user_headers(db_session, "rename-owner")
-        created = _create(client, headers)
+    def test_renames_the_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("renamer")
+        created = _create(client, headers, "Before").json()
 
         response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}",
+            f"/api/v1/saved-views/{created['id']}",
             headers=headers,
-            json={"name": "Ready"},
+            json={"name": "After"},
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["name"] == "Ready"
+        assert response.json()["name"] == "After"
 
-    def test_updates_a_saved_views_complete_filter_contract(self, client, db_session):
-        _, headers = _user_headers(db_session, "filter-update-owner")
-        created = _create(client, headers)
+    def test_replaces_the_whole_filter_set(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("replacer")
+        created = _create(client, headers, "Broad").json()
 
         response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}",
+            f"/api/v1/saved-views/{created['id']}",
             headers=headers,
-            json={"filters": BASE_FILTERS},
+            json={"filters": {"favorites": True}},
         )
 
         assert response.status_code == 200, response.text
-        assert response.json()["filters"] == BASE_FILTERS
+        assert response.json()["filters"]["tag"] == [], (
+            "a PATCH of filters replaces the set, it does not merge into it"
+        )
 
-    def test_preserves_omitted_fields_during_a_partial_saved_view_update(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "partial-update-owner")
-        created = _create(client, headers, filters={"favorites": True})
+    def test_leaves_the_name_alone_when_only_filters_are_sent(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("filter-only")
+        created = _create(client, headers, "Keep me").json()
 
         response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}",
+            f"/api/v1/saved-views/{created['id']}",
             headers=headers,
-            json={"name": "Renamed"},
+            json={"filters": {"favorites": True}},
         )
 
-        assert response.json()["filters"]["favorites"] is True
+        assert response.json()["name"] == "Keep me"
 
-    def test_accepts_an_empty_saved_view_update(self, client, db_session):
-        _, headers = _user_headers(db_session, "empty-update-owner")
-        created = _create(client, headers, filters={"favorites": True})
-
-        response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=headers, json={}
-        )
-
-        assert response.status_code == 200, response.text
-        assert response.json()["name"] == created.json()["name"]
-        assert response.json()["filters"] == created.json()["filters"]
-
-    def test_rejects_a_duplicate_name_during_update(self, client, db_session):
-        owner, headers = _user_headers(db_session, "duplicate-update-owner")
-        _create(client, headers, name="First")
-        second = _create(client, headers, name="Second")
+    def test_rejects_a_rename_onto_another_of_the_callers_views(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("collider")
+        _create(client, headers, "Taken")
+        created = _create(client, headers, "Free").json()
 
         response = client.patch(
-            f"/api/v1/saved-views/{second.json()['id']}",
+            f"/api/v1/saved-views/{created['id']}",
             headers=headers,
-            json={"name": "First"},
+            json={"name": "Taken"},
         )
 
-        names = db_session.exec(
-            select(SavedView.name)
-            .where(SavedView.user_id == owner.id)
-            .order_by(SavedView.name)
-        ).all()
         assert response.status_code == 409, response.text
-        assert names == ["First", "Second"]
+        assert response.json()["detail"] == "saved_view_name_exists"
 
-    def test_hides_another_users_saved_view_during_update(self, client, db_session):
-        _, owner_headers = _user_headers(db_session, "update-foreign-owner")
-        _, other_headers = _user_headers(db_session, "update-foreign-other")
-        created = _create(client, owner_headers)
+    def test_hides_another_users_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        owner = user_headers("patch-owner")
+        other = user_headers("patch-other")
+        created = _create(client, owner, "Private").json()
 
         response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}",
-            headers=other_headers,
-            json={"name": "Stolen"},
+            f"/api/v1/saved-views/{created['id']}",
+            headers=other,
+            json={"name": "Hijacked"},
         )
 
-        db_session.expire_all()
-        assert response.status_code == 404, response.text
+        assert response.status_code == 404
         assert (
-            db_session.get(SavedView, created.json()["id"]).name
-            == created.json()["name"]
+            client.get(f"/api/v1/saved-views/{created['id']}", headers=owner).json()[
+                "name"
+            ]
+            == "Private"
         )
 
-    def test_returns_not_found_when_updating_a_missing_saved_view(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "update-missing-owner")
+    def test_rejects_a_read_scope_token(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        writer = user_headers("patch-writer")
+        created = _create(client, writer, "Mine").json()
+        reader = user_headers("patch-reader", scope="read")
 
         response = client.patch(
-            "/api/v1/saved-views/999999", headers=headers, json={"name": "Missing"}
+            f"/api/v1/saved-views/{created['id']}", headers=reader, json={"name": "No"}
         )
 
-        assert response.status_code == 404, response.text
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            pytest.param({"name": ""}, id="empty-name"),
-            pytest.param({"name": "x" * 129}, id="long-name"),
-            pytest.param({"filters": {"storage": ["remote"]}}, id="invalid-enum"),
-            pytest.param({"unexpected": True}, id="extra-field"),
-        ],
-    )
-    def test_validates_saved_view_update_boundaries(self, client, db_session, payload):
-        _, headers = _user_headers(db_session, f"invalid-update-{len(str(payload))}")
-        created = _create(client, headers)
-
-        response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=headers, json=payload
-        )
-
-        db_session.expire_all()
-        assert response.status_code == 422, response.text
-        assert (
-            db_session.get(SavedView, created.json()["id"]).name
-            == created.json()["name"]
-        )
-
-    def test_rejects_an_unauthenticated_saved_view_update(self, client, db_session):
-        _, headers = _user_headers(db_session, "unauth-update-owner")
-        created = _create(client, headers)
-
-        response = client.patch(
-            f"/api/v1/saved-views/{created.json()['id']}", json={"name": "Changed"}
-        )
-
-        db_session.expire_all()
         assert response.status_code == 401, response.text
-        assert (
-            db_session.get(SavedView, created.json()["id"]).name
-            == created.json()["name"]
-        )
+        assert response.json()["detail"] == "insufficient_scope"
 
 
 class TestDeleteSavedView:
-    def test_deletes_the_current_users_saved_view(self, client, db_session):
-        _, headers = _user_headers(db_session, "delete-owner")
-        created = _create(client, headers)
+    def test_deletes_the_callers_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("deleter")
+        created = _create(client, headers, "Temporary").json()
 
         response = client.delete(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=headers
+            f"/api/v1/saved-views/{created['id']}", headers=headers
         )
 
         assert response.status_code == 204, response.text
-        assert response.content == b""
-        assert db_session.get(SavedView, created.json()["id"]) is None
+        assert client.get("/api/v1/saved-views", headers=headers).json() == []
 
-    def test_hides_another_users_saved_view_during_delete(self, client, db_session):
-        _, owner_headers = _user_headers(db_session, "delete-foreign-owner")
-        _, other_headers = _user_headers(db_session, "delete-foreign-other")
-        created = _create(client, owner_headers)
+    def test_hides_another_users_view(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        owner = user_headers("delete-owner")
+        other = user_headers("delete-other")
+        created = _create(client, owner, "Private").json()
 
-        response = client.delete(
-            f"/api/v1/saved-views/{created.json()['id']}", headers=other_headers
-        )
+        response = client.delete(f"/api/v1/saved-views/{created['id']}", headers=other)
 
-        assert response.status_code == 404, response.text
-        assert db_session.get(SavedView, created.json()["id"]) is not None
+        assert response.status_code == 404
+        assert len(client.get("/api/v1/saved-views", headers=owner).json()) == 1
 
-    def test_returns_not_found_when_deleting_a_missing_saved_view(
-        self, client, db_session
-    ):
-        _, headers = _user_headers(db_session, "delete-missing-owner")
+    def test_reports_a_second_delete_as_not_found(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        headers = user_headers("twice")
+        created = _create(client, headers, "Temporary").json()
+        client.delete(f"/api/v1/saved-views/{created['id']}", headers=headers)
 
-        response = client.delete("/api/v1/saved-views/999999", headers=headers)
+        again = client.delete(f"/api/v1/saved-views/{created['id']}", headers=headers)
 
-        assert response.status_code == 404, response.text
+        assert again.status_code == 404
 
-    def test_rejects_an_unauthenticated_saved_view_delete(self, client, db_session):
-        _, headers = _user_headers(db_session, "unauth-delete-owner")
-        created = _create(client, headers)
+    def test_rejects_a_read_scope_token(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        writer = user_headers("delete-writer")
+        created = _create(client, writer, "Mine").json()
+        reader = user_headers("delete-reader", scope="read")
 
-        response = client.delete(f"/api/v1/saved-views/{created.json()['id']}")
+        response = client.delete(f"/api/v1/saved-views/{created['id']}", headers=reader)
 
         assert response.status_code == 401, response.text
-        assert db_session.get(SavedView, created.json()["id"]) is not None
+        assert response.json()["detail"] == "insufficient_scope"

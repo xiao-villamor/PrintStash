@@ -1,27 +1,18 @@
-"""Unit-tier guards keep database, app, and network behavior out of unit tests."""
+"""``tests/unit/`` — one function, nothing real behind it.
+
+A unit test here exercises pure logic: parsers, hashing, URL safety, state machines, and
+the reaction of our code to a dependency that misbehaves on cue. It gets no database, no
+router, and no network. Both guards below are autouse, so a test that drifts out of the
+tier fails here rather than passing for the wrong reason.
+"""
 
 from __future__ import annotations
 
-import socket
-
 import pytest
 
-_INTEGRATION_FIXTURES = frozenset({"app", "client", "db_session"})
+from tests._guards import block_real_network, forbid_db_fixtures  # noqa: F401 — autouse
 
 
 @pytest.fixture(autouse=True)
-def _reject_integration_fixtures(request: pytest.FixtureRequest) -> None:
-    forbidden = _INTEGRATION_FIXTURES.intersection(request.fixturenames)
-    if forbidden:
-        names = ", ".join(sorted(forbidden))
-        pytest.fail(f"unit test requested integration fixture(s): {names}")
-
-
-@pytest.fixture(autouse=True)
-def _block_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    def denied(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("unit tests may not open sockets, including loopback")
-
-    monkeypatch.setattr(socket, "create_connection", denied)
-    monkeypatch.setattr(socket.socket, "connect", denied)
-    monkeypatch.setattr(socket.socket, "connect_ex", denied)
+def _no_db_fixtures(request: pytest.FixtureRequest) -> None:
+    forbid_db_fixtures(request)

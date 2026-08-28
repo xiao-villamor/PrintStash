@@ -1,3 +1,18 @@
+/*
+ * Connecting an account or a browser to PrintStash, without keeping the secret.
+ *
+ * Three credential shapes and one rule: none of them stays in the client. OAuth
+ * hands off to a server-provided authorization URL, so the client never sees a
+ * token. Cults takes a username and password, which are exchanged and dropped
+ * rather than held in component state. Pairing shows a *temporary code*, never the
+ * device credential the backend issues from it — the code is safe to read off a
+ * screen; the credential is not.
+ *
+ * Revocation confirms and renaming does not, which is the same asymmetry as
+ * everywhere else: revoking a device is what a user does after losing it, and
+ * doing it by accident locks out the one they are holding.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

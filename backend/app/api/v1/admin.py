@@ -19,6 +19,7 @@ from app.db.models import (
     Tag,
     User,
 )
+from app.db.scopes import live
 from app.db.session import get_session
 from app.schemas.auth import UserCreate, UserPasswordUpdate, UserRead, UserUpdate
 from app.services.auth import (
@@ -57,9 +58,7 @@ _RESOURCE_MODEL = {
 
 @router.get("/users", response_model=list[UserRead])
 def list_users(session: Session = Depends(get_session)) -> list[UserRead]:
-    rows = session.exec(
-        select(User).where(User.deleted_at.is_(None)).order_by(User.username)
-    ).all()
+    rows = session.exec(select(User).where(live(User)).order_by(User.username)).all()
     return [UserRead.model_validate(row) for row in rows]
 
 
@@ -67,7 +66,7 @@ def _active_superuser_count(session: Session) -> int:
     return len(
         session.exec(
             select(User).where(
-                User.deleted_at.is_(None),
+                live(User),
                 User.is_active == True,  # noqa: E712
                 User.is_superuser == True,  # noqa: E712
             )

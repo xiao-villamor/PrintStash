@@ -74,6 +74,14 @@
   affecting its imported Model or Artifacts; expired terminal import jobs no
   longer make a subsequent upload fail during pruning, and dismissed items
   leave the visible inbox.
+- **`greenlet` is now declared directly, so the async database capability works
+  on Apple Silicon.** SQLAlchemy requires `greenlet` for every asyncio code path
+  but declares it only for `platform_machine` in `AMD64`, `WIN32`, `aarch64`,
+  `amd64`, `ppc64le`, `win32`, `x86_64`. macOS on Apple Silicon reports `arm64`,
+  so that marker was false and `uv sync` left `greenlet` out — an async engine
+  then failed at runtime on a developer Mac while passing in CI. `aiosqlite` also
+  joins the `dev` group, so the SQLite async contracts run everywhere instead of
+  skipping (4 skipped tests became 4 passing ones).
 
 ## 0.12.1
 

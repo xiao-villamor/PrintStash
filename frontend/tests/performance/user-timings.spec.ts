@@ -1,3 +1,17 @@
+/*
+ * Real timings for the two interactions a user feels, recorded rather than
+ * asserted.
+ *
+ * Vault load and first interaction are where this app is slow if it is slow at
+ * all — a large library, thumbnails, a filter tree. This spec exists to produce
+ * numbers a human compares between releases, not to fail a build: a hard
+ * threshold on a laptop under CI load is a flake, and a flaky performance gate
+ * gets disabled and then nobody has numbers at all.
+ *
+ * It runs against a production build, because the dev server's timings say
+ * nothing about what a self-hoster experiences.
+ */
+
 import { expect, test, type Page } from "@playwright/test";
 import type { Server } from "node:http";
 
@@ -103,30 +117,32 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("records production vault loading and interaction timings", async ({ page }, testInfo) => {
-  await page.goto("/");
-  await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+test.describe("vault performance", () => {
+  test("records production vault loading and interaction timings", async ({ page }, testInfo) => {
+    await page.goto("/");
+    await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 
-  const interactionStarted = performance.now();
-  await page.getByRole("button", { name: "Display" }).click();
-  await page.getByRole("menuitem", { name: "List View" }).click();
-  await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
-  const displayChangeMs = performance.now() - interactionStarted;
+    const interactionStarted = performance.now();
+    await page.getByRole("button", { name: "Display" }).click();
+    await page.getByRole("menuitem", { name: "List View" }).click();
+    await expect(page.getByText("Thumb", { exact: true })).toBeVisible();
+    const displayChangeMs = performance.now() - interactionStarted;
 
-  await page.waitForTimeout(100);
-  const browser = await collectBrowserMetrics(page);
-  const metrics = {
-    buildMode: process.env.PERF_BUILD_MODE === "react-compiler" ? "react-compiler" : "baseline",
-    displayChangeMs,
-    ...browser,
-  };
+    await page.waitForTimeout(100);
+    const browser = await collectBrowserMetrics(page);
+    const metrics = {
+      buildMode: process.env.PERF_BUILD_MODE === "react-compiler" ? "react-compiler" : "baseline",
+      displayChangeMs,
+      ...browser,
+    };
 
-  console.log(`PRINTSTASH_PERF ${JSON.stringify(metrics)}`);
-  await testInfo.attach("performance-metrics", {
-    body: Buffer.from(`${JSON.stringify(metrics, null, 2)}\n`),
-    contentType: "application/json",
+    console.log(`PRINTSTASH_PERF ${JSON.stringify(metrics)}`);
+    await testInfo.attach("performance-metrics", {
+      body: Buffer.from(`${JSON.stringify(metrics, null, 2)}\n`),
+      contentType: "application/json",
+    });
+
+    expect(browser.requests).toBeGreaterThan(0);
+    expect(browser.cumulativeLayoutShift).toBeGreaterThanOrEqual(0);
   });
-
-  expect(browser.requests).toBeGreaterThan(0);
-  expect(browser.cumulativeLayoutShift).toBeGreaterThanOrEqual(0);
 });
