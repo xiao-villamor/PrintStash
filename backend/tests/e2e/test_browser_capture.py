@@ -328,7 +328,26 @@ class TestBrowserCapture:
 
         health = await api.get("/api/v1/health")
         assert health.status_code == 200
-        assert health.json() == {"status": "ok", "name": "PrintStash"}
+        assert health.json() == {
+            "status": "ok",
+            "name": "PrintStash",
+            "storage": {
+                "provider": "local",
+                "capabilities": {
+                    "conditional_create": True,
+                    "object_identity": "inode",
+                    "verified_delete": True,
+                    "conditional_replace": True,
+                    "namespace_ownership": True,
+                    "direct_path": True,
+                    "tier": "verified",
+                    "warnings": [],
+                },
+                "tier": "verified",
+                "diagnostics": {"probed": False},
+                "warnings": [],
+            },
+        }
 
         login = await api.post(
             "/api/v1/auth/login",

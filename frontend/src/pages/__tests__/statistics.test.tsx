@@ -149,6 +149,87 @@ describe("StatisticsPage", () => {
     });
   });
 
+  describe("the time-series controls", () => {
+    it("plots filament usage when the filament metric is selected", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      await screen.findByText("Total cost");
+
+      await user.click(screen.getByRole("button", { name: "Filament" }));
+
+      expect(await screen.findByText("Filament over time")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Filament" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("plots print counts when the prints metric is selected", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      await screen.findByText("Total cost");
+
+      await user.click(screen.getByRole("button", { name: "Prints" }));
+
+      expect(await screen.findByText("Prints over time")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Prints" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("renders a line chart when the line chart type is selected", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      await screen.findByText("Total cost");
+
+      await user.click(screen.getByRole("button", { name: "Line" }));
+
+      expect(screen.getByRole("button", { name: "Line" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("renders a bar chart when the bar chart type is selected", async () => {
+      const user = userEvent.setup();
+      renderStatistics();
+      await screen.findByText("Total cost");
+
+      await user.click(screen.getByRole("button", { name: "Bar" }));
+
+      expect(screen.getByRole("button", { name: "Bar" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("shows placeholders when optional statistics values are missing", async () => {
+      renderStatistics({
+        stats: statistics({
+          start_at: null,
+          total_cost: null,
+          total_filament_g: null,
+          cost_over_time: [{ bucket: "2026-01-01", cost: null, filament_g: null, print_count: 3 }],
+        }),
+      });
+
+      expect(await screen.findByText("7-day forecast")).toBeInTheDocument();
+      expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    });
+
+    it("uses zero for a missing filament datapoint", async () => {
+      const user = userEvent.setup();
+      renderStatistics({
+        stats: statistics({
+          cost_over_time: [{ bucket: "2026-01-01", cost: 10, filament_g: null, print_count: 3 }],
+        }),
+      });
+      await screen.findByText("Total cost");
+
+      await user.click(screen.getByRole("button", { name: "Filament" }));
+
+      expect(screen.getByRole("button", { name: "Filament" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+  });
+
   describe("choosing which widgets to show", () => {
     it("offers the customisation menu", async () => {
       const user = userEvent.setup();
@@ -170,6 +251,24 @@ describe("StatisticsPage", () => {
       await user.click(within(dialog).getAllByRole("checkbox")[0]);
 
       expect(window.localStorage.getItem(WIDGET_PREFERENCE_KEY)).not.toBeNull();
+    });
+
+    it("remembers a widget the user restored", async () => {
+      const user = userEvent.setup();
+      window.localStorage.setItem(
+        WIDGET_PREFERENCE_KEY,
+        JSON.stringify(["printers", "filaments", "collections"]),
+      );
+      renderStatistics();
+      await screen.findByText("Statistics");
+      await user.click(screen.getByRole("button", { name: /Customize/ }));
+
+      const dialog = await screen.findByRole("dialog");
+      await user.click(within(dialog).getAllByRole("checkbox")[0]);
+
+      expect(JSON.parse(window.localStorage.getItem(WIDGET_PREFERENCE_KEY) ?? "[]")).toContain(
+        "models",
+      );
     });
 
     it("falls back to the default widgets for a preference it cannot read", async () => {

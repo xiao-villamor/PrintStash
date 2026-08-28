@@ -64,7 +64,7 @@ const SUITES = [
       { prefix: "src/components/", statements: 77.5, branches: 71.8 },
       // Pages are exercised end-to-end by tests/e2e/*.spec.ts, which this cannot
       // see. The floor records what vitest reaches, not what is tested.
-      { prefix: "src/pages/", statements: 83.7, branches: 73.8 },
+      { prefix: "src/pages/", statements: 84.5, branches: 74.4 },
       // Root-level wiring: the router shell and the layout. Rendered by every
       // Playwright spec, unit-tested by nothing.
       { prefix: "src/", statements: 0, branches: 0 },

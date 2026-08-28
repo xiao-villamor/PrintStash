@@ -80,72 +80,73 @@ async def _await_job(api, headers: dict[str, str], job_id: str) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_artifact_upload_is_committed_and_readable_through_webdav(
-    api, tmp_path: Path, e2e_db, webdav_endpoint: str
-) -> None:
-    setup = await api.post(
-        "/api/v1/setup",
-        json={
-            "setup_token": current_setup_token(),
-            "username": "owner",
-            "password": "Password123",
-            "storage_backend": "local",
-            "data_dir": str(tmp_path / "files"),
-            "thumb_dir": str(tmp_path / "thumbs"),
-        },
-    )
-    assert setup.status_code == 201, setup.text
-    headers = {"Authorization": f"Bearer {setup.json()['access_token']}"}
-
-    health = await api.get("/api/v1/health")
-    assert health.status_code == 200, health.text
-    assert health.json()["storage"]["provider"] == "local"
-    assert health.json()["storage"]["tier"] == "verified"
-
-    from app.services.storage_backend import bind_backend
-    from app.services.storage_opendal import OpenDALStorageBackend
-    from app.services.storage_providers import TransportKind, TransportSpec
-
-    backend = OpenDALStorageBackend(
-        TransportSpec(
-            kind=TransportKind.WEBDAV,
-            provider="webdav",
-            namespace="webdav/vault-data",
-            options={
-                "endpoint_url": webdav_endpoint,
-                "username": "user",
-                "password": "password",
-                "root": "vault-data",
+class TestArtifactUpload:
+    async def test_artifact_upload_is_committed_through_webdav(
+        self, api, tmp_path: Path, e2e_db, webdav_endpoint: str
+    ) -> None:
+        setup = await api.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": current_setup_token(),
+                "username": "owner",
+                "password": "Password123",
+                "storage_backend": "local",
+                "data_dir": str(tmp_path / "files"),
+                "thumb_dir": str(tmp_path / "thumbs"),
             },
         )
-    )
-    backend.ensure_setup()
-    bind_backend(backend)
+        assert setup.status_code == 201, setup.text
+        headers = {"Authorization": f"Bearer {setup.json()['access_token']}"}
 
-    upload = await api.post(
-        "/api/v1/ingest/orca",
-        files={"file": (FIXTURE.name, FIXTURE.read_bytes(), "text/plain")},
-        data={"model_name": "WebDAV Benchy"},
-        headers=headers,
-    )
-    assert upload.status_code == 202, upload.text
-    job = await _await_job(api, headers, upload.json()["job_id"])
-    assert job["state"] == "completed", job
+        health = await api.get("/api/v1/health")
+        assert health.status_code == 200, health.text
+        assert health.json()["storage"]["provider"] == "local"
+        assert health.json()["storage"]["tier"] == "verified"
 
-    artifact = e2e_db.exec(select(File)).one()
-    assert backend.read_bytes(artifact.path) == FIXTURE.read_bytes()
-    ownership = e2e_db.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.key == artifact.path
+        from app.services.storage_backend import bind_backend
+        from app.services.storage_opendal import OpenDALStorageBackend
+        from app.services.storage_providers import TransportKind, TransportSpec
+
+        backend = OpenDALStorageBackend(
+            TransportSpec(
+                kind=TransportKind.WEBDAV,
+                provider="webdav",
+                namespace="webdav/vault-data",
+                options={
+                    "endpoint_url": webdav_endpoint,
+                    "username": "user",
+                    "password": "password",
+                    "root": "vault-data",
+                },
+            )
         )
-    ).one()
-    assert ownership.state == StorageObjectState.COMMITTED
+        backend.ensure_setup()
+        bind_backend(backend)
 
-    trashed = await api.delete(f"/api/v1/models/{artifact.model_id}", headers=headers)
-    assert trashed.status_code == 204, trashed.text
-    rejected = await api.delete(
-        f"/api/v1/models/{artifact.model_id}/purge", headers=headers
-    )
-    assert rejected.status_code == 409, rejected.text
-    assert rejected.json()["detail"]["code"] == "storage_risk_confirmation_required"
-    assert backend.exists(artifact.path)
+        upload = await api.post(
+            "/api/v1/ingest/orca",
+            files={"file": (FIXTURE.name, FIXTURE.read_bytes(), "text/plain")},
+            data={"model_name": "WebDAV Benchy"},
+            headers=headers,
+        )
+        assert upload.status_code == 202, upload.text
+        job = await _await_job(api, headers, upload.json()["job_id"])
+        assert job["state"] == "completed", job
+
+        artifact = e2e_db.exec(select(File)).one()
+        assert backend.read_bytes(artifact.path) == FIXTURE.read_bytes()
+        ownership = e2e_db.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == artifact.path)
+        ).one()
+        assert ownership.state == StorageObjectState.COMMITTED
+
+        trashed = await api.delete(
+            f"/api/v1/models/{artifact.model_id}", headers=headers
+        )
+        assert trashed.status_code == 204, trashed.text
+        rejected = await api.delete(
+            f"/api/v1/models/{artifact.model_id}/purge", headers=headers
+        )
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json()["detail"]["code"] == "storage_risk_confirmation_required"
+        assert backend.exists(artifact.path)

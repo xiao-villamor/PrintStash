@@ -520,7 +520,10 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: uv sync --extra dev --frozen
+        # Storage-provider E2E exercises WebDAV through the OpenDAL-backed
+        # providers, which is the full image capability rather than the lite
+        # runtime installed by the general real-backend lane.
+        run: uv sync --extra dev --extra full --frozen
 
       # Frontend: serves a Vite dev server + drives Playwright.
       - name: Set up pnpm

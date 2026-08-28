@@ -18,7 +18,7 @@ from typing import Iterator
 
 import pytest
 from sqlalchemy import event
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.services.backup as backup
 import app.services.storage_backend as storage_backend
@@ -119,6 +119,18 @@ def seed_model_with_blob(
         )
         session.commit()
         return model.id, key
+
+
+def read_model_names(env: BackupEnv) -> list[str]:
+    """Read model names through a fresh engine after a database restore."""
+    engine = create_engine(
+        f"sqlite:///{env.db_file}", connect_args={"check_same_thread": False}
+    )
+    try:
+        with Session(engine) as session:
+            return [model.name for model in session.exec(select(Model)).all()]
+    finally:
+        engine.dispose()
 
 
 def seed_document_with_blob(env: BackupEnv, *, name: str, content: bytes) -> str:

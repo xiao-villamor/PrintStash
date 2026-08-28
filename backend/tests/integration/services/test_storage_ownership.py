@@ -145,6 +145,17 @@ class TestRequireOwnedKey:
         with pytest.raises(UnsafeStorageDeleteError, match="verification_failed"):
             require_owned_key(db_session, ExplodingBackend(), _receipt().key)
 
+    def test_require_owned_key_rejects_an_incomplete_creation_receipt(
+        self, db_session
+    ) -> None:
+        backend = _LedgerBackend()
+        incomplete = replace(_receipt(), token=None)
+        record_creation(db_session, incomplete, object_kind="artifact")
+        db_session.commit()
+
+        with pytest.raises(UnsafeStorageDeleteError, match="verification_failed"):
+            require_owned_key(db_session, backend, incomplete.key)
+
 
 class TestRequireOrAdoptLegacyArtifact:
     def test_require_or_adopt_legacy_artifact_only_claims_untracked_matching_bytes(

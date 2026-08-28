@@ -41,7 +41,9 @@ def webdav_endpoint(tmp_path: Path):
         if venv_executable.is_file():
             executable = str(venv_executable)
     if executable is None:
-        pytest.fail("WsgiDAV contract dependency is not installed; install the dev extra")
+        pytest.fail(
+            "WsgiDAV contract dependency is not installed; install the dev extra"
+        )
     port = _free_port()
     process = subprocess.Popen(
         [
@@ -173,63 +175,6 @@ def _sftp_spec(port: int, private_key: Path) -> TransportSpec:
     )
 
 
-def test_webdav_stream_create_read_and_evidence_round_trip(
-    webdav_endpoint: str,
-) -> None:
-    backend = OpenDALStorageBackend(_spec(webdav_endpoint))
-    backend.ensure_setup()
-    key = backend.blob_key("widget", 1, "widget.3mf")
-    payload = b"remote-model" * (1024 * 1024)
-
-    receipt = backend.create_stream(BytesIO(payload), key)
-
-    assert backend.read_bytes(key) == payload
-    assert receipt.size == len(payload)
-    assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
-    assert backend.capabilities.tier.value == "unguarded"
-    with pytest.raises(StorageCollisionError):
-        backend.create_bytes(b"replacement", key)
-
-
-def test_sftp_mounted_key_stream_round_trip(sftp_endpoint) -> None:
-    port, private_key = sftp_endpoint
-    backend = OpenDALStorageBackend(_sftp_spec(port, private_key))
-    backend.ensure_setup()
-    key = backend.blob_key("sftp-widget", 1, "widget.3mf")
-    payload = b"sftp-model" * (1024 * 1024)
-
-    receipt = backend.create_stream(BytesIO(payload), key)
-
-    assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
-    assert receipt.size == len(payload)
-    assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
-    assert backend.capabilities.tier.value == "unguarded"
-
-
-def test_sftp_password_stream_round_trip(sftp_password_endpoint: int) -> None:
-    spec = TransportSpec(
-        kind=TransportKind.SFTP,
-        provider="sftp",
-        namespace="sftp/vault-data",
-        options={
-            "host": "127.0.0.1",
-            "port": sftp_password_endpoint,
-            "username": "printstash",
-            "password": "contract-secret",
-            "root": "vault-data",
-        },
-    )
-    backend = OpenDALStorageBackend(spec)
-    backend.ensure_setup()
-    key = backend.blob_key("password-widget", 1, "widget.3mf")
-    payload = b"password-sftp-model" * (1024 * 1024)
-
-    receipt = backend.create_stream(BytesIO(payload), key)
-
-    assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
-    assert receipt.size == len(payload)
-
-
 class _RenameFailure:
     def __init__(self) -> None:
         self.inner = opendal.Operator("memory")
@@ -242,23 +187,78 @@ class _RenameFailure:
         raise OSError("rename failed")
 
 
-def test_failed_remote_publication_removes_temporary_key() -> None:
-    operator = _RenameFailure()
-    backend = OpenDALStorageBackend(_spec(), operator=operator)
-    key = backend.thumbnail_key(1)
+class TestOpenDALStorageBackend:
+    def test_webdav_stream_round_trip_preserves_evidence(
+        self,
+        webdav_endpoint: str,
+    ) -> None:
+        backend = OpenDALStorageBackend(_spec(webdav_endpoint))
+        backend.ensure_setup()
+        key = backend.blob_key("widget", 1, "widget.3mf")
+        payload = b"remote-model" * (1024 * 1024)
 
-    with pytest.raises(OSError, match="rename failed"):
-        backend.create_bytes(b"thumbnail", key)
+        receipt = backend.create_stream(BytesIO(payload), key)
 
-    assert not backend.exists(key)
-    assert list(operator.inner.scan(".printstash-tmp")) == []
+        assert backend.read_bytes(key) == payload
+        assert receipt.size == len(payload)
+        assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
+        assert backend.capabilities.tier.value == "unguarded"
+        with pytest.raises(StorageCollisionError):
+            backend.create_bytes(b"replacement", key)
 
+    def test_sftp_mounted_key_stream_round_trip(self, sftp_endpoint) -> None:
+        port, private_key = sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key))
+        backend.ensure_setup()
+        key = backend.blob_key("sftp-widget", 1, "widget.3mf")
+        payload = b"sftp-model" * (1024 * 1024)
 
-def test_remote_verified_mutations_fail_closed(webdav_endpoint: str) -> None:
-    backend = OpenDALStorageBackend(_spec(webdav_endpoint))
-    receipt = backend.create_bytes(b"owned", backend.thumbnail_key(2))
+        receipt = backend.create_stream(BytesIO(payload), key)
 
-    assert backend.rollback_create(receipt) is False
-    with pytest.raises(NotImplementedError, match="atomic_replace_not_supported"):
-        backend.replace_bytes(b"new", receipt)
-    assert backend.read_bytes(receipt.key) == b"owned"
+        assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
+        assert receipt.size == len(payload)
+        assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
+        assert backend.capabilities.tier.value == "unguarded"
+
+    def test_sftp_password_stream_round_trip(self, sftp_password_endpoint: int) -> None:
+        spec = TransportSpec(
+            kind=TransportKind.SFTP,
+            provider="sftp",
+            namespace="sftp/vault-data",
+            options={
+                "host": "127.0.0.1",
+                "port": sftp_password_endpoint,
+                "username": "printstash",
+                "password": "contract-secret",
+                "root": "vault-data",
+            },
+        )
+        backend = OpenDALStorageBackend(spec)
+        backend.ensure_setup()
+        key = backend.blob_key("password-widget", 1, "widget.3mf")
+        payload = b"password-sftp-model" * (1024 * 1024)
+
+        receipt = backend.create_stream(BytesIO(payload), key)
+
+        assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
+        assert receipt.size == len(payload)
+
+    def test_failed_remote_publication_removes_temporary_key(self) -> None:
+        operator = _RenameFailure()
+        backend = OpenDALStorageBackend(_spec(), operator=operator)
+        key = backend.thumbnail_key(1)
+
+        with pytest.raises(OSError, match="rename failed"):
+            backend.create_bytes(b"thumbnail", key)
+
+        assert not backend.exists(key)
+        assert list(operator.inner.scan(".printstash-tmp")) == []
+
+    def test_remote_verified_mutations_fail_closed(self, webdav_endpoint: str) -> None:
+        backend = OpenDALStorageBackend(_spec(webdav_endpoint))
+        receipt = backend.create_bytes(b"owned", backend.thumbnail_key(2))
+
+        assert backend.rollback_create(receipt) is False
+        with pytest.raises(NotImplementedError, match="atomic_replace_not_supported"):
+            backend.replace_bytes(b"new", receipt)
+        assert backend.read_bytes(receipt.key) == b"owned"

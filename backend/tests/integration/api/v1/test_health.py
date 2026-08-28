@@ -129,9 +129,7 @@ class TestHealth:
     def test_needs_no_authentication(self, client: TestClient) -> None:
         assert client.get("/api/v1/health").status_code == 200
 
-    def test_discloses_only_liveness_and_safe_storage_metadata(
-        self, client: TestClient
-    ) -> None:
+    def test_discloses_safe_liveness_storage_metadata(self, client: TestClient) -> None:
         body = client.get("/api/v1/health").json()
 
         assert set(body) == {"status", "name", "storage"}

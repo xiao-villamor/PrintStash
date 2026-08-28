@@ -14,7 +14,6 @@ belongs to somebody's external library, which no amount of trash retention can u
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -22,42 +21,14 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import File, FileType, Model
+from app.db.models import Model
 from app.services.storage_backend import (
     ObjectIdentity,
     StorageCapabilities,
     get_backend,
 )
-from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
-
-
-def _trashed_model_with_owned_blob(session: Session, *, slug: str) -> tuple[Model, str]:
-    backend = get_backend()
-    model = Model(
-        name="Guarded model",
-        slug=slug,
-        hash="a" * 64,
-        deleted_at=datetime(2020, 1, 1, tzinfo=UTC),
-    )
-    session.add(model)
-    session.flush()
-    key = backend.blob_key(slug, 1, "owned.stl")
-    receipt = backend.create_bytes(b"owned", key)
-    record_creation(session, receipt, object_kind="artifact")
-    session.add(
-        File(
-            model_id=model.id,
-            path=key,
-            original_filename="owned.stl",
-            file_type=FileType.STL,
-            version=1,
-            size_bytes=5,
-            sha256="b" * 64,
-        )
-    )
-    session.commit()
-    session.refresh(model)
-    return model, key
+from app.services.storage_ownership import UnsafeStorageDeleteError
+from tests.factories import build_model, build_stored_file
 
 
 def _make_guarded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,9 +130,9 @@ class TestPurgeModel:
         auth_headers,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        model, key = _trashed_model_with_owned_blob(
-            db_session, slug="guarded-confirmation"
-        )
+        model = build_model(db_session, "Guarded model", trashed=True)
+        artifact = build_stored_file(db_session, get_backend(), model, data=b"owned")
+        key = artifact.path
         _make_guarded(monkeypatch)
 
         response = client.delete(
@@ -184,9 +155,9 @@ class TestPurgeModel:
         auth_headers,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        model, key = _trashed_model_with_owned_blob(
-            db_session, slug="guarded-confirmed"
-        )
+        model = build_model(db_session, "Guarded model", trashed=True)
+        artifact = build_stored_file(db_session, get_backend(), model, data=b"owned")
+        key = artifact.path
         model_id = model.id
         _make_guarded(monkeypatch)
 

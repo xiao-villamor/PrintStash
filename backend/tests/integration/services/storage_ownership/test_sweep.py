@@ -1,40 +1,27 @@
-"""Storage publication reserves ownership before bytes become externally visible.
+"""Orphaned storage publication sweep integration tests.
 
-The reservation is durable independently of the caller, while the transition to
-committed ownership shares the caller's domain transaction.
+These tests defend stale-intent reclamation and the fail-closed evidence checks
+that protect bytes from being deleted after an ownership mismatch.
 """
 
 from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
-from io import BytesIO
 from pathlib import Path
 
-import pytest
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.db.models import OwnedStorageObject, StorageObjectState
-from app.db.session import get_session_factory
 from app.services.storage_backend import (
     LocalStorageBackend,
-    StorageCollisionError,
+    StorageObjectInfo,
     get_backend,
 )
-from app.services.storage_ownership import (
-    publish_bytes,
-    reserve_creation,
-    sweep_orphaned_publications,
-)
+from app.services.storage_ownership import sweep_orphaned_publications
 
 FROZEN_NOW = datetime(2026, 1, 3, tzinfo=UTC)
 STALE_CREATED_AT = datetime(2026, 1, 1, tzinfo=UTC)
-
-
-class _FailingLocalStorageBackend(LocalStorageBackend):
-    def create_stream(self, src: BytesIO, key: str):
-        del src, key
-        raise OSError("disk full")
 
 
 class _TransientReclaimBackend(LocalStorageBackend):
@@ -71,156 +58,44 @@ class _ReplacementBeforeReclaimBackend(LocalStorageBackend):
         )
 
 
-class TestPublishBytes:
-    @pytest.mark.parametrize(
-        ("object_kind", "key_method", "arguments"),
-        [
-            ("artifact", "blob_key", ("managed", 1, "part.stl")),
-            ("thumbnail", "thumbnail_key", (701,)),
-            ("model_source_cover", "source_cover_key", (702,)),
-            ("capture_upload_slot", "capture_upload_slot_key", ("slot-703",)),
-            ("derived_stl_cache", "stl_cache_key", ("a" * 64,)),
-            ("collection_image", "collection_image_key", (704, "image.png")),
-            ("document_file", "document_file_key", (705, "manual.pdf")),
-            ("document_image", "document_image_key", (706, "image.png")),
-        ],
-    )
-    def test_publishes_every_managed_key_kind_through_the_ledger(
+class _ReclaimProbeBackend(LocalStorageBackend):
+    def __init__(self, *, removed: bool) -> None:
+        super().__init__()
+        self.removed = removed
+        self.info = StorageObjectInfo(size=5, etag="etag-1")
+        self.reclaim_calls: list[dict[str, object]] = []
+
+    def object_info(self, key: str) -> StorageObjectInfo | None:
+        del key
+        return self.info
+
+    def reclaim_unverified(
         self,
-        db_session: Session,
-        object_kind: str,
-        key_method: str,
-        arguments: tuple[object, ...],
-    ) -> None:
-        backend = get_backend()
-        key = getattr(backend, key_method)(*arguments)
-
-        publish_bytes(db_session, backend, key, b"managed", object_kind=object_kind)
-        db_session.commit()
-
-        row = db_session.exec(
-            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
-        ).one()
-        assert row.object_kind == object_kind
-        assert row.state is StorageObjectState.COMMITTED
-
-    def test_reserves_the_key_durably_before_storage_publication(
-        self,
-        db_session: Session,
-    ) -> None:
-        backend = get_backend()
-        key = backend.thumbnail_key(900)
-
-        reservation_id = reserve_creation(
-            db_session,
-            backend,
-            key,
-            object_kind="thumbnail",
-            expected_size=5,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
+    ) -> bool:
+        self.reclaim_calls.append(
+            {
+                "key": key,
+                "expected_size": expected_size,
+                "expected_etag": expected_etag,
+                "expected_sha256": expected_sha256,
+                "expected_version_id": expected_version_id,
+            }
         )
+        return self.removed
 
-        with get_session_factory().session() as independent:
-            row = independent.get(OwnedStorageObject, reservation_id)
-            assert row is not None
-            assert row.state is StorageObjectState.PENDING
-        assert not backend.exists(key)
 
-    def test_rejects_a_duplicate_pending_reservation(
-        self,
-        db_session: Session,
-    ) -> None:
-        backend = get_backend()
-        key = backend.thumbnail_key(899)
-        first_id = reserve_creation(
-            db_session,
-            backend,
-            key,
-            object_kind="thumbnail",
-        )
-
-        with pytest.raises(StorageCollisionError):
-            reserve_creation(
-                db_session,
-                backend,
-                key,
-                object_kind="thumbnail",
-            )
-
-        with get_session_factory().session() as independent:
-            assert independent.get(OwnedStorageObject, first_id) is not None
-
-    def test_commits_ownership_with_the_callers_transaction(
-        self,
-        db_session: Session,
-    ) -> None:
-        backend = get_backend()
-        key = backend.thumbnail_key(901)
-
-        publish_bytes(
-            db_session,
-            backend,
-            key,
-            b"thumbnail",
-            object_kind="thumbnail",
-        )
-        db_session.commit()
-
-        row = db_session.exec(
-            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
-        ).one()
-        assert row.state is StorageObjectState.COMMITTED
-
-    def test_leaves_pending_intent_when_storage_fails(
-        self,
-        db_session: Session,
-    ) -> None:
-        backend = _FailingLocalStorageBackend()
-        key = backend.thumbnail_key(902)
-
-        with pytest.raises(OSError, match="disk full"):
-            publish_bytes(
-                db_session,
-                backend,
-                key,
-                b"thumbnail",
-                object_kind="thumbnail",
-            )
-
-        with get_session_factory().session() as independent:
-            row = independent.exec(
-                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
-            ).one()
-            assert row.state is StorageObjectState.PENDING
-            assert row.last_error == "OSError"
-
-    def test_keeps_pending_intent_when_the_domain_transaction_rolls_back(
-        self,
-        db_session: Session,
-    ) -> None:
-        backend = get_backend()
-        key = backend.thumbnail_key(903)
-
-        publish_bytes(
-            db_session,
-            backend,
-            key,
-            b"thumbnail",
-            object_kind="thumbnail",
-        )
-        db_session.rollback()
-
-        with get_session_factory().session() as independent:
-            row = independent.exec(
-                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
-            ).one()
-            assert row.state is StorageObjectState.PENDING
+class _MismatchedBackend(LocalStorageBackend):
+    backend_name = "another-backend"
 
 
 class TestSweepOrphanedPublications:
-    def test_ignores_a_fresh_pending_reservation(
-        self,
-        db_session: Session,
-    ) -> None:
+    def test_ignores_a_fresh_pending_reservation(self, db_session: Session) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(904)
         row = OwnedStorageObject(
@@ -242,8 +117,7 @@ class TestSweepOrphanedPublications:
         assert db_session.get(OwnedStorageObject, row.id) is not None
 
     def test_removes_a_stale_reservation_when_the_object_is_absent(
-        self,
-        db_session: Session,
+        self, db_session: Session
     ) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(905)
@@ -265,10 +139,7 @@ class TestSweepOrphanedPublications:
         assert result.cleared == 1
         assert db_session.get(OwnedStorageObject, row.id) is None
 
-    def test_reclaims_a_matching_small_orphan(
-        self,
-        db_session: Session,
-    ) -> None:
+    def test_reclaims_a_matching_small_orphan(self, db_session: Session) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(906)
         payload = b"owned"
@@ -294,8 +165,7 @@ class TestSweepOrphanedPublications:
         assert not path.exists()
 
     def test_blocks_an_orphan_with_mismatched_evidence(
-        self,
-        db_session: Session,
+        self, db_session: Session
     ) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(907)
@@ -323,8 +193,7 @@ class TestSweepOrphanedPublications:
         assert path.read_bytes() == b"someone-elses-bytes"
 
     def test_preserves_a_same_size_replacement_before_hash_reclamation(
-        self,
-        db_session: Session,
+        self, db_session: Session
     ) -> None:
         backend = _ReplacementBeforeReclaimBackend()
         key = backend.thumbnail_key(911)
@@ -353,8 +222,7 @@ class TestSweepOrphanedPublications:
         assert path.read_bytes() == b"other"
 
     def test_blocks_a_large_orphan_without_sufficient_proof(
-        self,
-        db_session: Session,
+        self, db_session: Session
     ) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(909)
@@ -383,10 +251,7 @@ class TestSweepOrphanedPublications:
         assert row.state is StorageObjectState.BLOCKED
         assert path.exists()
 
-    def test_retries_a_transient_reclaim_failure(
-        self,
-        db_session: Session,
-    ) -> None:
+    def test_retries_a_transient_reclaim_failure(self, db_session: Session) -> None:
         backend = _TransientReclaimBackend()
         key = backend.thumbnail_key(910)
         payload = b"owned"
@@ -414,10 +279,7 @@ class TestSweepOrphanedPublications:
         assert row.last_error == "OSError"
         assert path.exists()
 
-    def test_never_sweeps_committed_ownership(
-        self,
-        db_session: Session,
-    ) -> None:
+    def test_never_sweeps_committed_ownership(self, db_session: Session) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(908)
         path = Path(key)
@@ -441,3 +303,125 @@ class TestSweepOrphanedPublications:
 
         assert result.examined == 0
         assert path.read_bytes() == b"owned"
+
+    def test_blocks_a_pending_reservation_for_another_backend(
+        self, db_session: Session
+    ) -> None:
+        backend = get_backend()
+        key = backend.thumbnail_key(925)
+        row = OwnedStorageObject(
+            backend="local",
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            size_bytes=5,
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(
+            db_session, _MismatchedBackend(), now=FROZEN_NOW
+        )
+
+        db_session.refresh(row)
+        assert result.blocked == 1
+        assert row.state is StorageObjectState.BLOCKED
+        assert row.last_error == "storage_backend_mismatch"
+
+    def test_reclaims_a_stale_versioned_reservation(self, db_session: Session) -> None:
+        backend = _ReclaimProbeBackend(removed=True)
+        key = backend.thumbnail_key(926)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token="pending-token",
+            size_bytes=5,
+            etag="etag-1",
+            version_id="version-1",
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        assert result.reclaimed == 1
+        assert backend.reclaim_calls[0]["expected_version_id"] == "version-1"
+        assert db_session.get(OwnedStorageObject, row.id) is None
+
+    def test_blocks_a_stale_reservation_with_a_size_mismatch(
+        self, db_session: Session
+    ) -> None:
+        backend = _ReclaimProbeBackend(removed=True)
+        key = backend.thumbnail_key(927)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            size_bytes=4,
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        db_session.refresh(row)
+        assert result.blocked == 1
+        assert row.last_error == "storage_size_mismatch"
+        assert backend.reclaim_calls == []
+
+    def test_reclaims_a_stale_reservation_with_matching_etag(
+        self, db_session: Session
+    ) -> None:
+        backend = _ReclaimProbeBackend(removed=True)
+        key = backend.thumbnail_key(928)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="artifact",
+            state=StorageObjectState.PENDING,
+            size_bytes=5,
+            etag="etag-1",
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        assert result.reclaimed == 1
+        assert backend.reclaim_calls[0]["expected_etag"] == "etag-1"
+
+    def test_blocks_a_stale_reservation_when_reclaim_does_not_remove(
+        self, db_session: Session
+    ) -> None:
+        backend = _ReclaimProbeBackend(removed=False)
+        key = backend.thumbnail_key(929)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="artifact",
+            state=StorageObjectState.PENDING,
+            size_bytes=5,
+            etag="etag-1",
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        db_session.refresh(row)
+        assert result.blocked == 1
+        assert row.state is StorageObjectState.BLOCKED
+        assert row.last_error == "storage_reclaim_mismatch"

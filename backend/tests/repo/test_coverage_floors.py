@@ -39,7 +39,7 @@ LANE = "./scripts/test.sh coverage"
 # rises past the slack below it has to be raised here, so the number in this file
 # is always roughly what the suite actually achieves rather than a floor from
 # eighteen months ago that everything clears by ten points.
-TOTAL_FLOOR = 93.56
+TOTAL_FLOOR = 93.89
 # 0.25pp of ~27,400 statements+branches is ~70 units of coverage — enough that a
 # normal PR adding tests for one behaviour does not force an edit here, small
 # enough that a sustained improvement does.
@@ -59,16 +59,13 @@ PINNED_BELOW_FLOOR = {
     "app/services/staging_leases.py": 76.0,
     "app/services/inbox.py": 81.0,
     "app/services/provenance.py": 81.5,
-    "app/services/external_library.py": 83.5,
     "app/services/library_transfer.py": 84.0,
     "app/services/ingestion.py": 85.5,
     "app/services/capture_provider_connections.py": 86.5,
     "app/services/ws_tickets.py": 87.0,
     "app/services/library_watcher.py": 87.5,
-    "app/services/storage_backend.py": 88.0,
     "app/services/backup.py": 88.5,
     "app/schemas/provenance.py": 89.0,
-    "app/services/mesh_processing.py": 89.0,
     "app/services/importer.py": 89.5,
 }
 
@@ -79,7 +76,7 @@ PIN_SLACK = 3.0
 
 # Two-sided, the same shape as the other ratchets in this directory: the list may
 # not grow, and when it shrinks this has to come down with it.
-MAX_PINNED = 15
+MAX_PINNED = 12
 
 
 def _report() -> dict:

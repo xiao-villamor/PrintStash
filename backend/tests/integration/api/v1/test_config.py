@@ -357,7 +357,7 @@ class TestUpdateConfig:
 
         assert response.status_code == 403, response.text
 
-    def test_rejects_mixed_typed_and_legacy_storage_configuration(
+    def test_rejects_mixed_storage_configuration_modes(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
         response = client.put(
