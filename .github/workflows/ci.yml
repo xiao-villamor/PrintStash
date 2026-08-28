@@ -263,7 +263,7 @@ jobs:
           PRINTSTASH_TEST_S3_ENDPOINT: http://localhost:9100
         run: >-
           uv run pytest tests/contract/services/test_storage_backend.py
-          tests/integration/services/backup -m s3 -v
+          tests/contract/services/backup -m s3 -v
 
   security:
     name: Security scan

@@ -10,10 +10,8 @@ from ._backup_shared import (
     CreationReceipt,
     MagicMock,
     Path,
-    _seed_model_with_blob,
     backup,
     pytest,
-    requires_s3,
 )
 
 
@@ -215,20 +213,3 @@ def test_restore_database_rejects_failed_destination_integrity(
 
     with pytest.raises(RuntimeError, match="restored_database_integrity_check_failed"):
         backup._restore_database_from_path(source_path)
-
-
-@requires_s3
-def test_delete_backup_removes_s3_copy(backup_s3_env: BackupEnv):
-    _seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
-    meta = backup.create_backup()
-
-    s3 = backup._get_backup_s3()
-    key = backup._backup_s3_key(Path(meta.path).name)
-    assert s3.head_object(Bucket=backup.settings.backup_s3_bucket, Key=key)
-
-    assert backup.delete_backup(meta.id) is True
-
-    import botocore.exceptions
-
-    with pytest.raises(botocore.exceptions.ClientError):
-        s3.head_object(Bucket=backup.settings.backup_s3_bucket, Key=key)

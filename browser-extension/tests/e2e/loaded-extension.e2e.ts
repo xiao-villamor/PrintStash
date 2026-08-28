@@ -7,8 +7,8 @@ interface LoadedExtensionElement {
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
+  capabilities: { browserName?: string };
   execute<Result>(script: () => Result): Promise<Result>;
-  getCapabilities(): Promise<{ browserName?: string }>;
   installAddOn(path: string | undefined, temporary: boolean): Promise<string>;
   url(destination: string | undefined): Promise<void>;
 }
@@ -21,8 +21,7 @@ declare const chrome: {
 
 describe("loaded extension", () => {
   it("installs the manifest and opens a popup extension context", async () => {
-    const capabilities = await browser.getCapabilities();
-    if (capabilities.browserName === "firefox") {
+    if (browser.capabilities.browserName === "firefox") {
       const addOnId = await browser.installAddOn(process.env.PRINTSTASH_EXTENSION_XPI, true);
       assert.equal(addOnId, "printstash-model-importer@printstash.local");
       await browser.url("about:debugging#/runtime/this-firefox");

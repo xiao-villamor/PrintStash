@@ -36,7 +36,7 @@ still subject to the repository gates; it does not mean a test may be skipped.
 | 28 | Never create an S3 bucket | Contract | `contract/services/test_storage_backend.py` | ✅ |
 | 29 | Never change S3 lifecycle policy | Contract | `contract/services/test_storage_backend.py` | ✅ |
 | 30 | Retain destructive lifecycle findings | Contract | `contract/services/test_storage_backend.py` | ✅ |
-| 31 | Preserve backup S3 behaviour | Integration | `integration/services/backup/test_purge_old_backups_skips_entry_with_invalid_created_at.py` | ✅ |
+| 31 | Preserve backup S3 behaviour | Contract | `contract/services/backup/test_s3.py` | ✅ |
 | 32 | Reject unacknowledged Unguarded startup | Integration | `integration/db/models/test_lifespan_starts_background_tasks_and_shuts_down_cleanly.py` | ✅ |
 | 33 | Accept acknowledged Unguarded startup | Integration | `integration/db/models/test_lifespan_starts_background_tasks_and_shuts_down_cleanly.py` | ✅ |
 | 34 | Warn without blocking Guarded startup | Integration | `integration/db/models/test_lifespan_starts_background_tasks_and_shuts_down_cleanly.py` | ✅ |
