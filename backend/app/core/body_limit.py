@@ -1,4 +1,12 @@
-"""ASGI request-body ceiling enforced before multipart parsing or route code."""
+"""ASGI request-body ceiling enforced before multipart parsing or route code.
+
+This is the backstop, not the upload limit. It bounds what the process will
+buffer for one request — a client that lies about `content-length`, or streams
+without end — and answers `request_too_large`. The limit a *user* is subject to
+is per file, checked by the routes against `max_upload_bytes`, which answer
+`upload_too_large`. The two are deliberately different numbers: see
+`MULTIPART_OVERHEAD_BYTES`.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +29,11 @@ class RequestBodyLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        limit = settings.max_upload_bytes
+        # The *request* ceiling, not the per-file cap. A multipart body carrying a
+        # file at the cap is larger than the file, so limiting the body to the
+        # per-file number rejected legal uploads here and left every route's own
+        # `upload_too_large` guard unreachable.
+        limit = settings.max_request_bytes
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         raw_length = headers.get(b"content-length")
         if raw_length:

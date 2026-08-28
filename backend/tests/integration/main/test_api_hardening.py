@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.core import config
 from app.core.config import _overlay
 
 
@@ -24,8 +26,15 @@ class TestOpenApiContract:
 
 class TestBodyLimit:
     def test_api_rejects_oversized_request_body_before_route(
-        self, client: TestClient
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The ceiling is the per-file cap plus multipart headroom, and it still bites.
+
+        The headroom is shrunk here rather than sending 17 MiB: what this test is
+        about is that *some* body is refused before any route runs, not the size at
+        which that happens.
+        """
+        monkeypatch.setattr(config, "MULTIPART_OVERHEAD_BYTES", 0)
         _overlay["max_upload_mb"] = 1
         try:
             response = client.post(

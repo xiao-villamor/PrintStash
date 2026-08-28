@@ -27,6 +27,21 @@ _overlay_lock = asyncio.Lock()
 # generated one on first boot.
 DEFAULT_JWT_SECRET = "changeme_jwt_secret_please_change"
 
+# Headroom the whole-request ceiling gets over the per-file cap.
+#
+# `max_upload_mb` is a limit on one *file* — that is what it is called in the UI
+# and what a user reads it as. A multipart request carrying a file at the cap is
+# necessarily larger than the file: boundaries, part headers, and the form fields
+# beside it (`model_name`, `collection`, `tags`). With one number for both, the
+# outer ceiling always fired first and the per-file guard could never run, so a
+# file *at* the documented limit was rejected as `request_too_large` — and
+# nothing could ever answer `upload_too_large`.
+#
+# 16 MiB is far more than any part header set, and small enough that the outer
+# ceiling still bounds what a lying `content-length` or an endless stream can
+# make the process buffer.
+MULTIPART_OVERHEAD_BYTES = 16 * 1024 * 1024
+
 
 class Settings(BaseSettings):
     """Frozen env-only settings. Never mutated after import.
@@ -267,6 +282,10 @@ class Settings(BaseSettings):
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
+
 
 class ConfigResolver:
     """Single read-path for effective configuration: overlay wins, frozen falls back.
@@ -300,6 +319,10 @@ class ConfigResolver:
     def max_upload_bytes(self) -> int:
         max_mb = _overlay.get("max_upload_mb", self._frozen.max_upload_mb)
         return max_mb * 1024 * 1024
+
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
 
 
 # Public: same name, new type — transparent to all existing call sites.

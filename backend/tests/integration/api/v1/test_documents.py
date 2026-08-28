@@ -248,6 +248,34 @@ class TestUploadDocument:
         assert uploaded["kind"] == "pdf"
         assert uploaded["filename"]
 
+    def test_tells_a_client_its_file_is_too_big_rather_than_its_request(
+        self,
+        client: TestClient,
+        admin_headers: dict[str, str],
+        tiny_upload_limit,
+    ) -> None:
+        """The per-file cap is what the user is subject to, so it is what they hear.
+
+        The app-wide body ceiling sits above this cap on purpose. With one number
+        for both it fired first and every client saw `request_too_large` — which
+        reads as "your request is malformed" for a file that is merely large, and
+        offers nothing to act on.
+        """
+        response = client.post(
+            "/api/v1/documents/upload",
+            files={
+                "file": (
+                    "manual.pdf",
+                    b"%PDF" + b"x" * (2 * MEGABYTE),
+                    "application/pdf",
+                )
+            },
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 413, response.text
+        assert response.json()["detail"] == "upload_too_large"
+
     def test_names_the_document_after_the_filename_when_none_is_given(
         self, client: TestClient, admin_headers: dict[str, str]
     ) -> None:
@@ -287,11 +315,11 @@ class TestUploadDocument:
     async def test_rejects_a_part_that_declares_more_than_the_upload_limit(
         self, db_session: Session, admin: User, tiny_upload_limit
     ) -> None:
-        # `BodyLimitMiddleware` reads the *same* setting and rejects the whole
-        # request first, so over HTTP this guard can never fire — a client always
-        # sees `request_too_large`. It is still the right check for a caller that
-        # is not coming through the HTTP stack, and this is the only way to reach
-        # it. The three tests here cover the three sizes this endpoint bounds.
+        # Called directly because these three cover the three *sizes* this endpoint
+        # bounds — the declared part size, the decoded markdown body, and the
+        # stored blob — and only the first is reachable through a client. The row
+        # below proves the HTTP path reaches this guard rather than the app-wide
+        # body ceiling swallowing it.
         oversized = UploadFile(
             filename="manual.pdf", file=io.BytesIO(_OVER_A_MEGABYTE), size=2 * MEGABYTE
         )

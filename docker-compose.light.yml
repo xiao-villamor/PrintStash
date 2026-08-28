@@ -12,7 +12,7 @@ services:
     # nginx must allow request bodies up to the configured upload limit, or large
     # uploads fail with 413 before reaching the api.
     environment:
-      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_UPLOAD_MB:-512}m
+      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_REQUEST_MB:-528}m
     networks:
       - printstash_net
     depends_on:

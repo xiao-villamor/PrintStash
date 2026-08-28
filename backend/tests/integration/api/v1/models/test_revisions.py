@@ -244,7 +244,9 @@ class TestAddGcodeRevision:
             files={"file": ("rev.gcode", GCODE, "text/plain")},
         )
 
-        # The route's own cap, behind the app-wide body limit that answers first.
+        # The route's own per-file cap, which a client can now actually see: the
+        # request ceiling sits above it, so a file over the file limit reaches
+        # route code instead of being answered as `request_too_large`.
         assert response.status_code == 413, response.text
         assert response.json()["detail"] == "upload_too_large"
 

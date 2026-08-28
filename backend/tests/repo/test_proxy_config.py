@@ -60,23 +60,66 @@ class TestFrontendNginxConf:
         assert "Permissions-Policy" in conf
 
 
+def _default_request_ceiling_mb() -> int:
+    """What the backend will accept for a whole request, in whole MiB.
+
+    Derived rather than written down, so the deployment files are checked against
+    the code's own arithmetic instead of a number somebody remembered.
+    """
+    from app.core.config import MULTIPART_OVERHEAD_BYTES, Settings
+
+    return Settings().max_upload_mb + MULTIPART_OVERHEAD_BYTES // (1024 * 1024)
+
+
 class TestFrontendDockerfile:
-    def test_frontend_image_defaults_to_backend_upload_limit(self) -> None:
+    def test_frontend_image_defaults_to_the_backend_request_ceiling(self) -> None:
+        """nginx bounds the *request*, so its default must clear the per-file cap.
+
+        Set to the per-file number, nginx answers a file at exactly the documented
+        limit with its own HTML 413 — the request carrying that file is larger than
+        the file — and the API never gets to say `upload_too_large`.
+        """
         dockerfile = (_root() / "frontend" / "Dockerfile").read_text()
 
         assert (
             "COPY nginx.conf /etc/nginx/templates/default.conf.template" in dockerfile
         )
-        assert "ENV NGINX_CLIENT_MAX_BODY_SIZE=512m" in dockerfile
+        assert (
+            f"ENV NGINX_CLIENT_MAX_BODY_SIZE={_default_request_ceiling_mb()}m"
+            in dockerfile
+        )
 
 
 class TestComposeFiles:
-    def test_compose_wires_frontend_proxy_limit_from_upload_setting(self) -> None:
-        root = REPO_ROOT
-        compose = (root / "docker-compose.yml").read_text()
+    @pytest.mark.parametrize(
+        "compose_file",
+        [
+            "docker-compose.yml",
+            "docker-compose.light.yml",
+            "docker-compose.prod.yml",
+            "docker-compose.manual-test.yml",
+        ],
+    )
+    def test_every_deployment_gives_the_proxy_multipart_headroom(
+        self, compose_file: str
+    ) -> None:
+        compose = (REPO_ROOT / compose_file).read_text()
 
-        assert "NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_UPLOAD_MB:-512}m" in compose
+        assert (
+            f"NGINX_CLIENT_MAX_BODY_SIZE: ${{VAULT_MAX_REQUEST_MB:-{_default_request_ceiling_mb()}}}m"
+            in compose.replace('"', "")
+        )
+
+    def test_compose_wires_the_backend_upload_cap_from_one_setting(self) -> None:
+        compose = (REPO_ROOT / "docker-compose.yml").read_text()
+
         assert "VAULT_MAX_UPLOAD_MB: ${VAULT_MAX_UPLOAD_MB:-512}" in compose
+
+    def test_the_example_env_documents_the_request_ceiling(self) -> None:
+        """Two knobs with a relationship between them is only safe if it is written down."""
+        example = (REPO_ROOT / ".env.example").read_text()
+
+        assert f"# VAULT_MAX_REQUEST_MB={_default_request_ceiling_mb()}" in example
 
     @pytest.mark.parametrize(
         "compose_file",

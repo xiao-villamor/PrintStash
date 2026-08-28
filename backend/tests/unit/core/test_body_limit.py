@@ -9,6 +9,11 @@ rejected before a response is produced, and one exactly at the limit reaches the
 application — an off-by-one here rejects legitimate uploads at the boundary the
 documentation promises.
 
+The number it enforces is the *request* ceiling, not the per-file cap. Those are
+deliberately different: a multipart body carrying a file at the cap is larger than
+the file, so one number for both rejected legal uploads here and left every
+route's own per-file guard unreachable.
+
 A malformed `Content-Length` is deliberately *not* handled here. Guessing at it
 would either reject a valid request or trust an attacker's number; leaving it to
 the application means one place decides, and that place already validates.
@@ -74,7 +79,7 @@ class TestBodyLimitMiddleware:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            type(settings), "max_upload_bytes", property(lambda _self: 3)
+            type(settings), "max_request_bytes", property(lambda _self: 3)
         )
 
         async def app(_scope, receive, _send) -> None:
@@ -90,7 +95,7 @@ class TestBodyLimitMiddleware:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            type(settings), "max_upload_bytes", property(lambda _self: 3)
+            type(settings), "max_request_bytes", property(lambda _self: 3)
         )
 
         async def app(_scope, receive, send) -> None:

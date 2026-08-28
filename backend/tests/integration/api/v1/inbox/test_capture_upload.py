@@ -23,6 +23,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 from starlette.requests import Request
 
+from app.core import config
 from app.core.config import _overlay
 from app.db.models import (
     CaptureUploadSlot,
@@ -266,37 +267,38 @@ class TestPutCaptureUploadSlot:
             content=BODY,
         )
 
-        # The app-wide body limit reads the same setting and answers first, so
-        # this is what a client actually sees.
+        # The route's own per-file guard answers, through the full HTTP stack: the
+        # request ceiling now sits above the per-file cap, so a body that is only
+        # over the *file* limit reaches route code instead of being swallowed by
+        # the middleware as a generic `request_too_large`.
+        assert response.status_code == 413, response.text
+        assert response.json()["detail"] == "upload_too_large"
+
+    def test_refuses_a_body_past_the_whole_request_ceiling(
+        self, client: TestClient, user_headers, slots, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The outer ceiling is still there, and still answers differently.
+
+        It bounds what the process will buffer at all — a lying `content-length`,
+        or a stream with no end — so it refuses before route code runs and says
+        `request_too_large`. Collapsing the two details would leave a client
+        unable to tell "your file is too big" from "your request is malformed".
+        """
+        headers = user_headers("slot-request-too-large")
+        _, opened = slots(headers)
+        # Zero per-file cap puts the request ceiling at the overhead allowance
+        # alone, which a padded body then exceeds.
+        monkeypatch.setitem(_overlay, "max_upload_mb", 0.000001)
+        monkeypatch.setattr(config, "MULTIPART_OVERHEAD_BYTES", 4)
+
+        response = client.put(
+            f"/api/v1/inbox/capture-upload-slots/{opened[0]['id']}",
+            headers={**headers, **OCTET},
+            content=b"x" * 64,
+        )
+
         assert response.status_code == 413, response.text
         assert response.json()["detail"] == "request_too_large"
-
-    def test_refuses_a_declared_length_past_the_cap_at_the_route_itself(
-        self, db_session: Session, slots, user_headers, monkeypatch
-    ) -> None:
-        from fastapi import HTTPException
-
-        from app.api.v1 import inbox as inbox_api
-
-        headers = user_headers("slot-route-declared")
-        _, opened = slots(headers)
-        monkeypatch.setitem(_overlay, "max_upload_mb", 0.000004)
-
-        with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(
-                inbox_api.put_capture_upload_slot(
-                    opened[0]["id"],
-                    _put_request(
-                        opened[0]["id"], _receives(BODY), content_length=len(BODY)
-                    ),
-                    current_user=_slot_owner(db_session, opened[0]["id"]),
-                    session=db_session,
-                )
-            )
-
-        # Defence in depth: the route refuses on its own, without the middleware.
-        assert exc_info.value.status_code == 413
-        assert exc_info.value.detail == "upload_too_large"
 
     def test_stores_the_streamed_body_at_the_route_itself(
         self, db_session: Session, slots, user_headers
