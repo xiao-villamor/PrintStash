@@ -1,6 +1,6 @@
 ---
 name: create-tests
-description: Use when touching any test — creating a test file, adding a case to an existing file, editing or deleting a test, auditing whether a module is covered, or choosing which tier (unit / integration / contract / e2e / Playwright) a scenario belongs to. Carries the mandatory coverage matrix, the tier policy, the mirrored test layout, file anatomy and parametrization rules, the fixture/factory system every arrange step uses, and the per-runtime conventions for pytest, vitest, and Playwright in this repo. Also applies when a production entity changes, since its factory changes with it. Not for merely running tests — AGENTS.md has the commands.
+description: Use when touching any test — creating a test file, adding a case to an existing file, editing or deleting a test, auditing whether a module is covered, or choosing which tier (unit / integration / contract / e2e / Playwright) a scenario belongs to. Carries the mandatory coverage matrix, the tier policy, the mirrored test layout, file anatomy and parametrization rules, the fixture/factory system every arrange step uses, and the per-runtime conventions for pytest, vitest, and Playwright in this repo. Also applies when a production entity changes, since its factory changes with it. Not for running the suites or closing a coverage gate — that is `run-tests`.
 ---
 
 # Create Tests

@@ -49,6 +49,7 @@ and changelog instead of reconstructing their contents.
 | Backend, config | [references/backend.md](references/backend.md) |
 | Schema change, migration, soft-delete query | `.claude/skills/database/SKILL.md` — autogenerate only; SQLite constraint work needs `op.batch_alter_table` |
 | Write, change, or audit tests (any layer) | `.agents/skills/create-tests/SKILL.md` — coverage matrix mandatory; then its per-runtime reference |
+| Run the suites, chase a failure, move a coverage floor | `.agents/skills/run-tests/SKILL.md` |
 | Frontend / UI change | [references/frontend.md](references/frontend.md) |
 | Pending Imports, URL capture, provenance, provider connections, or browser extension | [references/capture.md](references/capture.md) plus backend/frontend reference(s) for the layers changed |
 | Printer providers (new or changed) | [references/providers.md](references/providers.md) |

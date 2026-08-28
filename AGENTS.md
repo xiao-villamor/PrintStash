@@ -11,8 +11,8 @@ work; that detail lives there, not here, so this file stays small.
 ## Skills
 
 `.agents/skills/` is the source of truth for every assistant; `.claude/skills`
-is a symlink to it, and this file is what `CLAUDE.md` points at. Two skills are
-not optional:
+is a symlink to it, and this file is what `CLAUDE.md` points at. None of the
+skills below is optional:
 
 - **`printstash`** — invoke at the start of any task. It carries release
   procedure, roadmap position, and plan pointers, and routes to the one
@@ -30,6 +30,13 @@ not optional:
   its `references/fixtures.md` governs the arrange step: rows come from
   `tests/factories/`, and a production entity change is incomplete until its
   builder matches.
+- **`run-tests`** — invoke when running the suites and closing what they report:
+  a failing test to diagnose, a coverage floor to clear or raise, a red gate,
+  a merge that left stubs on renamed seams. It carries the lane order that fails
+  cheapest first, the two-sided ratchet procedure, and the failure→cause table
+  for the traps that cost hours (both breakpoints rendering in jsdom, `accept`
+  swallowing `user.upload`, module-level caches). `create-tests` decides what to
+  write; this one starts once tests exist.
 
 ## Bounded coordination
 
@@ -101,7 +108,10 @@ Any test-related work — writing, changing, deleting, or auditing tests, or
 deciding what a change needs — starts by loading
 `.agents/skills/create-tests/SKILL.md` (the `create-tests` skill). Its
 coverage matrix (one row per behaviour, every row `✅`/`❌`/`⏭️`) is mandatory
-in the response and the PR; a change without a matrix is not done.
+in the response and the PR; a change without a matrix is not done. Running the
+suites and closing what they report — a red gate, a floor to raise, a flake, a
+merge that left stubs on renamed seams — is the `run-tests` skill
+(`.agents/skills/run-tests/SKILL.md`).
 
 Coverage is gated with **branches on** in all three suites, and every floor is
 two-sided — clear it by more than its slack and the run fails until the floor is
