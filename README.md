@@ -351,7 +351,9 @@ deliberately not a full manufacturing platform. Set expectations accordingly:
   preview.
 
 Full detail — including non-goals — lives in
-[docs/known-limitations.md](./docs/known-limitations.md).
+[docs/known-limitations.md](./docs/known-limitations.md). Storage provider setup,
+runtime safety tiers, and required credentials are documented in
+[docs/storage-providers.md](./docs/storage-providers.md).
 
 ## Contributing
 

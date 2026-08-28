@@ -1,6 +1,38 @@
-FROM python:3.11-slim
-
 ARG PRINTSTASH_VARIANT=full
+
+FROM rust:1.91-slim-bookworm AS opendal-builder
+
+ARG OPENDAL_SOURCE_VERSION=0.58.2
+ARG OPENDAL_SOURCE_SHA256=476b0358ddc2a644dd4448552331af0d814279b0c1aaf5da755510b34645a764
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    python3 \
+    python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+
+# OpenDAL v0.58.2 publishes Python distribution 0.47.6. Its upstream Linux
+# wheel omits the Unix-only SFTP service, so the full image builds the exact
+# release source with only PrintStash's WebDAV/SFTP contract surface enabled.
+RUN curl -fsSL \
+      "https://github.com/apache/opendal/archive/refs/tags/v${OPENDAL_SOURCE_VERSION}.tar.gz" \
+      -o /tmp/opendal.tar.gz \
+ && echo "${OPENDAL_SOURCE_SHA256}  /tmp/opendal.tar.gz" | sha256sum -c - \
+ && mkdir -p /src /wheels \
+ && tar -xzf /tmp/opendal.tar.gz -C /src --strip-components=1 \
+ && python3 -m venv /tmp/maturin \
+ && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6' \
+ && cd /src/bindings/python \
+ && /tmp/maturin/bin/maturin build --release --no-default-features \
+      --features pyo3/extension-module,abi3,services-memory,services-webdav,services-sftp \
+      --out /wheels
+
+FROM scratch AS opendal-wheel
+COPY --from=opendal-builder /wheels /
+
+FROM python:3.11-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -20,13 +52,25 @@ RUN apt-get update \
 COPY --chmod=0644 pyproject.toml uv.lock ./
 COPY --chmod=0644 packages/printstash-core/pyproject.toml ./packages/printstash-core/pyproject.toml
 COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
-RUN case "$PRINTSTASH_VARIANT" in \
-      full) uv sync --frozen --no-dev --no-editable --extra full ;; \
-      lite) uv sync --frozen --no-dev --no-editable ;; \
-      *) echo "Unknown PRINTSTASH_VARIANT=$PRINTSTASH_VARIANT" >&2; exit 2 ;; \
-    esac \
+
+FROM base AS dependencies-lite
+RUN uv sync --frozen --no-dev --no-editable \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
+
+FROM base AS dependencies-full
+COPY --from=opendal-builder /wheels /tmp/opendal-wheels
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
+ && uv sync --frozen --no-dev --no-editable --extra full \
+ && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
+ && rm -rf /tmp/opendal-wheels \
+ && uv cache clean \
+ && rm -rf "$UV_CACHE_DIR"
+
+FROM dependencies-${PRINTSTASH_VARIANT} AS runtime
+ARG PRINTSTASH_VARIANT
 
 RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin printstash \
  && mkdir -p /data/files /data/thumbs /data/staging /data/backups /data/db \

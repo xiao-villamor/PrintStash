@@ -291,7 +291,9 @@ class TestUploadCaptureSlot:
         # A URL that does not belong to the declared provider at all is refused when
         # the source is parsed: provider and URL are bound, so there is no canonical
         # form of a Printables URL under `makerworld`.
-        with pytest.raises(inbox.importer.ImportError_, match="capture_source_invalid"):
+        with pytest.raises(
+            inbox.importer.ImportError_, match="capture_source_url_mismatch"
+        ):
             inbox.create_capture_upload_slots(
                 db_session, owner, CaptureUploadSlotsCreate.model_validate(raw)
             )
@@ -309,7 +311,9 @@ class TestUploadCaptureSlot:
 
         # Item id 1234 with model 9999's page: the canonical URL is bound to the
         # item, so this never reaches the URL comparison.
-        with pytest.raises(inbox.importer.ImportError_, match="capture_source_invalid"):
+        with pytest.raises(
+            inbox.importer.ImportError_, match="capture_source_url_mismatch"
+        ):
             inbox.create_capture_upload_slots(
                 db_session, owner, CaptureUploadSlotsCreate.model_validate(raw)
             )

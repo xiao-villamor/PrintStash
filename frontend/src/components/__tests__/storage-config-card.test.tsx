@@ -27,11 +27,83 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StorageConfigCard } from "@/components/storage-config-card";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { VaultConfigRead } from "@/types";
+import type { StorageProvider, VaultConfigRead } from "@/types";
+
+const PROVIDERS: StorageProvider[] = [
+  {
+    id: "local",
+    label: "Local disk",
+    category: "this_machine",
+    description: "Store artifacts on this machine.",
+    expected_tier: "verified",
+    expected_tier_note: "Local inode identity supports verified deletion.",
+    consequences: [],
+    documentation_url: "/docs/storage-providers.md#local",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "data_dir",
+        label: "Data directory",
+        help: "Private artifact directory.",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "thumb_dir",
+        label: "Thumbnail directory",
+        help: "Regenerable preview directory.",
+        input_type: "path",
+        required: true,
+        secret: false,
+      },
+    ],
+  },
+  {
+    id: "s3",
+    label: "Amazon S3",
+    category: "s3_compatible",
+    description: "Store artifacts in an S3 bucket.",
+    expected_tier: "guarded",
+    expected_tier_note: "Object versions guard destructive operations.",
+    consequences: [],
+    documentation_url: "/docs/storage-providers.md#s3",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "bucket",
+        label: "Bucket",
+        help: "Operator-provisioned bucket.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "access_key",
+        label: "Access key",
+        help: "Write-only credential.",
+        input_type: "password",
+        required: false,
+        secret: true,
+      },
+    ],
+  },
+];
 
 function aConfig(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
   return {
     storage_backend: "local",
+    storage_provider: "local",
+    storage_provider_config: {
+      provider: "local",
+      data_dir: "/data/files",
+      thumb_dir: "/data/thumbs",
+    },
+    storage_tier: "verified",
+    storage_warnings: [],
+    storage_unverified_acknowledged: false,
     data_dir: "/data/files",
     thumb_dir: "/data/thumbs",
     s3_bucket: "",
@@ -70,11 +142,25 @@ function aConfig(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
   };
 }
 
+function anS3Config(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
+  return aConfig({
+    storage_backend: "s3",
+    storage_provider: "s3",
+    storage_provider_config: {
+      provider: "s3",
+      bucket: "vault-prod",
+    },
+    storage_tier: "guarded",
+    ...over,
+  });
+}
+
 function renderCard(options: RenderAppOptions & { config?: VaultConfigRead } = {}) {
   const { config = aConfig(), routes = {}, ...rest } = options;
   return renderApp(<StorageConfigCard />, {
     routes: {
       "GET /api/v1/config": json(config),
+      "GET /api/v1/storage/providers": json(PROVIDERS),
       "PUT /api/v1/config": json(config),
       ...routes,
     },
@@ -121,32 +207,40 @@ describe("StorageConfigCard", () => {
       renderCard();
 
       expect(
-        await screen.findByText("Changes to the storage backend require an application restart."),
+        await screen.findByText(/Provider changes require an application restart/),
       ).toBeInTheDocument();
     });
   });
 
   describe("an S3 deployment", () => {
     it("shows the bucket it writes to", async () => {
-      renderCard({ config: aConfig({ storage_backend: "s3", s3_bucket: "vault-prod" }) });
+      renderCard({ config: anS3Config() });
 
       expect(await screen.findByDisplayValue("vault-prod")).toBeInTheDocument();
     });
 
     it("hides the local paths", async () => {
-      renderCard({ config: aConfig({ storage_backend: "s3" }) });
+      renderCard({ config: anS3Config() });
 
-      await screen.findByPlaceholderText("my-vault-bucket");
+      await screen.findByDisplayValue("vault-prod");
       expect(screen.queryByDisplayValue("/data/files")).toBeNull();
     });
 
     it("says a stored access key exists without showing it", async () => {
       // The server never returns it; a blank field would read as no key at all.
       renderCard({
-        config: aConfig({ storage_backend: "s3", has_s3_access_key: true }),
+        config: anS3Config({
+          storage_provider_config: {
+            provider: "s3",
+            bucket: "vault-prod",
+            secret_fields_set: ["access_key"],
+          },
+        }),
       });
 
-      expect(await screen.findByPlaceholderText("(stored)")).toBeInTheDocument();
+      expect(
+        await screen.findByPlaceholderText("Stored — leave blank to keep"),
+      ).toBeInTheDocument();
     });
 
     it("swaps to S3 when the operator chooses it", async () => {
@@ -154,9 +248,10 @@ describe("StorageConfigCard", () => {
       renderCard();
       await screen.findByDisplayValue("/data/files");
 
-      await user.click(screen.getByRole("button", { name: /S3 \/ R2/ }));
+      await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+      await user.click(screen.getByRole("button", { name: /Amazon S3/ }));
 
-      expect(screen.getByPlaceholderText("my-vault-bucket")).toBeInTheDocument();
+      expect(screen.getByLabelText("Bucket")).toBeInTheDocument();
     });
   });
 
@@ -165,13 +260,15 @@ describe("StorageConfigCard", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard();
       await screen.findByDisplayValue("/data/files");
-      await user.click(screen.getByRole("button", { name: /S3 \/ R2/ }));
+      await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+      await user.click(screen.getByRole("button", { name: /Amazon S3/ }));
 
       await user.click(screen.getByRole("button", { name: /Save configuration/ }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
-          storage_backend: "s3",
+          storage_provider: "s3",
+          storage_provider_config: { provider: "s3" },
         }),
       );
     });
@@ -187,7 +284,7 @@ describe("StorageConfigCard", () => {
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
-          data_dir: "/mnt/vault",
+          storage_provider_config: { data_dir: "/mnt/vault" },
         }),
       );
     });
@@ -197,36 +294,44 @@ describe("StorageConfigCard", () => {
       // vault stops being able to read its own files.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({
-        config: aConfig({
-          storage_backend: "s3",
-          has_s3_access_key: true,
-          s3_access_key: "****abcd",
+        config: anS3Config({
+          storage_provider_config: {
+            provider: "s3",
+            bucket: "vault-prod",
+            secret_fields_set: ["access_key"],
+          },
         }),
       });
-      await screen.findByPlaceholderText("my-vault-bucket");
+      await screen.findByDisplayValue("vault-prod");
 
       await user.click(screen.getByRole("button", { name: /Save configuration/ }));
 
       await waitFor(() =>
-        expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).not.toHaveProperty(
-          "s3_access_key",
-        ),
+        expect(
+          JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}").storage_provider_config,
+        ).not.toHaveProperty("access_key"),
       );
     });
 
     it("sends a credential the operator retyped", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({
-        config: aConfig({ storage_backend: "s3", has_s3_access_key: true }),
+        config: anS3Config({
+          storage_provider_config: {
+            provider: "s3",
+            bucket: "vault-prod",
+            secret_fields_set: ["access_key"],
+          },
+        }),
       });
-      const key = await screen.findByPlaceholderText("(stored)");
+      const key = await screen.findByPlaceholderText("Stored — leave blank to keep");
       await user.type(key, "not-a-real-key");
 
       await user.click(screen.getByRole("button", { name: /Save configuration/ }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
-          s3_access_key: "not-a-real-key",
+          storage_provider_config: { access_key: "not-a-real-key" },
         }),
       );
     });
@@ -272,12 +377,12 @@ describe("StorageConfigCard", () => {
   });
 
   describe("a configuration that cannot be read", () => {
-    it("still renders the form", async () => {
+    it("still renders the backup form", async () => {
       // This card is where an operator goes when storage is misbehaving; an
       // error page instead of a form takes away the fix.
       renderCard({ routes: { "GET /api/v1/config": json({ detail: "boom" }, 500) } });
 
-      expect(await screen.findByRole("button", { name: /Local disk/ })).toBeInTheDocument();
+      expect(await screen.findByPlaceholderText("my-backup-bucket")).toBeInTheDocument();
     });
   });
 });

@@ -56,7 +56,7 @@ from app.schemas.models import (
 )
 from app.services import rbac, taxonomy
 from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import publish_bytes
 from app.services.taxonomy import slugify
 
 # Raster image formats only — no SVG (script-capable) — keeps readme images
@@ -407,8 +407,13 @@ async def upload_collection_image(
     key = backend.collection_image_key(col.id, name)
     receipt = None
     try:
-        receipt = backend.create_bytes(data, key)
-        record_creation(session, receipt, object_kind="collection_image")
+        receipt = publish_bytes(
+            session,
+            backend,
+            key,
+            data,
+            object_kind="collection_image",
+        )
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()

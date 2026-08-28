@@ -14,6 +14,7 @@ belongs to somebody's external library, which no amount of trash retention can u
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,57 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import Model
-from app.services.storage_ownership import UnsafeStorageDeleteError
+from app.db.models import File, FileType, Model
+from app.services.storage_backend import (
+    ObjectIdentity,
+    StorageCapabilities,
+    get_backend,
+)
+from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
+
+
+def _trashed_model_with_owned_blob(session: Session, *, slug: str) -> tuple[Model, str]:
+    backend = get_backend()
+    model = Model(
+        name="Guarded model",
+        slug=slug,
+        hash="a" * 64,
+        deleted_at=datetime(2020, 1, 1, tzinfo=UTC),
+    )
+    session.add(model)
+    session.flush()
+    key = backend.blob_key(slug, 1, "owned.stl")
+    receipt = backend.create_bytes(b"owned", key)
+    record_creation(session, receipt, object_kind="artifact")
+    session.add(
+        File(
+            model_id=model.id,
+            path=key,
+            original_filename="owned.stl",
+            file_type=FileType.STL,
+            version=1,
+            size_bytes=5,
+            sha256="b" * 64,
+        )
+    )
+    session.commit()
+    session.refresh(model)
+    return model, key
+
+
+def _make_guarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        get_backend(),
+        "_capabilities",
+        StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.ETAG,
+            verified_delete=False,
+            conditional_replace=False,
+            namespace_ownership=True,
+            direct_path=False,
+        ),
+    )
 
 
 class TestDeleteModel:
@@ -102,6 +152,54 @@ class TestRestoreModel:
 
 
 class TestPurgeModel:
+    def test_guarded_storage_requires_structured_one_shot_confirmation(
+        self,
+        db_session: Session,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        model, key = _trashed_model_with_owned_blob(
+            db_session, slug="guarded-confirmation"
+        )
+        _make_guarded(monkeypatch)
+
+        response = client.delete(
+            f"/api/v1/models/{model.id}/purge", headers=auth_headers
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == {
+            "code": "storage_risk_confirmation_required",
+            "tier": "guarded",
+            "operation": "purge_model",
+            "required_confirmation": "confirm_storage_risk=true",
+        }
+        assert get_backend().exists(key)
+
+    def test_guarded_storage_accepts_one_shot_confirmation(
+        self,
+        db_session: Session,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        model, key = _trashed_model_with_owned_blob(
+            db_session, slug="guarded-confirmed"
+        )
+        model_id = model.id
+        _make_guarded(monkeypatch)
+
+        response = client.delete(
+            f"/api/v1/models/{model.id}/purge?confirm_storage_risk=true",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        assert db_session.get(Model, model_id) is None
+        assert not get_backend().exists(key)
+
     def test_permanently_removes_a_trashed_model(
         self, client: TestClient, db_session: Session, auth_headers, make_model
     ) -> None:
@@ -167,7 +265,7 @@ class TestPurgeModel:
 
         model = make_model("Unowned but kept", deleted_at=utcnow())
 
-        def unproven(session, _model):
+        def unproven(session, _model, **_kwargs: object):
             session.delete(_model)
             raise UnsafeStorageDeleteError("storage_ownership_unverified")
 

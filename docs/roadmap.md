@@ -36,7 +36,7 @@ Developed features in the current app:
 - Model print history with automatic Moonraker import for matching filenames and manual print-job logging
 - First-run setup wizard, JWT auth for UI/scripts, refresh/logout flow, per-user API keys, role-aware admin access, and audit logs
 - Alembic migrations, optional Postgres support, SQLite-to-Postgres migration script, and documented upgrade flow
-- Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, cached mesh conversion, lifecycle policy configuration, and backup/restore endpoints
+- Local and optional S3/R2 storage, multipart S3 uploads, pre-signed downloads, cached mesh conversion, read-only lifecycle auditing, and backup/restore endpoints
 - Vault stats, storage usage reporting, configurable card metrics, trash retention controls, restore/purge actions, and thumbnail rebuild jobs
 - Prometheus `/metrics` endpoint (request latency, ingestion counts, live printer status) and operational health output for database, storage, backup, background jobs, external-library scans, and printer provider readiness
 - Moonraker/Klipper provider with live status, upload/send, optional start, pause/resume/cancel, printer file inventory sync, remote-file start, and job history

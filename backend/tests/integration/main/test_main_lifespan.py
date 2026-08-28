@@ -38,6 +38,7 @@ from app.db.models import (
 from app.services import storage_backend
 from app.services.auth import create_access_token
 from app.services.realtime import InProcessBus
+from app.services.storage_backend import ObjectIdentity, StorageCapabilities
 from tests.factories import build_model, build_printer, build_user
 
 
@@ -73,6 +74,16 @@ class TestStorageComposition:
         events: list[str] = []
 
         class _Backend:
+            backend_name = "local"
+            capabilities = StorageCapabilities(
+                conditional_create=True,
+                object_identity=ObjectIdentity.INODE,
+                verified_delete=True,
+                conditional_replace=True,
+                namespace_ownership=True,
+                direct_path=True,
+            )
+
             def ensure_setup(self) -> None:
                 events.append("ensure")
 

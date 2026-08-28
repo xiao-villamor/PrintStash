@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-import socket
 import threading
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from pycentauri import sdcp
+from pycentauri.client import Printer
 from pycentauri.models import PrintStatus, Status
+from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from app.services.elegoo_centauri import ElegooCentauriError
@@ -71,11 +72,10 @@ class RunningCentauriServer:
 
 def start_cc1_server(sim: PrintSim) -> RunningCentauriServer:
     """Run SDCP v3 over a real loopback WebSocket for CC1 tests."""
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = int(sock.getsockname()[1])
     ready = threading.Event()
     stop = threading.Event()
+    bound_port: list[int] = []
+    startup_error: list[BaseException] = []
 
     async def handler(ws) -> None:  # noqa: ANN001
         await ws.send(
@@ -128,17 +128,46 @@ def start_cc1_server(sim: PrintSim) -> RunningCentauriServer:
             )
 
     async def run() -> None:
-        async with serve(handler, "127.0.0.1", port, compression=None):
+        try:
+            async with serve(handler, "127.0.0.1", 0, compression=None) as server:
+                sockets = server.sockets
+                if not sockets:
+                    raise RuntimeError("mock Centauri WebSocket has no bound socket")
+                bound_port.append(int(sockets[0].getsockname()[1]))
+                ready.set()
+                while not stop.is_set():
+                    await asyncio.sleep(0.05)
+        except BaseException as exc:
+            startup_error.append(exc)
             ready.set()
-            while not stop.is_set():
-                await asyncio.sleep(0.05)
 
     thread = threading.Thread(target=lambda: asyncio.run(run()), daemon=True)
     thread.start()
     if not ready.wait(10):
         stop.set()
         raise RuntimeError("mock Centauri WebSocket failed to start")
-    return RunningCentauriServer(port=port, _stop=stop, _thread=thread)
+    if startup_error:
+        raise RuntimeError(
+            "mock Centauri WebSocket failed to start"
+        ) from startup_error[0]
+    return RunningCentauriServer(port=bound_port[0], _stop=stop, _thread=thread)
+
+
+def cc1_connector(port: int) -> Callable[[bool], Any]:
+    """Connect the real pycentauri client to a dynamically allocated fake port."""
+
+    async def connector(enable_control: bool) -> Printer:
+        printer = Printer("127.0.0.1", enable_control=enable_control)
+        printer._ws = await connect(  # type: ignore[attr-defined]
+            f"ws://127.0.0.1:{port}/websocket", max_size=None
+        )
+        printer._reader = asyncio.create_task(  # type: ignore[attr-defined]
+            printer._read_loop(),  # type: ignore[attr-defined]
+            name=f"pycentauri-reader-127.0.0.1:{port}",
+        )
+        return printer
+
+    return connector
 
 
 class FakeCentauriConnection:

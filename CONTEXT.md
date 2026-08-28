@@ -58,6 +58,21 @@ claims them; failed writes clean up their exact destinations at the write site.
 
 ### Storage
 
+**Storage capability tier**:
+The runtime-probed safety guarantee of the active storage backend: Verified,
+Guarded, or Unguarded. Tiers are derived from capability axes, never from a
+provider label. Destructive storage behavior consults the probed tier.
+
+**Storage provider**:
+A stable catalogue entry selected by ID (for example `local`, `s3`, or
+`nextcloud`). It supplies typed setup fields and resolves to a native or remote
+transport; provider identity and transport kind are not interchangeable.
+
+**Ownership intent**:
+An `owned_storage_objects` reservation created before bytes are published.
+PENDING intents are reclaimable after the grace period, COMMITTED intents are
+authoritative ownership records, and BLOCKED intents require operator review.
+
 **Storage key**:
 Opaque identifier for a stored blob — an absolute path (local backend) or
 an object key (S3 backend). Callers never branch on which.

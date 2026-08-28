@@ -646,16 +646,14 @@ def return_inbox_lease_to_review(
 ) -> StagingLease:
     """Return one legacy browser-file lease from a job to its inbox review."""
     lease = _one_owner_lease(session, job_id=job_id)
-    # SQLite hands a DateTime column back naive; ``utcnow()`` is aware. Compare
-    # them directly and Python raises TypeError, which the API turns into a 500
-    # on the retry of any failed legacy browser-file import.
-    if ensure_utc(lease.expires_at) <= (now or utcnow()):
+    # SQLite hands a DateTime column back naive; normalize both sides once so
+    # expiry validation and the renewed deadline share the same instant.
+    current = ensure_utc(now or utcnow())
+    if ensure_utc(lease.expires_at) <= current:
         raise StagingLeaseError("staging lease expired")
     lease.background_job_id = None
     lease.inbox_item_id = inbox_item_id
-    lease.expires_at = (now or utcnow()) + timedelta(
-        days=settings.staging_review_lease_days
-    )
+    lease.expires_at = current + timedelta(days=settings.staging_review_lease_days)
     session.flush()
     return lease
 

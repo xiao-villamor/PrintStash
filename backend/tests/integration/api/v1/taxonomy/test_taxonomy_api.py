@@ -704,13 +704,17 @@ class TestCollectionPermissions:
         Image.new("RGB", (8, 8), "navy").save(image, format="PNG")
         rolled_back: list[object] = []
 
-        real_record = taxonomy_api.record_creation
+        real_commit = Session.commit
+        commits = 0
 
-        def failing_record(session, receipt, **kwargs):
-            real_record(session, receipt, **kwargs)
-            raise RuntimeError("ownership ledger unavailable")
+        def failing_commit(session: Session) -> None:
+            nonlocal commits
+            commits += 1
+            if commits == 3:
+                raise RuntimeError("ownership ledger unavailable")
+            real_commit(session)
 
-        monkeypatch.setattr(taxonomy_api, "record_creation", failing_record)
+        monkeypatch.setattr(taxonomy_api.Session, "commit", failing_commit)
         monkeypatch.setattr(
             get_backend(),
             "rollback_create",

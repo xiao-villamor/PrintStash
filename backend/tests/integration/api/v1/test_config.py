@@ -25,6 +25,7 @@ from sqlmodel import Session, select
 
 from app.core.config import _overlay
 from app.db.models import File, FileType, Model
+from app.services import runtime_config
 from tests.factories import build_file, build_model
 from tests.integration.conftest import UserHeaders
 
@@ -133,6 +134,33 @@ class TestGetConfig:
 
         assert body["has_backup_s3_secret_key"] is expected
         assert body["backup_s3_secret_key"] != value or value == ""
+
+    def test_masks_typed_provider_secrets(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        runtime_config.update_storage_provider(
+            db_session,
+            provider="webdav",
+            raw_config={
+                "provider": "webdav",
+                "endpoint_url": "https://dav.example.test",
+                "username": "printstash",
+                "password": "never-return-this",
+                "root": "models",
+            },
+            apply_runtime=False,
+        )
+
+        response = client.get("/api/v1/config", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert "never-return-this" not in response.text
+        assert response.json()["storage_provider_config"]["secret_fields_set"] == [
+            "password"
+        ]
 
     def test_defaults_the_currency_to_usd(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -325,6 +353,48 @@ class TestUpdateConfig:
             "/api/v1/config",
             json={"currency": "EUR"},
             headers=user_headers("operator"),
+        )
+
+        assert response.status_code == 403, response.text
+
+    def test_rejects_mixed_typed_and_legacy_storage_configuration(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={
+                "storage_backend": "local",
+                "storage_provider": "webdav",
+                "storage_provider_config": {
+                    "provider": "webdav",
+                    "endpoint_url": "https://dav.example.test",
+                    "username": "printstash",
+                    "password": "secret",
+                    "root": "models",
+                },
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "mixed_storage_provider_input"
+
+    def test_rejects_a_typed_provider_update_from_a_non_superuser(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            headers=user_headers("provider-config-writer"),
+            json={
+                "storage_provider": "webdav",
+                "storage_provider_config": {
+                    "provider": "webdav",
+                    "endpoint_url": "https://dav.example.test",
+                    "username": "printstash",
+                    "password": "secret",
+                    "root": "models",
+                },
+            },
         )
 
         assert response.status_code == 403, response.text

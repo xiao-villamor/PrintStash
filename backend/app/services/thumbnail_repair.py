@@ -6,7 +6,7 @@ from app.db.models import File, FileType, Model
 from app.db.scopes import live
 from app.services import mesh_processing, thumbnail
 from app.services.storage_backend import get_backend
-from app.services.storage_ownership import record_creation, replace_owned_bytes
+from app.services.storage_ownership import publish_bytes, replace_owned_bytes
 
 _MESH_TYPES = (FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP)
 
@@ -44,8 +44,7 @@ def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
             session, backend, key, encoded, object_kind="thumbnail"
         )
     else:
-        receipt = backend.create_bytes(encoded, key)
-        record_creation(session, receipt, object_kind="thumbnail")
+        publish_bytes(session, backend, key, encoded, object_kind="thumbnail")
     model.thumbnail_file_id = mesh.id
     model.thumbnail_path = key
     session.add(model)

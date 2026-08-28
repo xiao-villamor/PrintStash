@@ -5,11 +5,16 @@ import {
   SetupStatus,
   VaultConfigRead,
   VaultConfigUpdate,
+  StorageProvider,
   IngestResponse,
 } from "@/types";
 
 export function getSetupStatus(): Promise<SetupStatus> {
   return getJson<SetupStatus>("/api/v1/setup/status");
+}
+
+export function getStorageProviders(): Promise<StorageProvider[]> {
+  return getJson<StorageProvider[]>("/api/v1/storage/providers");
 }
 
 export function completeSetup(body: SetupRequest): Promise<SetupResponse> {

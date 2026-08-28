@@ -8,6 +8,7 @@ value without code changes. See ADR-0002.
 
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
 from typing import Any, Optional
@@ -18,6 +19,14 @@ from app.core.config import DEFAULT_JWT_SECRET, _overlay, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import SystemConfig, User
+from app.services.storage_providers import (
+    StorageProviderConfig,
+    merge_provider_secrets,
+    parse_provider_config,
+    resolve_transport,
+    sanitized_provider_config,
+    split_provider_config,
+)
 
 logger = get_logger(__name__)
 
@@ -60,16 +69,25 @@ def _merge_config_overlay(config: SystemConfig) -> None:
         if value is not None and value != "":
             _overlay[key] = value
 
-    if config.data_dir:
+    if config.storage_provider and config.storage_provider_config_json:
+        provider = _stored_provider_config(config)
+        if provider is not None:
+            _project_provider_overlay(provider)
+    if config.data_dir and not config.storage_provider:
         _overlay["data_dir"] = Path(config.data_dir)
-    if config.thumb_dir:
+    if config.thumb_dir and not config.storage_provider:
         _overlay["thumb_dir"] = Path(config.thumb_dir)
-    _set("storage_backend", config.storage_backend)
-    _set("s3_bucket", config.s3_bucket)
-    _set("s3_endpoint_url", config.s3_endpoint_url)
-    _set("s3_region", config.s3_region)
-    _set("s3_access_key", config.s3_access_key)
-    _set("s3_secret_key", config.s3_secret_key)
+    if not config.storage_provider:
+        if config.storage_backend:
+            # An explicit legacy DB backend outranks the new provider env input.
+            # The empty overlay value intentionally shadows the frozen env value.
+            _overlay["storage_provider"] = ""
+        _set("storage_backend", config.storage_backend)
+        _set("s3_bucket", config.s3_bucket)
+        _set("s3_endpoint_url", config.s3_endpoint_url)
+        _set("s3_region", config.s3_region)
+        _set("s3_access_key", config.s3_access_key)
+        _set("s3_secret_key", config.s3_secret_key)
     if config.backup_retention_days is not None:
         _overlay["backup_retention_days"] = config.backup_retention_days
     if config.trash_retention_days is not None:
@@ -103,12 +121,174 @@ def apply_overlay(session: Session) -> None:
         return
     _overlay.clear()
     _merge_config_overlay(config)
+    apply_environment_storage_provider(session)
+
+
+def apply_environment_storage_provider(session: Session) -> None:
+    """Project new provider env input only when no DB storage source exists."""
+    config = session.get(SystemConfig, 1)
+    has_db_storage = config is not None and bool(
+        config.storage_provider or config.storage_backend
+    )
+    if not has_db_storage and settings.storage_provider:
+        try:
+            nonsecret = _json_object(str(settings.storage_provider_config))
+            secrets_map = {
+                str(k): str(v)
+                for k, v in _json_object(str(settings.storage_provider_secrets)).items()
+                if v
+            }
+            parsed = merge_provider_secrets(nonsecret, secrets_map)
+            if parsed.provider != settings.storage_provider:
+                raise ValueError("storage_provider_config_mismatch")
+            _project_provider_overlay(parsed)
+        except ValueError:
+            logger.exception("environment provider configuration is invalid")
 
 
 def activate_config(config: SystemConfig) -> None:
     """Merge a newly committed config into live runtime state."""
     _merge_config_overlay(config)
     ensure_dirs()
+
+
+def _json_object(value: str | None) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _stored_provider_config(config: SystemConfig) -> StorageProviderConfig | None:
+    if not config.storage_provider or not config.storage_provider_config_json:
+        return None
+    nonsecret = _json_object(config.storage_provider_config_json)
+    secrets_json = _json_object(config.storage_provider_secret_json)
+    secrets_map = {str(k): str(v) for k, v in secrets_json.items() if v}
+    try:
+        return merge_provider_secrets(nonsecret, secrets_map)
+    except ValueError:
+        logger.exception("stored provider configuration is invalid")
+        return None
+
+
+def _project_provider_overlay(config: StorageProviderConfig) -> None:
+    spec = resolve_transport(config)
+    _overlay["storage_provider"] = config.provider
+    _overlay["storage_provider_config"] = config.model_dump_json()
+    if spec.kind.value == "local":
+        _overlay["storage_backend"] = "local"
+        _overlay["data_dir"] = Path(str(spec.options["data_dir"]))
+        _overlay["thumb_dir"] = Path(str(spec.options["thumb_dir"]))
+    elif spec.kind.value == "s3":
+        _overlay["storage_backend"] = "s3"
+        _overlay["s3_bucket"] = str(spec.options["bucket"])
+        _overlay["s3_endpoint_url"] = str(spec.options["endpoint_url"])
+        _overlay["s3_region"] = str(spec.options["region"])
+        _overlay["s3_access_key"] = str(spec.options["access_key"])
+        _overlay["s3_secret_key"] = str(spec.options["secret_key"])
+    else:
+        _overlay["storage_backend"] = config.provider
+
+
+def update_storage_provider(
+    session: Session,
+    *,
+    provider: str,
+    raw_config: dict[str, Any],
+    commit: bool = True,
+    apply_runtime: bool = True,
+) -> SystemConfig:
+    """Validate, persist, and sanitize one discriminated provider config."""
+    config = get_or_create(session, commit=commit)
+    if raw_config.get("provider") != provider:
+        raise ValueError("storage_provider_config_mismatch")
+    parsed = resolve_requested_storage_provider(
+        config, provider=provider, raw_config=raw_config
+    )
+    nonsecret, secrets_map = split_provider_config(parsed)
+    config.storage_provider = provider
+    config.storage_provider_config_json = json.dumps(nonsecret, separators=(",", ":"))
+    config.storage_provider_secret_json = json.dumps(secrets_map, separators=(",", ":"))
+    # Compatibility projections remain available to older releases/readers.
+    spec = resolve_transport(parsed)
+    config.storage_backend = (
+        "s3"
+        if spec.kind.value == "s3"
+        else "local"
+        if spec.kind.value == "local"
+        else provider
+    )
+    if spec.kind.value == "local":
+        config.data_dir = str(spec.options["data_dir"])
+        config.thumb_dir = str(spec.options["thumb_dir"])
+    elif spec.kind.value == "s3":
+        config.s3_bucket = str(spec.options["bucket"])
+        config.s3_endpoint_url = str(spec.options["endpoint_url"])
+        config.s3_region = str(spec.options["region"])
+        config.s3_access_key = str(spec.options["access_key"])
+        config.s3_secret_key = str(spec.options["secret_key"])
+    config.updated_at = utcnow()
+    session.add(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    if apply_runtime:
+        _project_provider_overlay(parsed)
+    return config
+
+
+def resolve_requested_storage_provider(
+    config: SystemConfig,
+    *,
+    provider: str,
+    raw_config: dict[str, Any],
+) -> StorageProviderConfig:
+    prior_secrets = _json_object(config.storage_provider_secret_json)
+    if config.storage_provider == provider:
+        merged = {**prior_secrets, **raw_config}
+        if provider == "sftp":
+            if raw_config.get("password"):
+                merged.pop("private_key_path", None)
+                merged.pop("passphrase", None)
+            elif raw_config.get("private_key_path"):
+                merged.pop("password", None)
+    else:
+        merged = raw_config
+    return parse_provider_config(merged)
+
+
+def storage_provider_signature(config: StorageProviderConfig) -> tuple[object, ...]:
+    spec = resolve_transport(config)
+    secret_names = {"access_key", "secret_key", "password", "passphrase"}
+    return (
+        spec.kind.value,
+        spec.provider,
+        spec.namespace,
+        tuple(
+            sorted(
+                (key, str(value))
+                for key, value in spec.options.items()
+                if key not in secret_names
+            )
+        ),
+    )
+
+
+def get_sanitized_storage_provider(
+    session: Session,
+) -> tuple[str, dict[str, object]] | None:
+    config = session.get(SystemConfig, 1)
+    if config is None or not config.storage_provider:
+        return None
+    nonsecret = _json_object(config.storage_provider_config_json)
+    secrets_map = {
+        str(k): str(v)
+        for k, v in _json_object(config.storage_provider_secret_json).items()
+        if v
+    }
+    return config.storage_provider, sanitized_provider_config(nonsecret, secrets_map)
 
 
 def ensure_jwt_secret(session: Session) -> None:

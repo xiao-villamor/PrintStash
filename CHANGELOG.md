@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Runtime-probed storage capability tiers and remote providers.** Local and
+  S3 storage now report Verified, Guarded, or Unguarded guarantees from runtime
+  probes; durable publication intents and one-shot destructive confirmations
+  protect weaker backends. Setup and Settings add typed presets for S3, R2,
+  B2, Wasabi, self-hosted S3, Nextcloud, WebDAV, and SFTP. The full image pins
+  Apache OpenDAL core 0.58.2 and supports SFTP password or mounted-key
+  authentication ([#90](https://github.com/xiao-villamor/PrintStash/issues/90)).
 - **GitHub-flavoured Markdown tables.** Collection READMEs and Markdown
   documents now render pipe-table syntax as semantic tables while retaining
   the existing sanitisation boundary

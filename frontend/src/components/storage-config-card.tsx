@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Cloud, HardDrive, Key, RefreshCw, Save } from "lucide-react";
-import { getVaultConfig, updateVaultConfig } from "@/lib/api";
-import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
+import { Cloud, Key, RefreshCw, Save } from "lucide-react";
+import { getStorageProviders, getVaultConfig, updateVaultConfig } from "@/lib/api";
+import type { StorageProvider, VaultConfigRead, VaultConfigUpdate } from "@/types";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { Localized } from "@/components/ui/localized";
+import {
+  defaultProviderValues,
+  StorageProviderPicker,
+  type ProviderValues,
+} from "@/components/storage-provider-picker";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -13,14 +18,9 @@ export function StorageConfigCard() {
   const { isAuthenticated } = useRequireAuth();
   const [cfg, setCfg] = useState<VaultConfigRead | null>(null);
   const [loading, setLoading] = useState(true);
-  const [backend, setBackend] = useState("local");
-  const [dataDir, setDataDir] = useState("");
-  const [thumbDir, setThumbDir] = useState("");
-  const [s3Bucket, setS3Bucket] = useState("");
-  const [s3Endpoint, setS3Endpoint] = useState("");
-  const [s3Region, setS3Region] = useState("auto");
-  const [s3AccessKey, setS3AccessKey] = useState("");
-  const [s3SecretKey, setS3SecretKey] = useState("");
+  const [providers, setProviders] = useState<StorageProvider[]>([]);
+  const [providerId, setProviderId] = useState("local");
+  const [providerValues, setProviderValues] = useState<ProviderValues>({});
   const [backupDays, setBackupDays] = useState(30);
   const [bkS3Bucket, setBkS3Bucket] = useState("");
   const [bkS3Endpoint, setBkS3Endpoint] = useState("");
@@ -32,16 +32,11 @@ export function StorageConfigCard() {
 
   const load = useCallback(async () => {
     try {
-      const c = await getVaultConfig();
+      const [c, providerCatalogue] = await Promise.all([getVaultConfig(), getStorageProviders()]);
       setCfg(c);
-      setBackend(c.storage_backend || "local");
-      setDataDir(c.data_dir);
-      setThumbDir(c.thumb_dir);
-      setS3Bucket(c.s3_bucket);
-      setS3Endpoint(c.s3_endpoint_url);
-      setS3Region(c.s3_region || "auto");
-      setS3AccessKey(c.s3_access_key);
-      setS3SecretKey(c.s3_secret_key);
+      setProviders(providerCatalogue);
+      setProviderId(c.storage_provider || (c.storage_backend === "s3" ? "s3" : "local"));
+      setProviderValues(c.storage_provider_config ?? {});
       setBackupDays(c.backup_retention_days ?? 30);
       setBkS3Bucket(c.backup_s3_bucket);
       setBkS3Endpoint(c.backup_s3_endpoint_url);
@@ -65,24 +60,21 @@ export function StorageConfigCard() {
     setErrorMsg("");
     try {
       const body: VaultConfigUpdate = {
-        storage_backend: backend || "",
-        data_dir: dataDir || "",
-        thumb_dir: thumbDir || "",
-        s3_bucket: s3Bucket || "",
-        s3_endpoint_url: s3Endpoint || "",
-        s3_region: s3Region || "",
+        storage_provider: providerId,
+        storage_provider_config: {
+          provider: providerId,
+          ...Object.fromEntries(
+            Object.entries(providerValues).filter(
+              ([name, value]) => name !== "secret_fields_set" && value !== "",
+            ),
+          ),
+        },
         backup_retention_days: backupDays,
         backup_s3_bucket: bkS3Bucket || "",
         backup_s3_endpoint_url: bkS3Endpoint || "",
         backup_s3_region: bkS3Region || "",
       };
 
-      if (s3AccessKey && !s3AccessKey.includes("*")) {
-        body.s3_access_key = s3AccessKey;
-      }
-      if (s3SecretKey && !s3SecretKey.includes("*")) {
-        body.s3_secret_key = s3SecretKey;
-      }
       if (bkS3AccessKey && !bkS3AccessKey.includes("*")) {
         body.backup_s3_access_key = bkS3AccessKey;
       }
@@ -100,14 +92,8 @@ export function StorageConfigCard() {
       setErrorMsg(e?.message || "Save failed");
     }
   }, [
-    backend,
-    dataDir,
-    thumbDir,
-    s3Bucket,
-    s3Endpoint,
-    s3Region,
-    s3AccessKey,
-    s3SecretKey,
+    providerId,
+    providerValues,
     backupDays,
     bkS3Bucket,
     bkS3Endpoint,
@@ -139,176 +125,35 @@ export function StorageConfigCard() {
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">Storage configuration</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              File storage backend, S3 credentials, and backup retention
+              Provider connection, active guarantees, and backup retention
             </p>
           </div>
           {cfg && (
             <span className="font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border text-muted-foreground border-border flex-shrink-0">
-              {cfg.storage_backend === "s3" ? "S3/R2" : "Local"}
+              {cfg.storage_provider}
             </span>
           )}
         </div>
 
         <div className="space-y-5 p-4 sm:p-5 lg:p-6">
-          {/* Backend selector */}
-          <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1.5">
-              Storage backend
-            </label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                disabled={!canEdit}
-                onClick={() => setBackend("local")}
-                className={`flex items-center gap-2 px-3 py-2 rounded text-sm border transition-colors
-                ${
-                  backend === "local"
-                    ? "bg-primary/10 border-primary text-primary"
-                    : "border-border text-muted-foreground hover:border-muted-foreground/40"
-                }`}
-              >
-                <HardDrive className="h-3.5 w-3.5" />
-                Local disk
-              </button>
-              <button
-                type="button"
-                disabled={!canEdit}
-                onClick={() => setBackend("s3")}
-                className={`flex items-center gap-2 px-3 py-2 rounded text-sm border transition-colors
-                ${
-                  backend === "s3"
-                    ? "bg-primary/10 border-primary text-primary"
-                    : "border-border text-muted-foreground hover:border-muted-foreground/40"
-                }`}
-              >
-                <Cloud className="h-3.5 w-3.5" />
-                S3 / R2
-              </button>
-            </div>
-            <p className="text-3xs text-muted-foreground mt-1">
-              Changes to the storage backend require an application restart.
-            </p>
-          </div>
-
-          {/* Local paths (shown for local backend) */}
-          {backend === "local" && (
-            <div className="space-y-3 rounded-lg bg-muted/40 p-3 sm:p-4">
-              <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                <HardDrive className="h-3 w-3" /> Local paths
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">
-                    Data directory
-                  </label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={dataDir}
-                    onChange={(e) => setDataDir(e.target.value)}
-                    placeholder={cfg?.data_dir || "/data/files"}
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">
-                    Thumbnail directory
-                  </label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={thumbDir}
-                    onChange={(e) => setThumbDir(e.target.value)}
-                    placeholder={cfg?.thumb_dir || "/data/thumbs"}
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* S3 settings (shown for S3 backend) */}
-          {backend === "s3" && (
-            <div className="space-y-3 rounded-lg bg-muted/40 p-3 sm:p-4">
-              <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                <Cloud className="h-3 w-3" /> S3 connection
-              </p>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Bucket</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={s3Bucket}
-                    onChange={(e) => setS3Bucket(e.target.value)}
-                    placeholder="my-vault-bucket"
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Region</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={s3Region}
-                    onChange={(e) => setS3Region(e.target.value)}
-                    placeholder="auto"
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-2xs text-muted-foreground mb-1">Endpoint URL</label>
-                <input
-                  type="text"
-                  disabled={!canEdit}
-                  value={s3Endpoint}
-                  onChange={(e) => setS3Endpoint(e.target.value)}
-                  placeholder="https://<id>.r2.cloudflarestorage.com"
-                  className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                />
-                <p className="text-3xs text-muted-foreground mt-0.5">
-                  Leave empty for AWS S3. Required for Cloudflare R2, SeaweedFS, MinIO, etc.
-                </p>
-              </div>
-
-              <div className="border-t border-border pt-3">
-                <p className="text-xs font-medium text-foreground flex items-center gap-1.5 mb-2">
-                  <Key className="h-3 w-3" /> Credentials
-                </p>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-2xs text-muted-foreground mb-1">Access key</label>
-                    <input
-                      type="text"
-                      disabled={!canEdit}
-                      value={s3AccessKey}
-                      onChange={(e) => setS3AccessKey(e.target.value)}
-                      placeholder={cfg?.has_s3_access_key ? "(stored)" : "your-access-key"}
-                      className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-2xs text-muted-foreground mb-1">Secret key</label>
-                    <input
-                      type="password"
-                      disabled={!canEdit}
-                      value={s3SecretKey}
-                      onChange={(e) => setS3SecretKey(e.target.value)}
-                      placeholder={cfg?.has_s3_secret_key ? "(stored)" : "your-secret-key"}
-                      className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                    />
-                  </div>
-                </div>
-                <p className="text-3xs text-muted-foreground mt-1">
-                  Keys are stored in the vault database. Set via environment for production.
-                </p>
-              </div>
-            </div>
-          )}
+          <StorageProviderPicker
+            providers={providers}
+            providerId={providerId}
+            values={providerValues}
+            activeTier={cfg?.storage_tier}
+            disabled={!canEdit}
+            onProviderChange={(provider) => {
+              setProviderId(provider.id);
+              setProviderValues(defaultProviderValues(provider));
+            }}
+            onValueChange={(name, value) =>
+              setProviderValues((current) => ({ ...current, [name]: value }))
+            }
+          />
+          <p className="text-3xs text-muted-foreground">
+            Provider changes require an application restart. Storage risk acknowledgement remains
+            environment-only.
+          </p>
 
           {/* Backup settings */}
           <div className="space-y-3 rounded-lg bg-muted/40 p-3 sm:p-4">

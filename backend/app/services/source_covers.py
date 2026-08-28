@@ -20,7 +20,11 @@ from app.services.storage_backend import (
     StorageCollisionError,
     StorageObjectInfo,
 )
-from app.services.storage_ownership import record_creation, replace_owned_bytes
+from app.services.storage_ownership import (
+    publish_bytes,
+    record_creation,
+    replace_owned_bytes,
+)
 
 
 @dataclass(frozen=True)
@@ -48,9 +52,16 @@ def _intent_session(caller: Session) -> Iterator[Session]:
 
 
 def _delete_durable_cover_intent(
-    caller: Session, *, cover_id: int, storage_key: str
+    caller: Session,
+    *,
+    cover_id: int,
+    storage_key: str,
+    preserve_ownership_intent: bool = False,
 ) -> None:
     """Remove a failed new-cover intent in its own committed transaction."""
+    for instance in tuple(caller.identity_map.values()):
+        if isinstance(instance, OwnedStorageObject) and instance.key == storage_key:
+            caller.expunge(instance)
     with _intent_session(caller) as intent:
         cover = intent.get(ModelSourceCover, cover_id)
         if cover is not None:
@@ -62,10 +73,11 @@ def _delete_durable_cover_intent(
             select(StagingLease).where(StagingLease.model_source_cover_id == cover_id)
         ).all():
             intent.delete(lease)
-        for proof in intent.exec(
-            select(OwnedStorageObject).where(OwnedStorageObject.key == storage_key)
-        ).all():
-            intent.delete(proof)
+        if not preserve_ownership_intent:
+            for proof in intent.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == storage_key)
+            ).all():
+                intent.delete(proof)
         intent.commit()
 
 
@@ -521,7 +533,14 @@ def put(
             receipt = recovered
         else:
             try:
-                receipt = backend.create_bytes(processed.data, key)
+                receipt = publish_bytes(
+                    session,
+                    backend,
+                    key,
+                    processed.data,
+                    object_kind="model_source_cover",
+                    sha256=lease.sha256,
+                )
             except StorageCollisionError:
                 # A create-only collision may be the object's own publication
                 # after a crash, but only exact key/size/content adoption is
@@ -542,7 +561,9 @@ def put(
             removed = backend.rollback_create(receipt)
             if removed:
                 _delete_durable_cover_intent(
-                    session, cover_id=cover.id or 0, storage_key=key
+                    session,
+                    cover_id=cover.id or 0,
+                    storage_key=key,
                 )
         else:
             # A backend failure before a verifiable publication is safe to
@@ -555,7 +576,10 @@ def put(
                 published = True
             if not published:
                 _delete_durable_cover_intent(
-                    session, cover_id=cover.id or 0, storage_key=key
+                    session,
+                    cover_id=cover.id or 0,
+                    storage_key=key,
+                    preserve_ownership_intent=True,
                 )
         raise
     return SourceCoverWrite(cover=cover, created=True, creation_receipt=receipt)

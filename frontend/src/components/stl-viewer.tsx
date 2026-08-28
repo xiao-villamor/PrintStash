@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -124,17 +124,21 @@ function Scene({
   );
   const [loaded, setLoaded] = useState(false);
   const fittedRef = useRef(false);
+  const loadedChangeRef = useRef(onLoadedChange);
+  useEffect(() => {
+    loadedChangeRef.current = onLoadedChange;
+  }, [onLoadedChange]);
   // Ref so fit() always reads the latest size without stale closure
   const sizeRef = useRef(size);
   useEffect(() => {
     sizeRef.current = size;
   }, [size]);
 
-  const handleSized = (s: THREE.Vector3) => {
-    setSize(s);
+  const handleSized = useCallback((nextSize: THREE.Vector3) => {
+    setSize((current) => (current.equals(nextSize) ? current : nextSize));
     setLoaded(true);
-    onLoadedChange?.(true);
-  };
+    loadedChangeRef.current?.(true);
+  }, []);
 
   const gridSize = Math.max(size.x, size.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -size.y / 2;

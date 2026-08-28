@@ -26,6 +26,7 @@ from app.db.models import (
     OwnedStorageObject,
     StagingLease,
     StorageDeleteIntent,
+    StorageObjectState,
 )
 from app.db.session import SQLiteSessionFactory, _set_sqlite_pragmas
 from app.services import inbox, source_covers, staging_leases, trash
@@ -227,7 +228,7 @@ class TestPut:
         assert backend.read_bytes(latest.cover.storage_key) == expected
         assert db_session.exec(select(StagingLease)).all() == []
 
-    def test_create_publish_failure_leaves_no_cover_lease_or_proof(
+    def test_create_publish_failure_leaves_only_a_recovery_proof(
         self,
         db_session: Session,
     ) -> None:
@@ -247,7 +248,9 @@ class TestPut:
 
         assert db_session.exec(select(ModelSourceCover)).all() == []
         assert db_session.exec(select(StagingLease)).all() == []
-        assert db_session.exec(select(OwnedStorageObject)).all() == []
+        ownership = db_session.exec(select(OwnedStorageObject)).all()
+        assert len(ownership) == 1
+        assert ownership[0].state is StorageObjectState.PENDING
 
     def test_deleting_a_cover_cascades_to_its_lease(self, db_session: Session) -> None:
         source = _source(db_session)
@@ -540,7 +543,8 @@ class TestPut:
 
         inbox._finish_import(row_id, "finish-job", factory)
 
-        assert len(commits) == 2  # durable intent + final Inbox terminalization
+        # Cover, publication intent, proof finalization, then Inbox terminalization.
+        assert len(commits) == 4
         with Session(engine) as check:
             finished = check.get(InboxItem, row_id)
             assert finished is not None

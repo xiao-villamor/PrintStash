@@ -46,7 +46,7 @@ const SUITE_ROOTS = ["src", "tests", "packages"];
  * The cap held at 133 when the sweep widened from `src` + `tests` to include
  * `packages/`, so the same number now covers strictly more files.
  */
-const MAX_CONJUNCTION_NAMES = 130;
+const MAX_CONJUNCTION_NAMES = 129;
 
 /**
  * Files that defend the repository rather than a module, so no mirror exists to

@@ -11,13 +11,109 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.filesystem import FsKind, detect_fs_kind
 
 logger = get_logger(__name__)
+
+
+class ObjectIdentity(StrEnum):
+    """How a creation receipt binds to the exact bytes it describes."""
+
+    INODE = "inode"
+    VERSION = "version"
+    ETAG = "etag"
+    NONE = "none"
+
+
+class StorageTier(StrEnum):
+    """The strongest write/delete guarantee a bound storage adapter provides."""
+
+    VERIFIED = "verified"
+    GUARDED = "guarded"
+    UNGUARDED = "unguarded"
+
+
+@dataclass(frozen=True)
+class StorageCapabilities:
+    """Capabilities measured for one configured storage adapter."""
+
+    conditional_create: bool
+    object_identity: ObjectIdentity
+    verified_delete: bool
+    conditional_replace: bool
+    namespace_ownership: bool
+    direct_path: bool
+
+    @property
+    def tier(self) -> StorageTier:
+        if not self.conditional_create:
+            return StorageTier.UNGUARDED
+        if self.verified_delete and self.conditional_replace:
+            return StorageTier.VERIFIED
+        return StorageTier.GUARDED
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        warnings: list[str] = []
+        if not self.conditional_create:
+            warnings.append(
+                "Two simultaneous uploads of the same revision can silently "
+                "overwrite each other."
+            )
+        if self.object_identity is ObjectIdentity.NONE:
+            warnings.append(
+                "PrintStash cannot verify that a file is the one it wrote."
+            )
+        if not self.verified_delete:
+            warnings.append(
+                "Interrupted uploads can leave files for the orphan sweep to reclaim."
+            )
+        if not self.conditional_replace:
+            warnings.append(
+                "PrintStash cannot conditionally replace an object while its proof "
+                "still matches."
+            )
+        if not self.namespace_ownership:
+            warnings.append(
+                "PrintStash cannot confirm that a file is inside its owned storage root."
+            )
+        return tuple(warnings)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "conditional_create": self.conditional_create,
+            "object_identity": self.object_identity.value,
+            "verified_delete": self.verified_delete,
+            "conditional_replace": self.conditional_replace,
+            "namespace_ownership": self.namespace_ownership,
+            "direct_path": self.direct_path,
+            "tier": self.tier.value,
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class LocalRootProbe:
+    role: str
+    path: str
+    fs_kind: FsKind
+    hardlink: bool
+    directory_fsync: bool
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "role": self.role,
+            "path": self.path,
+            "fs_kind": self.fs_kind,
+            "hardlink": self.hardlink,
+            "directory_fsync": self.directory_fsync,
+        }
 
 
 def _fsync_directory(path: Path) -> None:
@@ -65,6 +161,10 @@ class StorageCollisionError(FileExistsError):
     """A create-only write found an object already present at its exact key."""
 
 
+class StorageConfigurationError(RuntimeError):
+    """The selected storage target is missing or cannot be accessed safely."""
+
+
 @dataclass(frozen=True)
 class CreationReceipt:
     """Positive evidence that one storage operation created one exact object.
@@ -100,9 +200,47 @@ class StorageBackend(ABC):
 
     backend_name: str
 
+    @property
+    def capabilities(self) -> StorageCapabilities:
+        """Return guarantees measured for this configured adapter."""
+        return getattr(
+            self,
+            "_capabilities",
+            StorageCapabilities(
+                conditional_create=False,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=False,
+                direct_path=False,
+            ),
+        )
+
+    @property
+    def probe_diagnostics(self) -> dict[str, object]:
+        return getattr(self, "_probe_diagnostics", {})
+
     def destructive_lifecycle_findings(self) -> list[dict[str, object]]:
         """Read-only operator policy findings that may expire managed bytes."""
         return []
+
+    def namespace_for(self, key: str) -> str:
+        """Return the owned namespace that contains an opaque storage key."""
+        del key
+        raise NotImplementedError("storage_namespace_not_supported")
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
+    ) -> bool:
+        """Best-effort delete after a ledger-owned caller rechecks evidence."""
+        del key, expected_size, expected_etag, expected_sha256, expected_version_id
+        return False
 
     @abstractmethod
     def blob_key(self, slug: str, version: int, filename: str) -> str: ...
@@ -314,6 +452,46 @@ class StorageBackend(ABC):
 class LocalStorageBackend(StorageBackend):
     backend_name = "local"
 
+    def __init__(self) -> None:
+        self._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.INODE,
+            verified_delete=True,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=True,
+        )
+        self._probe_diagnostics: dict[str, object] = {"probed": False}
+
+    @staticmethod
+    def _probe_root(role: str, root: Path) -> LocalRootProbe:
+        fd, source_name = tempfile.mkstemp(prefix=".printstash-hardlink-probe-", dir=root)
+        os.close(fd)
+        source = Path(source_name)
+        target = source.with_name(f"{source.name}.link")
+        hardlink = False
+        try:
+            os.link(source, target, follow_symlinks=False)
+            hardlink = True
+        except OSError:
+            pass
+        finally:
+            target.unlink(missing_ok=True)
+            source.unlink(missing_ok=True)
+
+        directory_fsync = True
+        try:
+            _fsync_directory(root)
+        except OSError:
+            directory_fsync = False
+        return LocalRootProbe(
+            role=role,
+            path=str(root),
+            fs_kind=detect_fs_kind(root),
+            hardlink=hardlink,
+            directory_fsync=directory_fsync,
+        )
+
     @staticmethod
     def _assert_no_managed_escape(path: Path) -> None:
         """Reject a key lexically inside a managed root that resolves outside it."""
@@ -348,6 +526,47 @@ class LocalStorageBackend(StorageBackend):
             if resolved == root or resolved.is_relative_to(root):
                 return f"{role}:{root}"
         return None
+
+    def namespace_for(self, key: str) -> str:
+        namespace = self._owned_namespace(Path(key))
+        if namespace is None:
+            raise StorageCollisionError("storage_key_outside_managed_root")
+        return namespace
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
+    ) -> bool:
+        del expected_version_id
+        self.namespace_for(key)
+        info = self.object_info(key)
+        if info is None:
+            return True
+        if info.size != expected_size:
+            return False
+        if expected_etag is not None and info.etag != expected_etag:
+            return False
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            try:
+                with Path(key).open("rb") as source:
+                    while chunk := source.read(1024 * 1024):
+                        digest.update(chunk)
+            except FileNotFoundError:
+                return True
+            if digest.hexdigest() != expected_sha256.lower():
+                return False
+        try:
+            Path(key).unlink()
+        except FileNotFoundError:
+            return True
+        _fsync_directory(Path(key).parent)
+        return True
 
     def direct_path(self, key: str) -> Path | None:
         return Path(key)
@@ -496,6 +715,12 @@ class LocalStorageBackend(StorageBackend):
                 quarantine.unlink(missing_ok=True)
 
     def rollback_create(self, receipt: CreationReceipt) -> bool:
+        if not self.capabilities.verified_delete:
+            logger.warning(
+                "storage rollback skipped: local filesystem identity is not stable",
+                extra={"key": receipt.key},
+            )
+            return False
         quarantine = self._quarantine_owned(receipt)
         if quarantine is None:
             logger.warning(
@@ -516,6 +741,8 @@ class LocalStorageBackend(StorageBackend):
     def replace_stream(
         self, src: BinaryIO, receipt: CreationReceipt
     ) -> CreationReceipt:
+        if not self.capabilities.conditional_replace:
+            raise NotImplementedError("atomic_replace_not_supported")
         dest = Path(receipt.key)
         fd, temp_name = tempfile.mkstemp(prefix=".printstash-replace-", dir=dest.parent)
         temp = Path(temp_name)
@@ -567,6 +794,8 @@ class LocalStorageBackend(StorageBackend):
             temp.unlink(missing_ok=True)
 
     def creation_matches(self, receipt: CreationReceipt) -> bool:
+        if self.capabilities.object_identity is not ObjectIdentity.INODE:
+            return False
         if receipt.backend != "local":
             return False
         path = Path(receipt.key)
@@ -694,6 +923,25 @@ class LocalStorageBackend(StorageBackend):
     def ensure_setup(self) -> None:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         settings.thumb_dir.mkdir(parents=True, exist_ok=True)
+        roots = (
+            self._probe_root("data", settings.data_dir),
+            self._probe_root("thumb", settings.thumb_dir),
+        )
+        hardlinks = all(root.hardlink for root in roots)
+        stable_inodes = hardlinks and all(root.fs_kind == "local" for root in roots)
+        self._capabilities = StorageCapabilities(
+            conditional_create=hardlinks,
+            object_identity=(ObjectIdentity.INODE if stable_inodes else ObjectIdentity.NONE),
+            verified_delete=stable_inodes,
+            conditional_replace=stable_inodes,
+            namespace_ownership=True,
+            direct_path=True,
+        )
+        self._probe_diagnostics = {
+            "probed": True,
+            "directory_fsync": all(root.directory_fsync for root in roots),
+            "roots": [root.as_dict() for root in roots],
+        }
 
     def delete(self, key: str) -> None:
         del key
@@ -744,6 +992,8 @@ class LocalStorageBackend(StorageBackend):
             "ok": data_ok and thumb_ok,
             "data_dir": str(settings.data_dir),
             "thumb_dir": str(settings.thumb_dir),
+            "capabilities": self.capabilities.as_dict(),
+            "diagnostics": self.probe_diagnostics,
         }
 
 
@@ -789,8 +1039,112 @@ class S3StorageBackend(StorageBackend):
 
         self._client = boto3.client(**client_kwargs)
         self._bucket = settings.s3_bucket
+        self._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.ETAG,
+            verified_delete=False,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=False,
+        )
+        self._probe_diagnostics: dict[str, object] = {
+            "probed": False,
+            "bucket_versioning": "unknown",
+        }
 
         self._ensure_bucket()
+
+    def _probe_capabilities(self) -> None:
+        status = "unknown"
+        try:
+            response = self._client.get_bucket_versioning(Bucket=self._bucket)
+            status = str(response.get("Status") or "absent").lower()
+        except Exception as exc:
+            logger.warning("S3 versioning probe failed", exc_info=True)
+            self._probe_diagnostics = {
+                "probed": True,
+                "bucket_versioning": status,
+                "versioning_error": exc.__class__.__name__,
+            }
+        else:
+            self._probe_diagnostics = {
+                "probed": True,
+                "bucket_versioning": status,
+            }
+        versioned = status == "enabled"
+        self._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=(
+                ObjectIdentity.VERSION if versioned else ObjectIdentity.ETAG
+            ),
+            verified_delete=versioned,
+            conditional_replace=True,
+            namespace_ownership=True,
+            direct_path=False,
+        )
+
+    def namespace_for(self, key: str) -> str:
+        prefix = self._prefix()
+        if not key.startswith(prefix):
+            raise StorageCollisionError("storage_key_outside_managed_root")
+        return f"{self._bucket}/{prefix}"
+
+    def reclaim_unverified(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+        expected_sha256: str | None = None,
+        expected_version_id: str | None = None,
+    ) -> bool:
+        self.namespace_for(key)
+        if expected_version_id is not None:
+            import botocore.exceptions
+
+            try:
+                response = self._client.head_object(
+                    Bucket=self._bucket,
+                    Key=key,
+                    VersionId=expected_version_id,
+                )
+            except botocore.exceptions.ClientError as exc:
+                if exc.response.get("Error", {}).get("Code") in {
+                    "404",
+                    "NoSuchKey",
+                    "NoSuchVersion",
+                    "NotFound",
+                }:
+                    return True
+                raise
+            etag = response.get("ETag")
+            if etag and not str(etag).startswith('"'):
+                etag = f'"{etag}"'
+            if int(response.get("ContentLength", 0) or 0) != expected_size:
+                return False
+            if expected_etag is not None and str(etag) != expected_etag:
+                return False
+            self._client.delete_object(
+                Bucket=self._bucket,
+                Key=key,
+                VersionId=expected_version_id,
+            )
+            return True
+        info = self.object_info(key)
+        if info is None:
+            return True
+        if info.size != expected_size:
+            return False
+        if expected_etag is not None and info.etag != expected_etag:
+            return False
+        if expected_sha256 is not None:
+            digest = hashlib.sha256()
+            for chunk in self.stream_chunks(key):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256.lower():
+                return False
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+        return True
 
     def destructive_lifecycle_findings(self) -> list[dict[str, object]]:
         import botocore.exceptions
@@ -834,41 +1188,14 @@ class S3StorageBackend(StorageBackend):
         except botocore.exceptions.ClientError as exc:
             code = exc.response.get("Error", {}).get("Code")
             if code in ("404", "NoSuchBucket", "NotFound"):
-                logger.info("s3: creating bucket %r", self._bucket)
-                location = (
-                    {"LocationConstraint": settings.s3_region}
-                    if settings.s3_region and settings.s3_region != "auto"
-                    else {}
-                )
-                self._client.create_bucket(
-                    Bucket=self._bucket, CreateBucketConfiguration=location
-                )
-            else:
-                raise
-
-    def _apply_lifecycle_policy(self) -> None:
-        expiration_days = int(settings.s3_lifecycle_expiration_days or 0)
-        transition_days = int(settings.s3_lifecycle_transition_days or 0)
-        if expiration_days <= 0 and transition_days <= 0:
-            return
-        rule: dict = {
-            "ID": "vault-data-lifecycle",
-            "Status": "Enabled",
-            "Filter": {"Prefix": self._prefix()},
-        }
-        if transition_days > 0:
-            rule["Transitions"] = [
-                {
-                    "Days": transition_days,
-                    "StorageClass": settings.s3_transition_storage_class,
-                }
-            ]
-        if expiration_days > 0:
-            rule["Expiration"] = {"Days": expiration_days}
-        self._client.put_bucket_lifecycle_configuration(
-            Bucket=self._bucket,
-            LifecycleConfiguration={"Rules": [rule]},
-        )
+                raise StorageConfigurationError(
+                    f"S3 bucket {self._bucket!r} does not exist; create it with "
+                    "your storage provider and grant PrintStash object access"
+                ) from exc
+            raise StorageConfigurationError(
+                f"S3 bucket {self._bucket!r} is not accessible; verify the "
+                "endpoint, region, credentials, and bucket permissions"
+            ) from exc
 
     def _prefix(self) -> str:
         return "vault-data/"
@@ -1238,16 +1565,7 @@ class S3StorageBackend(StorageBackend):
 
     def ensure_setup(self) -> None:
         self._ensure_bucket()
-        if (
-            int(settings.s3_lifecycle_expiration_days or 0) > 0
-            or int(settings.s3_lifecycle_transition_days or 0) > 0
-        ):
-            # Bucket lifecycle configuration is bucket-wide and replacing it
-            # can destroy operator-managed rules or expire objects that this
-            # installation never proved it owns. Keep automatic mutation off.
-            logger.warning(
-                "automatic S3 lifecycle mutation is disabled for data safety"
-            )
+        self._probe_capabilities()
 
     def delete(self, key: str) -> None:
         del key
@@ -1305,6 +1623,8 @@ class S3StorageBackend(StorageBackend):
                 "ok": True,
                 "bucket": self._bucket,
                 "endpoint": settings.s3_endpoint_url,
+                "capabilities": self.capabilities.as_dict(),
+                "diagnostics": self.probe_diagnostics,
             }
         except Exception as exc:
             return {
@@ -1313,6 +1633,8 @@ class S3StorageBackend(StorageBackend):
                 "bucket": self._bucket,
                 "endpoint": settings.s3_endpoint_url,
                 "error": str(exc),
+                "capabilities": self.capabilities.as_dict(),
+                "diagnostics": self.probe_diagnostics,
             }
 
 

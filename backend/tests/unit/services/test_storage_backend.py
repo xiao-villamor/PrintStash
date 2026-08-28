@@ -461,12 +461,12 @@ class TestHealthProbe:
 
         result = LocalStorageBackend().health_probe()
 
-        assert result == {
-            "backend": "local",
-            "ok": True,
-            "data_dir": str(data_dir),
-            "thumb_dir": str(thumb_dir),
-        }
+        assert result["backend"] == "local"
+        assert result["ok"] is True
+        assert result["data_dir"] == str(data_dir)
+        assert result["thumb_dir"] == str(thumb_dir)
+        assert result["capabilities"]["object_identity"] == "inode"
+        assert isinstance(result["diagnostics"], dict)
 
     def test_health_probe_reports_not_ok_when_a_dir_is_missing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

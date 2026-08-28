@@ -730,6 +730,7 @@ describe("SettingsPanel", () => {
       });
 
       await user.click(await screen.findByRole("button", { name: /Purge expired/ }));
+      await user.click(screen.getByRole("button", { name: "Purge forever" }));
 
       await waitFor(() =>
         expect(

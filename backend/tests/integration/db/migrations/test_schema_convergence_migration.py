@@ -1,4 +1,4 @@
-"""`6acea2a5e555` makes an upgraded database structurally identical to a fresh one.
+"""The convergence chain makes an upgraded database identical to a fresh one.
 
 Two paths reach `head` and they had drifted 136 differences apart: `create_all` from
 the models for a fresh installation, the chain for an upgraded one. `eb8435c9400e`
@@ -46,7 +46,7 @@ from alembic import command
 from app.db import migrate as migrate_mod
 
 PREVIOUS = "eb8435c9400e"
-REVISION = "6acea2a5e555"
+REVISION = "5c777075c95b"
 
 # Tables the migration rebuilds that hold rows a user would notice losing.
 SEEDED_TABLES = ("collections", "files", "models", "printers", "tags")

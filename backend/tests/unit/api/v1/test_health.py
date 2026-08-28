@@ -207,7 +207,12 @@ class TestStorageProbe:
 
         out = health_mod._storage_probe()
 
-        assert out == get_backend().health_probe()
+        backend = get_backend()
+        for key, value in backend.health_probe().items():
+            assert out[key] == value
+        assert out["provider"] == "local"
+        assert out["tier"] == "verified"
+        assert out["warnings"] == []
 
     def test_reports_the_exception_class_when_the_backend_is_unavailable(
         self, monkeypatch: pytest.MonkeyPatch

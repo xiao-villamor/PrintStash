@@ -436,10 +436,10 @@ class TestUploadDocument:
     ) -> None:
         import app.api.v1.documents as documents_api
 
-        def failing_receipt(*_args: object, **_kwargs: object):
+        def failing_commit(_session: Session) -> None:
             raise RuntimeError("ownership ledger unavailable")
 
-        monkeypatch.setattr(documents_api, "record_creation", failing_receipt)
+        monkeypatch.setattr(documents_api.Session, "commit", failing_commit)
 
         with pytest.raises(RuntimeError, match="ownership ledger"):
             client.post(
@@ -1002,10 +1002,10 @@ class TestUploadDocumentImage:
         name = f"{hashlib.sha256(_PNG).hexdigest()}.png"
         key = get_backend().document_image_key(doc["id"], name)
 
-        def failing_receipt(*_args: object, **_kwargs: object):
+        def failing_commit(_session: Session) -> None:
             raise RuntimeError("ownership ledger unavailable")
 
-        monkeypatch.setattr(documents_api, "record_creation", failing_receipt)
+        monkeypatch.setattr(documents_api.Session, "commit", failing_commit)
 
         with pytest.raises(RuntimeError, match="ownership ledger"):
             client.post(

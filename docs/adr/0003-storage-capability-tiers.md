@@ -1,6 +1,6 @@
 # ADR-0003: Storage capability tiers, and OpenDAL as an additive adapter
 
-- **Status**: Proposed
+- **Status**: Accepted and implemented
 - **Date**: 2026-08-27
 - **Deciders**: maintainers
 - **Tracking issue**: [#90](https://github.com/xiao-villamor/PrintStash/issues/90)
@@ -29,6 +29,11 @@ Python bindings that speaks ~60 storage services behind one interface. The
 question this ADR settles is not "is OpenDAL good" — it is **which part of the
 storage layer may be expressed through a uniform interface, and which part must
 not be.**
+
+The full image builds the exact Apache OpenDAL **0.58.2** Rust source. OpenDAL's
+Python distribution uses an independent release number and that source builds
+the exact `opendal==0.47.6` wheel; these are the same pinned source release, not
+two different core versions.
 
 ### What we verified
 
@@ -734,6 +739,16 @@ S3 adapter carries `f"{bucket}/{prefix}"`.
 `VAULT_STORAGE_PROVIDER`, and `SystemConfig.storage_backend` keeps being read.
 Self-hosters auto-upgrade; nothing in an existing `.env` may stop working.
 
+#### SFTP authentication implementation note
+
+OpenDAL core 0.58.2 exposes mounted-key SFTP but does not expose password or
+encrypted-key authentication. The full image therefore keeps mounted-key SFTP
+on OpenDAL and uses an internal operator-compatible AsyncSSH transport only for
+password and key-passphrase modes. Both paths implement the same synchronous
+`StorageBackend`, remain Unguarded, publish through temporary-key rename, and
+run the same loopback contracts. This narrow fallback is not a generic second
+storage abstraction and does not make additional providers selectable.
+
 ### 8. Retire the two bucket-administration writes
 
 Independent of OpenDAL, and worth doing on its own merits:
@@ -1070,8 +1085,9 @@ unnecessary.
 
 ## Testing
 
-Docs-only change; no coverage matrix applies to this PR. The implementation
-work it authorises carries these obligations:
+The implementation is covered by the executable
+[63-row coverage matrix](0003-storage-capability-tiers-coverage.md). It has no
+missing or skipped behaviours. The enduring test obligations are:
 
 - `unit/` — tier derivation: one case per axis combination, plus one per
   warning-table row. Provider registry: every `StorageProvider` has a spec, every

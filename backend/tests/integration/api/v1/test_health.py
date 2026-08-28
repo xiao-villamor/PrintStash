@@ -121,15 +121,27 @@ class TestHealth:
         response = client.get("/api/v1/health")
 
         assert response.status_code == 200, response.text
-        assert response.json() == {"status": "ok", "name": get_config().app_name}
+        body = response.json()
+        assert body["status"] == "ok"
+        assert body["name"] == get_config().app_name
+        assert body["storage"]["tier"] == "verified"
 
     def test_needs_no_authentication(self, client: TestClient) -> None:
         assert client.get("/api/v1/health").status_code == 200
 
-    def test_discloses_nothing_beyond_liveness(self, client: TestClient) -> None:
+    def test_discloses_only_liveness_and_safe_storage_metadata(
+        self, client: TestClient
+    ) -> None:
         body = client.get("/api/v1/health").json()
 
-        assert set(body) == {"status", "name"}
+        assert set(body) == {"status", "name", "storage"}
+        assert set(body["storage"]) == {
+            "provider",
+            "capabilities",
+            "tier",
+            "diagnostics",
+            "warnings",
+        }
 
 
 class TestHealthDetails:

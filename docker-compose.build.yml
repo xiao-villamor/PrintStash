@@ -28,7 +28,7 @@ services:
     ports:
       - "7125:7125"
     volumes:
-      - ./backend/tests/e2e/fakes/mock_printer.py:/app/mock_printer.py:ro
+      - ./backend/tests/fakes/mock_printer.py:/app/mock_printer.py:ro
     working_dir: /app
     command: >
       sh -c "pip install --quiet fastapi uvicorn python-multipart &&

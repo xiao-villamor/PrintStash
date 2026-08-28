@@ -7,6 +7,8 @@ export interface SetupStatus {
   current_data_dir?: string;
   current_thumb_dir?: string;
   current_storage_backend?: string;
+  current_storage_provider?: string;
+  current_storage_provider_config?: StorageProviderConfigValues;
   current_s3_bucket?: string;
   current_s3_endpoint_url?: string;
   current_s3_region?: string;
@@ -23,6 +25,8 @@ export interface SetupRequest {
   password: string;
   email?: string;
   storage_backend?: string;
+  storage_provider?: string;
+  storage_provider_config?: StorageProviderConfigValues;
   data_dir?: string;
   thumb_dir?: string;
   s3_bucket?: string;
@@ -43,6 +47,7 @@ export interface SetupResponse {
   user_id: number;
   username: string;
   storage_backend: string;
+  storage_provider: string;
   data_dir: string;
   thumb_dir: string;
   access_token: string;
@@ -51,6 +56,11 @@ export interface SetupResponse {
 
 export interface VaultConfigRead {
   storage_backend: string;
+  storage_provider: string;
+  storage_provider_config: StorageProviderConfigValues;
+  storage_tier: StorageTier;
+  storage_warnings: string[];
+  storage_unverified_acknowledged: boolean;
   data_dir: string;
   thumb_dir: string;
   s3_bucket: string;
@@ -89,6 +99,8 @@ export interface VaultConfigRead {
 
 export interface VaultConfigUpdate {
   storage_backend?: string;
+  storage_provider?: string;
+  storage_provider_config?: StorageProviderConfigValues;
   data_dir?: string;
   thumb_dir?: string;
   s3_bucket?: string;
@@ -118,6 +130,38 @@ export interface VaultConfigUpdate {
   oidc_display_name?: string;
   oidc_redirect_uri?: string;
   oidc_allow_insecure_http?: boolean;
+}
+
+export type StorageTier = "verified" | "guarded" | "unguarded";
+
+export type StorageProviderConfigValue = string | number | string[];
+export type StorageProviderConfigValues = Record<string, StorageProviderConfigValue>;
+
+export type ProviderCategory = "this_machine" | "s3_compatible" | "nextcloud_webdav" | "nas_sftp";
+
+export interface StorageProviderField {
+  name: string;
+  label: string;
+  help: string;
+  input_type: "text" | "password" | "url" | "number" | "path";
+  required: boolean;
+  secret: boolean;
+  default?: string | number | null;
+}
+
+export interface StorageProvider {
+  id: string;
+  label: string;
+  category: ProviderCategory;
+  description: string;
+  expected_tier: StorageTier;
+  expected_tier_note: string;
+  consequences: string[];
+  documentation_url: string;
+  available: boolean;
+  selectable: boolean;
+  disabled_reason?: string | null;
+  fields: StorageProviderField[];
 }
 
 export type ExternalLibraryCollectionMode = "mirror" | "single";

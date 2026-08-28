@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -53,12 +54,18 @@ from app.services.printer_hub import PrinterHub
 from app.services.printer_jobs import reconcile_stranded_dispatches, run_fleet_scheduler
 from app.services.printer_provider import build_provider_registry, get_provider_client
 from app.services.realtime import InProcessBus
-from app.services.runtime_config import apply_overlay, ensure_jwt_secret, is_configured
+from app.services.runtime_config import (
+    apply_environment_storage_provider,
+    apply_overlay,
+    ensure_jwt_secret,
+    is_configured,
+)
 from app.services.setup_token import current_setup_token
 from app.services.storage_backend import (
     LocalStorageBackend,
     S3StorageBackend,
     StorageBackend,
+    StorageTier,
     bind_backend,
 )
 from app.services.task_queue import LocalTaskQueue
@@ -110,11 +117,38 @@ def _safe_db_url(value: str) -> str:
 
 def _compose_storage_backend() -> StorageBackend:
     """Bind and recover the configured backend before serving requests."""
-    if settings.storage_backend == "s3":
+    if settings.storage_backend in {"nextcloud", "webdav", "sftp"}:
+        from app.services.storage_opendal import OpenDALStorageBackend
+        from app.services.storage_providers import (
+            parse_provider_config,
+            resolve_transport,
+        )
+
+        provider_config = parse_provider_config(
+            json.loads(str(settings.storage_provider_config))
+        )
+        storage_backend = OpenDALStorageBackend(resolve_transport(provider_config))
+    elif settings.storage_backend == "s3":
         storage_backend: StorageBackend = S3StorageBackend()
     else:
         storage_backend = LocalStorageBackend()
     storage_backend.ensure_setup()
+    if (
+        storage_backend.capabilities.tier is StorageTier.UNGUARDED
+        and not settings.storage_allow_unverified
+    ):
+        raise RuntimeError(
+            "unguarded storage refused; set "
+            "VAULT_STORAGE_ALLOW_UNVERIFIED=true to acknowledge the risk"
+        )
+    logger.info(
+        "storage capabilities backend=%s tier=%s identity=%s",
+        storage_backend.backend_name,
+        storage_backend.capabilities.tier.value,
+        storage_backend.capabilities.object_identity.value,
+    )
+    for warning in storage_backend.capabilities.warnings:
+        logger.warning("storage capability warning: %s", warning)
     bound = bind_backend(storage_backend)
     from app.services.inbox import reconcile_storage_publications
 
@@ -152,6 +186,7 @@ async def lifespan(app: FastAPI):
     init_db()
     with get_session_factory().scoped_session() as session:
         apply_overlay(session)
+        apply_environment_storage_provider(session)
         # Persisted runtime configuration can differ from environment
         # defaults, so revalidate before creating the secrets key.
         validate_runtime_storage_paths()

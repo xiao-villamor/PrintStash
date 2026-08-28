@@ -31,6 +31,29 @@ test.describe("settings route", () => {
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
   });
 
+  test("non-Verified trash purge sends a one-shot storage-risk acknowledgement", async ({
+    page,
+  }) => {
+    await page.goto("/settings?section=trash");
+    await page.getByRole("button", { name: "Purge expired" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Purge expired trash?" });
+    await expect(dialog).toContainText(
+      "unguarded storage cannot verify every destructive mutation",
+    );
+    const request = page.waitForRequest((candidate) => {
+      const url = new URL(candidate.url());
+      return (
+        candidate.method() === "DELETE" &&
+        url.pathname === "/api/v1/models/trash/expired" &&
+        url.searchParams.get("confirm_storage_risk") === "true"
+      );
+    });
+    await dialog.getByRole("button", { name: "Purge forever" }).click();
+    await request;
+    await expect(page.getByText("1 expired model deleted.")).toBeVisible();
+  });
+
   test("settings prepares a one-time browser extension setup", async ({ page }) => {
     await page.goto("/settings?section=access");
 

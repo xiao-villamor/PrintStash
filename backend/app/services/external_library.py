@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import monotonic
-from typing import Literal, Optional
+from typing import Optional
 
 from croniter import croniter
 from sqlalchemy import or_, update
@@ -43,6 +43,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
 from app.services import taxonomy, thumbnail
+from app.services.filesystem import FsKind, detect_fs_kind
 from app.services.hashing import sha256_file
 from app.services.ingestion import (
     _gcode_strategy,
@@ -53,7 +54,7 @@ from app.services.ingestion import (
 from app.services.jobs import registry
 from app.services.profile_detection import upsert_detected_profiles
 from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import publish_bytes
 
 logger = get_logger(__name__)
 
@@ -90,79 +91,6 @@ class _ScanProgressCoalescer:
             self.last_flush_at = current
             return True
         return False
-
-
-FsKind = Literal["local", "network", "unknown"]
-
-# Filesystem types that do NOT deliver reliable inotify events. Real-time
-# watching is disabled for these; they fall back to scheduled scans.
-_NETWORK_FSTYPES = {
-    "nfs",
-    "nfs4",
-    "cifs",
-    "smbfs",
-    "smb3",
-    "afs",
-    "ncpfs",
-    "9p",
-}
-# Filesystem types that support inotify and are safe to watch.
-_LOCAL_FSTYPES = {
-    "ext2",
-    "ext3",
-    "ext4",
-    "xfs",
-    "btrfs",
-    "zfs",
-    "f2fs",
-    "reiserfs",
-    "jfs",
-    "overlay",
-    "tmpfs",
-}
-
-
-def detect_fs_kind(path: str | os.PathLike[str]) -> FsKind:
-    """Classify the filesystem backing *path* as local / network / unknown.
-
-    Used to decide whether real-time watching can work (it can't on network
-    mounts). Reads ``/proc/self/mountinfo`` on Linux; anything else (other OS,
-    parse failure, fuse, virtiofs, …) returns ``"unknown"`` so the caller treats
-    it as "schedule only" unless the user explicitly forces watching.
-    """
-    target = os.path.realpath(str(path))
-    try:
-        with open("/proc/self/mountinfo", encoding="utf-8") as fh:
-            entries = fh.readlines()
-    except OSError:
-        return "unknown"
-
-    best_mount = ""
-    best_fstype = ""
-    for line in entries:
-        # Format: ... mount_point ... - fstype source super_opts
-        parts = line.split(" - ", 1)
-        if len(parts) != 2:
-            continue
-        left = parts[0].split()
-        right = parts[1].split()
-        if len(left) < 5 or not right:
-            continue
-        mount_point = left[4]
-        fstype = right[0]
-        if target == mount_point or target.startswith(mount_point.rstrip("/") + "/"):
-            if len(mount_point) >= len(best_mount):
-                best_mount = mount_point
-                best_fstype = fstype
-
-    if not best_fstype:
-        return "unknown"
-    base = best_fstype.split(".", 1)[0].lower()  # e.g. "fuse.sshfs" -> "fuse"
-    if base in _NETWORK_FSTYPES or "smb" in base or "cifs" in base:
-        return "network"
-    if base in _LOCAL_FSTYPES:
-        return "local"
-    return "unknown"
 
 
 def should_watch(library: ExternalLibrary, fs_kind: FsKind) -> bool:
@@ -366,10 +294,13 @@ def _reindex_changed(
     assert file_row.id is not None
     if thumb_bytes:
         try:
-            receipt = backend.create_bytes(
-                thumbnail.to_webp(thumb_bytes), backend.thumbnail_key(file_row.id)
+            publish_bytes(
+                session,
+                backend,
+                backend.thumbnail_key(file_row.id),
+                thumbnail.to_webp(thumb_bytes),
+                object_kind="thumbnail",
             )
-            record_creation(session, receipt, object_kind="thumbnail")
             session.commit()
         except (StorageCollisionError, ValueError):
             # Existing thumbnails are never replaced without a separate,

@@ -402,8 +402,9 @@ class TestMatchingPath:
         path = tmp_path / "staged.bin"
         path.write_bytes(b"payload")
         lease = _lease_for(path)
-        path.unlink()
-        path.write_bytes(b"payload")
+        replacement = tmp_path / "replacement.bin"
+        replacement.write_bytes(b"payload")
+        replacement.replace(path)
 
         assert staging_leases._matching_path(lease) is None
 

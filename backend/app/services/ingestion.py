@@ -38,7 +38,7 @@ from app.services.jobs import registry
 from app.services.mesh_processing import FallbackThumbnail
 from app.services.profile_detection import upsert_detected_profiles
 from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import publish_bytes, publish_file
 
 if TYPE_CHECKING:
     from app.services.provenance import ProvenanceContext
@@ -360,7 +360,18 @@ def persist_artifact(
             # ``move_in`` performs the only authoritative collision check using
             # the backend's atomic create-only primitive. An earlier exists()
             # check would be a TOCTOU race.
-            blob_receipt = backend.move_in(staged_path, dest_key)
+            if is_external:
+                blob_receipt = backend.move_in(staged_path, dest_key)
+            else:
+                blob_receipt = publish_file(
+                    session,
+                    backend,
+                    dest_key,
+                    staged_path,
+                    object_kind="artifact",
+                    sha256=blob_hash,
+                    move=True,
+                )
         size_bytes = (
             blob_receipt.size
             if blob_receipt is not None
@@ -427,15 +438,16 @@ def persist_artifact(
             # A provenance failure therefore follows the established rollback
             # path for both its link and the bytes/row it describes.
             _attach_ingested_artifact(session, file_row, provenance_context)
-        if blob_receipt is not None and not is_external:
-            record_creation(session, blob_receipt, object_kind="artifact")
-
         if thumb_bytes:
             candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
             try:
                 encoded_thumbnail = thumbnail.to_webp(thumb_bytes)
-                thumbnail_receipt = backend.create_bytes(
-                    encoded_thumbnail, candidate_thumbnail_key
+                thumbnail_receipt = publish_bytes(
+                    session,
+                    backend,
+                    candidate_thumbnail_key,
+                    encoded_thumbnail,
+                    object_kind="thumbnail",
                 )
             except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
                 logger.exception(
@@ -443,7 +455,6 @@ def persist_artifact(
                     extra={"file_id": file_row.id},
                 )
             else:
-                record_creation(session, thumbnail_receipt, object_kind="thumbnail")
                 file_row.thumbnail_path = candidate_thumbnail_key
                 session.add(file_row)
                 if overwrite_thumbnail or not model.thumbnail_path:

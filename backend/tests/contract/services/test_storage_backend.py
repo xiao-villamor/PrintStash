@@ -19,10 +19,15 @@ from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterator
 
+import boto3
 import pytest
 
 from app.core.config import _overlay
-from app.services.storage_backend import S3StorageBackend, StorageCollisionError
+from app.services.storage_backend import (
+    S3StorageBackend,
+    StorageCollisionError,
+    StorageConfigurationError,
+)
 from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
 
 # The `s3` marker is what tells conftest.py this file needs a real endpoint, so
@@ -34,6 +39,16 @@ pytestmark = pytest.mark.s3
 @pytest.fixture
 def s3_backend() -> Iterator[S3StorageBackend]:
     bucket = f"printstash-test-{uuid.uuid4().hex[:12]}"
+    test_client = boto3.client(
+        "s3",
+        endpoint_url=s3_endpoint(),
+        region_name="us-east-1",
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+    )
+    # Bucket administration belongs to test infrastructure. Production setup
+    # only verifies the operator-provisioned namespace.
+    test_client.create_bucket(Bucket=bucket)
     _overlay.update(
         {
             "s3_bucket": bucket,
@@ -43,7 +58,7 @@ def s3_backend() -> Iterator[S3StorageBackend]:
             "s3_secret_key": S3_SECRET_KEY,
         }
     )
-    backend = S3StorageBackend()  # creates the bucket (_ensure_bucket)
+    backend = S3StorageBackend()
     try:
         yield backend
     finally:
@@ -203,6 +218,27 @@ class TestUploadFile:
 
 
 class TestEnsureSetup:
+    def test_fails_actionably_for_a_missing_bucket(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        real_bucket = s3_backend._bucket
+        s3_backend._bucket = f"does-not-exist-{uuid.uuid4().hex[:12]}"
+        try:
+            with pytest.raises(StorageConfigurationError, match="create it with"):
+                s3_backend.ensure_setup()
+        finally:
+            s3_backend._bucket = real_bucket
+
+    def test_never_creates_a_bucket(
+        self, s3_backend: S3StorageBackend, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _unexpected_create(**_kwargs: object) -> None:
+            pytest.fail("production storage setup attempted to create the S3 bucket")
+
+        monkeypatch.setattr(s3_backend._client, "create_bucket", _unexpected_create)
+
+        s3_backend.ensure_setup()
+
     def test_ensure_setup_never_mutates_bucket_lifecycle_automatically(
         self,
         s3_backend: S3StorageBackend,
@@ -292,12 +328,12 @@ class TestHealthProbe:
         self, s3_backend: S3StorageBackend
     ):
         probe = s3_backend.health_probe()
-        assert probe == {
-            "backend": "s3",
-            "ok": True,
-            "bucket": s3_backend._bucket,
-            "endpoint": s3_endpoint(),
-        }
+        assert probe["backend"] == "s3"
+        assert probe["ok"] is True
+        assert probe["bucket"] == s3_backend._bucket
+        assert probe["endpoint"] == s3_endpoint()
+        assert probe["capabilities"] == s3_backend.capabilities.as_dict()
+        assert probe["diagnostics"] == s3_backend.probe_diagnostics
 
     def test_health_probe_reports_error_for_missing_bucket(
         self, s3_backend: S3StorageBackend

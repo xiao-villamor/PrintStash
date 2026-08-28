@@ -1033,21 +1033,25 @@ def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -
             connection.execute(
                 """
                 INSERT INTO owned_storage_objects (
-                    backend, namespace, key, object_kind, token, size_bytes,
-                    etag, device, inode, ctime_ns, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    backend, namespace, key, object_kind, state, token,
+                    size_bytes, etag, version_id, device, inode, ctime_ns,
+                    committed_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     receipt.backend,
                     receipt.namespace,
                     receipt.key,
                     object_kind,
+                    "committed",
                     receipt.token,
                     receipt.size,
                     receipt.etag,
+                    receipt.version_id,
                     receipt.device,
                     receipt.inode,
                     receipt.ctime_ns,
+                    utcnow().isoformat(sep=" "),
                     utcnow().isoformat(sep=" "),
                 ),
             )

@@ -198,6 +198,7 @@ test.describe("settings", () => {
     await page.getByRole("spinbutton").fill("0");
     await page.getByRole("button", { name: "Save retention" }).click();
     await page.getByRole("button", { name: "Purge expired" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "Purge forever" }).click();
     await expect(page.getByText(name)).toHaveCount(0);
 
     // Restore the default so later runs aren't affected.

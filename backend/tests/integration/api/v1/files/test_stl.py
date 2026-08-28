@@ -175,7 +175,7 @@ class TestFileAsStl:
         def failing_receipt(*_args: object, **_kwargs: object):
             raise RuntimeError("ownership ledger unavailable")
 
-        monkeypatch.setattr(files_api, "record_creation", failing_receipt)
+        monkeypatch.setattr(files_api, "publish_bytes", failing_receipt)
 
         response = client.get(f"/api/v1/files/{row.id}/stl", headers=auth_headers)
 

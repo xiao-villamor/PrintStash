@@ -13,7 +13,7 @@ be reported as hardware validation.
 
 | Mark | Evidence | What it proves |
 | --- | --- | --- |
-| **A** | Automated | CI or a named local test passed on the tested commit. |
+| **A** | Automated | A named tier lane (`test.sh fast`, `contract`, `e2e`, or `full`) or Playwright suite passed on the tested commit. |
 | **E** | Emulated | The running product completed the flow against a protocol fake or local service. |
 | **H** | Hardware | A supervised test completed against the recorded physical device and firmware. |
 | **M** | Manual | A human inspected behavior that automation cannot establish, such as layout or copy. |

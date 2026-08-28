@@ -641,7 +641,7 @@ class TestAdminDeleteResource:
         )
         model_id = model.id
 
-        def unproven(session, row):
+        def unproven(session, row, **_kwargs: object):
             session.delete(row)
             raise UnsafeStorageDeleteError("storage_ownership_unverified")
 

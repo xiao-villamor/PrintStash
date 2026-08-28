@@ -100,6 +100,12 @@ Add `--extra async-db` only when exercising SQLite through
   the selected full/lite variant.
 - For PostgreSQL or S3-compatible deployments, verify database/storage health
   and download representative Artifacts and thumbnails.
+- PrintStash no longer creates S3 buckets or changes bucket lifecycle policies.
+  Provision the data bucket before startup. Existing
+  `VAULT_S3_LIFECYCLE_*` settings are ignored and may be removed; application
+  credentials no longer need `s3:CreateBucket` or
+  `s3:PutLifecycleConfiguration`. Read access to lifecycle configuration is
+  still used to warn about rules that could expire managed objects.
 - If migrating MinIO, run Vault Maintenance/audit after switching to SeaweedFS
   and keep the source volume for the rollback window.
 

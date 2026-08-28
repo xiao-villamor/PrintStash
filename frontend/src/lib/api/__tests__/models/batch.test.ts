@@ -122,6 +122,14 @@ describe("purgeModel", () => {
 
     expectRequest("/api/v1/models/1/purge", "DELETE");
   });
+
+  it("adds the one-shot storage-risk confirmation when requested", async () => {
+    respondWith({ purged_model_ids: [1], purged_count: 1 });
+
+    await purgeModel(1, true);
+
+    expectRequest("/api/v1/models/1/purge?confirm_storage_risk=true", "DELETE");
+  });
 });
 
 describe("purgeExpiredTrash", () => {
@@ -131,5 +139,13 @@ describe("purgeExpiredTrash", () => {
     await purgeExpiredTrash();
 
     expectRequest("/api/v1/models/trash/expired", "DELETE");
+  });
+
+  it("adds the one-shot storage-risk confirmation when requested", async () => {
+    respondWith({ purged_model_ids: [], purged_count: 0 });
+
+    await purgeExpiredTrash(true);
+
+    expectRequest("/api/v1/models/trash/expired?confirm_storage_risk=true", "DELETE");
   });
 });

@@ -116,6 +116,7 @@ from app.services.storage_deletion import (
 )
 from app.services.storage_ownership import UnsafeStorageDeleteError
 from app.services.trash import (
+    StorageRiskConfirmationRequired,
     hard_delete_expired_models,
     hard_delete_model,
     soft_delete_model,
@@ -706,12 +707,21 @@ def list_trash(
     dependencies=[Depends(require_superuser)],
     summary="Permanently delete expired trash items",
 )
-def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRead:
+def purge_expired_trash(
+    confirm_storage_risk: bool = Query(False),
+    session: Session = Depends(get_session),
+) -> TrashPurgeRead:
     try:
         purged_model_ids = hard_delete_expired_models(
             session,
             retention_days=int(settings.trash_retention_days),
+            confirm_storage_risk=confirm_storage_risk,
         )
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -719,7 +729,9 @@ def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRe
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    storage_result = process_storage_delete_intents()
+    storage_result = process_storage_delete_intents(
+        allow_unverified=confirm_storage_risk
+    )
     return TrashPurgeRead(
         purged_model_ids=purged_model_ids,
         purged_count=len(purged_model_ids),
@@ -1726,6 +1738,7 @@ def restore_model(
 )
 def purge_model(
     model_id: int,
+    confirm_storage_risk: bool = Query(False),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> TrashPurgeRead:
@@ -1741,7 +1754,14 @@ def purge_model(
         CollectionRole.EDIT,
     )
     try:
-        hard_delete_model(session, m)
+        hard_delete_model(
+            session, m, confirm_storage_risk=confirm_storage_risk
+        )
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -1749,7 +1769,9 @@ def purge_model(
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    storage_result = process_storage_delete_intents()
+    storage_result = process_storage_delete_intents(
+        allow_unverified=confirm_storage_risk
+    )
     return TrashPurgeRead(
         purged_model_ids=[model_id],
         purged_count=1,

@@ -331,12 +331,13 @@ describe("PrinterCard", () => {
   });
 
   it("lets the user pick a model from the list when nothing was detected", async () => {
+    const user = userEvent.setup();
     renderPrintersPage({ printers: [makePrinter()] });
 
-    await userEvent.click(screen.getByText("Set model"));
-    expect(screen.getByRole("dialog", { name: "Select printer model" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Voron 2.4" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save model" }));
+    await user.click(screen.getByText("Set model"));
+    const picker = screen.getByRole("dialog", { name: "Select printer model" });
+    await user.click(within(picker).getByText("Voron 2.4"));
+    await user.click(within(picker).getByText("Save model"));
 
     await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
     const patched = requestsWithMethod("PATCH")[0]!;

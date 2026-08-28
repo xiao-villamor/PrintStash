@@ -547,6 +547,10 @@ jobs:
         working-directory: frontend
         run: pnpm test:e2e:real
 
+      - name: Storage-provider E2E
+        working-directory: frontend
+        run: pnpm test:e2e:storage
+
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
