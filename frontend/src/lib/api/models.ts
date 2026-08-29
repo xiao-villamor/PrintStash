@@ -32,6 +32,7 @@ import {
   OutlinerModelRead,
   RevisionBatchResult,
   TrashPurgeRead,
+  normalizeTrashPurgeRead,
   TrashedModelRead,
   VaultStatsRead,
 } from "@/types";
@@ -272,7 +273,7 @@ export async function purgeModel(id: number, confirmStorageRisk = false): Promis
     headers: authHeaders(),
   });
   invalidateApiCache(`/api/v1/models/${id}/purge`);
-  return handleResponse<TrashPurgeRead>(res);
+  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
 }
 
 export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<TrashPurgeRead> {
@@ -282,7 +283,7 @@ export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<Tra
     headers: authHeaders(),
   });
   invalidateApiCache("/api/v1/models/trash/expired");
-  return handleResponse<TrashPurgeRead>(res);
+  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
 }
 
 export function updateFileRevision(

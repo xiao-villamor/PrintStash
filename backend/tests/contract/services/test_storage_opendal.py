@@ -278,6 +278,14 @@ class _RenameFailure:
 
 
 class TestOpenDALStorageBackend:
+    def test_webdav_rejects_invalid_credentials(self, webdav_endpoint: str) -> None:
+        spec = _spec(webdav_endpoint)
+        spec.options["password"] = "not-the-contract-password"
+        backend = OpenDALStorageBackend(spec)
+
+        with pytest.raises(opendal.exceptions.Error):
+            backend.ensure_setup()
+
     def test_webdav_stream_round_trip_preserves_evidence(
         self,
         webdav_endpoint: str,
@@ -419,6 +427,25 @@ class TestOpenDALStorageBackend:
 
         with pytest.raises(asyncssh.HostKeyNotVerifiable):
             changed_backend.ensure_setup()
+
+    def test_webdav_guarded_cleanup_retains_matching_bytes(
+        self, webdav_endpoint: str
+    ) -> None:
+        backend = OpenDALStorageBackend(_spec(webdav_endpoint))
+        key = backend.thumbnail_key(31)
+        payload = b"guarded-bytes"
+        backend.ensure_setup()
+        backend.create_bytes(payload, key)
+
+        assert (
+            backend.reclaim_unverified(
+                key,
+                expected_size=len(payload),
+                expected_etag=None,
+            )
+            is False
+        )
+        assert backend.read_bytes(key) == payload
 
     def test_failed_remote_publication_removes_temporary_key(self) -> None:
         operator = _RenameFailure()

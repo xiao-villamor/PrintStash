@@ -61,6 +61,19 @@ class Settings(BaseSettings):
     storage_provider: str = ""
     storage_provider_config: str = ""
     storage_provider_secrets: str = ""
+    storage_identity: str = ""
+    storage_provider_error: str = ""
+    storage_root: str = ""
+    webdav_endpoint_url: str = ""
+    webdav_username: str = ""
+    webdav_password: str = ""
+    sftp_host: str = ""
+    sftp_port: int = 22
+    sftp_username: str = ""
+    sftp_host_key: str = ""
+    sftp_password: str = ""
+    sftp_private_key_path: str = ""
+    sftp_passphrase: str = ""
     storage_allow_unverified: bool = False
     data_dir: Path = Path("/data/files")
     thumb_dir: Path = Path("/data/thumbs")
@@ -71,6 +84,9 @@ class Settings(BaseSettings):
     s3_region: str = "auto"
     s3_access_key: str = ""
     s3_secret_key: str = ""
+    # Historical installs default to the literal ``vault-data`` prefix. Typed
+    # provider configuration may select another normalized namespace.
+    s3_root: str = "vault-data"
     s3_presigned_url_expire_seconds: int = Field(default=900, gt=0)
     s3_multipart_threshold_mb: int = Field(default=50, gt=0)
 
@@ -338,13 +354,19 @@ def _sqlite_db_path(db_url: str) -> Path | None:
     return Path(database)
 
 
-def ensure_dirs() -> None:
-    """Create required storage directories at startup. Idempotent."""
+def ensure_dirs(*, create_managed_roots: bool = False) -> None:
+    """Create app-owned directories, optionally provisioning local roots.
+
+    Runtime configuration and normal startup may create staging, inbox,
+    backups, and the SQLite parent.  Managed data/thumb roots are mount points
+    and must already exist and be enrolled; only the first-run setup flow may
+    opt into creating them explicitly.
+    """
     settings.staging_dir.mkdir(parents=True, exist_ok=True)
     settings.incoming_dir.mkdir(parents=True, exist_ok=True)
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
 
-    if settings.storage_backend == "local":
+    if create_managed_roots and settings.storage_backend == "local":
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         settings.thumb_dir.mkdir(parents=True, exist_ok=True)
 

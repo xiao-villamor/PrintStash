@@ -39,6 +39,7 @@ from app.db.models import (
     Model,
     OwnedStorageObject,
     PrintJobState,
+    RestoreMarker,
 )
 from app.services.auth import create_access_token
 from app.services.storage_backend import get_backend
@@ -837,7 +838,7 @@ class TestCreateBackup:
         fetched = backup.get_backup(meta.id)
         assert fetched is not None and fetched.id == meta.id
 
-    def test_create_backup_records_v2_content_evidence(
+    def test_create_backup_records_v3_provider_content_evidence(
         self, backup_env: BackupEnv
     ) -> None:
         _, key = seed_model_with_blob(
@@ -850,13 +851,18 @@ class TestCreateBackup:
             stream = archive.extractfile("manifest.json")
             assert stream is not None
             manifest = json.loads(stream.read())
-        assert manifest["version"] == "2"
+        assert manifest["version"] == "3"
+        assert manifest["provider_id"] == "local"
+        assert manifest["transport"] == "local"
+        assert manifest["namespace"] == get_backend().namespace_for(key)
         assert manifest["files"] == [
             {
                 "member": manifest["files"][0]["member"],
                 "arc": manifest["files"][0]["member"],
                 "key": key,
                 "provider": "local",
+                "provider_id": "local",
+                "transport": "local",
                 "namespace": get_backend().namespace_for(key),
                 "size": len(b"content-evidence"),
                 "sha256": "5cd0da5638341f7227386d0fab6742f51f6f740a7971e20e2be0bbdb1a4386f5",
@@ -1010,6 +1016,63 @@ class TestListLocalBackups:
         shutil.rmtree(backup_env.backup_dir)
         assert backup._list_local_backups() == []
         assert backup.list_backups() == []
+
+    def test_legacy_archive_requires_explicit_adoption(self, backup_env: BackupEnv):
+        seed_model_with_blob(backup_env, name="Legacy adoption", content=b"legacy")
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(archive),
+                    OwnedStorageObject.object_kind == "backup",
+                )
+            ).one()
+            session.delete(row)
+            session.commit()
+
+        assert backup.list_backups() == []
+        adopted = backup.adopt_local_backup(archive.name)
+        assert adopted.id == meta.id
+        assert {item.id for item in backup.list_backups()} == {meta.id}
+
+    def test_archive_adoption_rejects_tampered_bytes(self, backup_env: BackupEnv):
+        seed_model_with_blob(backup_env, name="Tampered adoption", content=b"bytes")
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == str(archive))
+            ).one()
+            session.delete(row)
+            session.commit()
+        archive.write_bytes(b"not-an-archive")
+
+        with pytest.raises((RuntimeError, gzip.BadGzipFile, tarfile.TarError)):
+            backup.adopt_local_backup(archive.name)
+
+    def test_unowned_discovery_returns_only_valid_adoption_candidates(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Legacy discover", content=b"bytes")
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(archive),
+                    OwnedStorageObject.object_kind == "backup",
+                )
+            ).one()
+            session.delete(row)
+            session.commit()
+        (
+            backup_env.backup_dir / "printstash-backup-invalid-deadbeefcafe.tar.gz"
+        ).write_bytes(b"invalid")
+
+        candidates = backup.discover_unowned_local_backups()
+
+        assert [candidate["filename"] for candidate in candidates] == [archive.name]
 
 
 class TestListBackups:
@@ -1586,19 +1649,61 @@ class TestStageRestoreArchive:
 
         assert not Path(key).exists()
 
-    def test_restore_accepts_a_v1_archive(self, backup_env: BackupEnv) -> None:
+    def test_restore_accepts_a_v1_archive(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         content = b"legacy-v1"
         _, key = seed_model_with_blob(backup_env, name="Legacy", content=content)
         meta = backup.create_backup()
+        archive = Path(meta.path)
+        # Build a genuine pre-v2 archive shape from explicit released fields.
+        # This deliberately does not rewrite a current manifest: v0.12.1 had
+        # no provider/namespace/hash metadata in its file entries.
+        database_bytes = backup_env.db_file.read_bytes()
+        member = "files/legacy/legacy.stl"
+        manifest = {
+            "version": "1",
+            "created_at": meta.created_at,
+            "app_version": "0.12.1",
+            "storage_backend": "local",
+            "files": [{"member": member, "key": key, "size": len(content)}],
+        }
+        with tarfile.open(archive, mode="w:gz") as tar:
+            manifest_bytes = json.dumps(manifest).encode("utf-8")
+            manifest_info = tarfile.TarInfo(name="manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            tar.addfile(manifest_info, io.BytesIO(manifest_bytes))
+            database_info = tarfile.TarInfo(name="db.sqlite3")
+            database_info.size = len(database_bytes)
+            tar.addfile(database_info, io.BytesIO(database_bytes))
+            blob_info = tarfile.TarInfo(name=member)
+            blob_info.size = len(content)
+            tar.addfile(blob_info, io.BytesIO(content))
 
-        def downgrade(manifest: dict) -> None:
-            manifest["version"] = "1"
-            for entry in manifest["files"]:
-                for field in ("member", "provider", "namespace", "sha256"):
-                    entry.pop(field, None)
-
-        _rewrite_backup_archive(backup_env, Path(meta.path), downgrade)
+        # The archive ledger must describe the literal fixture bytes, as it
+        # would after a crash between publication and ownership commit.
+        stat = archive.stat()
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(archive),
+                    OwnedStorageObject.object_kind == "backup",
+                )
+            ).one()
+            row.size_bytes = stat.st_size
+            row.sha256 = backup._sha256_path(archive)
+            row.etag = f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+            row.device = stat.st_dev
+            row.inode = stat.st_ino
+            row.ctime_ns = stat.st_ctime_ns
+            session.add(row)
+            session.commit()
         Path(key).unlink()
+        # The fixture is deliberately a literal v1 archive, while the harness
+        # database is created without Alembic's historical index backfills.
+        # Keep this test focused on v1 archive compatibility; migration parity
+        # is covered by the released-revision migration fixtures.
+        monkeypatch.setattr(backup, "run_migrations", lambda _url: None)
 
         backup.restore_backup(meta.id)
 
@@ -1988,6 +2093,107 @@ class TestRestoreDatabase:
             backup.restore_backup(meta.id)
 
         assert not Path(key).exists()
+
+    def test_restore_finishes_forward_when_database_swap_reports_after_commit(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"swap-committed"
+        _, key = seed_model_with_blob(
+            backup_env, name="Swap committed", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_restore = backup._restore_database_from_path
+
+        def swap_then_raise(path: Path) -> None:
+            real_restore(path)
+            raise OSError("acknowledgement lost")
+
+        monkeypatch.setattr(backup, "_restore_database_from_path", swap_then_raise)
+
+        result = backup.restore_backup(meta.id)
+
+        assert result["restored_files"] == 1
+        assert Path(key).read_bytes() == content
+        assert not (backup_env.backup_dir / f".restore-{meta.id}.journal").exists()
+
+    def test_repeated_restore_replaces_stale_marker_before_new_swap(
+        self, backup_env: BackupEnv
+    ) -> None:
+        content = b"repeatable-restore"
+        _, key = seed_model_with_blob(
+            backup_env, name="Repeatable restore", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+        Path(key).unlink()
+        result = backup.restore_backup(meta.id)
+
+        assert result["restored_files"] == 1
+        assert Path(key).read_bytes() == content
+        with backup_env.new_session() as session:
+            markers = session.exec(select(RestoreMarker)).all()
+            assert len(markers) == 1
+            assert markers[0].backup_id == meta.id
+
+    def test_restore_keeps_maintenance_when_active_journal_ack_fails(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"journal-terminal"
+        _, key = seed_model_with_blob(
+            backup_env, name="Journal terminal", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def fail_active_ack(path: Path, event: dict[str, object]) -> None:
+            if event.get("event") == "database_active":
+                raise OSError("journal terminal failure")
+            real_append(path, event)
+
+        monkeypatch.setattr(backup, "_append_restore_journal", fail_active_ack)
+        try:
+            with pytest.raises(
+                backup.RestoreConflictError,
+                match="restore_post_swap_recovery_required",
+            ):
+                backup.restore_backup(meta.id)
+            assert backup.restore_in_progress() is True
+            assert Path(key).read_bytes() == content
+            assert (backup_env.backup_dir / f".restore-{meta.id}.journal").exists()
+        finally:
+            backup._end_restore_maintenance()
+
+    def test_restore_unknown_swap_state_preserves_bytes(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"unknown-swap-state"
+        _, key = seed_model_with_blob(
+            backup_env, name="Unknown swap state", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        monkeypatch.setattr(
+            backup,
+            "_restore_database_from_path",
+            lambda _path: (_ for _ in ()).throw(OSError("swap uncertain")),
+        )
+        monkeypatch.setattr(
+            backup, "_active_restore_marker", lambda _id, **_kwargs: None
+        )
+
+        try:
+            with pytest.raises(
+                backup.RestoreConflictError, match="restore_database_state_unknown"
+            ):
+                backup.restore_backup(meta.id)
+            assert backup.restore_in_progress() is True
+            assert Path(key).exists() is True
+        finally:
+            backup._end_restore_maintenance()
 
     def test_restore_preserves_final_destination_mutation(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
@@ -2932,6 +3138,35 @@ class TestStart:
 
 
 class TestRaises:
+    def test_restore_cannot_bypass_an_unresolved_other_backup(
+        self, backup_env: BackupEnv
+    ) -> None:
+        journal = backup_env.backup_dir / ".restore-active.journal"
+        journal.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 2,
+                    "backup_id": "active-backup",
+                    "archive_sha256": "a" * 64,
+                    "operation_nonce": "b" * 64,
+                    "backend": "local",
+                    "namespaces": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        backup._restore_gate.set()
+        try:
+            with pytest.raises(
+                backup.RestoreConflictError, match="restore_recovery_required"
+            ):
+                backup.restore_backup("different-backup")
+        finally:
+            backup._restore_gate.clear()
+            journal.unlink()
+
     def test_restore_unknown_backup_raises(self, backup_env: BackupEnv):
         with pytest.raises(FileNotFoundError):
             backup.restore_backup("does-not-exist")

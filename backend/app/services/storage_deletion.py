@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -12,7 +12,13 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
 from app.db.session import get_session_factory
-from app.services.storage_backend import CreationReceipt, StorageBackend, get_backend
+from app.services import audit
+from app.services.storage_backend import (
+    CreationReceipt,
+    StorageBackend,
+    StorageTier,
+    get_backend,
+)
 from app.services.storage_ownership import UnsafeStorageDeleteError
 
 logger = get_logger(__name__)
@@ -23,6 +29,15 @@ class DeleteIntentResult:
     completed: int = 0
     pending: int = 0
     blocked: int = 0
+
+
+def cleanup_status(result: DeleteIntentResult) -> str:
+    """Return the durable outcome of an exact-delete batch for API callers."""
+    if result.blocked:
+        return "blocked" if not result.completed and not result.pending else "partial"
+    if result.pending:
+        return "pending" if not result.completed else "partial"
+    return "completed"
 
 
 def _owned_receipt(row: OwnedStorageObject) -> CreationReceipt:
@@ -66,6 +81,73 @@ def _content_sha256(backend: StorageBackend, key: str) -> str | None:
         return digest.hexdigest()
     except Exception:
         return None
+
+
+def _authorization(backend: StorageBackend, *, allow_unverified: bool) -> str:
+    """Freeze the policy selected by the operation in the delete intent."""
+    if allow_unverified:
+        return "guarded"
+    return backend.capabilities.tier.value
+
+
+def _authorization_metadata() -> tuple[int | None, datetime]:
+    actor_id, _ip = audit.current_audit_context()
+    return actor_id, utcnow()
+
+
+def record_legacy_blocked_intent(
+    session: Session,
+    backend: StorageBackend,
+    *,
+    key: str,
+    size_bytes: int,
+    sha256: str | None,
+    object_kind: str,
+    resource_id: int | str | None = None,
+) -> StorageDeleteIntent:
+    """Record an exact, retained legacy object that lacks a creation receipt.
+
+    A confirmed logical purge may remove a pre-ledger catalog row, but it must
+    never turn confirmation into permission to delete an object whose ownership
+    cannot be proven.  The synthetic token makes this intent idempotent while
+    the original path, size, and digest remain available for an administrator to
+    recover or adopt explicitly later.
+    """
+    namespace = backend.namespace_for(key)
+    token_material = (
+        f"legacy:{backend.backend_name}:{namespace}:{key}:{size_bytes}:{sha256 or ''}"
+    )
+    token = hashlib.sha256(token_material.encode("utf-8")).hexdigest()
+    existing = session.exec(
+        select(StorageDeleteIntent).where(
+            StorageDeleteIntent.backend == backend.backend_name,
+            StorageDeleteIntent.namespace == namespace,
+            StorageDeleteIntent.key == key,
+            StorageDeleteIntent.token == token,
+        )
+    ).first()
+    if existing is not None:
+        return existing
+    actor_id, authorized_at = _authorization_metadata()
+    intent = StorageDeleteIntent(
+        backend=backend.backend_name,
+        namespace=namespace,
+        key=key,
+        object_kind=object_kind,
+        token=token,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        authorization_mode="legacy_unknown",
+        authorized_actor_id=actor_id,
+        authorized_at=authorized_at,
+        quarantine_state="none",
+        resource_kind=object_kind,
+        resource_id=str(resource_id) if resource_id is not None else None,
+        status="pending",
+    )
+    session.add(intent)
+    session.flush()
+    return intent
 
 
 def enqueue_owned_key(
@@ -117,6 +199,7 @@ def enqueue_owned_key(
             return False
         if not matches:
             continue
+        actor_id, authorized_at = _authorization_metadata()
         intent = StorageDeleteIntent(
             backend=owned.backend,
             namespace=owned.namespace,
@@ -130,6 +213,12 @@ def enqueue_owned_key(
             device=owned.device,
             inode=owned.inode,
             ctime_ns=owned.ctime_ns,
+            authorization_mode=_authorization(
+                backend, allow_unverified=allow_unverified
+            ),
+            authorized_actor_id=actor_id,
+            authorized_at=authorized_at,
+            quarantine_state="none",
             resource_kind=resource_kind,
             resource_id=str(resource_id) if resource_id is not None else None,
         )
@@ -171,6 +260,7 @@ def enqueue_creation_receipt(
     ).first()
     if existing is not None:
         return existing
+    actor_id, authorized_at = _authorization_metadata()
     intent = StorageDeleteIntent(
         backend=receipt.backend,
         namespace=receipt.namespace,
@@ -184,6 +274,10 @@ def enqueue_creation_receipt(
         device=receipt.device,
         inode=receipt.inode,
         ctime_ns=receipt.ctime_ns,
+        authorization_mode=_authorization(backend, allow_unverified=False),
+        authorized_actor_id=actor_id,
+        authorized_at=authorized_at,
+        quarantine_state="none",
         resource_kind=resource_kind,
         resource_id=str(resource_id) if resource_id is not None else None,
     )
@@ -198,13 +292,21 @@ def _mark_retry(intent: StorageDeleteIntent, exc: Exception) -> None:
     delay_seconds = min(3600, 2 ** min(intent.attempts, 10))
     intent.next_attempt_at = utcnow() + timedelta(seconds=delay_seconds)
     intent.last_error = type(exc).__name__[:255]
+    # A backend may have completed a quarantine/delete before reporting an
+    # error. Keep this marker until a later session reconciles the receipt.
+    intent.quarantine_state = "pending"
     intent.updated_at = utcnow()
 
 
 def process_storage_delete_intents(
     *, limit: int = 100, allow_unverified: bool = False
 ) -> DeleteIntentResult:
-    """Consume committed intents idempotently, preserving mismatched objects."""
+    """Consume intents, using only the policy persisted on each row.
+
+    ``allow_unverified`` is retained as a compatibility keyword for older
+    callers, but cannot change the outcome of an already-authorized intent.
+    """
+    del allow_unverified
     completed = pending = blocked = 0
     backend = get_backend()
     now = utcnow()
@@ -223,14 +325,16 @@ def process_storage_delete_intents(
             if intent.backend != getattr(backend, "backend_name", intent.backend):
                 intent.status = "blocked"
                 intent.last_error = "storage_backend_mismatch"
+                intent.quarantine_state = "blocked"
                 intent.updated_at = utcnow()
                 blocked += 1
                 session.add(intent)
                 session.commit()
                 continue
-            if allow_unverified and intent.sha256 is None:
+            if intent.authorization_mode != StorageTier.VERIFIED.value:
                 intent.status = "blocked"
-                intent.last_error = "storage_hash_unavailable"
+                intent.last_error = "storage_guarded_delete_unsupported"
+                intent.quarantine_state = "blocked"
                 intent.attempts += 1
                 intent.updated_at = utcnow()
                 blocked += 1
@@ -238,26 +342,24 @@ def process_storage_delete_intents(
                 session.commit()
                 continue
             try:
+                # Commit before crossing the storage boundary. A worker crash
+                # after this point leaves durable evidence for reconciliation.
+                intent.quarantine_state = "pending"
+                intent.updated_at = utcnow()
+                session.add(intent)
+                session.commit()
                 receipt = _intent_receipt(intent)
-                removed = (
-                    backend.reclaim_unverified(
-                        receipt.key,
-                        expected_size=receipt.size,
-                        expected_etag=receipt.etag,
-                        expected_sha256=intent.sha256,
-                        expected_version_id=receipt.version_id,
-                    )
-                    if allow_unverified
-                    else backend.rollback_create(receipt)
-                )
+                removed = backend.rollback_create(receipt)
                 if not removed and backend.exists(intent.key):
                     intent.status = "blocked"
                     intent.last_error = "storage_receipt_mismatch"
+                    intent.quarantine_state = "blocked"
                     blocked += 1
                 else:
                     intent.status = "completed"
                     intent.completed_at = utcnow()
                     intent.last_error = None
+                    intent.quarantine_state = "deleted"
                     completed += 1
                 intent.attempts += 1
                 intent.updated_at = utcnow()

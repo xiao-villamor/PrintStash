@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -23,13 +24,28 @@ def _grant(session: Session, user: User, cid: int, role: CollectionRole) -> None
     grant_collection_role(session, user, cid, role)
 
 
+def _set_thumb_root(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".printstash-storage-root.json").write_text(
+        json.dumps(
+            {
+                "format": 1,
+                "installation": str(_overlay.get("storage_identity") or "a" * 64),
+                "role": "thumb",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _overlay["thumb_dir"] = path
+
+
 def _editable_collection(session: Session, tmp_path: Path):
     """A collection plus the headers of a user who may edit it.
 
     `EDIT` rather than admin, so these tests keep proving the endpoints are reachable
     on the role the UI actually grants a collaborator.
     """
-    _overlay["thumb_dir"] = tmp_path / "thumbs"
+    _set_thumb_root(tmp_path / "thumbs")
     collection = taxonomy.resolve_or_create_collection(session, "Brackets")
     editor = build_user(session, "editor")
     _grant(session, editor, collection.id, CollectionRole.EDIT)
@@ -90,7 +106,7 @@ class TestCollectionReadme:
     def test_readme_rbac(
         self, db_session: Session, client: TestClient, tmp_path: Path
     ) -> None:
-        _overlay["thumb_dir"] = tmp_path / "thumbs"
+        _set_thumb_root(tmp_path / "thumbs")
         col = taxonomy.resolve_or_create_collection(db_session, "Private")
         viewer = build_user(db_session, "viewer")
         _grant(db_session, viewer, col.id, CollectionRole.VIEW)

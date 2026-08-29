@@ -28,6 +28,7 @@ from app.db.models import (
     Model,
     NotificationChannel,
     NotificationTarget,
+    RestoreMarker,
     ShareLink,
     User,
     VaultAuditFinding,
@@ -38,6 +39,29 @@ from app.db.models import (
     VaultAuditSeverity,
 )
 from tests.factories._support import nth, reject_aliases, save, unique_hash
+
+
+def build_restore_marker(
+    session: Session,
+    backup_id: str = "test-backup",
+    *,
+    state: str = "database_active",
+    operation_nonce: str = "a" * 64,
+    archive_sha256: str = "b" * 64,
+    **overrides: Any,
+) -> RestoreMarker:
+    """A durable restore PONR marker for recovery tests."""
+    return save(
+        session,
+        RestoreMarker(
+            backup_id=backup_id,
+            state=state,
+            operation_nonce=operation_nonce,
+            archive_sha256=archive_sha256,
+            **overrides,
+        ),
+    )
+
 
 SHARE_TOKEN = "not-a-real-share-token"
 

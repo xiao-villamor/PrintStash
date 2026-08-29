@@ -27,6 +27,7 @@ dropping a job must not take its completed import history with it.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
@@ -44,6 +45,7 @@ from alembic import command
 from app.db import migrate as migrate_mod
 from app.db.session import _is_alembic_managed, init_db
 from tests.factories import build_user
+from tests.factories.migration_rows import seed_released_v0121_rows, seed_schema_row
 from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
 
@@ -80,6 +82,69 @@ def _seeded_duplicate_defaults(tmp_path: Path) -> str:
 
 class TestDataMigrations:
     """The migrations that rewrite rows rather than schema, on real prior data."""
+
+    def test_v0121_external_library_upgrade_preserves_linked_file_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        """A released database keeps external paths and bytes through upgrade.
+
+        The external-library columns were introduced after v0.12.1.  This
+        fixture therefore starts with the literal released schema/data, moves
+        through that migration, and then carries the linked-file evidence to
+        head; it guards the real upgrade boundary rather than only fresh
+        ``create_all`` metadata.
+        """
+        db_path = tmp_path / "v0121-external.sqlite"
+        cfg = migrate_mod._alembic_config(_url(tmp_path, db_path.name))
+        command.upgrade(cfg, "e7b4c1d9a6f2")
+        engine = create_engine(_url(tmp_path, db_path.name))
+        external_path = tmp_path / "nas" / "released-model.stl"
+        external_path.parent.mkdir()
+        external_bytes = b"released external bytes"
+        external_path.write_bytes(external_bytes)
+        external_sha = hashlib.sha256(external_bytes).hexdigest()
+        try:
+            with engine.begin() as connection:
+                seed_released_v0121_rows(connection)
+            command.upgrade(cfg, "a3f1c7d2e9b8")
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "external_libraries",
+                    id=1,
+                    name="Released NAS",
+                    root_path=str(external_path.parent),
+                    enabled=True,
+                )
+                connection.execute(
+                    text(
+                        "UPDATE files SET path = :path, sha256 = :sha, "
+                        "size_bytes = :size, is_external = 1, "
+                        "external_library_id = 1, source_mtime = :mtime WHERE id = 1"
+                    ),
+                    {
+                        "path": str(external_path),
+                        "sha": external_sha,
+                        "size": len(external_bytes),
+                        "mtime": external_path.stat().st_mtime,
+                    },
+                )
+            command.upgrade(cfg, "head")
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT path, sha256, size_bytes, is_external, "
+                        "external_library_id FROM files WHERE id = 1"
+                    )
+                ).one()
+            assert row.path == str(external_path)
+            assert row.sha256 == external_sha
+            assert row.size_bytes == len(external_bytes)
+            assert row.is_external in (True, 1)
+            assert row.external_library_id == 1
+            assert external_path.read_bytes() == external_bytes
+        finally:
+            engine.dispose()
 
     def test_bambu_identity_migration_absorbs_duplicate_pair_without_delete(
         self,

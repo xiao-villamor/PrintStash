@@ -272,7 +272,7 @@ def permanently_delete_document(
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    process_storage_delete_intents(allow_unverified=confirm_storage_risk)
+    process_storage_delete_intents()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

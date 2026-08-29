@@ -13,12 +13,13 @@ import secrets
 from pathlib import Path
 from typing import Any, Optional
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.config import DEFAULT_JWT_SECRET, _overlay, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import SystemConfig, User
+from app.db.models import File, SystemConfig, User
 from app.services.storage_providers import (
     SFTPProviderConfig,
     StorageProviderConfig,
@@ -52,6 +53,117 @@ def get_config(session: Session) -> SystemConfig:
     return get_or_create(session)
 
 
+def ensure_storage_identity(session: Session) -> str:
+    """Create the random installation identity before storage is composed."""
+    config = get_or_create(session)
+    if not config.storage_identity:
+        # 256 bits gives the installation binding enough entropy that a copied
+        # sentinel cannot plausibly collide with another vault.
+        config.storage_identity = secrets.token_hex(32)
+        config.updated_at = utcnow()
+        session.add(config)
+        session.commit()
+    _overlay["storage_identity"] = config.storage_identity
+    return config.storage_identity
+
+
+def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
+    """Safely bind markerless v0.12 local roots during startup.
+
+    A markerless non-empty root is enrolled only when DB-referenced managed
+    files still match their recorded size and hash. Empty roots are allowed for
+    a genuinely new, unconfigured installation; all other roots remain read-only
+    until an explicit enrollment flow proves them.
+    """
+    from app.services.storage_backend import enroll_legacy_local_root
+
+    if settings.storage_backend != "local":
+        return {"data": True, "thumb": True}
+    identity = str(_overlay.get("storage_identity") or "")
+    # A startup probe must remain bounded.  Hashing every historical row here
+    # turns a missing sentinel into an unbounded migration and can keep a large
+    # installation in recovery for hours.  The oldest deterministic sample is
+    # enough to prove that this is the configured legacy tree; all remaining
+    # rows are still reconciled by the normal scanner after enrollment.
+    managed_rows_exist = (
+        session.exec(
+            select(File.id)
+            .where(File.is_external == False)  # noqa: E712
+            .limit(1)
+        ).first()
+        is not None
+    )
+    candidate_files = session.exec(
+        select(File)
+        .where(File.is_external == False)  # noqa: E712
+        .where(File.sha256.is_not(None))
+        .where(func.length(File.sha256) == 64)
+        .order_by(File.id)  # pyright: ignore[reportArgumentType]
+        .limit(32)
+    ).all()
+    files = [
+        file
+        for file in candidate_files
+        if isinstance(file.sha256, str)
+        and len(file.sha256) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in file.sha256)
+    ][:3]
+    fresh_install = not is_configured(session) and not managed_rows_exist
+
+    def root_is_empty(root: Path) -> bool:
+        try:
+            return root.is_dir() and not any(
+                entry.name != ".printstash-storage-root.json"
+                for entry in root.iterdir()
+            )
+        except OSError:
+            return False
+
+    data_proofs: list[tuple[Path, int, str | None]] = [
+        (Path(file.path), file.size_bytes, file.sha256) for file in files if file.path
+    ]
+    data_root = Path(settings.data_dir)
+    thumb_root = Path(settings.thumb_dir)
+    data_enrolled = enroll_legacy_local_root(
+        data_root,
+        role="data",
+        installation=identity,
+        proofs=data_proofs,
+        allow_empty=fresh_install and root_is_empty(data_root),
+    )
+
+    # Thumbnail rows historically carried no content hash. A same-size file at
+    # a markerless, separately-mounted thumb path is therefore not evidence of
+    # the right installation and must await explicit administrator enrollment.
+    # The only safe automatic exception is a thumb root physically co-located
+    # under the already-proven data root.
+    try:
+        thumb_is_co_located = thumb_root.resolve(strict=False).is_relative_to(
+            data_root.resolve(strict=False)
+        )
+    except OSError:
+        thumb_is_co_located = False
+    thumb_proofs: list[tuple[Path, int, str | None]] = []
+    if data_enrolled and thumb_is_co_located:
+        for file in files:
+            if not file.thumbnail_path:
+                continue
+            path = Path(file.thumbnail_path)
+            try:
+                thumb_proofs.append((path, path.stat().st_size, None))
+            except OSError:
+                return {"data": data_enrolled, "thumb": False}
+    thumb_enrolled = enroll_legacy_local_root(
+        thumb_root,
+        role="thumb",
+        installation=identity,
+        proofs=thumb_proofs,
+        allow_empty=fresh_install and root_is_empty(thumb_root),
+        allow_size_only=thumb_is_co_located and data_enrolled,
+    )
+    return {"data": data_enrolled, "thumb": thumb_enrolled}
+
+
 def is_configured(session: Session) -> bool:
     """True once the setup wizard has run *and* at least one user exists.
 
@@ -74,6 +186,10 @@ def _merge_config_overlay(config: SystemConfig) -> None:
         provider = _stored_provider_config(config)
         if provider is not None:
             _project_provider_overlay(provider)
+        else:
+            _overlay["storage_provider_error"] = "stored_provider_configuration_invalid"
+    if config.storage_identity:
+        _overlay["storage_identity"] = config.storage_identity
     if config.data_dir and not config.storage_provider:
         _overlay["data_dir"] = Path(config.data_dir)
     if config.thumb_dir and not config.storage_provider:
@@ -127,6 +243,8 @@ def apply_overlay(session: Session) -> None:
 
 def apply_environment_storage_provider(session: Session) -> None:
     """Project new provider env input only when no DB storage source exists."""
+    import os
+
     config = session.get(SystemConfig, 1)
     has_db_storage = config is not None and bool(
         config.storage_provider or config.storage_backend
@@ -139,12 +257,121 @@ def apply_environment_storage_provider(session: Session) -> None:
                 for k, v in _json_object(str(settings.storage_provider_secrets)).items()
                 if v
             }
+            typed = _typed_environment_provider_config()
+            typed_env_supplied = any(
+                key.startswith("VAULT_")
+                and key
+                in {
+                    "VAULT_STORAGE_ROOT",
+                    "VAULT_DATA_DIR",
+                    "VAULT_THUMB_DIR",
+                    "VAULT_S3_BUCKET",
+                    "VAULT_S3_REGION",
+                    "VAULT_S3_ENDPOINT_URL",
+                    "VAULT_S3_ACCESS_KEY",
+                    "VAULT_S3_SECRET_KEY",
+                    "VAULT_WEBDAV_ENDPOINT_URL",
+                    "VAULT_WEBDAV_USERNAME",
+                    "VAULT_WEBDAV_PASSWORD",
+                    "VAULT_SFTP_HOST",
+                    "VAULT_SFTP_PORT",
+                    "VAULT_SFTP_USERNAME",
+                    "VAULT_SFTP_HOST_KEY",
+                    "VAULT_SFTP_PASSWORD",
+                    "VAULT_SFTP_PRIVATE_KEY_PATH",
+                    "VAULT_SFTP_PASSPHRASE",
+                }
+                for key in os.environ
+            )
+            if typed_env_supplied and (nonsecret or secrets_map):
+                raise ValueError("storage_provider_configuration_conflict")
+            if typed_env_supplied and typed:
+                nonsecret = typed
+            elif nonsecret or secrets_map:
+                logger.warning(
+                    "VAULT_STORAGE_PROVIDER_CONFIG and *_SECRETS are deprecated; "
+                    "use typed provider environment fields"
+                )
             parsed = merge_provider_secrets(nonsecret, secrets_map)
             if parsed.provider != settings.storage_provider:
                 raise ValueError("storage_provider_config_mismatch")
             _project_provider_overlay(parsed)
-        except ValueError:
+        except ValueError as exc:
+            _overlay["storage_provider_error"] = str(exc)
             logger.exception("environment provider configuration is invalid")
+
+
+def _typed_environment_provider_config() -> dict[str, object]:
+    """Build canonical provider config from scalar VAULT_* fields."""
+    import os
+
+    def supplied(name: str, value: object) -> bool:
+        # Checking the process environment first keeps this boundary correct
+        # for Settings instances assembled by tests or embedding applications,
+        # where ``model_fields_set`` does not retain source provenance.
+        if f"VAULT_{name.upper()}" in os.environ:
+            return True
+        try:
+            return name in settings._frozen.model_fields_set  # type: ignore[attr-defined]
+        except AttributeError:
+            return value not in (None, "")
+
+    provider = settings.storage_provider
+    root = settings.storage_root.strip()
+    payload: dict[str, object] = {"provider": provider}
+    if root and supplied("storage_root", root):
+        payload["root"] = root
+    if provider == "local":
+        if supplied("data_dir", settings.data_dir):
+            payload["data_dir"] = str(settings.data_dir)
+        if supplied("thumb_dir", settings.thumb_dir):
+            payload["thumb_dir"] = str(settings.thumb_dir)
+    elif provider in {
+        "s3",
+        "cloudflare_r2",
+        "backblaze_b2",
+        "wasabi",
+        "s3_self_hosted",
+    }:
+        for key, env_name, value in (
+            ("bucket", "s3_bucket", settings.s3_bucket),
+            ("region", "s3_region", settings.s3_region),
+            ("endpoint_url", "s3_endpoint_url", settings.s3_endpoint_url),
+            ("access_key", "s3_access_key", settings.s3_access_key),
+            ("secret_key", "s3_secret_key", settings.s3_secret_key),
+        ):
+            if value not in (None, "") and supplied(env_name, value):
+                payload[key] = value
+    elif provider in {"nextcloud", "webdav"}:
+        for key, value in (
+            ("endpoint_url", settings.webdav_endpoint_url),
+            ("username", settings.webdav_username),
+            ("password", settings.webdav_password),
+        ):
+            if value not in (None, "") and supplied(
+                {
+                    "endpoint_url": "webdav_endpoint_url",
+                    "username": "webdav_username",
+                    "password": "webdav_password",
+                }[key],
+                value,
+            ):
+                payload[key] = value
+    elif provider == "sftp":
+        for key, value in (
+            ("host", settings.sftp_host),
+            ("port", settings.sftp_port),
+            ("username", settings.sftp_username),
+            ("host_key", settings.sftp_host_key),
+            ("password", settings.sftp_password),
+            ("private_key_path", settings.sftp_private_key_path),
+            ("passphrase", settings.sftp_passphrase),
+        ):
+            if value not in (None, "") and supplied(f"sftp_{key}", value):
+                payload[key] = value
+    # Provider alone is not a typed configuration; use the deprecated JSON only
+    # when no scalar was supplied, otherwise validation must fail closed.
+    return payload if len(payload) > 1 else {}
 
 
 def activate_config(config: SystemConfig) -> None:
@@ -189,6 +416,10 @@ def _project_provider_overlay(config: StorageProviderConfig) -> None:
         _overlay["s3_region"] = str(spec.options["region"])
         _overlay["s3_access_key"] = str(spec.options["access_key"])
         _overlay["s3_secret_key"] = str(spec.options["secret_key"])
+        # Keep the managed namespace alongside the compatibility S3 fields.
+        # The S3 adapter must not silently collapse a typed provider root back
+        # to the historical default.
+        _overlay["s3_root"] = str(spec.options["root"])
     else:
         _overlay["storage_backend"] = config.provider
 

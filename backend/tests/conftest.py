@@ -326,12 +326,19 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     _overlay.clear()
     _overlay["db_url"] = TEST_DB_URL
     _overlay["secrets_key"] = "printstash-test-secrets-key"
+    _overlay["storage_identity"] = "a" * 64
     _reset_test_storage()
     _truncate_all()
     # Production binds storage during lifespan. Unit tests exercise services
     # directly, so bind the local adapter explicitly after every reset instead
     # of letting get_backend() construct infrastructure on first access.
     from app.services.storage_backend import LocalStorageBackend, bind_backend
+
+    for role, root in (("data", settings.data_dir), ("thumb", settings.thumb_dir)):
+        (Path(root) / ".printstash-storage-root.json").write_text(
+            '{"format":1,"installation":"%s","role":"%s"}' % ("a" * 64, role),
+            encoding="utf-8",
+        )
 
     bind_backend(LocalStorageBackend())
     # Drop the process-wide httpx client so a test that drives async egress in

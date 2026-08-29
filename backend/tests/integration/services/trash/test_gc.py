@@ -29,7 +29,12 @@ from app.db.models import (
     VaultAuditFindingState,
     VaultAuditSeverity,
 )
-from app.services.trash import _cleanup_orphan_blobs, gc_soft_deleted
+from app.services.storage_deletion import process_storage_delete_intents
+from app.services.trash import (
+    _cleanup_orphan_blobs,
+    gc_soft_deleted,
+    hard_delete_model,
+)
 from tests.factories import (
     build_audit_run,
     build_collection,
@@ -242,7 +247,13 @@ class TestGcSoftDeleted:
 
         result = gc_soft_deleted(retention_days=-1)
 
-        assert result == {"rows": 0, "orphan_blobs": 0}
+        assert result == {
+            "rows": 0,
+            "orphan_blobs": 0,
+            "storage_completed": 0,
+            "storage_pending": 0,
+            "storage_blocked": 0,
+        }
         assert Path(artifact.path).exists()
         db_session.expire_all()
         assert db_session.get(File, artifact.id) is not None
@@ -322,6 +333,49 @@ class TestGcSoftDeleted:
         db_session.expire_all()
         assert db_session.get(Model, model_id) is None
         assert db_session.get(File, artifact_id) is None
+
+    def test_confirmed_legacy_purge_retains_unproven_bytes(
+        self, db_session: Session, storage
+    ) -> None:
+        model = build_model(
+            db_session,
+            name="Legacy retained",
+            slug="legacy-retained",
+            hash="legacy-retained-hash",
+        )
+        content = b"bytes with no ownership receipt"
+        legacy_path = storage.blob_key("legacy-retained", 1, "legacy.stl")
+        _write(legacy_path, content)
+        artifact = build_file(
+            db_session,
+            model,
+            path=legacy_path,
+            filename="legacy.stl",
+            file_type=FileType.STL,
+            version=1,
+            size_bytes=len(content),
+            sha256="not-a-proven-hash",
+        )
+        model.deleted_at = utcnow() - timedelta(days=1)
+        db_session.add(model)
+        db_session.commit()
+
+        hard_delete_model(db_session, model, confirm_storage_risk=True)
+        db_session.commit()
+        result = process_storage_delete_intents()
+
+        assert result.blocked == 1
+        assert db_session.get(Model, model.id) is None
+        assert db_session.get(File, artifact.id) is None
+        assert Path(legacy_path).read_bytes() == content
+        intent = db_session.exec(
+            select(StorageDeleteIntent).where(
+                StorageDeleteIntent.key == legacy_path,
+                StorageDeleteIntent.object_kind == "legacy_artifact",
+            )
+        ).one()
+        assert intent.status == "blocked"
+        assert intent.authorization_mode == "legacy_unknown"
 
     def test_gc_preserves_shared_stl_cache_until_last_artifact_is_purged(
         self, db_session: Session, storage

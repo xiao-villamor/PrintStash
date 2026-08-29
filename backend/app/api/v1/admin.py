@@ -247,9 +247,7 @@ def admin_delete_resource(
         session.add(row)
     session.commit()
     if hard:
-        process_storage_delete_intents(
-            allow_unverified=confirm_storage_risk
-        )
+        process_storage_delete_intents()
     return Response(status_code=204)
 
 

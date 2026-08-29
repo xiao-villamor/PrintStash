@@ -11,6 +11,7 @@ for the next one.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -24,8 +25,12 @@ def storage(tmp_path: Path):
     _overlay["storage_backend"] = "local"
     _overlay["data_dir"] = tmp_path / "files"
     _overlay["thumb_dir"] = tmp_path / "thumbs"
-    (tmp_path / "files").mkdir()
-    (tmp_path / "thumbs").mkdir()
+    for role, root in (("data", tmp_path / "files"), ("thumb", tmp_path / "thumbs")):
+        root.mkdir()
+        (root / ".printstash-storage-root.json").write_text(
+            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
+            encoding="utf-8",
+        )
     yield get_backend()
     for key in ("storage_backend", "data_dir", "thumb_dir"):
         _overlay.pop(key, None)

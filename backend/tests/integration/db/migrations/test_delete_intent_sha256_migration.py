@@ -18,6 +18,7 @@ from tests.factories.migration_rows import seed_schema_row
 
 PREVIOUS = "5c777075c95b"
 REVISION = "303a72ca9ff4"
+AUTHORIZATION_REVISION = "02b4f9e2f6f1"
 
 
 @pytest.fixture
@@ -91,3 +92,52 @@ class TestRoundTrip:
             engine.dispose()
 
         assert row == ("trash/legacy.stl", "legacy-delete-token", 50, None)
+
+
+class TestAuthorizationUpgrade:
+    def test_blocks_ambiguous_legacy_retry(self, tmp_path: Path) -> None:
+        url = f"sqlite:///{tmp_path / 'legacy-authorization.sqlite'}"
+        blob = tmp_path / "trash" / "legacy.stl"
+        blob.parent.mkdir()
+        blob.write_bytes(b"legacy bytes must survive")
+        config = migrate_mod._alembic_config(url)  # noqa: SLF001
+        command.upgrade(config, PREVIOUS)
+        engine = create_engine(url)
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "storage_delete_intents",
+                    id=1,
+                    backend="local",
+                    namespace="released-vault",
+                    key=str(blob),
+                    object_kind="artifact",
+                    token="legacy-delete-token",
+                    size_bytes=len(blob.read_bytes()),
+                    status="pending",
+                    attempts=0,
+                )
+        finally:
+            engine.dispose()
+
+        command.upgrade(config, AUTHORIZATION_REVISION)
+        engine = create_engine(url)
+        try:
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT authorization_mode, status, quarantine_state, "
+                        "last_error FROM storage_delete_intents WHERE id = 1"
+                    )
+                ).one()
+        finally:
+            engine.dispose()
+
+        assert row == (
+            "legacy_unknown",
+            "blocked",
+            "blocked",
+            "storage_delete_reauthorization_required",
+        )
+        assert blob.read_bytes() == b"legacy bytes must survive"

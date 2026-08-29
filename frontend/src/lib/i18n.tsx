@@ -244,6 +244,43 @@ const messages = {
     "settings.pairedBrowsers.revokeDescription":
       "This browser will no longer be able to capture models. Pair it again to restore access.",
     "settings.pairedBrowsers.revokeConfirm": "Revoke browser",
+    "settings.storageUnavailableTitle": "Storage is read-only",
+    "settings.storageUnavailableDescription":
+      "PrintStash cannot verify the configured storage root. Check the mounted path and its .printstash-storage-root.json sentinel, then restart the application. Do not acknowledge this warning to enable writes.",
+    "settings.storageWarningTitle": "Storage needs attention",
+    "settings.storageWarningDescription":
+      "Some storage operations are unavailable until the configured root is mounted and verified.",
+    "settings.storageEnrollTitle": "A legacy storage root can be enrolled",
+    "settings.storageEnrollDescription":
+      "Only enroll a root after verifying that the mounted path belongs to this PrintStash installation.",
+    "settings.storageEnrollAction": "Review and enroll",
+    "settings.storageEnrollConfirmTitle": "Enroll {role} storage root?",
+    "settings.storageEnrollConfirmDescription":
+      "This records {path} as the PrintStash {role} root and creates its binding marker. If this is the wrong disk, files can become unreachable. Confirm only after checking the mount.",
+    "settings.storageEnrollConfirmAction": "Enroll root",
+    "settings.storageEnrollSuccess":
+      "Storage root enrolled. Restart PrintStash to activate the binding.",
+    "settings.storageRootIdentityTitle": "Storage root identity problem",
+    "settings.storageRootIdentityDescription":
+      "Do not acknowledge this warning as a fix. Verify the configured mount and restore the expected root marker; a mismatched or invalid marker cannot be enrolled here.",
+    "settings.storageSupport": "Support: {level}",
+    "settings.storageRootPath": "{role} root: {path}",
+    "settings.storageRootLocation": "{role} root: {path} — {status}",
+    "settings.backupLegacyTitle": "Validated legacy backups need adoption",
+    "settings.backupLegacyDescription":
+      "These local archives passed validation but are not owned by this installation. Review the exact filename and metadata before registering one.",
+    "settings.backupLegacyConfirmTitle": "Adopt legacy backup?",
+    "settings.backupLegacyConfirmDescription":
+      "Register {filename} as an owned backup. This has been validated as a PrintStash archive ({files} files, {size}). Confirm only if this is the exact archive you intend to manage.",
+    "settings.backupLegacyAdoptAction": "Adopt backup",
+    "settings.backupLegacyAdopted": "Legacy backup {filename} is now registered.",
+    "settings.trashCleanupCompleted": "Storage cleanup completed.",
+    "settings.trashCleanupPending":
+      "Catalog purge completed; {count} storage object(s) remain pending cleanup.",
+    "settings.trashCleanupBlocked":
+      "Catalog purge completed; {count} storage object(s) were retained because deletion could not be verified.",
+    "settings.trashCleanupPartial":
+      "Catalog purge completed partially; storage cleanup still has pending or retained objects.",
   },
   es: {
     "locale.label": "Idioma",
@@ -490,6 +527,43 @@ const messages = {
     "settings.pairedBrowsers.revokeDescription":
       "Este navegador ya no podrá capturar modelos. Vuelve a vincularlo para restaurar el acceso.",
     "settings.pairedBrowsers.revokeConfirm": "Revocar navegador",
+    "settings.storageUnavailableTitle": "El almacenamiento es de solo lectura",
+    "settings.storageUnavailableDescription":
+      "PrintStash no puede verificar la raíz de almacenamiento configurada. Comprueba la ruta montada y su marcador .printstash-storage-root.json y reinicia la aplicación. No aceptes esta advertencia para activar las escrituras.",
+    "settings.storageWarningTitle": "El almacenamiento necesita atención",
+    "settings.storageWarningDescription":
+      "Algunas operaciones de almacenamiento no están disponibles hasta montar y verificar la raíz configurada.",
+    "settings.storageEnrollTitle": "Se puede registrar una raíz de almacenamiento antigua",
+    "settings.storageEnrollDescription":
+      "Registra una raíz solo después de verificar que la ruta montada pertenece a esta instalación de PrintStash.",
+    "settings.storageEnrollAction": "Revisar y registrar",
+    "settings.storageEnrollConfirmTitle": "¿Registrar la raíz de almacenamiento {role}?",
+    "settings.storageEnrollConfirmDescription":
+      "Esto registra {path} como raíz {role} de PrintStash y crea su marcador de vinculación. Si es el disco equivocado, los archivos podrían quedar inaccesibles. Confirma solo después de comprobar el montaje.",
+    "settings.storageEnrollConfirmAction": "Registrar raíz",
+    "settings.storageEnrollSuccess":
+      "Raíz de almacenamiento registrada. Reinicia PrintStash para activar el vínculo.",
+    "settings.storageRootIdentityTitle": "Problema de identidad de la raíz de almacenamiento",
+    "settings.storageRootIdentityDescription":
+      "No aceptes esta advertencia como solución. Verifica el montaje configurado y restaura el marcador esperado; una raíz no coincidente o no válida no se puede registrar aquí.",
+    "settings.storageSupport": "Compatibilidad: {level}",
+    "settings.storageRootPath": "Raíz {role}: {path}",
+    "settings.storageRootLocation": "Raíz {role}: {path} — {status}",
+    "settings.backupLegacyTitle": "Las copias antiguas validadas necesitan registro",
+    "settings.backupLegacyDescription":
+      "Estos archivos locales han pasado la validación, pero esta instalación no los posee. Revisa el nombre exacto y los metadatos antes de registrar uno.",
+    "settings.backupLegacyConfirmTitle": "¿Registrar copia antigua?",
+    "settings.backupLegacyConfirmDescription":
+      "Registra {filename} como copia propia. Se ha validado como archivo de PrintStash ({files} archivos, {size}). Confirma solo si es exactamente el archivo que quieres administrar.",
+    "settings.backupLegacyAdoptAction": "Registrar copia",
+    "settings.backupLegacyAdopted": "La copia antigua {filename} ya está registrada.",
+    "settings.trashCleanupCompleted": "Limpieza de almacenamiento completada.",
+    "settings.trashCleanupPending":
+      "La purga del catálogo terminó; quedan {count} objeto(s) de almacenamiento pendientes de limpieza.",
+    "settings.trashCleanupBlocked":
+      "La purga del catálogo terminó; se conservaron {count} objeto(s) porque no se pudo verificar su eliminación.",
+    "settings.trashCleanupPartial":
+      "La purga del catálogo terminó parcialmente; aún hay objetos pendientes o conservados.",
   },
 } as const;
 

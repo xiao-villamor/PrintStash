@@ -6,6 +6,8 @@ import {
   VaultConfigRead,
   VaultConfigUpdate,
   StorageProvider,
+  StorageRootEnrollmentRead,
+  StorageRootRole,
   IngestResponse,
 } from "@/types";
 
@@ -27,6 +29,13 @@ export function getVaultConfig(): Promise<VaultConfigRead> {
 
 export function getHealthDetails<T>(): Promise<T> {
   return getJson<T>("/api/v1/health/details", { fresh: true });
+}
+
+export function enrollStorageRoot(role: StorageRootRole): Promise<StorageRootEnrollmentRead> {
+  return sendJson<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", "POST", {
+    role,
+    confirm: true,
+  });
 }
 
 export interface ReleaseStatus {

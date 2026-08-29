@@ -132,6 +132,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/maintenance/audits/latest": json(null),
       "GET /api/v1/models/trash": json([]),
       "GET /api/v1/backups": json([]),
+      "GET /api/v1/backups/unowned-local": json([]),
       "GET /api/v1/models/stats": json(VAULT_STATS),
       ...routes,
     },
@@ -209,6 +210,30 @@ describe("SettingsPanel", () => {
       });
 
       expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
+    });
+
+    it("explains when the storage root is read-only", async () => {
+      renderSettings({
+        routes: {
+          "GET /api/v1/health/details": json({
+            ...HEALTH,
+            status: "degraded",
+            components: {
+              database: { ok: true },
+              storage: {
+                ok: false,
+                provider: "local",
+                tier: "guarded",
+                diagnostics: { root_bindings: { data: "binding_missing" } },
+              },
+            },
+          }),
+        },
+      });
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Storage is read-only");
+      expect(screen.getByRole("alert")).toHaveTextContent(".printstash-storage-root.json");
+      expect(screen.getByRole("alert")).toHaveTextContent("Do not acknowledge this warning");
     });
 
     it("re-checks for a release when asked", async () => {
@@ -645,6 +670,66 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("2026-01-01T000000Z")).toBeInTheDocument();
     });
 
+    it("surfaces validated legacy candidates", async () => {
+      renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/unowned-local": json([
+            {
+              filename: "nexus3d-backup-2025.tar.gz",
+              backup_id: "legacy-1",
+              created_at: "2025-01-01T00:00:00Z",
+              location: "local",
+              app_version: "0.11.0",
+              file_count: 8,
+              size_bytes: 2048,
+              storage_backend: "local",
+            },
+          ]),
+        },
+      });
+
+      expect(await screen.findByText("nexus3d-backup-2025.tar.gz")).toBeInTheDocument();
+      expect(screen.getByText(/8 files.*v0\.11\.0/)).toBeInTheDocument();
+    });
+
+    it("confirms one legacy candidate before adopting", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/unowned-local": json([
+            {
+              filename: "nexus3d-backup-2025.tar.gz",
+              backup_id: "legacy-1",
+              created_at: "2025-01-01T00:00:00Z",
+              location: "local",
+              app_version: "0.11.0",
+              file_count: 8,
+              size_bytes: 2048,
+              storage_backend: "local",
+            },
+          ]),
+          "POST /api/v1/backups/adopt-local": json({ backup_id: "legacy-1" }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Adopt backup" }));
+      expect(await screen.findByRole("dialog")).toHaveTextContent("nexus3d-backup-2025.tar.gz");
+      expect(screen.getByRole("dialog")).toHaveTextContent("8 files");
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Adopt backup" }),
+      );
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) =>
+            call.url.includes("/backups/adopt-local?filename=nexus3d-backup-2025.tar.gz"),
+          ),
+        ).toBe(true),
+      );
+    });
+
     it("says which version of the app wrote each one", async () => {
       // Restoring a backup written by a newer app is how a vault ends up with a
       // schema its code cannot read.
@@ -788,6 +873,55 @@ describe("SettingsPanel", () => {
         expect(requestsWithMethod("DELETE").some((call) => call.url.includes("/models/7"))).toBe(
           true,
         ),
+      );
+    });
+
+    it("shows a retained storage result", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/models/trash": json([TRASHED_MODEL]),
+          "DELETE /api/v1/models/7": json({
+            purged_model_ids: [7],
+            purged_count: 1,
+            storage_completed: 0,
+            storage_pending: 0,
+            storage_blocked: 1,
+            storage_cleanup_status: "blocked",
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Delete/ }));
+      await user.click(await screen.findByRole("button", { name: "Delete forever" }));
+
+      expect(await screen.findByRole("status")).toHaveTextContent("retained");
+    });
+
+    it("shows a pending storage result", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "DELETE /api/v1/models/trash/expired": json({
+            purged_model_ids: [7],
+            purged_count: 1,
+            storage_completed: 0,
+            storage_pending: 2,
+            storage_blocked: 0,
+            storage_cleanup_status: "pending",
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Purge expired/ }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Purge forever" }),
+      );
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        /2 storage object\(s\) remain pending/i,
       );
     });
   });

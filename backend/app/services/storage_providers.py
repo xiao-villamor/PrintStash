@@ -46,6 +46,10 @@ class StorageProvider(BaseModel):
     documentation_url: str
     available: bool
     selectable: bool
+    # Product support is independent from the measured storage safety tier.
+    # Stable providers have the broadest lifecycle coverage; beta transports
+    # remain selectable only when their optional dependency is installed.
+    support_level: Literal["stable", "beta"] = "stable"
     disabled_reason: str | None = None
     fields: list[StorageFieldDescriptor]
 
@@ -355,6 +359,7 @@ def provider_catalogue() -> list[StorageProvider]:
             documentation_url="/docs/storage-providers.md#local",
             available=True,
             selectable=True,
+            support_level="stable",
             fields=[
                 _field(
                     "data_dir",
@@ -418,6 +423,7 @@ def provider_catalogue() -> list[StorageProvider]:
                 documentation_url=f"/docs/storage-providers.md#{provider_id}",
                 available=True,
                 selectable=True,
+                support_level="stable" if provider_id == "s3" else "beta",
                 fields=[*common_s3, *extras],
             )
         )
@@ -452,6 +458,7 @@ def provider_catalogue() -> list[StorageProvider]:
                 documentation_url=f"/docs/storage-providers.md#{provider_id}",
                 available=remote_available,
                 selectable=remote_available,
+                support_level="beta",
                 disabled_reason=remote_reason,
                 fields=remote_common,
             )
@@ -482,6 +489,7 @@ def provider_catalogue() -> list[StorageProvider]:
             documentation_url="/docs/storage-providers.md#sftp",
             available=sftp_available,
             selectable=sftp_available,
+            support_level="beta",
             disabled_reason=sftp_reason,
             fields=[
                 _field("host", "Host", "SFTP hostname"),
@@ -536,10 +544,10 @@ def render_storage_provider_docs() -> str:
     lines = [
         "# Storage providers",
         "",
-        "PrintStash probes the configured storage at startup. The expected tier below is guidance; `/api/v1/health` and Settings report the active probed tier.",
+        "PrintStash probes the configured storage at startup. Support maturity and storage safety are separate: the expected tier below is guidance, while `/api/v1/health` and Settings report the measured active tier.",
         "",
-        "| Provider | Category | Expected tier | Configuration fields |",
-        "| --- | --- | --- | --- |",
+        "| Provider | Category | Support | Expected tier | Configuration fields |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for provider in provider_catalogue():
         fields = ", ".join(
@@ -547,7 +555,7 @@ def render_storage_provider_docs() -> str:
             for field in provider.fields
         )
         lines.append(
-            f"| [{provider.label}](#{provider.id}) | {category_labels[provider.category]} | {provider.expected_tier.title()} | {fields} |"
+            f"| [{provider.label}](#{provider.id}) | {category_labels[provider.category]} | {provider.support_level.title()} | {provider.expected_tier.title()} | {fields} |"
         )
     lines.extend(
         [

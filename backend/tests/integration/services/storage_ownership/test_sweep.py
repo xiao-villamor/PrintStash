@@ -15,7 +15,10 @@ from sqlmodel import Session
 from app.db.models import OwnedStorageObject, StorageObjectState
 from app.services.storage_backend import (
     LocalStorageBackend,
+    ObjectIdentity,
+    StorageCapabilities,
     StorageObjectInfo,
+    StorageTier,
     get_backend,
 )
 from app.services.storage_ownership import sweep_orphaned_publications
@@ -92,6 +95,25 @@ class _ReclaimProbeBackend(LocalStorageBackend):
 
 class _MismatchedBackend(LocalStorageBackend):
     backend_name = "another-backend"
+
+
+class _GuardedBackend(LocalStorageBackend):
+    backend_name = "guarded-remote"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.NONE,
+            verified_delete=False,
+            conditional_replace=False,
+            namespace_ownership=True,
+            direct_path=False,
+        )
+
+    def object_info(self, key: str) -> StorageObjectInfo | None:
+        del key
+        return StorageObjectInfo(size=5, etag="etag")
 
 
 class TestSweepOrphanedPublications:
@@ -329,6 +351,32 @@ class TestSweepOrphanedPublications:
         assert result.blocked == 1
         assert row.state is StorageObjectState.BLOCKED
         assert row.last_error == "storage_backend_mismatch"
+
+    def test_guarded_backend_never_check_then_deletes_an_orphan(
+        self, db_session: Session
+    ) -> None:
+        backend = _GuardedBackend()
+        key = "remote/guarded-orphan"
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace="remote",
+            key=key,
+            object_kind="artifact",
+            state=StorageObjectState.PENDING,
+            size_bytes=5,
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        db_session.refresh(row)
+        assert backend.capabilities.tier is StorageTier.GUARDED
+        assert result.blocked == 1
+        assert row.state is StorageObjectState.BLOCKED
+        assert row.last_error == "storage_reclaim_unsupported"
+        assert db_session.get(OwnedStorageObject, row.id) is not None
 
     def test_reclaims_a_stale_versioned_reservation(self, db_session: Session) -> None:
         backend = _ReclaimProbeBackend(removed=True)

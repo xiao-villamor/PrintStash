@@ -57,6 +57,7 @@ import {
   createApiKey,
   createAdminUser,
   createBackup,
+  adoptLocalBackup,
   deactivateAdminUser,
   deleteCollectionPermission,
   deletePrinterPermission,
@@ -69,6 +70,7 @@ import {
   getLatestRelease,
   getVaultConfig,
   listBackups,
+  listUnownedLocalBackups,
   listCollectionPermissions,
   listCollections,
   listPrinterPermissions,
@@ -87,7 +89,7 @@ import {
   updateAdminUser,
   updateVaultConfig,
 } from "@/lib/api";
-import type { BackupMeta, ReleaseStatus } from "@/lib/api";
+import type { BackupMeta, ReleaseStatus, UnownedBackupCandidate } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useVaultStats } from "@/lib/queries";
 import {
@@ -129,15 +131,13 @@ import type {
   PrinterPermissionRead,
   PrinterRead,
   PrinterRole,
+  StorageCleanupStatus,
+  StorageHealthRead,
+  HealthResponse,
+  TrashPurgeRead,
   TrashedModelRead,
   UserRead,
 } from "@/types";
-
-interface HealthResponse {
-  status: string;
-  name: string;
-  version: string;
-}
 
 type SettingsSection =
   | "overview"
@@ -255,6 +255,25 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function storageHealthFrom(health: HealthResponse | null): StorageHealthRead | null {
+  return health?.components?.storage ?? health?.storage ?? null;
+}
+
+function cleanupStatusMessage(t: ReturnType<typeof useI18n>["t"], result: TrashPurgeRead): string {
+  const status: StorageCleanupStatus = result.storage_cleanup_status ?? "completed";
+  const retained = (result.storage_pending ?? 0) + (result.storage_blocked ?? 0);
+  switch (status) {
+    case "pending":
+      return t("settings.trashCleanupPending", { count: String(retained) });
+    case "blocked":
+      return t("settings.trashCleanupBlocked", { count: String(retained) });
+    case "partial":
+      return t("settings.trashCleanupPartial");
+    default:
+      return t("settings.trashCleanupCompleted");
+  }
+}
+
 // Consistent card shell used across every settings section.
 function SettingsCard({
   icon: Icon,
@@ -349,6 +368,7 @@ export function SettingsPanel() {
   const [extensionSetupReady, setExtensionSetupReady] = useState(false);
   const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
+  const [trashPurgeResult, setTrashPurgeResult] = useState<TrashPurgeRead | null>(null);
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
   const [autoMarkKnownGood, setAutoMarkKnownGood] = useState(true);
@@ -365,8 +385,11 @@ export function SettingsPanel() {
   const [trashStorageTier, setTrashStorageTier] = useState("verified");
   const [backingUp, setBackingUp] = useState(false);
   const [backups, setBackups] = useState<BackupMeta[]>([]);
+  const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
+  const [adoptTarget, setAdoptTarget] = useState<UnownedBackupCandidate | null>(null);
+  const [adoptingBackup, setAdoptingBackup] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
 
   const [downloadingBackup, setDownloadingBackup] = useState<string | null>(null);
@@ -431,6 +454,8 @@ export function SettingsPanel() {
       .then(setHealth)
       .catch(() => {});
   }, [user]);
+
+  const storageHealth = storageHealthFrom(health);
 
   const checkForUpdates = useCallback(
     async (refresh = false) => {
@@ -503,13 +528,35 @@ export function SettingsPanel() {
     }
     setBackupsLoading(true);
     try {
-      setBackups(await listBackups());
+      const [owned, unowned] = await Promise.allSettled([listBackups(), listUnownedLocalBackups()]);
+      if (owned.status === "rejected") throw owned.reason;
+      setBackups(owned.value);
+      // The discovery endpoint is additive. Older servers may return 404, in
+      // which case owned backups remain fully usable and the candidate panel
+      // simply stays empty.
+      setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
     } catch (e) {
       toast.error(e);
     } finally {
       setBackupsLoading(false);
     }
   }, [user]);
+
+  async function confirmAdoptBackup() {
+    if (!adoptTarget) return;
+    const target = adoptTarget;
+    setAdoptingBackup(true);
+    try {
+      await adoptLocalBackup(target.filename);
+      toast.success(t("settings.backupLegacyAdopted", { filename: target.filename }));
+      setAdoptTarget(null);
+      await loadBackups();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAdoptingBackup(false);
+    }
+  }
 
   useEffect(() => {
     if (activeSection === "storage") {
@@ -980,9 +1027,14 @@ export function SettingsPanel() {
     setPurgeTarget(null);
     setTrashBusy(id);
     try {
-      await purgeModel(id, trashStorageTier !== "verified");
+      const result = await purgeModel(id, trashStorageTier !== "verified");
       setTrashItems((current) => current.filter((item) => item.id !== id));
-      toast.success("Model permanently deleted.");
+      setTrashPurgeResult(result);
+      if (result.storage_cleanup_status === "completed") {
+        toast.success(cleanupStatusMessage(t, result));
+      } else {
+        toast.warning(cleanupStatusMessage(t, result));
+      }
     } catch (e) {
       toast.error(e);
     } finally {
@@ -995,9 +1047,13 @@ export function SettingsPanel() {
     setTrashBusy("expired");
     try {
       const result = await purgeExpiredTrash(trashStorageTier !== "verified");
-      toast.success(
-        `${result.purged_count} expired model${result.purged_count === 1 ? "" : "s"} deleted.`,
-      );
+      setTrashPurgeResult(result);
+      const summary = `${result.purged_count} expired model${result.purged_count === 1 ? "" : "s"} deleted.`;
+      if (result.storage_cleanup_status === "completed") {
+        toast.success(`${summary} ${cleanupStatusMessage(t, result)}`);
+      } else {
+        toast.warning(`${summary} ${cleanupStatusMessage(t, result)}`);
+      }
       await loadTrash();
     } catch (e) {
       toast.error(e);
@@ -1044,7 +1100,13 @@ export function SettingsPanel() {
     },
     {
       label: "Database",
-      value: health?.status === "ok" ? "Connected" : "Unknown",
+      value: health?.components?.database
+        ? health.components.database.ok
+          ? "Connected"
+          : "Unavailable"
+        : health?.status === "ok"
+          ? "Connected"
+          : "Unknown",
       desc: "SQLite by default, Postgres optional",
       icon: Database,
     },
@@ -1133,6 +1195,25 @@ export function SettingsPanel() {
           title="Restore backup?"
           description="This replaces the current database and stored files with the selected backup."
           confirmLabel="Restore"
+        />
+        <ConfirmModal
+          open={adoptTarget !== null}
+          onClose={() => {
+            if (!adoptingBackup) setAdoptTarget(null);
+          }}
+          onConfirm={confirmAdoptBackup}
+          busy={adoptingBackup}
+          title={t("settings.backupLegacyConfirmTitle")}
+          description={
+            adoptTarget
+              ? t("settings.backupLegacyConfirmDescription", {
+                  filename: adoptTarget.filename,
+                  files: String(adoptTarget.file_count),
+                  size: formatBytes(adoptTarget.size_bytes),
+                })
+              : ""
+          }
+          confirmLabel={t("settings.backupLegacyAdoptAction")}
         />
         <ConfirmModal
           open={printerImageWarningOpen}
@@ -1233,6 +1314,22 @@ export function SettingsPanel() {
 
             {activeSection === "overview" && (
               <div className="space-y-6 animate-panel-in">
+                {storageHealth && !storageHealth.ok && (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4"
+                  >
+                    <HardDrive className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {t("settings.storageUnavailableTitle")}
+                      </p>
+                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                        {t("settings.storageUnavailableDescription")}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 {/* KPI tiles */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                   {kpiItems.map((item) => {
@@ -2007,7 +2104,7 @@ export function SettingsPanel() {
 
             {activeSection === "storage" && (
               <div className="space-y-6 animate-panel-in">
-                <StorageConfigCard />
+                <StorageConfigCard storageHealth={storageHealth} />
                 <SettingsCard
                   icon={HardDrive}
                   title="Manual backup"
@@ -2054,60 +2151,103 @@ export function SettingsPanel() {
                       </p>
                     ) : backupsLoading ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">Loading...</p>
-                    ) : backups.length === 0 ? (
+                    ) : backups.length === 0 && unownedBackups.length === 0 ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">No backups found.</p>
                     ) : (
-                      backups.map((backup) => (
-                        <div
-                          key={backup.backup_id}
-                          className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[1fr_auto] lg:items-center"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-medium text-foreground">
-                                {formatDate(backup.created_at)}
+                      <>
+                        {unownedBackups.length > 0 && (
+                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {t("settings.backupLegacyTitle")}
                               </p>
-                              <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                {backup.location}
-                              </span>
-                              <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                v{backup.app_version}
-                              </span>
+                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                {t("settings.backupLegacyDescription")}
+                              </p>
                             </div>
-                            <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
-                              {backup.backup_id}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {backup.file_count} files · {formatBytes(backup.size_bytes)} ·{" "}
-                              {backup.storage_backend}
-                            </p>
+                            {unownedBackups.map((candidate) => (
+                              <div
+                                key={candidate.filename}
+                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-mono text-xs text-foreground">
+                                    {candidate.filename}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {candidate.file_count} files ·{" "}
+                                    {formatBytes(candidate.size_bytes)} · v{candidate.app_version} ·{" "}
+                                    {formatDate(candidate.created_at)}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdoptTarget(candidate)}
+                                  disabled={adoptingBackup || restoringBackup || backingUp}
+                                  className={BTN_SECONDARY}
+                                >
+                                  {t("settings.backupLegacyAdoptAction")}
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadBackup(backup.backup_id)}
-                              disabled={downloadingBackup !== null || restoringBackup || backingUp}
-                              className={BTN_SECONDARY}
-                            >
-                              {downloadingBackup === backup.backup_id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Download className="h-3.5 w-3.5" />
-                              )}
-                              Download
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setRestoreTarget(backup)}
-                              disabled={downloadingBackup !== null || restoringBackup || backingUp}
-                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              Restore
-                            </button>
+                        )}
+                        {backups.map((backup) => (
+                          <div
+                            key={backup.backup_id}
+                            className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[1fr_auto] lg:items-center"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-medium text-foreground">
+                                  {formatDate(backup.created_at)}
+                                </p>
+                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                                  {backup.location}
+                                </span>
+                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                                  v{backup.app_version}
+                                </span>
+                              </div>
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                {backup.backup_id}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {backup.file_count} files · {formatBytes(backup.size_bytes)} ·{" "}
+                                {backup.storage_backend}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2 lg:justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadBackup(backup.backup_id)}
+                                disabled={
+                                  downloadingBackup !== null || restoringBackup || backingUp
+                                }
+                                className={BTN_SECONDARY}
+                              >
+                                {downloadingBackup === backup.backup_id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                                Download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRestoreTarget(backup)}
+                                disabled={
+                                  downloadingBackup !== null || restoringBackup || backingUp
+                                }
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                Restore
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        ))}
+                      </>
                     )}
                   </div>
                 </SettingsCard>
@@ -2548,6 +2688,20 @@ export function SettingsPanel() {
                       {trashBusy === "expired" ? "Purging" : "Purge expired"}
                     </button>
                   </div>
+                  {trashPurgeResult && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className={cn(
+                        "border-t px-4 py-3 text-xs sm:px-5",
+                        (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
+                          ? "border-success/30 bg-success/10 text-success"
+                          : "border-warning/30 bg-warning/10 text-warning",
+                      )}
+                    >
+                      {cleanupStatusMessage(t, trashPurgeResult)}
+                    </div>
+                  )}
                 </SettingsCard>
 
                 <SettingsCard

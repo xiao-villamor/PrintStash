@@ -16,7 +16,7 @@ class FakeSettings:
     data_dir: Path
     thumb_dir: Path
     backup_dir: Path | None = None
-    storage_identity: str = "test-installation"
+    storage_identity: str = "a" * 64
 
 
 @pytest.fixture
@@ -33,5 +33,10 @@ def configured_backend(
     settings.thumb_dir.mkdir()
     assert settings.backup_dir is not None
     settings.backup_dir.mkdir()
+    for role, root in (("data", settings.data_dir), ("thumb", settings.thumb_dir)):
+        (root / ".printstash-storage-root.json").write_text(
+            '{"format":1,"installation":"%s","role":"%s"}' % ("a" * 64, role),
+            encoding="utf-8",
+        )
     monkeypatch.setattr(storage_backend, "settings", settings)
     return LocalStorageBackend()

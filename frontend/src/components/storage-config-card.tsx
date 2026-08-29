@@ -1,10 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Cloud, Key, RefreshCw, Save } from "lucide-react";
-import { getStorageProviders, getVaultConfig, updateVaultConfig } from "@/lib/api";
-import type { StorageProvider, VaultConfigRead, VaultConfigUpdate } from "@/types";
+import { AlertTriangle, Cloud, Key, RefreshCw, Save } from "lucide-react";
+import {
+  enrollStorageRoot,
+  getStorageProviders,
+  getVaultConfig,
+  updateVaultConfig,
+} from "@/lib/api";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
+import type {
+  StorageHealthRead,
+  StorageRootRole,
+  StorageProvider,
+  VaultConfigRead,
+  VaultConfigUpdate,
+} from "@/types";
 import { useRequireAuth } from "@/lib/use-require-auth";
+import { useI18n } from "@/lib/i18n";
+import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
 import {
   defaultProviderValues,
@@ -14,8 +28,9 @@ import {
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-export function StorageConfigCard() {
+export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHealthRead | null }) {
   const { isAuthenticated } = useRequireAuth();
+  const { t } = useI18n();
   const [cfg, setCfg] = useState<VaultConfigRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [providers, setProviders] = useState<StorageProvider[]>([]);
@@ -29,6 +44,8 @@ export function StorageConfigCard() {
   const [bkS3SecretKey, setBkS3SecretKey] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [enrollRole, setEnrollRole] = useState<StorageRootRole | null>(null);
+  const [enrolling, setEnrolling] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -117,6 +134,32 @@ export function StorageConfigCard() {
   }
 
   const canEdit = isAuthenticated;
+  const rootBindings = storageHealth?.diagnostics?.root_bindings ?? {};
+  const rootCandidates: Array<[StorageRootRole, string | undefined]> = [
+    ["data", cfg?.data_dir],
+    ["thumb", cfg?.thumb_dir],
+  ];
+  const enrollableRoots = rootCandidates.filter(
+    ([role, path]) => path && rootBindings[role] === "binding_missing",
+  );
+  const invalidRoots = rootCandidates.filter(
+    ([role, path]) =>
+      path && ["binding_mismatch", "binding_invalid", "missing"].includes(rootBindings[role] ?? ""),
+  );
+
+  async function confirmEnrollRoot() {
+    if (!enrollRole) return;
+    setEnrolling(true);
+    try {
+      await enrollStorageRoot(enrollRole);
+      toast.success(t("settings.storageEnrollSuccess"));
+      setEnrollRole(null);
+    } catch (error) {
+      toast.error(error);
+    } finally {
+      setEnrolling(false);
+    }
+  }
 
   return (
     <Localized>
@@ -136,6 +179,79 @@ export function StorageConfigCard() {
         </div>
 
         <div className="space-y-5 p-4 sm:p-5 lg:p-6">
+          {storageHealth && !storageHealth.ok && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {t("settings.storageWarningTitle")}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {t("settings.storageUnavailableDescription")}
+                </p>
+              </div>
+            </div>
+          )}
+          {invalidRoots.length > 0 && (
+            <div
+              role="alert"
+              className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3"
+            >
+              <p className="text-sm font-semibold text-foreground">
+                {t("settings.storageRootIdentityTitle")}
+              </p>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {t("settings.storageRootIdentityDescription")}
+              </p>
+              {invalidRoots.map(([role, path]) => (
+                <p key={role} className="font-mono text-xs text-foreground">
+                  {t("settings.storageRootLocation", {
+                    role: role === "data" ? "Data" : "Thumbnail",
+                    path: path ?? "",
+                    status: rootBindings[role] ?? "invalid",
+                  })}
+                </p>
+              ))}
+            </div>
+          )}
+          {enrollableRoots.length > 0 && (
+            <div className="space-y-3 rounded-lg border border-warning/30 bg-warning/10 p-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">
+                  {t("settings.storageEnrollTitle")}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  {t("settings.storageEnrollDescription")}
+                </p>
+              </div>
+              <div className="space-y-2">
+                {enrollableRoots.map(([role, path]) => (
+                  <div
+                    key={role}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-background/50 px-3 py-2"
+                  >
+                    <span className="font-mono text-xs text-foreground">
+                      {t("settings.storageRootPath", {
+                        role: role === "data" ? "Data" : "Thumbnail",
+                        path: path ?? "",
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded border border-warning/40 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10"
+                      onClick={() => setEnrollRole(role)}
+                      disabled={!canEdit || enrolling}
+                    >
+                      {t("settings.storageEnrollAction")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <StorageProviderPicker
             providers={providers}
             providerId={providerId}
@@ -291,6 +407,22 @@ export function StorageConfigCard() {
             <p className="text-xs text-muted-foreground italic">Sign in to modify configuration.</p>
           )}
         </div>
+        <ConfirmModal
+          open={enrollRole !== null}
+          onClose={() => {
+            if (!enrolling) setEnrollRole(null);
+          }}
+          onConfirm={() => void confirmEnrollRoot()}
+          busy={enrolling}
+          title={t("settings.storageEnrollConfirmTitle", {
+            role: enrollRole === "data" ? "data" : "thumbnail",
+          })}
+          description={t("settings.storageEnrollConfirmDescription", {
+            role: enrollRole === "data" ? "data" : "thumbnail",
+            path: enrollableRoots.find(([role]) => role === enrollRole)?.[1] ?? "configured path",
+          })}
+          confirmLabel={t("settings.storageEnrollConfirmAction")}
+        />
       </div>
     </Localized>
   );

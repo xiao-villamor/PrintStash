@@ -23,7 +23,27 @@ pnpm test:e2e:storage
 ```
 
 `playwright.storage.config.ts` owns a separate backend, Vite server, and
-loopback WebDAV server. CI runs both real-backend suites.
+loopback WebDAV server. The storage spec always runs the WsgiDAV contract. To
+enable the additional real-Nextcloud contract, provide a reachable URL (the
+storage launcher starts the official Apache image when Docker is available):
+
+```bash
+PLAYWRIGHT_STORAGE_NEXTCLOUD_URL=http://127.0.0.1:8780 pnpm test:e2e:storage
+```
+
+The launcher uses the same digest-pinned Nextcloud image and administrator
+credentials as the backend provider contract. The contract configures Nextcloud
+through Settings, restarts the API, verifies a non-empty remote G-code object,
+checks the confirmation guard, and asserts guarded purge returns `blocked` while
+the exact remote object remains. Without Docker or the URL it is reported as a
+deterministic Playwright skip rather than a false compatibility pass. CI runs
+both real-backend suites.
+
+The optional SFTP lifecycle uses the OpenSSH contract harness when
+`PLAYWRIGHT_STORAGE_SFTP_HOST` and `PLAYWRIGHT_STORAGE_SFTP_HOST_KEY` are set;
+the port, username, and password can be overridden with the corresponding
+`PLAYWRIGHT_STORAGE_SFTP_*` variables. It verifies guarded confirmation and a
+blocked retained cleanup outcome.
 
 `helpers.ts` seeds the first admin via `/setup` once and injects a real JWT into
 the browser, so tests boot authenticated. The suite runs serially on one DB, so

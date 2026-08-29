@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.api.v1 import taxonomy as taxonomy_router
+from app.core.config import _overlay
 from app.db.models import CollectionRole
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
@@ -23,6 +25,21 @@ from tests.factories import (
     build_user,
     grant_collection_role,
 )
+
+
+def _set_thumb_root(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / ".printstash-storage-root.json").write_text(
+        json.dumps(
+            {
+                "format": 1,
+                "installation": str(_overlay.get("storage_identity") or "a" * 64),
+                "role": "thumb",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _overlay["thumb_dir"] = path
 
 
 class TestListCollections:
@@ -396,9 +413,7 @@ class TestCollectionImages:
         auth_headers: dict[str, str],
         tmp_path: Path,
     ) -> None:
-        from app.core.config import _overlay
-
-        _overlay["thumb_dir"] = tmp_path / "thumbs"
+        _set_thumb_root(tmp_path / "thumbs")
         col = taxonomy.resolve_or_create_collection(db_session, "Imgs3")
         assert col is not None
         data = b"\x89PNG\r\n\x1a\nfake-png-bytes"
@@ -420,9 +435,7 @@ class TestCollectionImages:
         auth_headers: dict[str, str],
         tmp_path: Path,
     ) -> None:
-        from app.core.config import _overlay
-
-        _overlay["thumb_dir"] = tmp_path / "thumbs"
+        _set_thumb_root(tmp_path / "thumbs")
         col = taxonomy.resolve_or_create_collection(db_session, "Collision")
         data = b"\x89PNG\r\n\x1a\nincoming"
         name = f"{hashlib.sha256(data).hexdigest()}.png"

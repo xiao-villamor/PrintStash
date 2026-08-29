@@ -40,8 +40,19 @@ manufacturing platform.
 - Docker Compose is the recommended install path.
 - SQLite and local disk are the default path and the best-tested path for home
   installs.
+- Local data and thumbnail roots are bound to the installation with a role-specific
+  marker. If a configured mount is missing, has the wrong marker, or cannot prove
+  create-only publication, PrintStash keeps the installation available for
+  administration and readable data but blocks storage mutations. The unverified
+  storage acknowledgement does not bypass this identity check. A legacy markerless
+  root can be enrolled by a superuser only after verifying the exact role and path;
+  a mismatched marker must be fixed at the mount/configuration layer.
 - Postgres, S3/R2-compatible storage, SeaweedFS, and cloud backup targets are optional and
   should be treated as larger-install paths.
+- Storage support maturity is separate from the measured safety tier. Local storage
+  and the generic/native S3 path are stable. Cloudflare R2, Backblaze B2, Wasabi,
+  self-hosted S3 presets, Nextcloud, generic WebDAV, and SFTP are beta until their
+  real-service compatibility matrices and independent deployments are broader.
 - The built-in database backup and restore operation supports file-backed
   SQLite only. PostgreSQL installations must use operator-managed `pg_dump`
   and restore procedures; the backup API exposes this capability explicitly
@@ -96,6 +107,13 @@ manufacturing platform.
   STL/3MF/G-code blobs, secrets, API keys, or printer credentials.
 - Full backup/restore is available separately for moving or recovering an
   install.
+- Full backups include the database and PrintStash-managed primary/thumbnail
+  objects. Files referenced through an External Library remain at their external
+  paths and must be backed up separately by the operator.
+- Backup manifests bind managed objects to the storage provider and namespace they
+  came from. Restore does not silently retarget those objects to a different remote
+  namespace. Valid pre-ledger local backups require explicit superuser adoption
+  before they appear in the normal backup list.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a
   slicer-grade simulator and does not validate firmware-specific macros,
   acceleration, pressure advance, or printer safety.
@@ -140,6 +158,11 @@ manufacturing platform.
   declared member sizes, and manifest compatibility. It does not restore an
   individual blob or prove that every application-level database invariant is
   healthy.
+- A logical trash purge can complete while physical cleanup remains blocked. On a
+  provider that cannot prove an atomic quarantine or immutable object identity,
+  PrintStash retains the remote bytes and reports the cleanup as blocked instead of
+  risking deletion of replacement data. Scheduled purge never supplies the one-time
+  acknowledgement used by an administrator.
 
 ## Pending Imports And Facets
 

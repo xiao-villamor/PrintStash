@@ -12,6 +12,7 @@ from io import BytesIO
 
 import pytest
 
+from app.services import storage_backend
 from app.services.storage_backend import (
     S3StorageBackend,
     StorageCollisionError,
@@ -134,6 +135,22 @@ class TestS3Reclaim:
 
 
 class TestS3Namespace:
+    def test_uses_the_configured_normalized_prefix_for_all_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            storage_backend, "settings", type("S", (), {"s3_root": "tenant/vault"})()
+        )
+        backend = _bare_s3_backend(_MemoryS3Client())
+
+        assert backend._prefix() == "tenant/vault/"
+        assert backend.blob_key("model", 1, "part.stl") == (
+            "tenant/vault/files/model/v1/part.stl"
+        )
+        assert backend.namespace_for("tenant/vault/files/model/v1/part.stl") == (
+            "vault/tenant/vault/"
+        )
+
     def test_reports_the_managed_namespace_for_a_vault_key(self) -> None:
         backend = _bare_s3_backend(_MemoryS3Client())
 
@@ -173,6 +190,61 @@ class TestS3ObjectInfo:
 
 
 class TestS3CapabilityProbe:
+    def test_accepts_conditional_create_when_duplicate_is_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import botocore.exceptions
+
+        class _Client:
+            def __init__(self) -> None:
+                self.payload = b""
+
+            def put_object(self, **kwargs: object) -> None:
+                if self.payload:
+                    raise botocore.exceptions.ClientError(
+                        {"Error": {"Code": "PreconditionFailed"}}, "PutObject"
+                    )
+                self.payload = bytes(kwargs["Body"])
+
+            def get_object(self, **_kwargs: object) -> dict[str, BytesIO]:
+                return {"Body": BytesIO(self.payload)}
+
+            def delete_object(self, **_kwargs: object) -> None:
+                self.payload = b""
+
+        client = _Client()
+        backend = _bare_s3_backend(client)  # type: ignore[arg-type]
+        monkeypatch.setattr(
+            storage_backend, "settings", type("S", (), {"s3_root": "vault-data"})()
+        )
+
+        assert backend._probe_conditional_create() is True  # type: ignore[attr-defined]
+
+    def test_rejects_conditional_create_when_duplicate_is_overwritten(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _Client:
+            def __init__(self) -> None:
+                self.payload = b""
+
+            def put_object(self, **kwargs: object) -> None:
+                body = kwargs["Body"]
+                self.payload = bytes(body)
+
+            def get_object(self, **_kwargs: object) -> dict[str, BytesIO]:
+                return {"Body": BytesIO(self.payload)}
+
+            def delete_object(self, **_kwargs: object) -> None:
+                self.payload = b""
+
+        client = _Client()
+        backend = _bare_s3_backend(client)  # type: ignore[arg-type]
+        monkeypatch.setattr(
+            storage_backend, "settings", type("S", (), {"s3_root": "vault-data"})()
+        )
+
+        assert backend._probe_conditional_create() is False  # type: ignore[attr-defined]
+
     def test_records_a_versioning_probe_failure_as_guarded(self) -> None:
         class _Client:
             def get_bucket_versioning(self, **_kwargs: str) -> dict[str, object]:
@@ -187,4 +259,5 @@ class TestS3CapabilityProbe:
             "probed": True,
             "bucket_versioning": "unknown",
             "versioning_error": "OSError",
+            "conditional_create": True,
         }

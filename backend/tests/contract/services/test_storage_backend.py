@@ -22,7 +22,7 @@ from typing import Callable, Iterator
 import boto3
 import pytest
 
-from app.core.config import _overlay
+from app.core.config import _overlay, settings
 from app.services.storage_backend import (
     S3StorageBackend,
     StorageCollisionError,
@@ -428,6 +428,63 @@ class TestKeyDerivation:
         # Same id, two extensions. They must not collide, or the repair job that
         # regenerates a `.webp` overwrites the `.png` it is migrating from.
         assert s3_backend.thumbnail_key(7) != s3_backend.legacy_thumbnail_key(7)
+
+    def test_reads_a_literal_legacy_vault_data_object(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        """A v0.12 object remains readable before any migration rewrites it."""
+        key = "vault-data/files/legacy-model/v1/part.stl"
+        payload = b"released-v0.12.1-bytes"
+        s3_backend._client.put_object(Bucket=s3_backend._bucket, Key=key, Body=payload)
+
+        assert s3_backend.read_bytes(key) == payload
+        assert s3_backend.stat_size(key) == len(payload)
+
+    def test_composes_legacy_s3_config_on_the_literal_vault_data_prefix(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        """The pre-0.13 absent-root setting must remain readable in place."""
+        _overlay.pop("s3_root", None)
+        legacy = S3StorageBackend()
+        key = "vault-data/files/released-v0.12.1/v1/part.stl"
+        payload = b"legacy-s3-object"
+        legacy._client.put_object(Bucket=legacy._bucket, Key=key, Body=payload)
+
+        assert legacy._prefix() == "vault-data/"
+        assert legacy.blob_key("released-v0.12.1", 1, "part.stl") == key
+        assert legacy.read_bytes(key) == payload
+        assert key in legacy.list_keys()
+        assert all(item.startswith("vault-data/") for item in legacy.list_keys())
+
+    def test_isolates_two_typed_roots_in_one_s3_bucket(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        """Two installations sharing a bucket cannot list or read each other."""
+        bucket = s3_backend._bucket
+        endpoint = str(settings.s3_endpoint_url or "")
+        base = {
+            "s3_bucket": bucket,
+            "s3_endpoint_url": endpoint,
+            "s3_region": "us-east-1",
+            "s3_access_key": S3_ACCESS_KEY,
+            "s3_secret_key": S3_SECRET_KEY,
+        }
+        try:
+            _overlay.update({**base, "s3_root": "installation-a"})
+            first = S3StorageBackend()
+            _overlay["s3_root"] = "installation-b"
+            second = S3StorageBackend()
+            first_key = first.blob_key("shared", 1, "a.stl")
+            second_key = second.blob_key("shared", 1, "b.stl")
+            first.create_bytes(b"a", first_key)
+            second.create_bytes(b"b", second_key)
+
+            assert first_key in first.list_keys()
+            assert second_key not in first.list_keys()
+            assert second_key in second.list_keys()
+            assert first_key not in second.list_keys()
+        finally:
+            _overlay.pop("s3_root", None)
 
 
 class TestConstruction:

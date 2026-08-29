@@ -168,6 +168,19 @@ class TestSanitizedStorageProvider:
 
 
 class TestUpdateStorage:
+    def test_update_storage_does_not_create_missing_managed_roots(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        data_dir = tmp_path / "missing-files"
+        thumb_dir = tmp_path / "missing-thumbs"
+
+        runtime_config.update_storage(
+            db_session, data_dir=str(data_dir), thumb_dir=str(thumb_dir)
+        )
+
+        assert not data_dir.exists()
+        assert not thumb_dir.exists()
+
     def test_update_storage_persists_paths(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

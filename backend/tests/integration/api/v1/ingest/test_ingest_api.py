@@ -959,6 +959,7 @@ class TestIngestModel:
             "storage_completed": 2,
             "storage_pending": 0,
             "storage_blocked": 0,
+            "storage_cleanup_status": "completed",
             "resources_blocked": 0,
         }
         db_session.expire_all()

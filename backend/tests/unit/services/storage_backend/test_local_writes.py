@@ -13,10 +13,52 @@ from threading import Barrier, Thread
 import pytest
 
 from app.services import storage_backend
-from app.services.storage_backend import LocalStorageBackend, StorageCollisionError
+from app.services.storage_backend import (
+    LocalStorageBackend,
+    StorageCollisionError,
+    StorageConfigurationError,
+)
 
 
 class TestReplaceStream:
+    def test_rejects_a_pre_format_binding_without_implicit_enrollment(
+        self, configured_backend: LocalStorageBackend, tmp_path: Path
+    ) -> None:
+        marker = tmp_path / "files" / ".printstash-storage-root.json"
+        marker.write_text(
+            '{"installation":"%s","role":"data"}' % ("a" * 64),
+            encoding="utf-8",
+        )
+        destination = tmp_path / "files" / "legacy-marker.stl"
+
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.create_bytes(b"must-not-enroll", str(destination))
+
+        assert not destination.exists()
+
+    def test_sentinel_loss_blocks_all_mutations_but_keeps_reads(
+        self, configured_backend: LocalStorageBackend, tmp_path: Path
+    ) -> None:
+        destination = tmp_path / "files" / "sentinel-loss.stl"
+        receipt = configured_backend.create_bytes(b"owned", str(destination))
+        marker = tmp_path / "files" / ".printstash-storage-root.json"
+        marker.unlink()
+
+        assert configured_backend.read_bytes(str(destination)) == b"owned"
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.create_bytes(b"new", str(tmp_path / "files" / "new.stl"))
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.replace_bytes(b"replacement", receipt)
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.rollback_create(receipt)
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.adopt_existing(
+                str(destination), expected_size=5, expected_sha256="0" * 64
+            )
+        with pytest.raises(StorageConfigurationError, match="storage_root_unavailable"):
+            configured_backend.verify_destructive_access([str(destination)])
+        assert destination.read_bytes() == b"owned"
+
     def test_explicit_replace_requires_current_creation_receipt(
         self, configured_backend: LocalStorageBackend, tmp_path: Path
     ) -> None:
@@ -125,6 +167,33 @@ class TestCreateOnlyWrites:
 
 
 class TestCreateStream:
+    def test_mount_marker_swap_during_publication_fails_closed(
+        self,
+        configured_backend: LocalStorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        destination = tmp_path / "files" / "mount-swap.stl"
+        marker = tmp_path / "files" / ".printstash-storage-root.json"
+        real_link = storage_backend.os.link
+
+        def swap_marker_before_publication(source, target, **kwargs):
+            marker.write_text(
+                '{"format":1,"installation":"wrong-mount","role":"data"}',
+                encoding="utf-8",
+            )
+            return real_link(source, target, **kwargs)
+
+        monkeypatch.setattr(storage_backend.os, "link", swap_marker_before_publication)
+
+        with pytest.raises(StorageConfigurationError, match="storage_root_changed"):
+            configured_backend.create_bytes(b"must-reconcile", str(destination))
+
+        # The descriptor-relative write never reaches another root.  The
+        # published bytes remain available for ownership reconciliation after
+        # the failed acknowledgement.
+        assert destination.read_bytes() == b"must-reconcile"
+
     def test_returns_a_receipt_for_the_bytes_it_wrote(
         self, configured_backend: LocalStorageBackend, tmp_path: Path
     ) -> None:

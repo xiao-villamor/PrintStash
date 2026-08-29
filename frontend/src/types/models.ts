@@ -190,6 +190,57 @@ export interface TrashedModelRead {
 export interface TrashPurgeRead {
   purged_model_ids: number[];
   purged_count: number;
+  /** The physical-storage outcome after the catalog rows were purged. */
+  storage_cleanup_status?: StorageCleanupStatus;
+  storage_completed?: number;
+  storage_pending?: number;
+  storage_blocked?: number;
+}
+
+export type StorageCleanupStatus = "completed" | "pending" | "blocked" | "partial";
+
+function isStorageCleanupStatus(value: string | null | undefined): value is StorageCleanupStatus {
+  return value === "completed" || value === "pending" || value === "blocked" || value === "partial";
+}
+
+/**
+ * Normalize responses from pre-0.13 servers and derive a useful status when a
+ * rolling upgrade returns the legacy counters without the new discriminator.
+ */
+export function normalizeTrashPurgeRead(
+  value: Partial<TrashPurgeRead> | null | undefined,
+): TrashPurgeRead & { storage_cleanup_status: StorageCleanupStatus } {
+  const payload = value ?? {};
+  const completed = payload.storage_completed ?? 0;
+  const pending = payload.storage_pending ?? 0;
+  const blocked = payload.storage_blocked ?? 0;
+  const hasMixedOutcome =
+    (completed > 0 && (pending > 0 || blocked > 0)) || (pending > 0 && blocked > 0);
+  const explicitStatus = payload.storage_cleanup_status;
+
+  let status: StorageCleanupStatus;
+  if (isStorageCleanupStatus(explicitStatus)) {
+    status = explicitStatus;
+  } else if (completed === 0 && pending === 0 && blocked === 0) {
+    status = "completed";
+  } else if (hasMixedOutcome) {
+    status = "partial";
+  } else if (blocked > 0) {
+    status = "blocked";
+  } else if (pending > 0) {
+    status = "pending";
+  } else {
+    status = "completed";
+  }
+
+  return {
+    purged_model_ids: payload.purged_model_ids ?? [],
+    purged_count: payload.purged_count ?? 0,
+    storage_completed: completed,
+    storage_pending: pending,
+    storage_blocked: blocked,
+    storage_cleanup_status: status,
+  };
 }
 
 export interface ModelBatchFailure {

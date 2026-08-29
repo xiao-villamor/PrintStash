@@ -21,13 +21,13 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StorageConfigCard } from "@/components/storage-config-card";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { StorageProvider, VaultConfigRead } from "@/types";
+import type { StorageHealthRead, StorageProvider, VaultConfigRead } from "@/types";
 
 const PROVIDERS: StorageProvider[] = [
   {
@@ -218,9 +218,11 @@ function anS3Config(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
   });
 }
 
-function renderCard(options: RenderAppOptions & { config?: VaultConfigRead } = {}) {
-  const { config = aConfig(), routes = {}, ...rest } = options;
-  return renderApp(<StorageConfigCard />, {
+function renderCard(
+  options: RenderAppOptions & { config?: VaultConfigRead; storageHealth?: StorageHealthRead } = {},
+) {
+  const { config = aConfig(), storageHealth, routes = {}, ...rest } = options;
+  return renderApp(<StorageConfigCard storageHealth={storageHealth} />, {
     routes: {
       "GET /api/v1/config": json(config),
       "GET /api/v1/storage/providers": json(PROVIDERS),
@@ -241,6 +243,70 @@ afterEach(() => {
 
 describe("StorageConfigCard", () => {
   describe("a local deployment", () => {
+    it("explains a missing root without offering unsafe acknowledgement", async () => {
+      renderCard({
+        storageHealth: {
+          ok: false,
+          provider: "local",
+          tier: "guarded",
+          diagnostics: { root_bindings: { data: "binding_missing" } },
+        },
+      });
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Storage needs attention");
+      expect(alert).toHaveTextContent("Do not acknowledge this warning");
+    });
+
+    it("offers explicit enrollment for a missing legacy marker", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderCard({
+        storageHealth: {
+          ok: false,
+          provider: "local",
+          tier: "guarded",
+          data_dir: "/data/files",
+          diagnostics: { root_bindings: { data: "binding_missing" } },
+        },
+        routes: {
+          "POST /api/v1/config/storage-roots/enroll": json({
+            enrolled: true,
+            role: "data",
+            restart_required: true,
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Review and enroll" }));
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toHaveTextContent("/data/files");
+      expect(dialog).toHaveTextContent("wrong disk");
+      await user.click(within(dialog).getByRole("button", { name: "Enroll root" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) => call.url.includes("storage-roots/enroll")),
+        ).toBe(true),
+      );
+      expect(await screen.findByText(/Storage root enrolled/i)).toBeVisible();
+    });
+
+    it("does not offer enrollment when the root binding mismatches", async () => {
+      renderCard({
+        storageHealth: {
+          ok: false,
+          provider: "local",
+          tier: "guarded",
+          data_dir: "/data/files",
+          diagnostics: { root_bindings: { data: "binding_mismatch" } },
+        },
+      });
+
+      await screen.findAllByRole("alert");
+      expect(screen.queryByRole("button", { name: "Review and enroll" })).toBeNull();
+      expect(screen.getByText(/binding_mismatch/)).toBeInTheDocument();
+    });
+
     it("shows where artifacts are written", async () => {
       renderCard();
 

@@ -19,6 +19,7 @@ from app.services.storage_backend import (
     CreationReceipt,
     StorageBackend,
     StorageCollisionError,
+    StorageTier,
 )
 
 logger = get_logger(__name__)
@@ -350,6 +351,16 @@ def sweep_orphaned_publications(
         if row.backend != backend.backend_name:
             row.state = StorageObjectState.BLOCKED
             row.last_error = "storage_backend_mismatch"
+            session.add(row)
+            blocked += 1
+            continue
+        # A content check followed by a remote delete is not an ownership
+        # proof on Guarded transports: another writer can replace the key in
+        # between. Retain the bytes and make the operator's reauthorization
+        # requirement durable until the provider can prove quarantine/delete.
+        if backend.capabilities.tier is not StorageTier.VERIFIED:
+            row.state = StorageObjectState.BLOCKED
+            row.last_error = "storage_reclaim_unsupported"
             session.add(row)
             blocked += 1
             continue

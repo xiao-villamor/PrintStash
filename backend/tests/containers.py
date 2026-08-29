@@ -32,6 +32,7 @@ check only fires for markers a *selected* test carries.
 
 from __future__ import annotations
 
+import subprocess
 from typing import Any, Callable, NoReturn
 
 import pytest
@@ -55,6 +56,20 @@ SEAWEEDFS_READY_LOG = "Start Seaweed S3 API"
 
 S3_RESOURCE = "SeaweedFS (the S3 endpoint)"
 POSTGRES_RESOURCE = "PostgreSQL"
+NEXTCLOUD_RESOURCE = "Nextcloud WebDAV"
+OPENSSH_RESOURCE = "OpenSSH/SFTP"
+
+# Provider contract pins. Keep these immutable: updating a digest is a
+# deliberate provider compatibility change and requires rerunning the contract
+# lifecycle (setup, restart, upload, trash, purge).
+NEXTCLOUD_IMAGE = (
+    "nextcloud:29.0.4-apache"
+    "@sha256:37d77a1857563d26f7c9a6dc8cdc306ef1118b66f0485bbf457d2f9c1d86e6ed"
+)
+OPENSSH_IMAGE = (
+    "lscr.io/linuxserver/openssh-server"
+    "@sha256:f5d2155439a0ea4c1b8e173bc36a8bd0be76c3524e4eac3c3b44f67b45fd32ea"
+)
 
 POSTGRES_IMAGE = "postgres:16-alpine"
 POSTGRES_USER = "printstash"
@@ -175,6 +190,70 @@ def postgres_url() -> str:
 def s3_endpoint() -> str:
     """A real S3-compatible endpoint URL. Raises when Docker is not running."""
     return _resolve("s3", S3_RESOURCE, _start_seaweedfs)
+
+
+def _start_nextcloud() -> str:
+    """Start the pinned Nextcloud WebDAV provider for opt-in contracts."""
+    from testcontainers.core.container import DockerContainer
+    from testcontainers.core.wait_strategies import HttpWaitStrategy
+
+    container = (
+        DockerContainer(NEXTCLOUD_IMAGE)
+        .with_env("SQLITE_DATABASE", "nextcloud")
+        .with_env("NEXTCLOUD_ADMIN_USER", "admin")
+        .with_env("NEXTCLOUD_ADMIN_PASSWORD", "contract-only")
+        .with_exposed_ports(80)
+        .waiting_for(
+            HttpWaitStrategy(80, "/status.php").with_startup_timeout(STARTUP_TIMEOUT_S)
+        )
+    )
+    container.start()
+    _started.append(container)
+    return (
+        f"http://{container.get_container_host_ip()}:{container.get_exposed_port(80)}"
+    )
+
+
+def _start_openssh() -> tuple[str, int, str]:
+    """Start the pinned OpenSSH provider for opt-in SFTP contracts."""
+    from testcontainers.core.container import DockerContainer
+    from testcontainers.core.wait_strategies import PortWaitStrategy
+
+    container = (
+        DockerContainer(OPENSSH_IMAGE)
+        .with_env("USER_NAME", "contract")
+        .with_env("USER_PASSWORD", "contract-only")
+        .with_env("PASSWORD_ACCESS", "true")
+        .with_env("SUDO_ACCESS", "false")
+        .with_exposed_ports(2222)
+        .waiting_for(PortWaitStrategy(2222).with_startup_timeout(STARTUP_TIMEOUT_S))
+    )
+    container.start()
+    _started.append(container)
+    host = container.get_container_host_ip()
+    port = int(container.get_exposed_port(2222))
+    try:
+        known_hosts = subprocess.check_output(
+            ["ssh-keyscan", "-p", str(port), host],
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("ssh-keyscan is required for pinned SFTP contracts") from exc
+    if not known_hosts.strip():
+        raise RuntimeError("OpenSSH did not publish a host key")
+    return host, port, known_hosts
+
+
+def nextcloud_endpoint() -> str:
+    """A pinned Nextcloud endpoint; Docker absence is a hard test error."""
+    return _resolve("nextcloud", NEXTCLOUD_RESOURCE, _start_nextcloud)
+
+
+def openssh_endpoint() -> tuple[str, int, str]:
+    """A pinned OpenSSH endpoint; Docker absence is a hard test error."""
+    return _resolve("openssh", OPENSSH_RESOURCE, _start_openssh)
 
 
 def shutdown_containers() -> None:

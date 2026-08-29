@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import _overlay
 from app.services import backup
 from tests.integration._backup_harness import BackupEnv, seed_model_with_blob
 
@@ -237,3 +238,79 @@ class TestVerifyBackup:
             f["code"] == "backup_manifest_invalid" and f["member"] == "archive"
             for f in result.findings
         )
+
+
+class TestRestoreJournalV2:
+    def test_upgrades_a_matching_v1_journal_forward_only(self, tmp_path: Path) -> None:
+        path = tmp_path / ".restore-abc.journal"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 1,
+                    "backup_id": "abc",
+                    "archive_sha256": "archive-hash",
+                    "backend": "local",
+                    "namespaces": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        state = backup._prepare_restore_journal(  # noqa: SLF001
+            path,
+            backup_id="abc",
+            archive_sha256="archive-hash",
+            blobs=[],
+        )
+
+        assert state.started["version"] == 1
+        events = [json.loads(line) for line in path.read_text().splitlines()]
+        assert events[-1]["event"] == "journal_upgrade"
+        assert events[-1]["backup_id"] == "abc"
+        assert events[-1]["from_version"] == 1
+        assert events[-1]["to_version"] == 2
+        assert isinstance(events[-1]["operation_nonce"], str)
+        assert len(events[-1]["operation_nonce"]) == 64
+        assert events[-1]["archive_sha256"] == "archive-hash"
+
+    def test_interrupted_journal_gates_mutations_across_restart(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / ".restore-resume.journal"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 2,
+                    "backup_id": "resume",
+                    "archive_sha256": "a" * 64,
+                    "operation_nonce": "b" * 64,
+                    "backend": "local",
+                    "namespaces": [],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        _overlay["backup_dir"] = tmp_path
+        backup._restore_gate.clear()
+        try:
+            assert backup.inspect_restore_recovery() is True
+            assert backup.restore_in_progress() is True
+            assert backup.unresolved_restore_backup_id() == "resume"
+        finally:
+            backup._restore_gate.clear()
+            _overlay.pop("backup_dir", None)
+
+    def test_invalid_journal_allows_no_restore_bypass(self, tmp_path: Path) -> None:
+        (tmp_path / ".restore-unknown.journal").write_text("not-json\n")
+        _overlay["backup_dir"] = tmp_path
+        backup._restore_gate.clear()
+        try:
+            assert backup.inspect_restore_recovery() is True
+            assert backup.unresolved_restore_backup_id() is None
+        finally:
+            backup._restore_gate.clear()
+            _overlay.pop("backup_dir", None)

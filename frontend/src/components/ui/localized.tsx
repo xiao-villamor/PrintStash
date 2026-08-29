@@ -4,6 +4,7 @@ import { Children, cloneElement, isValidElement, useEffect, useRef, type ReactNo
 import { useI18n, useOptionalI18n, type Locale } from "@/lib/i18n";
 
 const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
+  ["Support:", "Compatibilidad:"],
   ["Restore captured value", "Restaurar valor capturado"],
   ["Restore captured value?", "¿Restaurar el valor capturado?"],
   [

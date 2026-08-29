@@ -10,6 +10,7 @@ SQLModel/SQLAlchemy's column descriptors confuse static type checkers. They
 are correct at runtime.
 """
 
+import secrets
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -1225,6 +1226,10 @@ class SystemConfig(SQLModel, table=True):
 
     id: Optional[int] = Field(default=1, primary_key=True)
 
+    # Random installation identity used to bind managed filesystem roots to
+    # this database. It is generated once and never derived from a path.
+    storage_identity: Optional[str] = Field(default=None, max_length=64, index=True)
+
     # Local storage paths (overridden at runtime)
     data_dir: Optional[str] = Field(default=None, max_length=1024)
     thumb_dir: Optional[str] = Field(default=None, max_length=1024)
@@ -1439,6 +1444,16 @@ class StorageDeleteIntent(SQLModel, table=True):
     ctime_ns: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
+    # The authorization decision is durable: a retry after process death must
+    # not reinterpret a one-shot guarded confirmation as a verified delete (or
+    # vice versa).
+    authorization_mode: str = Field(default="verified", max_length=16, index=True)
+    authorized_actor_id: Optional[int] = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    authorized_at: datetime = Field(default_factory=utcnow, index=True)
+    quarantine_key: Optional[str] = Field(default=None, max_length=2048)
+    quarantine_state: str = Field(default="none", max_length=16)
     resource_kind: Optional[str] = Field(default=None, max_length=64, index=True)
     resource_id: Optional[str] = Field(default=None, max_length=64, index=True)
     status: str = Field(default="pending", max_length=16, index=True)
@@ -1448,6 +1463,26 @@ class StorageDeleteIntent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow)
     completed_at: Optional[datetime] = None
+
+
+class RestoreMarker(SQLModel, table=True):
+    """Durable point-of-no-return marker carried by a restored database."""
+
+    __tablename__ = "restore_markers"
+    __table_args__ = (
+        UniqueConstraint("backup_id", name="uq_restore_marker_backup"),
+        UniqueConstraint("operation_nonce", name="uq_restore_marker_nonce"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    backup_id: str = Field(max_length=255, index=True)
+    operation_nonce: str = Field(
+        default_factory=lambda: secrets.token_hex(32), max_length=64, index=True
+    )
+    archive_sha256: str = Field(default="", max_length=64, index=True)
+    state: str = Field(default="database_active", max_length=32, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 class ExternalLibraryCollectionMode(str, Enum):

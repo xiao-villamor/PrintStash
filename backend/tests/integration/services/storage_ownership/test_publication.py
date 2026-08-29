@@ -13,8 +13,9 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.db.models import OwnedStorageObject, StorageObjectState, User
+from app.db.models import FileType, OwnedStorageObject, StorageObjectState, User
 from app.db.session import _set_sqlite_pragmas, get_session_factory
+from app.services.ingestion import _resolve_committed_artifact
 from app.services.storage_backend import (
     CreationReceipt,
     LocalStorageBackend,
@@ -26,9 +27,10 @@ from app.services.storage_ownership import (
     publish_bytes,
     publish_file,
     publish_stream,
+    record_creation,
     reserve_creation,
 )
-from tests.factories import build_user
+from tests.factories import build_file, build_model, build_user
 
 
 class _FailingLocalStorageBackend(LocalStorageBackend):
@@ -38,6 +40,44 @@ class _FailingLocalStorageBackend(LocalStorageBackend):
 
 
 class TestPublishBytes:
+    def test_fresh_session_resolves_a_committed_artifact_after_ack_failure(
+        self, db_session: Session
+    ) -> None:
+        backend = get_backend()
+        model = build_model(db_session, "Ack proof")
+        assert model.id is not None
+        key = backend.blob_key("commit-proof", 1, "part.stl")
+        payload = b"committed-after-ack-loss"
+        receipt = backend.create_bytes(payload, key)
+        record_creation(
+            db_session,
+            receipt,
+            object_kind="artifact",
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        build_file(
+            db_session,
+            model,
+            path=key,
+            filename="part.stl",
+            file_type=FileType.STL,
+            version=1,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        db_session.commit()
+
+        resolved = _resolve_committed_artifact(
+            backend=backend,
+            key=key,
+            model_id=model.id,
+            blob_hash=hashlib.sha256(payload).hexdigest(),
+            ingestion_key=None,
+        )
+
+        assert resolved is not None
+        assert resolved.path == key
+
     @pytest.mark.parametrize(
         ("object_kind", "key_method", "arguments"),
         [

@@ -18,6 +18,7 @@ export type {
   ListModelPageParams,
   TrashedModelRead,
   TrashPurgeRead,
+  StorageCleanupStatus,
   ModelBatchFailure,
   ModelBatchResult,
   RevisionBatchResult,
@@ -67,6 +68,15 @@ export type {
   PrinterProfileUpdate,
   PrintSummaryRead,
 } from "./models";
+
+export { normalizeTrashPurgeRead } from "./models";
+
+export type {
+  HealthResponse,
+  StorageHealthRead,
+  StorageRootRole,
+  StorageRootEnrollmentRead,
+} from "./config";
 
 export type {
   ProviderJsonValue,

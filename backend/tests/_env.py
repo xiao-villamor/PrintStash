@@ -18,6 +18,7 @@ end state it expects.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -38,6 +39,19 @@ def use_local_storage(tmp_path: Path) -> Path:
     (tmp_path / "files").mkdir(parents=True, exist_ok=True)
     (tmp_path / "thumbs").mkdir(parents=True, exist_ok=True)
     (tmp_path / "staging" / "_incoming").mkdir(parents=True, exist_ok=True)
+    # Local production roots are never implicitly enrolled. Test helpers model
+    # an already-installed vault by writing the same durable binding marker
+    # that setup/migration creates.
+    installation = str(_overlay.get("storage_identity", "a" * 64))
+    for role in ("data", "thumb"):
+        (
+            tmp_path
+            / ("files" if role == "data" else "thumbs")
+            / ".printstash-storage-root.json"
+        ).write_text(
+            json.dumps({"format": 1, "installation": installation, "role": role}),
+            encoding="utf-8",
+        )
     return tmp_path
 
 

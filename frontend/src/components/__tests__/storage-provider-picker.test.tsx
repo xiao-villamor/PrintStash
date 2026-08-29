@@ -124,6 +124,38 @@ describe("StorageProviderPicker", () => {
     expect(tier.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("shows support maturity separately from storage safety", () => {
+    render(
+      <StorageProviderPicker
+        providers={providers}
+        providerId="webdav"
+        values={{}}
+        onProviderChange={vi.fn<(provider: StorageProvider) => void>()}
+        onValueChange={vi.fn<(name: string, value: string | number) => void>()}
+      />,
+    );
+
+    expect(screen.getByText("Support: Stable")).toBeInTheDocument();
+    expect(screen.getByText("Expected: Guarded")).toBeInTheDocument();
+  });
+
+  it("labels beta support without changing the expected tier", () => {
+    render(
+      <StorageProviderPicker
+        providers={providers.map((item) =>
+          item.id === "webdav" ? { ...item, support_level: "beta" } : item,
+        )}
+        providerId="webdav"
+        values={{}}
+        onProviderChange={vi.fn<(provider: StorageProvider) => void>()}
+        onValueChange={vi.fn<(name: string, value: string | number) => void>()}
+      />,
+    );
+
+    expect(screen.getByText("Support: Beta")).toBeInTheDocument();
+    expect(screen.getByText("Expected: Guarded")).toBeInTheDocument();
+  });
+
   it("disables unavailable providers with an actionable reason", async () => {
     render(
       <StorageProviderPicker

@@ -16,6 +16,17 @@ from app.services.storage_backend import LocalStorageBackend, StorageCollisionEr
 
 
 class TestLocalNamespaces:
+    def test_direct_adapter_identity_is_256_bit_when_unconfigured(
+        self,
+        configured_backend: LocalStorageBackend,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(storage_backend.settings, "storage_identity", "")
+
+        assert len(configured_backend._installation_identity()) == 64
+        monkeypatch.setattr(storage_backend.settings, "storage_identity", "malformed")
+        assert len(configured_backend._installation_identity()) == 64
+
     @pytest.mark.parametrize(
         "key_kind",
         [
@@ -112,6 +123,32 @@ class TestLocalKeyDerivation:
 
 
 class TestLocalReclaim:
+    def test_reclaim_pins_the_original_inode_before_a_path_replacement(
+        self,
+        configured_backend: LocalStorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        destination = tmp_path / "files" / "reclaim-race.bin"
+        destination.write_bytes(b"owned")
+        real_rename = storage_backend.os.rename
+
+        def replace_after_pin(source, target, **kwargs):
+            replacement = destination.with_name("replacement.bin")
+            replacement.write_bytes(b"other")
+            storage_backend.os.replace(replacement, destination)
+            return real_rename(source, target, **kwargs)
+
+        monkeypatch.setattr(storage_backend.os, "rename", replace_after_pin)
+
+        assert (
+            configured_backend.reclaim_unverified(
+                str(destination), expected_size=5, expected_etag=None
+            )
+            is False
+        )
+        assert destination.read_bytes() == b"other"
+
     def test_treats_a_missing_object_as_reclaimed(
         self, configured_backend: LocalStorageBackend, tmp_path: Path
     ) -> None:

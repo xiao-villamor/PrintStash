@@ -134,6 +134,40 @@ export interface VaultConfigUpdate {
 
 export type StorageTier = "verified" | "guarded" | "unguarded";
 
+export interface StorageHealthRead {
+  ok: boolean;
+  backend?: string | null;
+  provider?: string | null;
+  data_dir?: string | null;
+  thumb_dir?: string | null;
+  tier?: StorageTier | string | null;
+  warnings?: string[];
+  diagnostics?: {
+    root_bindings?: Record<string, string>;
+    roots_ready?: boolean;
+    probed?: boolean;
+  };
+}
+
+export type StorageRootRole = "data" | "thumb";
+
+export interface StorageRootEnrollmentRead {
+  enrolled: boolean;
+  role: StorageRootRole;
+  restart_required: boolean;
+}
+
+export interface HealthResponse {
+  status: string;
+  name: string;
+  version: string;
+  storage?: StorageHealthRead;
+  components?: {
+    database?: { ok: boolean };
+    storage?: StorageHealthRead;
+  };
+}
+
 export type StorageProviderConfigValue = string | number | string[];
 export type StorageProviderConfigValues = Record<string, StorageProviderConfigValue>;
 
@@ -160,6 +194,8 @@ export interface StorageProvider {
   documentation_url: string;
   available: boolean;
   selectable: boolean;
+  /** Product maturity, independent from the measured storage safety tier. */
+  support_level?: "stable" | "beta" | string;
   disabled_reason?: string | null;
   fields: StorageProviderField[];
 }

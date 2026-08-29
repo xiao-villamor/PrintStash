@@ -50,5 +50,7 @@ def downgrade() -> None:
             "state",
             existing_type=sa.String(length=16),
             existing_nullable=False,
-            server_default="PENDING",
+            # StorageObjectState values are lowercase on every supported
+            # dialect. Keep downgrade compatible with the predecessor schema.
+            server_default="pending",
         )

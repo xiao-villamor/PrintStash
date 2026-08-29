@@ -17,10 +17,15 @@ One physical stored blob (STL/3MF/OBJ/G-code) at a version under a Model.
 _Avoid_: upload, attachment
 
 **Artifact persistence**:
-The invariant-heavy sequence `version → canonical move → File row →
-thumbnail → Metadata`, owned solely by `services/ingestion.persist_artifact`.
-Both background ingestion and revision attachment call it; nothing else
-re-implements it.
+The invariant-heavy sequence `version → canonical publication → File row +
+Metadata + committed ownership`, owned solely by
+`services/ingestion.persist_artifact`. That primary boundary is atomic: once
+the database commit begins, uncertain outcomes preserve the published bytes and
+their ownership evidence for reconciliation rather than deleting them.
+Thumbnails are retryable derivatives published after the primary transaction;
+their failure never invalidates an otherwise complete Artifact. Both background
+ingestion and revision attachment call this service; nothing else re-implements
+it.
 
 **Revision**:
 A G-code Artifact with test-outcome bookkeeping (label, status, notes,

@@ -57,6 +57,16 @@ from tests.factories import build_file, build_model, build_print_job
 def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
     _overlay["data_dir"] = tmp_path / "files"
     _overlay["thumb_dir"] = tmp_path / "thumbs"
+    installation = str(_overlay.get("storage_identity") or "a" * 64)
+    for role, root in (
+        ("data", _overlay["data_dir"]),
+        ("thumb", _overlay["thumb_dir"]),
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / ".printstash-storage-root.json").write_text(
+            json.dumps({"format": 1, "installation": installation, "role": role}),
+            encoding="utf-8",
+        )
     user = db.exec(select(User)).first()
     assert user is not None
     model = build_model(

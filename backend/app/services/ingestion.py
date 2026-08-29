@@ -27,11 +27,13 @@ from app.db.models import (
     Metadata,
     Model,
     ModelTagLink,
+    OwnedStorageObject,
     StagingLease,
+    StorageObjectState,
     User,
 )
 from app.db.scopes import live
-from app.db.session import SessionFactory
+from app.db.session import SessionFactory, get_session_factory
 from app.services import gcode_parser, rbac, storage, taxonomy, thumbnail
 from app.services.hashing import sha256_file
 from app.services.jobs import registry
@@ -88,8 +90,48 @@ class ThumbnailDurabilityError(RuntimeError):
     """A thumbnail reported as generated is not visible in storage."""
 
 
+class ArtifactCommitUncertain(RuntimeError):
+    """The domain commit outcome is unknown; storage evidence was preserved."""
+
+
 def _fault_injection_checkpoint(_stage: str, _job_id: str) -> None:
     """Stable monkeypatch seam for commit-boundary regression tests."""
+
+
+def _resolve_committed_artifact(
+    *,
+    backend,
+    key: str,
+    model_id: int,
+    blob_hash: str,
+    ingestion_key: str | None,
+) -> File | None:
+    """Resolve a commit acknowledgement failure without touching the blob."""
+    with get_session_factory().session() as verification:
+        ownership = verification.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.backend == backend.backend_name,
+                OwnedStorageObject.namespace == backend.namespace_for(key),
+                OwnedStorageObject.key == key,
+                OwnedStorageObject.state == StorageObjectState.COMMITTED,
+            )
+        ).first()
+        if ownership is None:
+            return None
+        statement = select(File).where(
+            File.model_id == model_id,
+            File.path == key,
+            File.sha256 == blob_hash,
+        )
+        if ingestion_key is not None:
+            statement = statement.where(File.ingestion_key == ingestion_key)
+        candidate = verification.exec(statement).first()
+        if candidate is None:
+            return None
+        # Return a detached copy; the caller's failed transaction must not be
+        # reused after the acknowledgement boundary.
+        verification.expunge(candidate)
+        return candidate
 
 
 def _attach_ingested_artifact(
@@ -373,6 +415,8 @@ def persist_artifact(
         )
     )
     blob_receipt = None
+    commit_started = False
+    commit_resolved = False
     try:
         if move_blob:
             # ``move_in`` performs the only authoritative collision check using
@@ -494,22 +538,58 @@ def persist_artifact(
                         color_hex=requirement.get("color_hex"),
                     )
                 )
+        # A driver may acknowledge a committed transaction as an exception
+        # (for example, a connection loss after COMMIT). From here onward the
+        # blob must be preserved until a fresh session resolves the outcome.
+        commit_started = True
         session.commit()
-    except Exception:
+    except Exception as exc:
         session.rollback()
-        # Delete only exact destinations selected by this failed write.  Never
-        # rely on a later directory walk to infer ownership.
-        # External-library bytes become user-owned at publication and are never
-        # removed by rollback cleanup. A failed DB transaction may leave an
-        # unindexed file, which is safer and the next scan can discover it.
-        if blob_receipt is not None and not is_external:
-            backend.rollback_create(blob_receipt)
-        raise
+        if commit_started and blob_receipt is not None and not is_external:
+            try:
+                resolved = _resolve_committed_artifact(
+                    backend=backend,
+                    key=blob_receipt.key,
+                    model_id=model_id,
+                    blob_hash=blob_hash,
+                    ingestion_key=ingestion_key,
+                )
+            except Exception as resolution_exc:
+                # The acknowledgement and the verification query are separate
+                # failure domains. If the latter is unavailable, the outcome is
+                # still unknown and the committed bytes must remain retryable.
+                raise ArtifactCommitUncertain(
+                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                ) from resolution_exc
+            if resolved is not None:
+                file_row = resolved
+                commit_resolved = True
+            else:
+                # Unknown commit state is retryable and reconciled by the
+                # ownership worker. Deleting here could destroy a committed
+                # artifact when only the acknowledgement was lost.
+                raise ArtifactCommitUncertain(
+                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                ) from exc
+        else:
+            # Before the domain commit boundary, exact receipt rollback is safe.
+            # External-library bytes remain user-owned for the next scan.
+            if blob_receipt is not None and not is_external:
+                backend.rollback_create(blob_receipt)
+            raise
+
+    # A successfully resolved commit is terminal for this call. The detached
+    # row is returned and thumbnail work is left to the derivative reconciler;
+    # continuing with the rolled-back caller session could create a second,
+    # unrelated transaction against stale Model state.
+    if commit_resolved:
+        return file_row
 
     # A thumbnail is a retryable derivative, not part of the File+Metadata
     # integrity boundary. Publish it only after that transaction commits so its
     # own durable reservation never competes with an already-open SQLite writer.
     if thumb_bytes:
+        assert file_row.id is not None
         candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
         thumbnail_receipt = None
         try:

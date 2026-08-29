@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import secrets
 import shutil
 import stat as stat_module
 import tempfile
@@ -20,6 +22,8 @@ from app.core.logging import get_logger
 from app.services.filesystem import FsKind, detect_fs_kind
 
 logger = get_logger(__name__)
+
+_DIRECT_ADAPTER_IDENTITY = secrets.token_hex(32)
 
 
 class ObjectIdentity(StrEnum):
@@ -102,6 +106,7 @@ class LocalRootProbe:
     path: str
     fs_kind: FsKind
     hardlink: bool
+    exclusive_create: bool
     directory_fsync: bool
 
     def as_dict(self) -> dict[str, object]:
@@ -110,6 +115,7 @@ class LocalRootProbe:
             "path": self.path,
             "fs_kind": self.fs_kind,
             "hardlink": self.hardlink,
+            "exclusive_create": self.exclusive_create,
             "directory_fsync": self.directory_fsync,
         }
 
@@ -197,6 +203,11 @@ class StorageBackend(ABC):
     """
 
     backend_name: str
+    # Stable manifest identity.  Concrete adapters may provide a provider
+    # flavour (for example ``cloudflare_r2``) while retaining a transport
+    # (``s3``); legacy fakes fall back to ``backend_name``.
+    provider_id: str
+    transport: str
 
     @property
     def capabilities(self) -> StorageCapabilities:
@@ -451,8 +462,142 @@ class StorageBackend(ABC):
 # ---------------------------------------------------------------------------
 
 
+class UnavailableStorageBackend(StorageBackend):
+    """Fail-closed backend used when selected provider configuration is invalid."""
+
+    backend_name = "unavailable"
+    provider_id = "unavailable"
+    transport = "unavailable"
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        self._capabilities = StorageCapabilities(
+            False, ObjectIdentity.NONE, False, False, False, False
+        )
+        self._probe_diagnostics = {"available": False, "error": reason}
+
+    def _fail(self):
+        raise StorageConfigurationError(f"storage_unavailable:{self.reason}")
+
+    def blob_key(self, slug: str, version: int, filename: str) -> str:
+        del slug, version, filename
+        return self._fail()
+
+    def thumbnail_key(self, file_id: int) -> str:
+        del file_id
+        return self._fail()
+
+    def source_cover_key(self, provenance_source_id: int) -> str:
+        del provenance_source_id
+        return self._fail()
+
+    def capture_upload_slot_key(self, slot_id: str) -> str:
+        del slot_id
+        return self._fail()
+
+    def legacy_thumbnail_key(self, file_id: int) -> str:
+        del file_id
+        return self._fail()
+
+    def stl_cache_key(self, sha256: str) -> str:
+        del sha256
+        return self._fail()
+
+    def collection_image_key(self, collection_id: int, name: str) -> str:
+        del collection_id, name
+        return self._fail()
+
+    def document_file_key(self, document_id: int, name: str) -> str:
+        del document_id, name
+        return self._fail()
+
+    def document_image_key(self, document_id: int, name: str) -> str:
+        del document_id, name
+        return self._fail()
+
+    def exists(self, key: str) -> bool:
+        del key
+        return self._fail()
+
+    def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
+        del src, key
+        return self._fail()
+
+    def replace_stream(
+        self, src: BinaryIO, receipt: CreationReceipt
+    ) -> CreationReceipt:
+        del src, receipt
+        return self._fail()
+
+    def move(self, src_key: str, dest_key: str) -> None:
+        del src_key, dest_key
+        self._fail()
+
+    def stat_size(self, key: str) -> int:
+        del key
+        return self._fail()
+
+    def read_bytes(self, key: str) -> bytes:
+        del key
+        return self._fail()
+
+    def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        del key, chunk_size
+        self._fail()
+        yield b""
+
+    def download_to_path(self, key: str, dest: Path) -> Path:
+        del key, dest
+        return self._fail()
+
+    def upload_file(self, src: Path, key: str) -> None:
+        del src, key
+        self._fail()
+
+    def ensure_setup(self) -> None:
+        return None
+
+    def delete(self, key: str) -> None:
+        del key
+        self._fail()
+
+    def list_keys(self, prefix: str = "") -> list[str]:
+        del prefix
+        return self._fail()
+
+    def walk_keys(self, prefix: str = "") -> Iterator[str]:
+        del prefix
+        self._fail()
+        yield ""
+
+    def usage(self, prefix: str = "") -> dict:
+        del prefix
+        return self._fail()
+
+    def presigned_download_url(self, key: str, filename: str) -> str | None:
+        del key, filename
+        return self._fail()
+
+    def health_probe(self) -> dict:
+        return {
+            "backend": self.backend_name,
+            "ok": False,
+            "error": self.reason,
+            "capabilities": self.capabilities.as_dict(),
+            "diagnostics": self.probe_diagnostics,
+        }
+
+    def direct_path(self, key: str) -> Path | None:
+        del key
+        return None
+
+
 class LocalStorageBackend(StorageBackend):
     backend_name = "local"
+    provider_id = "local"
+    transport = "local"
+    _BINDING_FILENAME = ".printstash-storage-root.json"
+    _BINDING_FORMAT = 1
 
     def __init__(self, *, external_roots: tuple[Path, ...] = ()) -> None:
         self._capabilities = StorageCapabilities(
@@ -467,6 +612,60 @@ class LocalStorageBackend(StorageBackend):
         self._external_roots = tuple(
             Path(root).expanduser().resolve(strict=False) for root in external_roots
         )
+        self._roots_ready = True
+        self.recovery_mode = False
+        self._startup_checked = False
+        self._root_binding_diagnostics: dict[str, object] = {}
+
+    @staticmethod
+    def _installation_identity() -> str:
+        configured = str(getattr(settings, "storage_identity", "") or "").strip()
+        if len(configured) == 64 and all(
+            char in "0123456789abcdefABCDEF" for char in configured
+        ):
+            return configured.lower()
+        # Direct adapter users (migration tooling and isolated tests) have no
+        # SystemConfig session to persist through. Keep a random process-local
+        # identity there; production composition persists a valid
+        # ``storage_identity`` before constructing the backend.  An invalid
+        # configured value deliberately falls back to a different identity so
+        # existing sentinels fail closed instead of binding to malformed data.
+        return _DIRECT_ADAPTER_IDENTITY
+
+    def _bind_root(self, role: str, root: Path) -> bool:
+        """Validate the durable marker for an existing managed root.
+
+        Marker creation is deliberately separate: startup must never turn a
+        missing mount into an empty shadow directory.  Legacy adoption uses
+        :func:`enroll_legacy_local_root` with explicit DB evidence (or an
+        administrator's explicit recovery confirmation).
+        """
+        marker = root / self._BINDING_FILENAME
+        expected = {
+            "format": self._BINDING_FORMAT,
+            "installation": self._installation_identity(),
+            "role": role,
+        }
+        try:
+            raw = marker.read_text(encoding="utf-8")
+            actual = json.loads(raw)
+            # Markerless and pre-format roots are handled only by the explicit
+            # legacy enrollment path, which proves DB-referenced bytes before
+            # writing a format-1 binding. Mutation paths never auto-adopt them.
+            if (
+                not isinstance(actual, dict)
+                or type(actual.get("format")) is not int
+                or actual != expected
+            ):
+                self._root_binding_diagnostics[role] = "binding_mismatch"
+                return False
+            return True
+        except FileNotFoundError:
+            self._root_binding_diagnostics[role] = "binding_missing"
+            return False
+        except (OSError, ValueError, TypeError):
+            self._root_binding_diagnostics[role] = "binding_invalid"
+            return False
 
     @staticmethod
     def _probe_root(role: str, root: Path) -> LocalRootProbe:
@@ -486,6 +685,17 @@ class LocalStorageBackend(StorageBackend):
             target.unlink(missing_ok=True)
             source.unlink(missing_ok=True)
 
+        exclusive_create = False
+        probe = root / f".printstash-exclusive-probe-{uuid.uuid4().hex}"
+        try:
+            fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            os.close(fd)
+            exclusive_create = True
+        except OSError:
+            pass
+        finally:
+            probe.unlink(missing_ok=True)
+
         directory_fsync = True
         try:
             _fsync_directory(root)
@@ -496,6 +706,7 @@ class LocalStorageBackend(StorageBackend):
             path=str(root),
             fs_kind=detect_fs_kind(root),
             hardlink=hardlink,
+            exclusive_create=exclusive_create,
             directory_fsync=directory_fsync,
         )
 
@@ -509,6 +720,12 @@ class LocalStorageBackend(StorageBackend):
         for configured_root in roots:
             lexical_root = Path(configured_root).expanduser().absolute()
             if lexical == lexical_root or lexical.is_relative_to(lexical_root):
+                if not lexical_root.is_dir():
+                    # A missing bind mount must never be replaced by a directory
+                    # created by the application.  Otherwise a container restart
+                    # can successfully write into its own writable layer while
+                    # the real vault is still unmounted.
+                    raise StorageConfigurationError("storage_root_unavailable")
                 resolved_root = lexical_root.resolve(strict=False)
                 resolved = lexical.resolve(strict=False)
                 if resolved != resolved_root and not resolved.is_relative_to(
@@ -516,6 +733,102 @@ class LocalStorageBackend(StorageBackend):
                 ):
                     raise StorageCollisionError("managed_storage_symlink_escape")
                 return
+
+    def _assert_root_binding_for(self, path: Path, *, mutation: bool = True) -> None:
+        """Revalidate the configured root immediately before a local mutation.
+
+        Startup probes are only a snapshot. A mount can disappear or its
+        sentinel can be replaced while the process is running, so every
+        mutating operation must recheck the binding before creating a parent,
+        opening a destination, or quarantining an object.
+        """
+        lexical = path.expanduser().absolute()
+        roots = (("data", Path(settings.data_dir)), ("thumb", Path(settings.thumb_dir)))
+        for role, configured_root in roots:
+            root = configured_root.expanduser().absolute()
+            if lexical != root and not lexical.is_relative_to(root):
+                continue
+            if not root.is_dir():
+                raise StorageConfigurationError("storage_root_unavailable")
+            resolved_root = root.resolve(strict=False)
+            resolved = lexical.resolve(strict=False)
+            if resolved != resolved_root and not resolved.is_relative_to(resolved_root):
+                raise StorageCollisionError("managed_storage_symlink_escape")
+            if mutation and not self._bind_root(role, root):
+                raise StorageConfigurationError("storage_root_unavailable")
+            return
+
+    def _open_pinned_parent(self, path: Path) -> tuple[int, int, str, Path, str] | None:
+        """Open a managed destination through a pinned root directory fd.
+
+        Absolute path operations can silently switch to a replacement mount
+        after validation.  Walking descendants with ``*at`` operations keeps a
+        publication on the root that was validated, and the caller compares the
+        root identity again before reporting success.
+        """
+        lexical = path.expanduser().absolute()
+        for role, configured_root in (
+            ("data", Path(settings.data_dir)),
+            ("thumb", Path(settings.thumb_dir)),
+        ):
+            root = configured_root.expanduser().absolute()
+            if lexical == root or not lexical.is_relative_to(root):
+                continue
+            # This check must precede opening/creating any descendant.  The
+            # descriptor below then pins the validated root for the rest of
+            # the publication, even if the pathname is concurrently remounted.
+            self._assert_root_binding_for(lexical)
+            root_path_stat = os.stat(root, follow_symlinks=False)
+            root_fd = os.open(
+                root,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            parent_fd = os.dup(root_fd)
+            try:
+                relative = lexical.relative_to(root)
+                parts = relative.parts
+                if not parts:
+                    raise StorageConfigurationError("storage_destination_invalid")
+                for part in parts[:-1]:
+                    self._assert_root_binding_for(lexical)
+                    try:
+                        os.mkdir(part, mode=0o755, dir_fd=parent_fd)
+                    except FileExistsError:
+                        pass
+                    child_fd = os.open(
+                        part,
+                        os.O_RDONLY
+                        | getattr(os, "O_DIRECTORY", 0)
+                        | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=parent_fd,
+                    )
+                    os.close(parent_fd)
+                    parent_fd = child_fd
+                root_stat = os.fstat(root_fd)
+                current_root = os.stat(root, follow_symlinks=False)
+                if (
+                    root_path_stat.st_dev != root_stat.st_dev
+                    or root_path_stat.st_ino != root_stat.st_ino
+                    or root_stat.st_dev != current_root.st_dev
+                    or root_stat.st_ino != current_root.st_ino
+                    or not self._bind_root(role, root)
+                ):
+                    raise StorageConfigurationError("storage_root_changed")
+                return root_fd, parent_fd, parts[-1], root, role
+            except Exception:
+                os.close(parent_fd)
+                os.close(root_fd)
+                raise
+        return None
+
+    @staticmethod
+    def _assert_pinned_root_current(root_fd: int, root: Path) -> None:
+        pinned = os.fstat(root_fd)
+        current = os.stat(root, follow_symlinks=False)
+        if pinned.st_dev != current.st_dev or pinned.st_ino != current.st_ino:
+            raise StorageConfigurationError("storage_root_changed")
 
     def _owned_namespace(self, path: Path) -> str | None:
         resolved = path.resolve(strict=False)
@@ -565,6 +878,8 @@ class LocalStorageBackend(StorageBackend):
         expected_version_id: str | None = None,
     ) -> bool:
         del expected_version_id
+        path = Path(key)
+        self._assert_root_binding_for(path)
         self.namespace_for(key)
         info = self.object_info(key)
         if info is None:
@@ -573,22 +888,156 @@ class LocalStorageBackend(StorageBackend):
             return False
         if expected_etag is not None and info.etag != expected_etag:
             return False
-        if expected_sha256 is not None:
-            digest = hashlib.sha256()
-            try:
-                with Path(key).open("rb") as source:
-                    while chunk := source.read(1024 * 1024):
-                        digest.update(chunk)
-            except FileNotFoundError:
-                return True
-            if digest.hexdigest() != expected_sha256.lower():
-                return False
+
+        # Rename the selected directory entry into a private same-directory
+        # quarantine.  Unlike stat-then-unlink (or a hardlink followed by
+        # unlink), rename(2) selects one directory entry atomically.  A writer
+        # that wins the path race can only create a new entry at ``path``; it
+        # cannot cause us to unlink that replacement.
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
         try:
-            Path(key).unlink()
+            fd = os.open(path, flags)
         except FileNotFoundError:
             return True
-        _fsync_directory(Path(key).parent)
-        return True
+        try:
+            before = os.fstat(fd)
+            if before.st_size != expected_size or not stat_module.S_ISREG(
+                before.st_mode
+            ):
+                return False
+            digest = hashlib.sha256()
+            while chunk := os.read(fd, 1024 * 1024):
+                digest.update(chunk)
+            after = os.fstat(fd)
+        finally:
+            os.close(fd)
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_ctime_ns != after.st_ctime_ns
+            or before.st_size != after.st_size
+        ):
+            return False
+        if (
+            expected_sha256 is not None
+            and digest.hexdigest() != expected_sha256.lower()
+        ):
+            return False
+
+        self._assert_root_binding_for(path)
+        quarantine = path.parent / f".printstash-reclaim-{uuid.uuid4().hex}"
+        parent_fd = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        quarantine_created = False
+        try:
+            # Reserve the quarantine name without ever replacing an existing
+            # entry.  The empty placeholder is the only entry we permit
+            # os.replace to overwrite.
+            quarantine_fd = os.open(
+                quarantine.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            os.close(quarantine_fd)
+            quarantine_created = True
+            os.rename(
+                path.name,
+                quarantine.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
+        except FileNotFoundError:
+            if quarantine_created:
+                os.unlink(quarantine.name, dir_fd=parent_fd)
+            return True
+        except OSError:
+            if quarantine_created:
+                try:
+                    os.unlink(quarantine.name, dir_fd=parent_fd)
+                except OSError:
+                    pass
+            return False
+        try:
+
+            def restore_mismatched_quarantine() -> None:
+                """Restore moved bytes only when the destination is vacant."""
+                nonlocal quarantine_created
+                try:
+                    os.link(
+                        quarantine.name,
+                        path.name,
+                        src_dir_fd=parent_fd,
+                        dst_dir_fd=parent_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError:
+                    # A concurrent writer owns the destination. Preserve both
+                    # entries for reconciliation rather than replacing it.
+                    return
+                except OSError:
+                    return
+                try:
+                    os.unlink(quarantine.name, dir_fd=parent_fd)
+                    quarantine_created = False
+                except OSError:
+                    logger.warning(
+                        "local reclaim quarantine restore cleanup failed",
+                        extra={"destination": str(path), "quarantine": str(quarantine)},
+                    )
+
+            # The root binding may have changed while the rename was in
+            # flight.  Preserve the moved bytes if so; never report a delete
+            # from an unproven mount.
+            self._assert_root_binding_for(path)
+            quarantined = os.stat(
+                quarantine.name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            if (
+                quarantined.st_dev != before.st_dev
+                or quarantined.st_ino != before.st_ino
+                or quarantined.st_size != before.st_size
+            ):
+                logger.warning(
+                    "local reclaim quarantine identity mismatch",
+                    extra={"destination": str(path), "quarantine": str(quarantine)},
+                )
+                restore_mismatched_quarantine()
+                return False
+            # Re-read and hash the quarantined inode itself.  A replacement
+            # moved by a pathname race must remain retained, not be mistaken
+            # for the originally verified object.
+            quarantine_read_fd = os.open(
+                quarantine.name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+            with os.fdopen(quarantine_read_fd, "rb") as quarantined_file:
+                digest = hashlib.sha256()
+                while chunk := quarantined_file.read(1024 * 1024):
+                    digest.update(chunk)
+            if (
+                expected_sha256 is not None
+                and digest.hexdigest() != expected_sha256.lower()
+            ):
+                restore_mismatched_quarantine()
+                return False
+            os.unlink(quarantine.name, dir_fd=parent_fd)
+            quarantine_created = False
+            os.fsync(parent_fd)
+            return True
+        finally:
+            # If verification or fsync failed, retain the quarantined bytes
+            # for a later operator/reconciliation pass.  The original path is
+            # intentionally never unlinked after the atomic rename.
+            if quarantine_created:
+                logger.warning(
+                    "local reclaim quarantine retained for reconciliation",
+                    extra={"destination": str(path), "quarantine": str(quarantine)},
+                )
+            os.close(parent_fd)
 
     def direct_path(self, key: str) -> Path | None:
         return Path(key)
@@ -638,6 +1087,124 @@ class LocalStorageBackend(StorageBackend):
     def write_bytes(self, data: bytes, key: str) -> int:
         return self.create_bytes(data, key).size
 
+    def _create_stream_pinned(
+        self, src: BinaryIO, dest: Path
+    ) -> CreationReceipt | None:
+        """Publish a managed local object through a pinned directory fd.
+
+        ``Path`` validation alone is not sufficient when a mount can be
+        replaced while an upload is being staged.  The parent walk and both
+        publication primitives below are descriptor-relative, so a pathname
+        switch cannot redirect this operation to another root.
+        """
+        pinned = self._open_pinned_parent(dest)
+        if pinned is None:
+            return None
+        root_fd, parent_fd, dest_name, root, role = pinned
+        temp_name = f".printstash-create-{uuid.uuid4().hex}"
+        temp_created = False
+        try:
+            temp_fd = os.open(
+                temp_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            temp_created = True
+            written = 0
+            with os.fdopen(temp_fd, "wb") as staged:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    staged.write(chunk)
+                    written += len(chunk)
+                staged.flush()
+                os.fsync(staged.fileno())
+
+            # Check both the durable marker and the directory identity just
+            # before publication.  The final check below handles a remount or
+            # marker replacement that occurs during the publication syscall.
+            self._assert_root_binding_for(dest)
+            self._assert_pinned_root_current(root_fd, root)
+            verified_identity = True
+            try:
+                os.link(
+                    temp_name,
+                    dest_name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+            except OSError as exc:
+                if isinstance(exc, FileExistsError):
+                    raise StorageCollisionError(str(dest)) from exc
+                if exc.errno not in {
+                    getattr(os, "EXDEV", 18),
+                    getattr(os, "EPERM", 1),
+                    getattr(os, "EOPNOTSUPP", 95),
+                }:
+                    raise
+                # Hardlinkless mounts retain create-only semantics through
+                # O_EXCL.  A later write failure deliberately leaves the
+                # destination for reconciliation; it is never blindly
+                # unlinked after a possible replacement race.
+                verified_identity = False
+                try:
+                    out_fd = os.open(
+                        dest_name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o644,
+                        dir_fd=parent_fd,
+                    )
+                except FileExistsError as collision:
+                    raise StorageCollisionError(str(dest)) from collision
+                try:
+                    with os.fdopen(out_fd, "wb") as out:
+                        read_fd = os.open(
+                            temp_name,
+                            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                            dir_fd=parent_fd,
+                        )
+                        with os.fdopen(read_fd, "rb") as staged:
+                            shutil.copyfileobj(staged, out)
+                        out.flush()
+                        os.fsync(out.fileno())
+                except Exception:
+                    logger.warning(
+                        "guarded local publication left an uncertain destination",
+                        extra={"path": str(dest)},
+                    )
+                    raise
+            os.unlink(temp_name, dir_fd=parent_fd)
+            temp_created = False
+            os.fsync(parent_fd)
+            self._assert_pinned_root_current(root_fd, root)
+            if not self._bind_root(role, root):
+                raise StorageConfigurationError("storage_root_changed")
+            stat_result = os.stat(dest_name, dir_fd=parent_fd, follow_symlinks=False)
+            return CreationReceipt(
+                key=str(dest),
+                size=written,
+                token=uuid.uuid4().hex,
+                backend="local",
+                namespace=self._owned_namespace(dest)
+                or f"external:{dest.parent.resolve(strict=False)}",
+                device=stat_result.st_dev if verified_identity else None,
+                inode=stat_result.st_ino if verified_identity else None,
+                ctime_ns=stat_result.st_ctime_ns if verified_identity else None,
+            )
+        finally:
+            if temp_created:
+                try:
+                    os.unlink(temp_name, dir_fd=parent_fd)
+                except OSError:
+                    logger.warning(
+                        "storage create temp cleanup failed", extra={"path": str(dest)}
+                    )
+            os.close(parent_fd)
+            os.close(root_fd)
+
     def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
         # A remote-compatible subclass may override ``direct_path`` while
         # inheriting this class. Keep it on the generic seam rather than
@@ -645,8 +1212,26 @@ class LocalStorageBackend(StorageBackend):
         if self.direct_path(key) is None:
             return StorageBackend.create_stream(self, src, key)
 
+        if not self.capabilities.conditional_create:
+            # A reachable filesystem that cannot prove no-replace publication
+            # remains readable but must not accept writes. The setting that
+            # acknowledges an unverified provider cannot turn this into a safe
+            # mutation path.
+            raise StorageConfigurationError("storage_write_unverified")
+
         dest = Path(key)
-        self._assert_no_managed_escape(dest)
+        self._assert_root_binding_for(dest)
+        pinned_receipt = self._create_stream_pinned(src, dest)
+        if pinned_receipt is not None:
+            return pinned_receipt
+        # On hardlinkless NAS/FUSE mounts, O_EXCL is the only safe create-only
+        # primitive available.  It is Guarded (not Verified): the exact inode
+        # cannot be proven later for deletion, but concurrent writers can never
+        # overwrite one another.
+        # Backup archives are application-owned staging/output, not a legacy
+        # vault root.  They are created by the backup service immediately
+        # before publication and therefore intentionally have no vault
+        # binding marker.
         dest.parent.mkdir(parents=True, exist_ok=True)
         fd, temp_name = tempfile.mkstemp(prefix=".printstash-create-", dir=dest.parent)
         temp = Path(temp_name)
@@ -661,14 +1246,64 @@ class LocalStorageBackend(StorageBackend):
                     written += len(chunk)
                 out.flush()
                 os.fsync(out.fileno())
+            # Revalidate the mount after staging bytes and immediately before
+            # publication. This closes the common split-brain window where a
+            # bind mount is replaced while a slow upload is in progress.
+            self._assert_root_binding_for(dest)
             try:
                 # link(2) is an atomic no-replace publication on the same
                 # filesystem. Readers never observe the partial temp file.
                 os.link(temp, dest, follow_symlinks=False)
-            except FileExistsError as exc:
-                raise StorageCollisionError(str(dest)) from exc
-            # Dropping the temporary hard link changes ctime/link-count. Capture
-            # the fingerprint only after the destination is the sole link.
+            except OSError as exc:
+                if isinstance(exc, FileExistsError):
+                    raise StorageCollisionError(str(dest)) from exc
+                # The temp file has already been fully fsynced. Fall back to
+                # direct O_EXCL only when link(2) itself is unavailable; any
+                # other publication failure remains fatal.
+                if exc.errno not in {
+                    getattr(os, "EXDEV", 18),
+                    getattr(os, "EPERM", 1),
+                    getattr(os, "EOPNOTSUPP", 95),
+                }:
+                    raise
+                try:
+                    out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                except FileExistsError as collision:
+                    raise StorageCollisionError(str(dest)) from collision
+                try:
+                    with os.fdopen(out_fd, "wb") as out:
+                        with temp.open("rb") as staged:
+                            shutil.copyfileobj(staged, out)
+                        out.flush()
+                        os.fsync(out.fileno())
+                except Exception:
+                    # O_EXCL proves this operation opened the path, but a
+                    # subsequent failure does not prove which bytes are at the
+                    # name. Preserve the partial object for reconciliation;
+                    # an unconditional unlink could remove a raced replacement.
+                    logger.warning(
+                        "guarded local publication left an uncertain destination",
+                        extra={"path": str(dest)},
+                    )
+                    raise
+                # A directory fsync is best effort for Guarded fallback.  The
+                # capability probe advertises the weaker tier explicitly.
+                try:
+                    _fsync_directory(dest.parent)
+                except OSError:
+                    logger.warning(
+                        "guarded local publication directory fsync failed",
+                        extra={"path": str(dest)},
+                    )
+                return CreationReceipt(
+                    key=str(dest),
+                    size=written,
+                    token=uuid.uuid4().hex,
+                    backend="local",
+                    namespace=self._owned_namespace(dest)
+                    or f"external:{dest.parent.resolve(strict=False)}",
+                )
+            # Dropping the temporary hard link changes ctime/link-count.
             temp.unlink()
             _fsync_directory(dest.parent)
             stat = dest.stat(follow_symlinks=False)
@@ -703,6 +1338,7 @@ class LocalStorageBackend(StorageBackend):
         if not self.creation_matches(receipt):
             return None
         dest = Path(receipt.key)
+        self._assert_root_binding_for(dest)
         fd, quarantine_name = tempfile.mkstemp(
             prefix=".printstash-quarantine-", dir=dest.parent
         )
@@ -766,6 +1402,7 @@ class LocalStorageBackend(StorageBackend):
         if not self.capabilities.conditional_replace:
             raise NotImplementedError("atomic_replace_not_supported")
         dest = Path(receipt.key)
+        self._assert_root_binding_for(dest)
         fd, temp_name = tempfile.mkstemp(prefix=".printstash-replace-", dir=dest.parent)
         temp = Path(temp_name)
         written = 0
@@ -852,7 +1489,7 @@ class LocalStorageBackend(StorageBackend):
         uses the same device/inode/ctime guard as a newly-created object.
         """
         path = Path(key)
-        self._assert_no_managed_escape(path)
+        self._assert_root_binding_for(path)
         namespace = self._owned_namespace(path)
         if namespace is None:
             raise StorageCollisionError("storage_key_outside_managed_root")
@@ -899,7 +1536,10 @@ class LocalStorageBackend(StorageBackend):
         # targets only the inode this probe just created.
         if any(self.direct_path(key) is None for key in keys):
             return super().verify_destructive_access(keys)
-        for parent in {Path(key).parent for key in keys}:
+        paths = [Path(key) for key in keys]
+        for path in paths:
+            self._assert_root_binding_for(path)
+        for parent in {path.parent for path in paths}:
             fd, probe_name = tempfile.mkstemp(
                 prefix=".printstash-delete-probe-", dir=parent
             )
@@ -935,6 +1575,7 @@ class LocalStorageBackend(StorageBackend):
                 yield chunk
 
     def download_to_path(self, key: str, dest: Path) -> Path:
+        self._assert_root_binding_for(dest)
         with Path(key).open("rb") as source:
             return _copy_stream_create_only(source, dest)
 
@@ -943,16 +1584,50 @@ class LocalStorageBackend(StorageBackend):
             self.create_stream(source, key)
 
     def ensure_setup(self) -> None:
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
-        settings.thumb_dir.mkdir(parents=True, exist_ok=True)
+        # Never mkdir a configured vault root. A missing bind mount must leave
+        # the application readable/recoverable rather than writing into a new
+        # directory in the container or host filesystem.
+        self._startup_checked = True
+        configured_roots = {
+            "data": Path(settings.data_dir).expanduser(),
+            "thumb": Path(settings.thumb_dir).expanduser(),
+        }
+        missing = [role for role, root in configured_roots.items() if not root.is_dir()]
+        self._root_binding_diagnostics = {role: "missing" for role in missing}
+        self._roots_ready = not missing and all(
+            self._bind_root(role, root) for role, root in configured_roots.items()
+        )
+        if not self._roots_ready:
+            self.recovery_mode = True
+            self._capabilities = StorageCapabilities(
+                conditional_create=False,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=True,
+                direct_path=True,
+            )
+            self._probe_diagnostics = {
+                "probed": True,
+                "roots_ready": False,
+                "root_bindings": self._root_binding_diagnostics,
+            }
+            return
+        self.recovery_mode = False
         roots = (
             self._probe_root("data", settings.data_dir),
             self._probe_root("thumb", settings.thumb_dir),
         )
         hardlinks = all(root.hardlink for root in roots)
-        stable_inodes = hardlinks and all(root.fs_kind == "local" for root in roots)
+        exclusive_create = all(root.exclusive_create for root in roots)
+        directory_fsync = all(root.directory_fsync for root in roots)
+        stable_inodes = (
+            hardlinks
+            and directory_fsync
+            and all(root.fs_kind == "local" for root in roots)
+        )
         self._capabilities = StorageCapabilities(
-            conditional_create=hardlinks,
+            conditional_create=hardlinks or exclusive_create,
             object_identity=(
                 ObjectIdentity.INODE if stable_inodes else ObjectIdentity.NONE
             ),
@@ -963,7 +1638,9 @@ class LocalStorageBackend(StorageBackend):
         )
         self._probe_diagnostics = {
             "probed": True,
-            "directory_fsync": all(root.directory_fsync for root in roots),
+            "roots_ready": True,
+            "directory_fsync": directory_fsync,
+            "root_bindings": self._root_binding_diagnostics,
             "roots": [root.as_dict() for root in roots],
         }
 
@@ -975,14 +1652,18 @@ class LocalStorageBackend(StorageBackend):
         root = Path(prefix) if prefix else settings.data_dir
         if not root.exists():
             return []
-        return [str(p) for p in root.rglob("*") if p.is_file()]
+        return [
+            str(p)
+            for p in root.rglob("*")
+            if p.is_file() and p.name != self._BINDING_FILENAME
+        ]
 
     def walk_keys(self, prefix: str = "") -> Iterator[str]:
         root = Path(prefix) if prefix else settings.data_dir
         if not root.exists():
             return
         for p in root.rglob("*"):
-            if p.is_file():
+            if p.is_file() and p.name != self._BINDING_FILENAME:
                 yield str(p)
 
     def usage(self, prefix: str = "") -> dict:
@@ -991,7 +1672,7 @@ class LocalStorageBackend(StorageBackend):
         object_count = 0
         if root.exists():
             for path in root.rglob("*"):
-                if not path.is_file():
+                if not path.is_file() or path.name == self._BINDING_FILENAME:
                     continue
                 try:
                     total_size += path.stat().st_size
@@ -1009,16 +1690,136 @@ class LocalStorageBackend(StorageBackend):
         return None
 
     def health_probe(self) -> dict:
-        data_ok = settings.data_dir.exists()
-        thumb_ok = settings.thumb_dir.exists()
+        # Re-read both sentinels so a mount disappearing after startup is
+        # reflected immediately. This is validation only; `_bind_root` never
+        # enrolls or creates a marker.
+        data_root = Path(settings.data_dir).expanduser()
+        thumb_root = Path(settings.thumb_dir).expanduser()
+        data_ok = data_root.is_dir() and self._bind_root("data", data_root)
+        thumb_ok = thumb_root.is_dir() and self._bind_root("thumb", thumb_root)
+        self._roots_ready = data_ok and thumb_ok
         return {
             "backend": "local",
-            "ok": data_ok and thumb_ok,
+            "ok": data_ok and thumb_ok and self._roots_ready,
             "data_dir": str(settings.data_dir),
             "thumb_dir": str(settings.thumb_dir),
             "capabilities": self.capabilities.as_dict(),
             "diagnostics": self.probe_diagnostics,
         }
+
+
+# ---------------------------------------------------------------------------
+# Legacy local-root enrollment
+# ---------------------------------------------------------------------------
+
+
+def enroll_legacy_local_root(
+    root: Path,
+    *,
+    role: str,
+    installation: str,
+    proofs: list[tuple[Path, int, str | None]],
+    allow_empty: bool = False,
+    allow_size_only: bool = False,
+) -> bool:
+    """Enroll a pre-ledger root only after deterministic content proof.
+
+    Existing v0.12 roots have no marker. A non-empty root is accepted only when
+    every selected DB-referenced object still has its recorded size and hash.
+    Empty roots are accepted solely for a brand-new, unconfigured installation.
+    """
+    # Callers may provide a path-like test double or another pathlib-compatible
+    # wrapper.  Normalize at this boundary so marker I/O always uses the
+    # backend's validated filesystem seam rather than relying on wrapper
+    # implementation details.
+    root = Path(str(root))
+    if not root.is_dir():
+        return False
+    marker = root / LocalStorageBackend._BINDING_FILENAME
+    expected = {
+        "format": LocalStorageBackend._BINDING_FORMAT,
+        "installation": installation,
+        "role": role,
+    }
+    legacy_marker = False
+    try:
+        actual = json.loads(marker.read_text(encoding="utf-8"))
+        if (
+            isinstance(actual, dict)
+            and type(actual.get("format")) is int
+            and actual == expected
+        ):
+            return True
+        if actual != {"installation": installation, "role": role}:
+            return False
+        legacy_marker = True
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, TypeError):
+        return False
+    if not proofs and not allow_empty:
+        return False
+    for path, expected_size, expected_sha256 in proofs:
+        # A size-only claim cannot distinguish the intended legacy mount from
+        # an unrelated file tree.  The sole exception is the thumbnail root
+        # physically co-located under an already hash-proven data root; the
+        # caller sets that explicit narrow flag.
+        if not allow_size_only and (
+            not expected_sha256
+            or len(expected_sha256) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in expected_sha256)
+        ):
+            return False
+        try:
+            candidate = path.expanduser().resolve(strict=True)
+            boundary = root.resolve(strict=True)
+            if candidate == boundary or not candidate.is_relative_to(boundary):
+                return False
+            stat = candidate.stat()
+            if stat.st_size != expected_size:
+                return False
+            if expected_sha256 is not None:
+                digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+                if digest != expected_sha256.lower():
+                    return False
+        except OSError:
+            return False
+    marker_to_write = marker
+    temporary_marker: Path | None = None
+    if legacy_marker:
+        # Upgrade an explicitly proven pre-format marker atomically.  Re-read
+        # it first so an administrator or another process cannot have changed
+        # the binding while the content proofs were being computed.
+        try:
+            if json.loads(marker.read_text(encoding="utf-8")) != {
+                "installation": installation,
+                "role": role,
+            }:
+                return False
+        except (OSError, ValueError, TypeError):
+            return False
+        temporary_marker = marker.with_name(f".{marker.name}.{uuid.uuid4().hex}.tmp")
+        marker_to_write = temporary_marker
+    try:
+        with marker_to_write.open("x", encoding="utf-8") as handle:
+            json.dump(expected, handle, sort_keys=True, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        if temporary_marker is not None:
+            os.replace(temporary_marker, marker)
+        _fsync_directory(root)
+    except FileExistsError:
+        if temporary_marker is not None:
+            temporary_marker.unlink(missing_ok=True)
+        try:
+            return json.loads(marker.read_text(encoding="utf-8")) == expected
+        except (OSError, ValueError, TypeError):
+            return False
+    except OSError:
+        if temporary_marker is not None:
+            temporary_marker.unlink(missing_ok=True)
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1040,8 +1841,9 @@ def _raise_s3_missing_object(exc: Exception, key: str) -> None:
 
 class S3StorageBackend(StorageBackend):
     backend_name = "s3"
+    transport = "s3"
 
-    def __init__(self) -> None:
+    def __init__(self, *, check_bucket: bool = True) -> None:
         import boto3
         from botocore.config import Config as BotoConfig
 
@@ -1063,6 +1865,7 @@ class S3StorageBackend(StorageBackend):
 
         self._client = boto3.client(**client_kwargs)
         self._bucket = settings.s3_bucket
+        self.provider_id = str(getattr(settings, "storage_provider", "") or "s3")
         self._capabilities = StorageCapabilities(
             conditional_create=True,
             object_identity=ObjectIdentity.ETAG,
@@ -1075,8 +1878,13 @@ class S3StorageBackend(StorageBackend):
             "probed": False,
             "bucket_versioning": "unknown",
         }
+        self._read_only = False
 
-        self._ensure_bucket()
+        # Recovery startup must not perform a network probe before the
+        # unresolved restore journal is inspected/resumed.  Reads remain
+        # available and the restore path performs its own operation checks.
+        if check_bucket:
+            self._ensure_bucket()
 
     def _probe_capabilities(self) -> None:
         status = "unknown"
@@ -1096,8 +1904,9 @@ class S3StorageBackend(StorageBackend):
                 "bucket_versioning": status,
             }
         versioned = status == "enabled"
+        conditional = self._probe_conditional_create()
         self._capabilities = StorageCapabilities(
-            conditional_create=True,
+            conditional_create=conditional,
             object_identity=(
                 ObjectIdentity.VERSION if versioned else ObjectIdentity.ETAG
             ),
@@ -1106,6 +1915,59 @@ class S3StorageBackend(StorageBackend):
             namespace_ownership=True,
             direct_path=False,
         )
+        self._read_only = not conditional
+        self._probe_diagnostics["conditional_create"] = conditional
+        if not conditional:
+            self._probe_diagnostics["read_only"] = True
+
+    def _probe_conditional_create(self) -> bool:
+        """Prove native S3 no-replace semantics with a disposable object."""
+        import botocore.exceptions
+
+        # Small in-process clients used by storage unit tests model versioning
+        # only. The boto3 production client always exposes this API; retaining
+        # their measured versioning path keeps the adapter seam testable.
+        if not hasattr(self._client, "put_object"):
+            return True
+
+        key = f"{self._prefix()}.printstash-probe/{uuid.uuid4().hex}"
+        payload = b"printstash-s3-conditional-create-proof"
+        try:
+            self._client.put_object(
+                Bucket=self._bucket,
+                Key=key,
+                Body=payload,
+                IfNoneMatch="*",
+            )
+            try:
+                self._client.put_object(
+                    Bucket=self._bucket,
+                    Key=key,
+                    Body=b"replacement",
+                    IfNoneMatch="*",
+                )
+            except botocore.exceptions.ClientError as exc:
+                code = str(exc.response.get("Error", {}).get("Code", ""))
+                collision = code in {"412", "PreconditionFailed"}
+            else:
+                collision = False
+            observed = self._client.get_object(Bucket=self._bucket, Key=key)[
+                "Body"
+            ].read()
+            if observed != payload:
+                collision = False
+            return collision
+        except Exception as exc:
+            raise StorageConfigurationError(
+                "s3_conditional_create_unavailable"
+            ) from exc
+        finally:
+            try:
+                self._client.delete_object(Bucket=self._bucket, Key=key)
+            except Exception:
+                logger.warning(
+                    "S3 conditional-create probe cleanup failed", exc_info=True
+                )
 
     def namespace_for(self, key: str) -> str:
         prefix = self._prefix()
@@ -1222,7 +2084,15 @@ class S3StorageBackend(StorageBackend):
             ) from exc
 
     def _prefix(self) -> str:
-        return "vault-data/"
+        value = str(getattr(settings, "s3_root", "vault-data") or "vault-data")
+        value = value.strip().strip("/")
+        if (
+            not value
+            or value in {".", ".."}
+            or any(part in {"", ".", ".."} for part in Path(value).parts)
+        ):
+            raise StorageConfigurationError("s3_root_invalid")
+        return f"{value}/"
 
     def direct_path(self, key: str) -> Path | None:
         return None
@@ -1289,6 +2159,9 @@ class S3StorageBackend(StorageBackend):
 
     def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
         import botocore.exceptions
+
+        if getattr(self, "_read_only", False):
+            raise StorageConfigurationError("remote_storage_read_only")
 
         token = uuid.uuid4().hex
         threshold = int(settings.s3_multipart_threshold_mb) * 1024 * 1024

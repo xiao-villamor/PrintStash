@@ -130,6 +130,28 @@ describe("purgeModel", () => {
 
     expectRequest("/api/v1/models/1/purge?confirm_storage_risk=true", "DELETE");
   });
+
+  it("normalizes a legacy response with no storage fields", async () => {
+    respondWith({ purged_model_ids: [1], purged_count: 1 });
+
+    await expect(purgeModel(1)).resolves.toMatchObject({
+      storage_cleanup_status: "completed",
+      storage_completed: 0,
+      storage_pending: 0,
+      storage_blocked: 0,
+    });
+  });
+
+  it.each([
+    [{ storage_pending: 2 }, "pending"],
+    [{ storage_blocked: 2 }, "blocked"],
+    [{ storage_completed: 1, storage_pending: 1 }, "partial"],
+    [{ storage_completed: 1, storage_blocked: 1 }, "partial"],
+  ] as const)("derives the cleanup status from legacy counters (%s)", async (counts, status) => {
+    respondWith({ purged_model_ids: [1], purged_count: 1, ...counts });
+
+    await expect(purgeModel(1)).resolves.toMatchObject({ storage_cleanup_status: status });
+  });
 });
 
 describe("purgeExpiredTrash", () => {

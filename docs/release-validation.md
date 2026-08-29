@@ -42,9 +42,16 @@ Expected:
 
 - existing models/files are still visible
 - thumbnails still load
+- external-library rows remain live when a configured external snapshot is
+  incomplete or unavailable; no previously indexed external file is soft-deleted
 - 3MF/OBJ files can open through the cached STL preview endpoint
 - a new G-code upload creates or updates the expected model
 - Settings shows vault stats and the trash page can load
+- markerless legacy local roots either auto-enroll from stored size plus SHA-256
+  evidence or enter read-only recovery with an explicit exact-path enrollment
+  action; missing/mismatched mounts are never created or written through
+- valid legacy local backups are discoverable and can be explicitly adopted without
+  making invalid/unowned archives restorable
 
 ## Backend
 
@@ -83,8 +90,21 @@ a real SeaweedFS that the suite starts as containers, so Docker must be running.
   error) and once with `--extra async-db` for SQLite async.
 - Run `tests/contract/services/test_storage_backend.py` — the pinned SeaweedFS
   image, started for the run.
+- Run the real Nextcloud and OpenSSH storage contracts. They must exercise the
+  production adapters (authentication rejection, nested/Unicode paths,
+  duplicate-create preservation, stat/read/list/stream, host-key rejection, and
+  supported/blocked destructive operations), not only endpoint reachability.
+- Run the public real-backend storage lifecycle: setup, API restart, upload, remote
+  byte verification, trash, rejected unconfirmed purge, then the explicit confirmed
+  outcome. Assert remote absence only when the provider proved and used safe atomic
+  quarantine; otherwise assert `blocked` with the exact bytes retained.
 - Run `./scripts/test_minio_migration.sh`; it verifies normal, Unicode, and
   multipart objects twice with downloaded-content comparison.
+
+The upgrade gate must also start from the literal released v0.12.1 schema and
+data shapes: linked External Library rows and bytes, pending deletion intents,
+legacy `vault-data/` S3 objects, and v1 backup/restore journals. Reconstructing a
+legacy-looking object on the current schema is not equivalent upgrade evidence.
 
 ## Image variants
 

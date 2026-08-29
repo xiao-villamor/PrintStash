@@ -17,7 +17,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createBackup, downloadBackup, listBackups, restoreBackup } from "@/lib/api/backup";
+import {
+  adoptLocalBackup,
+  createBackup,
+  downloadBackup,
+  listBackups,
+  listUnownedLocalBackups,
+  restoreBackup,
+} from "@/lib/api/backup";
 import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, respondWith } from "./_wire";
@@ -77,6 +84,24 @@ describe("listBackups", () => {
     await listBackups();
 
     expectRequest("/api/v1/backups");
+  });
+});
+
+describe("legacy local backup adoption", () => {
+  it("lists only validated unowned archives", async () => {
+    respondWith([{ filename: "nexus3d-backup-2025.tar.gz", file_count: 4 }]);
+
+    await listUnownedLocalBackups();
+
+    expectRequest("/api/v1/backups/unowned-local");
+  });
+
+  it("posts the exact candidate filename for explicit adoption", async () => {
+    respondWith({ backup_id: "legacy-1" });
+
+    await adoptLocalBackup("nexus3d-backup-2025.tar.gz");
+
+    expectRequest("/api/v1/backups/adopt-local?filename=nexus3d-backup-2025.tar.gz", "POST");
   });
 });
 

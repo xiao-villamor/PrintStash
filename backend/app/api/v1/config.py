@@ -100,6 +100,43 @@ class VaultConfigUpdate(BaseModel):
     backup_s3_secret_key: Optional[str] = None
 
 
+class StorageRootEnrollment(BaseModel):
+    """Explicit acknowledgement for enrolling an unprovable local root."""
+
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["data", "thumb"]
+    confirm: bool = False
+
+
+@router.post(
+    "/storage-roots/enroll",
+    summary="Enroll a local storage root after an explicit confirmation",
+    dependencies=[Depends(require_superuser)],
+)
+def enroll_storage_root(
+    body: StorageRootEnrollment,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="storage_root_confirmation_required")
+    if settings.storage_backend != "local":
+        raise HTTPException(status_code=409, detail="storage_backend_not_local")
+    from app.services.storage_backend import enroll_legacy_local_root
+
+    identity = runtime_config.ensure_storage_identity(session)
+    root = settings.data_dir if body.role == "data" else settings.thumb_dir
+    enrolled = enroll_legacy_local_root(
+        root,
+        role=body.role,
+        installation=identity,
+        proofs=[],
+        allow_empty=True,
+    )
+    if not enrolled:
+        raise HTTPException(status_code=409, detail="storage_root_enrollment_failed")
+    return {"enrolled": True, "role": body.role, "restart_required": True}
+
+
 @router.get(
     "",
     summary="Get current vault configuration",

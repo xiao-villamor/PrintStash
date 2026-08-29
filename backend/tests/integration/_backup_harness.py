@@ -12,6 +12,7 @@ call.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -55,6 +56,14 @@ def build_backup_env(
     db_dir = tmp_path / "db"
     for directory in (data_dir, thumb_dir, backup_dir, db_dir):
         directory.mkdir(parents=True, exist_ok=True)
+    # Tests intentionally provision the same durable binding that production
+    # startup requires.  The adapter must not enroll a markerless root merely
+    # because a test happened to create the directory.
+    for role, root in (("data", data_dir), ("thumb", thumb_dir)):
+        (root / ".printstash-storage-root.json").write_text(
+            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
+            encoding="utf-8",
+        )
     db_file = db_dir / "vault.sqlite"
     db_url = f"sqlite:///{db_file}"
 
@@ -65,6 +74,7 @@ def build_backup_env(
             "thumb_dir": thumb_dir,
             "backup_dir": backup_dir,
             "db_url": db_url,
+            "storage_identity": "a" * 64,
         }
     )
 
@@ -79,6 +89,10 @@ def build_backup_env(
     monkeypatch.setattr(backup, "_backup_s3", None, raising=False)
     # A real restore waits a grace period for in-flight jobs; tests need not pay it.
     monkeypatch.setattr(backup, "_RESTORE_GRACE_PERIOD_S", 0)
+    # A test may intentionally leave a durable journal behind to model a
+    # crash.  Each isolated file-based vault must start with a fresh process
+    # gate; the journal itself remains the authority within that vault.
+    backup._restore_gate.clear()
 
     try:
         yield BackupEnv(
@@ -89,6 +103,7 @@ def build_backup_env(
             engine=engine,
         )
     finally:
+        backup._restore_gate.clear()
         engine.dispose()
 
 

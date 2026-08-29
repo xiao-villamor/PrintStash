@@ -1,18 +1,18 @@
 # Storage providers
 
-PrintStash probes the configured storage at startup. The expected tier below is guidance; `/api/v1/health` and Settings report the active probed tier.
+PrintStash probes the configured storage at startup. Support maturity and storage safety are separate: the expected tier below is guidance, while `/api/v1/health` and Settings report the measured active tier.
 
-| Provider | Category | Expected tier | Configuration fields |
-| --- | --- | --- | --- |
-| [This machine](#local) | This machine | Verified | `data_dir`, `thumb_dir`, `root` |
-| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `account_id` |
-| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Wasabi](#wasabi) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [WebDAV](#webdav) | Nextcloud and WebDAV | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [SFTP](#sftp) | NAS over SFTP | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
+| Provider | Category | Support | Expected tier | Configuration fields |
+| --- | --- | --- | --- | --- |
+| [This machine](#local) | This machine | Stable | Verified | `data_dir`, `thumb_dir`, `root` |
+| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Stable | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
+| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `account_id` |
+| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
+| [Wasabi](#wasabi) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
+| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
+| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
+| [WebDAV](#webdav) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
+| [SFTP](#sftp) | NAS over SFTP | Beta | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
 
 ## Safety tiers
 

@@ -169,7 +169,10 @@ class TestPurgeModel:
         assert response.status_code == 200, response.text
         db_session.expire_all()
         assert db_session.get(Model, model_id) is None
-        assert not get_backend().exists(key)
+        body = response.json()
+        assert body["storage_blocked"] == 1
+        assert body["storage_cleanup_status"] == "blocked"
+        assert get_backend().exists(key)
 
     def test_permanently_removes_a_trashed_model(
         self, client: TestClient, db_session: Session, auth_headers, make_model

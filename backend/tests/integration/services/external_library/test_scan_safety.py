@@ -162,3 +162,31 @@ class TestScanLibrary:
         # last_scanned_at is stamped so the scheduler treats it as due again (a
         # terminal state), rather than a permanently-skipped RUNNING row.
         assert lib.last_scanned_at is not None
+
+    def test_partial_traversal_never_soft_trashes_unobserved_files(
+        self, tmp_path: Path, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A nested listing/stat failure makes the whole snapshot incomplete."""
+        use_local_storage(tmp_path)
+        enable_feature(db_session)
+        nas = tmp_path / "nas"
+        first = drop_gcode(nas, "first.gcode", marker="first")
+        (nas / "nested").mkdir()
+        second = drop_gcode(nas, "nested" + "/second.gcode", marker="second")
+        lib = build_external_library(db_session, nas, name="nas")
+        external_library.scan_library(lib.id)
+        second.unlink()
+
+        def partial_walk(_root, **_kwargs):  # type: ignore[no-untyped-def]
+            yield str(nas), [], [first.name]
+            raise OSError("nested listing failed")
+
+        monkeypatch.setattr(external_library.os, "walk", partial_walk)
+        summary = external_library.scan_library(lib.id)
+
+        assert summary["aborted"] is True
+        assert summary["removed"] == 0
+        indexed = db_session.exec(
+            select(File).where(File.external_library_id == lib.id, live(File))
+        ).all()
+        assert {row.path for row in indexed} == {str(first), str(second)}

@@ -9,6 +9,7 @@ and no error anywhere to explain it.
 from __future__ import annotations
 
 import hashlib
+import json
 import threading
 from pathlib import Path
 
@@ -25,7 +26,11 @@ from app.db.models import (
     ModelProvenanceField,
     ProvenanceCapture,
 )
-from app.db.session import SQLiteSessionFactory, _set_sqlite_pragmas
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    get_session_factory,
+)
 from app.services import ingestion, provenance, thumbnail
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
@@ -41,8 +46,12 @@ def storage(tmp_path: Path):
     _overlay["storage_backend"] = "local"
     _overlay["data_dir"] = tmp_path / "files"
     _overlay["thumb_dir"] = tmp_path / "thumbs"
-    (tmp_path / "files").mkdir()
-    (tmp_path / "thumbs").mkdir()
+    for role, root in (("data", tmp_path / "files"), ("thumb", tmp_path / "thumbs")):
+        root.mkdir()
+        (root / ".printstash-storage-root.json").write_text(
+            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
+            encoding="utf-8",
+        )
     yield get_backend()
     for key in ("storage_backend", "data_dir", "thumb_dir"):
         _overlay.pop(key, None)
@@ -245,6 +254,81 @@ class TestReserveNextVersion:
 
 
 class TestMetadata:
+    def test_unknown_commit_resolution_keeps_the_published_blob(
+        self,
+        db_session: Session,
+        storage,
+        model: Model,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        original_commit = db_session.commit
+        commit_calls = 0
+
+        def commit_then_lose_ack() -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+            original_commit()
+            if commit_calls == 2:
+                raise ConnectionError("acknowledgement lost after commit")
+
+        monkeypatch.setattr(db_session, "commit", commit_then_lose_ack)
+        monkeypatch.setattr(
+            ingestion,
+            "_resolve_committed_artifact",
+            lambda **_kwargs: (_ for _ in ()).throw(OSError("database unavailable")),
+        )
+
+        with pytest.raises(ingestion.ArtifactCommitUncertain):
+            _persist(db_session, model, _staged(tmp_path))
+
+        # An unresolved acknowledgement is not permission to roll back storage.
+        db_session.rollback()
+        assert list(storage.walk_keys())
+
+    def test_commit_ack_loss_resolves_from_a_fresh_session(
+        self,
+        db_session: Session,
+        storage,
+        model: Model,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A successful COMMIT followed by lost acknowledgement is terminal."""
+        original_commit = db_session.commit
+        commit_calls = 0
+
+        def commit_then_lose_ack() -> None:
+            nonlocal commit_calls
+            commit_calls += 1
+            original_commit()
+            # The first commit closes the caller's read transaction. The
+            # second is the File+Metadata ownership boundary.
+            if commit_calls == 2:
+                raise ConnectionError("acknowledgement lost after commit")
+
+        monkeypatch.setattr(db_session, "commit", commit_then_lose_ack)
+        file_row = _persist(
+            db_session,
+            model,
+            _staged(tmp_path),
+            thumb_bytes=b"thumbnail-is-deferred",
+        )
+
+        assert file_row.id is not None
+        with get_session_factory().session() as fresh:
+            durable = fresh.get(File, file_row.id)
+            assert durable is not None
+            assert (
+                fresh.exec(
+                    select(Metadata).where(Metadata.file_id == file_row.id)
+                ).first()
+                is not None
+            )
+            assert durable.thumbnail_path is None
+        assert Path(file_row.path).exists()
+        assert not Path(storage.thumbnail_key(file_row.id)).exists()
+
     def test_persists_a_file_row_with_its_metadata_in_one_commit(
         self, db_session: Session, storage, model: Model, tmp_path: Path
     ) -> None:

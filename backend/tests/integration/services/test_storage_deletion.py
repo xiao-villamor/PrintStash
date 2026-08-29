@@ -25,11 +25,15 @@ import pytest
 from sqlmodel import Session, select
 
 from app.db.models import StorageDeleteIntent
+from app.services import audit
 from app.services.storage_backend import get_backend
 from app.services.storage_deletion import (
+    DeleteIntentResult,
+    cleanup_status,
     enqueue_creation_receipt,
     enqueue_owned_key,
     process_storage_delete_intents,
+    record_legacy_blocked_intent,
 )
 from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
 
@@ -174,6 +178,19 @@ class TestEnqueueOwnedKey:
         intent = _intents(db_session)[0]
         assert intent.sha256 == digest
 
+    def test_persists_authorization_actor(self, db_session: Session, owned) -> None:
+        key, _receipt = owned()
+        audit.set_audit_context(actor_id=912, ip="127.0.0.1")
+        try:
+            assert enqueue_owned_key(db_session, get_backend(), key)
+            db_session.commit()
+        finally:
+            audit.clear_audit_context()
+
+        intent = _intents(db_session)[0]
+        assert intent.authorized_actor_id == 912
+        assert intent.authorized_at is not None
+
     def test_guarded_deletion_rejects_mismatched_hash(
         self, db_session: Session, owned
     ) -> None:
@@ -238,6 +255,49 @@ class TestEnqueueCreationReceipt:
 
 
 class TestProcessStorageDeleteIntents:
+    def test_records_legacy_bytes_as_a_durable_blocked_intent(
+        self, db_session: Session
+    ) -> None:
+        backend = get_backend()
+        key = backend.blob_key("legacy-retained", 1, "old.stl")
+        backend.write_bytes(b"legacy bytes", key)
+
+        record_legacy_blocked_intent(
+            db_session,
+            backend,
+            key=key,
+            size_bytes=len(b"legacy bytes"),
+            sha256=hashlib.sha256(b"legacy bytes").hexdigest(),
+            object_kind="legacy_artifact",
+        )
+        db_session.commit()
+
+        result = process_storage_delete_intents()
+
+        assert result.blocked == 1
+        persisted = _intents(db_session)[0]
+        assert persisted.status == "blocked"
+        assert persisted.authorization_mode == "legacy_unknown"
+        assert persisted.quarantine_state == "blocked"
+        assert persisted.last_error == "storage_guarded_delete_unsupported"
+        assert backend.exists(key)
+
+    @pytest.mark.parametrize(
+        ("result", "expected"),
+        [
+            pytest.param(DeleteIntentResult(), "completed", id="completed"),
+            pytest.param(DeleteIntentResult(pending=1), "pending", id="pending"),
+            pytest.param(DeleteIntentResult(blocked=1), "blocked", id="blocked"),
+            pytest.param(
+                DeleteIntentResult(completed=1, blocked=1), "partial", id="partial"
+            ),
+        ],
+    )
+    def test_classifies_the_exact_cleanup_result(
+        self, result: DeleteIntentResult, expected: str
+    ) -> None:
+        assert cleanup_status(result) == expected
+
     def test_removes_the_bytes_it_was_authorized_to_remove(
         self, db_session: Session, owned
     ) -> None:
@@ -306,15 +366,77 @@ class TestProcessStorageDeleteIntents:
     def test_guarded_processing_blocks_intent_without_hash_evidence(
         self, db_session: Session, owned
     ) -> None:
-        key, _receipt = owned()
-        enqueue_owned_key(db_session, get_backend(), key)
+        key, receipt = owned()
+        db_session.add(
+            StorageDeleteIntent(
+                backend=receipt.backend,
+                namespace=receipt.namespace,
+                key=key,
+                object_kind="artifact",
+                token=receipt.token,
+                size_bytes=receipt.size,
+                authorization_mode="guarded",
+            )
+        )
         db_session.commit()
 
         result = process_storage_delete_intents(allow_unverified=True)
 
         assert result.blocked == 1
         assert get_backend().exists(key)
-        assert _intents(db_session)[0].last_error == "storage_hash_unavailable"
+        assert (
+            _intents(db_session)[0].last_error == "storage_guarded_delete_unsupported"
+        )
+
+    def test_guarded_authorization_survives_restart(
+        self, db_session: Session, owned
+    ) -> None:
+        data = b"guarded-with-proof"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(
+            db_session,
+            get_backend(),
+            key,
+            required_proof=True,
+            allow_unverified=True,
+        )
+        db_session.commit()
+
+        # A later worker cannot elevate the durable guarded decision by passing
+        # the old compatibility keyword.
+        result = process_storage_delete_intents(allow_unverified=False)
+
+        intent = _intents(db_session)[0]
+        assert result == DeleteIntentResult(blocked=1)
+        assert intent.authorization_mode == "guarded"
+        assert intent.quarantine_state == "blocked"
+        assert get_backend().exists(key)
+
+    def test_verified_intent_retries_after_worker_crash(
+        self, db_session: Session, owned, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        key, _receipt = owned()
+        enqueue_owned_key(db_session, get_backend(), key)
+        db_session.commit()
+
+        def crash_after_pending(*_args: object, **_kwargs: object) -> bool:
+            raise KeyboardInterrupt("worker crashed")
+
+        monkeypatch.setattr(get_backend(), "rollback_create", crash_after_pending)
+        with pytest.raises(KeyboardInterrupt):
+            process_storage_delete_intents()
+
+        pending = _intents(db_session)[0]
+        assert pending.status == "pending"
+        assert pending.quarantine_state == "pending"
+        assert get_backend().exists(key)
+
+        monkeypatch.undo()
+        result = process_storage_delete_intents()
+
+        assert result.completed == 1
+        assert not get_backend().exists(key)
+        assert _intents(db_session)[0].status == "completed"
 
     def test_leaves_an_intent_pending_when_the_backend_is_unreachable(
         self, db_session: Session, owned, monkeypatch: pytest.MonkeyPatch

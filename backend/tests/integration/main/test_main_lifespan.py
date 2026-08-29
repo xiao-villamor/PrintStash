@@ -53,6 +53,15 @@ def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             "staging_dir": tmp_path / "staging",
         }
     )
+    for role, root in (
+        ("data", tmp_path / "files"),
+        ("thumb", tmp_path / "thumbs"),
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / ".printstash-storage-root.json").write_text(
+            '{"format":1,"installation":"%s","role":"%s"}' % ("a" * 64, role),
+            encoding="utf-8",
+        )
     monkeypatch.setattr(storage_backend, "_backend", None)
     yield
     for field in (
@@ -66,6 +75,50 @@ def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestStorageComposition:
+    def test_recovery_composition_skips_setup_probes(
+        self, _local_storage: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unresolved restore binds read/recovery access without startup I/O."""
+        from app.services import inbox
+
+        events: list[str] = []
+
+        class _RecoveryBackend:
+            backend_name = "local"
+            capabilities = StorageCapabilities(
+                conditional_create=True,
+                object_identity=ObjectIdentity.INODE,
+                verified_delete=True,
+                conditional_replace=True,
+                namespace_ownership=True,
+                direct_path=True,
+            )
+
+            def ensure_setup(self) -> None:
+                events.append("unexpected-setup")
+                raise AssertionError("recovery startup must not probe storage")
+
+        backend = _RecoveryBackend()
+        monkeypatch.setattr(app_main, "LocalStorageBackend", lambda: backend)
+        monkeypatch.setattr(
+            app_main,
+            "bind_backend",
+            lambda value: events.append("bind") or value,
+        )
+        monkeypatch.setattr(
+            inbox,
+            "reconcile_storage_publications",
+            lambda: events.append("unexpected-publication-reconcile") or 1,
+        )
+
+        assert (
+            app_main._prepare_storage_for_startup(
+                recover_publications=False, recovery_only=True
+            )
+            is backend
+        )
+        assert events == ["bind"]
+
     def test_storage_composition_runs_publication_recovery_after_binding(
         self, _local_storage: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:

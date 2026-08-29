@@ -25,6 +25,32 @@ def _clean_overlay():
 
 
 class TestApplyOverlay:
+    def test_markerless_nonempty_thumb_root_is_not_auto_enrolled(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        data_root = tmp_path / "files"
+        thumb_root = tmp_path / "thumbs"
+        data_root.mkdir()
+        thumb_root.mkdir()
+        (thumb_root / "wrong-installation.webp").write_bytes(b"not our thumbnail")
+        _overlay.update(
+            {
+                "storage_backend": "local",
+                "data_dir": data_root,
+                "thumb_dir": thumb_root,
+            }
+        )
+
+        runtime_config.ensure_storage_identity(db_session)
+        result = runtime_config.enroll_legacy_local_roots(db_session)
+
+        assert result == {"data": False, "thumb": False}
+        assert not (data_root / ".printstash-storage-root.json").exists()
+        assert not (thumb_root / ".printstash-storage-root.json").exists()
+        assert (
+            thumb_root / "wrong-installation.webp"
+        ).read_bytes() == b"not our thumbnail"
+
     def test_apply_overlay_noop_when_no_config_row(self, db_session: Session) -> None:
         _overlay["storage_backend"] = "leftover"
         runtime_config.apply_overlay(db_session)
@@ -213,6 +239,12 @@ class TestApplyEnvironmentStorageProvider:
     def test_projects_a_valid_provider_from_environment(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        for name in (
+            "VAULT_DATA_DIR",
+            "VAULT_THUMB_DIR",
+            "VAULT_STORAGE_ROOT",
+        ):
+            monkeypatch.delenv(name, raising=False)
         monkeypatch.setattr(settings._frozen, "storage_provider", "local")  # noqa: SLF001
         monkeypatch.setattr(  # noqa: SLF001
             settings._frozen,
@@ -234,6 +266,24 @@ class TestApplyEnvironmentStorageProvider:
 
         assert _overlay["storage_provider"] == "local"
         assert _overlay["data_dir"] == tmp_path / "files"
+
+    def test_rejects_generic_json_when_typed_provider_fields_are_present(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VAULT_DATA_DIR", "/tmp/typed-files")
+        monkeypatch.setattr(settings._frozen, "storage_provider", "local")  # noqa: SLF001
+        monkeypatch.setattr(  # noqa: SLF001
+            settings._frozen,
+            "storage_provider_config",
+            '{"provider":"local","data_dir":"/tmp/json-files","thumb_dir":"/tmp/json-thumbs"}',
+        )
+        monkeypatch.setattr(settings._frozen, "storage_provider_secrets", "{}")  # noqa: SLF001
+
+        runtime_config.apply_environment_storage_provider(db_session)
+
+        assert _overlay["storage_provider_error"] == (
+            "storage_provider_configuration_conflict"
+        )
 
     def test_ignores_a_mismatched_environment_provider(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch

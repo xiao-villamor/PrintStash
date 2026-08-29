@@ -90,38 +90,31 @@ class TestArtifactUpload:
                 "setup_token": current_setup_token(),
                 "username": "owner",
                 "password": "Password123",
-                "storage_backend": "local",
-                "data_dir": str(tmp_path / "files"),
-                "thumb_dir": str(tmp_path / "thumbs"),
+                "storage_provider": "webdav",
+                "storage_provider_config": {
+                    "provider": "webdav",
+                    "endpoint_url": webdav_endpoint,
+                    "username": "webdav-user",
+                    "password": "webdav-password",
+                    "root": "vault-data",
+                },
             },
         )
         assert setup.status_code == 201, setup.text
         headers = {"Authorization": f"Bearer {setup.json()['access_token']}"}
 
+        # Use the production composition root to activate the persisted
+        # provider; the E2E must not bypass configuration with bind_backend.
+        from app.main import _compose_storage_backend
+        from app.services import runtime_config
+
+        runtime_config.apply_overlay(e2e_db)
+        backend = _compose_storage_backend(recover_publications=False)
+
         health = await api.get("/api/v1/health")
         assert health.status_code == 200, health.text
-        assert health.json()["storage"]["provider"] == "local"
-        assert health.json()["storage"]["tier"] == "verified"
-
-        from app.services.storage_backend import bind_backend
-        from app.services.storage_opendal import OpenDALStorageBackend
-        from app.services.storage_providers import TransportKind, TransportSpec
-
-        backend = OpenDALStorageBackend(
-            TransportSpec(
-                kind=TransportKind.WEBDAV,
-                provider="webdav",
-                namespace="webdav/vault-data",
-                options={
-                    "endpoint_url": webdav_endpoint,
-                    "username": "user",
-                    "password": "password",
-                    "root": "vault-data",
-                },
-            )
-        )
-        backend.ensure_setup()
-        bind_backend(backend)
+        assert health.json()["storage"]["provider"] == "webdav"
+        assert health.json()["storage"]["tier"] == "guarded"
 
         upload = await api.post(
             "/api/v1/ingest/orca",

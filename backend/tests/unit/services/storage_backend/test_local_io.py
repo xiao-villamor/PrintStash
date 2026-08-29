@@ -6,6 +6,8 @@ source bytes, reject destination collisions, and report accurate inventories.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -20,7 +22,7 @@ from app.services.storage_backend import LocalStorageBackend, StorageCollisionEr
 class FakeSettings:
     data_dir: Path
     thumb_dir: Path
-    storage_identity: str = "test-installation"
+    storage_identity: str = "a" * 64
 
 
 class TestStatSize:
@@ -127,7 +129,52 @@ class TestUploadFile:
 
 
 class TestEnsureSetup:
-    def test_creates_every_directory_the_backend_writes_into(
+    def test_explicit_enrollment_upgrades_a_proven_legacy_marker(
+        self, tmp_path: Path
+    ) -> None:
+        from app.services.storage_backend import enroll_legacy_local_root
+
+        root = tmp_path / "legacy"
+        root.mkdir()
+        payload = root / "part.stl"
+        payload.write_bytes(b"legacy-bytes")
+        (root / ".printstash-storage-root.json").write_text(
+            '{"installation":"installation","role":"data"}', encoding="utf-8"
+        )
+
+        assert enroll_legacy_local_root(
+            root,
+            role="data",
+            installation="installation",
+            proofs=[
+                (
+                    payload,
+                    payload.stat().st_size,
+                    hashlib.sha256(payload.read_bytes()).hexdigest(),
+                )
+            ],
+        )
+        assert json.loads(
+            (root / ".printstash-storage-root.json").read_text(encoding="utf-8")
+        ) == {"format": 1, "installation": "installation", "role": "data"}
+
+    def test_legacy_enrollment_rejects_size_only_evidence(self, tmp_path: Path) -> None:
+        from app.services.storage_backend import enroll_legacy_local_root
+
+        root = tmp_path / "legacy"
+        root.mkdir()
+        payload = root / "part.stl"
+        payload.write_bytes(b"legacy-bytes")
+
+        assert not enroll_legacy_local_root(
+            root,
+            role="data",
+            installation="installation",
+            proofs=[(payload, payload.stat().st_size, None)],
+        )
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_does_not_create_missing_configured_directories(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         data_dir = tmp_path / "files"
@@ -138,8 +185,8 @@ class TestEnsureSetup:
 
         LocalStorageBackend().ensure_setup()
 
-        assert data_dir.is_dir()
-        assert thumb_dir.is_dir()
+        assert not data_dir.exists()
+        assert not thumb_dir.exists()
 
 
 class TestDelete:
@@ -233,6 +280,11 @@ class TestHealthProbe:
         thumb_dir = tmp_path / "thumbs"
         data_dir.mkdir()
         thumb_dir.mkdir()
+        for role, root in (("data", data_dir), ("thumb", thumb_dir)):
+            (root / ".printstash-storage-root.json").write_text(
+                '{"format":1,"installation":"%s","role":"%s"}' % ("a" * 64, role),
+                encoding="utf-8",
+            )
         monkeypatch.setattr(
             storage_backend, "settings", FakeSettings(data_dir, thumb_dir)
         )

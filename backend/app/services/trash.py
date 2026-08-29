@@ -45,6 +45,7 @@ from app.services.storage_backend import StorageTier, get_backend
 from app.services.storage_deletion import (
     enqueue_owned_key,
     process_storage_delete_intents,
+    record_legacy_blocked_intent,
 )
 from app.services.storage_ownership import (
     UnsafeStorageDeleteError,
@@ -245,15 +246,28 @@ def hard_delete_file(
         # Once a multi-key purge starts, a late storage failure must leak the
         # uncertain remainder rather than roll back DB rows after earlier exact
         # objects were already removed.
-        enqueue_owned_key(
-            session,
-            backend,
-            file_row.path,
-            required_proof=True,
-            resource_kind="file",
-            resource_id=file_id,
-            allow_unverified=confirm_storage_risk,
-        )
+        try:
+            enqueue_owned_key(
+                session,
+                backend,
+                file_row.path,
+                required_proof=True,
+                resource_kind="file",
+                resource_id=file_id,
+                allow_unverified=confirm_storage_risk,
+            )
+        except UnsafeStorageDeleteError:
+            if not confirm_storage_risk:
+                raise
+            record_legacy_blocked_intent(
+                session,
+                backend,
+                key=file_row.path,
+                size_bytes=file_row.size_bytes,
+                sha256=file_row.sha256,
+                object_kind="legacy_artifact",
+                resource_id=file_id,
+            )
     enqueue_owned_key(
         session,
         backend,
@@ -574,8 +588,19 @@ def gc_soft_deleted(
         int(settings.trash_retention_days) if retention_days is None else retention_days
     )
     if effective_retention < 0:
-        logger.info("gc skipped: trash retention is disabled")
-        return {"rows": 0, "orphan_blobs": 0}
+        # Retention controls expiry, not the durable delete outbox.  A
+        # previously authorized intent must still be retried while operators
+        # keep trash indefinitely, otherwise disabling retention strands
+        # already-purged bytes forever.
+        logger.info("gc expiry skipped: trash retention is disabled")
+        storage_result = process_storage_delete_intents()
+        return {
+            "rows": 0,
+            "orphan_blobs": 0,
+            "storage_completed": storage_result.completed,
+            "storage_pending": storage_result.pending,
+            "storage_blocked": storage_result.blocked,
+        }
     cutoff = utcnow() - timedelta(days=effective_retention)
     purged = {"rows": 0, "orphan_blobs": 0}
     with get_session_factory().scoped_session() as session:

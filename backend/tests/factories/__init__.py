@@ -96,6 +96,7 @@ from tests.factories.ops import (
     build_external_library,
     build_filament_profile,
     build_notification_channel,
+    build_restore_marker,
     build_share_link,
 )
 from tests.factories.printers import (
@@ -120,6 +121,7 @@ from tests.factories.scenarios import (
     a_printer_with_a_queue,
 )
 from tests.factories.storage import (
+    build_storage_delete_intent,
     build_stored_file,
     build_unowned_file,
     store_owned_bytes,
@@ -150,6 +152,7 @@ __all__ = [
     "build_metadata",
     "build_model",
     "build_notification_channel",
+    "build_restore_marker",
     "build_print_job",
     "build_printer",
     "build_printer_file",
@@ -157,6 +160,7 @@ __all__ = [
     "build_provenance_source",
     "build_share_link",
     "build_stored_file",
+    "build_storage_delete_intent",
     "build_tag",
     "build_unowned_file",
     "build_user",

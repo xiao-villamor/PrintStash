@@ -391,6 +391,36 @@ class TestOpenDALStorageBackend:
         assert result["ok"] is False
         assert result["error"] == "OSError"
 
+    def test_setup_refuses_a_provider_that_overwrites_duplicate_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+        calls = 0
+
+        def overwrite(_source: BinaryIO, key: str):
+            nonlocal calls
+            calls += 1
+            operator.objects[backend._relative(key)] = b"overwritten"
+            return SimpleNamespace(
+                key=key,
+                size=len(b"overwritten"),
+                token="probe",
+                backend=backend.backend_name,
+                namespace=backend.namespace_for(key),
+            )
+
+        monkeypatch.setattr(backend, "create_stream", overwrite)
+
+        backend.ensure_setup()
+
+        assert calls == 2
+        assert backend.capabilities.conditional_create is False
+        assert backend.probe_diagnostics["conditional_create"] is False
+        monkeypatch.undo()
+        with pytest.raises(StorageConfigurationError, match="remote_storage_read_only"):
+            backend.create_bytes(b"new", backend.thumbnail_key(99))
+
     def test_exposes_no_direct_path(self) -> None:
         backend = storage_opendal.OpenDALStorageBackend(
             _spec(), operator=_MemoryOperator()
@@ -471,9 +501,9 @@ class TestOpenDALStorageBackend:
                 expected_sha256=hashlib.sha256(b"payload").hexdigest().upper(),
                 expected_version_id="ignored",
             )
-            is True
+            is False
         )
-        assert not operator.exists("thumbs/25.webp")
+        assert operator.exists("thumbs/25.webp")
 
     def test_reclaims_when_object_evidence_matches(self) -> None:
         operator = _MemoryOperator()
@@ -485,6 +515,6 @@ class TestOpenDALStorageBackend:
             backend.reclaim_unverified(
                 key, expected_size=7, expected_etag="etag:thumbs/26.webp"
             )
-            is True
+            is False
         )
-        assert not operator.exists("thumbs/26.webp")
+        assert operator.exists("thumbs/26.webp")

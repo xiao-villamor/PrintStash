@@ -15,6 +15,7 @@ backup/restore).
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,17 @@ def _switch_to_fresh_instance(tmp_path: Path, name: str) -> None:
         d = root / key
         d.mkdir(parents=True, exist_ok=True)
         _overlay[key] = d
+    for role, directory in (("data", root / "files"), ("thumb", root / "thumbs")):
+        (directory / ".printstash-storage-root.json").write_text(
+            json.dumps(
+                {
+                    "format": 1,
+                    "installation": str(_overlay.get("storage_identity") or "a" * 64),
+                    "role": role,
+                }
+            ),
+            encoding="utf-8",
+        )
     # get_backend() caches a singleton keyed to whatever data_dir was active
     # when it was first built; force it to rebuild against the new instance.
     storage_backend._backend = None

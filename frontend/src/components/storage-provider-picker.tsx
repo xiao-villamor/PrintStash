@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useOptionalI18n } from "@/lib/i18n";
 import type { ProviderCategory, StorageProvider, StorageProviderConfigValues } from "@/types";
 
 const CATEGORIES: Array<{
@@ -33,6 +34,10 @@ function tierLabel(tier: string): string {
   return tier.charAt(0).toUpperCase() + tier.slice(1);
 }
 
+function supportLabel(level: string | undefined): string {
+  return (level ?? "stable").charAt(0).toUpperCase() + (level ?? "stable").slice(1);
+}
+
 function providerConsequences(provider: StorageProvider): string[] {
   if (provider.expected_tier !== "guarded") return provider.consequences;
 
@@ -54,6 +59,7 @@ export function StorageProviderPicker(props: {
   disabled?: boolean;
   activeTier?: string;
 }) {
+  const i18n = useOptionalI18n();
   const selected = props.providers.find((provider) => provider.id === props.providerId);
   const [categoryOverride, setCategoryOverride] = useState<ProviderCategory | null>(null);
   const selectedCategory = categoryOverride ?? selected?.category ?? "this_machine";
@@ -136,6 +142,11 @@ export function StorageProviderPicker(props: {
         <section className="space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">
+                {i18n?.t("settings.storageSupport", {
+                  level: supportLabel(selected.support_level),
+                }) ?? `Support: ${supportLabel(selected.support_level)}`}
+              </Badge>
               <Badge variant="secondary">Expected: {tierLabel(selected.expected_tier)}</Badge>
               {props.activeTier && (
                 <Badge variant="outline">Active: {tierLabel(props.activeTier)}</Badge>

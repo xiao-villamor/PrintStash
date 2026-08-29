@@ -8,6 +8,7 @@ each file is how the same helper came to exist in four slightly different forms.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -114,4 +115,13 @@ def local_storage(tmp_path: Path):
     _overlay["data_dir"] = tmp_path / "files"
     _overlay["thumb_dir"] = tmp_path / "thumbs"
     _overlay["staging_dir"] = tmp_path / "staging"
+    for role, root in (
+        ("data", _overlay["data_dir"]),
+        ("thumb", _overlay["thumb_dir"]),
+    ):
+        root.mkdir(parents=True, exist_ok=True)
+        (root / ".printstash-storage-root.json").write_text(
+            json.dumps({"format": 1, "installation": "a" * 64, "role": role}),
+            encoding="utf-8",
+        )
     return tmp_path

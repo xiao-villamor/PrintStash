@@ -10,6 +10,11 @@ export interface BackupMeta {
   location: string;
 }
 
+/** A validated local archive not yet registered in the ownership ledger. */
+export interface UnownedBackupCandidate extends BackupMeta {
+  filename: string;
+}
+
 export interface BackupRestoreResult {
   backup_id: string;
   restored_files: number;
@@ -21,6 +26,18 @@ export function createBackup(): Promise<BackupMeta> {
 
 export function listBackups(): Promise<BackupMeta[]> {
   return getJson<BackupMeta[]>("/api/v1/backups");
+}
+
+export function listUnownedLocalBackups(): Promise<UnownedBackupCandidate[]> {
+  return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local");
+}
+
+export function adoptLocalBackup(filename: string): Promise<BackupMeta> {
+  return sendJson<BackupMeta>(
+    `/api/v1/backups/adopt-local?filename=${encodeURIComponent(filename)}`,
+    "POST",
+    undefined,
+  );
 }
 
 export function restoreBackup(backupId: string): Promise<BackupRestoreResult> {

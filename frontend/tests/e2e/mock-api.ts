@@ -424,6 +424,7 @@ function storageProviders() {
       documentation_url: "/docs/storage-providers.md#local",
       available: true,
       selectable: true,
+      support_level: "stable",
       fields: [
         {
           name: "data_dir",
@@ -465,6 +466,7 @@ function storageProviders() {
       documentation_url: "/docs/storage-providers.md#sftp",
       available: false,
       selectable: false,
+      support_level: "beta",
       disabled_reason: "Requires the full image",
       fields: [
         {
@@ -868,7 +870,14 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/models/trash/expired" && req.method === "DELETE") {
-    sendJson(res, { purged_model_ids: [91], purged_count: 1 });
+    sendJson(res, {
+      purged_model_ids: [91],
+      purged_count: 1,
+      storage_completed: 1,
+      storage_pending: 0,
+      storage_blocked: 0,
+      storage_cleanup_status: "completed",
+    });
     return;
   }
   if (url.pathname === "/api/v1/models/stats") {
@@ -1374,6 +1383,43 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       return;
     }
     sendJson(res, vaultConfig());
+    return;
+  }
+  if (url.pathname === "/api/v1/backups/unowned-local" && req.method === "GET") {
+    sendJson(res, []);
+    return;
+  }
+  if (url.pathname === "/api/v1/backups" && req.method === "GET") {
+    sendJson(res, []);
+    return;
+  }
+  if (url.pathname === "/api/v1/backups/adopt-local" && req.method === "POST") {
+    drainRequest(req, () => sendJson(res, { backup_id: "legacy-backup" }));
+    return;
+  }
+  if (url.pathname === "/api/v1/config/storage-roots/enroll" && req.method === "POST") {
+    drainRequest(req, () =>
+      sendJson(res, { enrolled: true, role: "data", restart_required: true }),
+    );
+    return;
+  }
+  if (url.pathname === "/api/v1/health/details") {
+    sendJson(res, {
+      status: "ok",
+      name: "PrintStash",
+      version: "0.13.0",
+      components: {
+        database: { ok: true },
+        storage: {
+          ok: true,
+          backend: "local",
+          provider: "local",
+          tier: "verified",
+          warnings: [],
+          diagnostics: { roots_ready: true, root_bindings: {} },
+        },
+      },
+    });
     return;
   }
   if (url.pathname === "/api/v1/storage/providers") {

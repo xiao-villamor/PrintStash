@@ -32,7 +32,7 @@ from typing import Any
 
 from sqlmodel import Session
 
-from app.db.models import File, FileType, Model
+from app.db.models import File, FileType, Model, StorageDeleteIntent
 from app.services.storage_backend import CreationReceipt, StorageBackend
 from app.services.storage_ownership import record_creation
 from tests.factories._support import nth, reject_aliases, save, unique_hash
@@ -57,6 +57,42 @@ def store_owned_bytes(
     )
     session.commit()
     return receipt
+
+
+def build_storage_delete_intent(
+    session: Session,
+    backend: StorageBackend,
+    receipt: CreationReceipt,
+    *,
+    authorization_mode: str = "verified",
+    sha256: str | None = None,
+    quarantine_state: str = "none",
+    **overrides: Any,
+) -> StorageDeleteIntent:
+    """Persist one outbox row for restart/reconciliation scenarios.
+
+    The builder keeps authorization metadata explicit so tests cannot create a
+    row that accidentally relies on a process-local confirmation flag.
+    """
+    overrides.setdefault("authorization_mode", authorization_mode)
+    overrides.setdefault("quarantine_state", quarantine_state)
+    overrides.setdefault("sha256", sha256)
+    row = StorageDeleteIntent(
+        backend=receipt.backend,
+        namespace=receipt.namespace,
+        key=receipt.key,
+        object_kind="test",
+        token=receipt.token,
+        size_bytes=receipt.size,
+        sha256=overrides.pop("sha256"),
+        etag=receipt.etag,
+        version_id=receipt.version_id,
+        device=receipt.device,
+        inode=receipt.inode,
+        ctime_ns=receipt.ctime_ns,
+        **overrides,
+    )
+    return save(session, row)
 
 
 def build_stored_file(

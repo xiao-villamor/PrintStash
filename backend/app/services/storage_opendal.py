@@ -65,8 +65,11 @@ class OpenDALStorageBackend(StorageBackend):
             raise StorageConfigurationError("unsupported remote transport")
         self._spec = spec
         self.backend_name = spec.provider
+        self.provider_id = spec.provider
+        self.transport = spec.kind.value
         self._namespace = spec.namespace.rstrip("/")
         self._operator = operator if operator is not None else _operator_for(spec)
+        self._read_only = False
         self._webdav_endpoint = str(spec.options.get("endpoint_url") or "").rstrip("/")
         self._webdav_root = str(spec.options.get("root") or "").strip("/")
         self._capabilities = StorageCapabilities(
@@ -74,7 +77,10 @@ class OpenDALStorageBackend(StorageBackend):
             # atomic create-only operations.  They do not provide a durable
             # object identity/conditional replacement, so the adapter is
             # Guarded rather than Verified.
-            conditional_create=True,
+            # Do not advertise conditional publication until the configured
+            # endpoint proves it.  A provider that silently overwrites a
+            # duplicate key must remain unguarded/read-only.
+            conditional_create=False,
             object_identity=ObjectIdentity.NONE,
             verified_delete=False,
             conditional_replace=False,
@@ -211,6 +217,8 @@ class OpenDALStorageBackend(StorageBackend):
         return bool(self._operator.exists(self._relative(key)))
 
     def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
+        if self._read_only:
+            raise StorageConfigurationError("remote_storage_read_only")
         destination = self._relative(key)
         try:
             if (
@@ -300,6 +308,11 @@ class OpenDALStorageBackend(StorageBackend):
             self._webdav_ensure_parent(destination)
             self._webdav_move_create_only(source, destination)
             return
+        if self._spec.kind is TransportKind.SFTP:
+            # SFTP rename is allowed to replace a destination.  The existence
+            # check below would be a TOCTOU window, so do not expose it as a
+            # create-only move until the server provides a no-replace rename.
+            raise StorageConfigurationError("atomic_move_not_supported")
         if self._operator.exists(destination):
             raise StorageCollisionError(dest_key)
         self._operator.rename(source, destination)
@@ -340,9 +353,96 @@ class OpenDALStorageBackend(StorageBackend):
 
     def ensure_setup(self) -> None:
         self._operator.check()
-        self.verify_destructive_access([])
+        from io import BytesIO
+
+        probe = f".printstash-probe/{uuid.uuid4().hex}"
+        first = b"printstash-conditional-create-proof"
+        second = b"printstash-conditional-create-collision"
+
+        def cleanup() -> None:
+            try:
+                self._operator.delete(self._relative(self._key(probe)))
+            except Exception:
+                pass
+
+        try:
+            self.create_stream(BytesIO(first), self._key(probe))
+        except Exception:
+            self._probe_diagnostics["probed"] = True
+            self._probe_diagnostics["conditional_create"] = False
+            raise
+        try:
+            self.create_stream(BytesIO(second), self._key(probe))
+        except StorageCollisionError:
+            collision_proven = True
+        except Exception:
+            self._probe_diagnostics["probed"] = True
+            self._probe_diagnostics["conditional_create"] = False
+            cleanup()
+            raise
+        else:
+            collision_proven = False
+        try:
+            observed = self.read_bytes(self._key(probe))
+            observed_size = self.stat_size(self._key(probe))
+            listed = self._key(probe) in set(self.walk_keys())
+        except Exception:
+            self._probe_diagnostics["probed"] = True
+            self._probe_diagnostics["conditional_create"] = False
+            cleanup()
+            raise
+        if not listed:
+            cleanup()
+            raise StorageConfigurationError("remote_conditional_create_unproven")
+        if observed_size != len(first):
+            if collision_proven:
+                cleanup()
+                raise StorageConfigurationError("remote_conditional_create_unproven")
+            # Reached endpoint, but its duplicate write changed the object.
+            cleanup()
+            self._capabilities = StorageCapabilities(
+                conditional_create=False,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=True,
+                direct_path=False,
+            )
+            self._probe_diagnostics.update(
+                {"probed": True, "conditional_create": False, "read_only": True}
+            )
+            self._read_only = True
+            return
+        if observed != first:
+            if collision_proven:
+                cleanup()
+                raise StorageConfigurationError("remote_conditional_create_unproven")
+            cleanup()
+            self._capabilities = StorageCapabilities(
+                conditional_create=False,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=True,
+                direct_path=False,
+            )
+            self._probe_diagnostics.update(
+                {"probed": True, "conditional_create": False, "read_only": True}
+            )
+            self._read_only = True
+            return
+        cleanup()
+        self._capabilities = StorageCapabilities(
+            conditional_create=True,
+            object_identity=ObjectIdentity.NONE,
+            verified_delete=False,
+            conditional_replace=False,
+            namespace_ownership=True,
+            direct_path=False,
+        )
         self._probe_diagnostics["probed"] = True
         self._probe_diagnostics["destructive_access"] = True
+        self._probe_diagnostics["conditional_create"] = True
 
     def verify_destructive_access(self, keys: list[str]) -> None:
         """Probe create/delete on a fresh key, never on a caller's object."""
@@ -447,8 +547,11 @@ class OpenDALStorageBackend(StorageBackend):
                 digest.update(chunk)
             if digest.hexdigest() != expected_sha256.lower():
                 return False
-        self._operator.delete(self._relative(key))
-        return True
+        # Guarded transports expose no immutable object identity and no
+        # conditional delete/quarantine primitive.  The proof above can be
+        # invalidated by a replacement before delete, so retain the bytes and
+        # let the ownership ledger record a durable blocked cleanup outcome.
+        return False
 
 
 def _operator_for(spec: TransportSpec):
@@ -548,7 +651,9 @@ class _AsyncSSHSFTPOperator:
 
     def check(self) -> None:
         async def operation(client) -> None:
-            await client.makedirs(self._root, exist_ok=True)
+            # Health and startup checks are read-only. Creating a missing
+            # remote root here can turn a typo or unmounted share into a new
+            # empty namespace; provisioning belongs to explicit setup.
             await client.stat(self._root)
 
         self._run(operation)

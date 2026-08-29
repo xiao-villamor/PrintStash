@@ -47,6 +47,7 @@ from app.services.audit import (
 from app.services.backup import (
     begin_mutating_operation,
     end_mutating_operation,
+    inspect_restore_recovery,
 )
 from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
@@ -66,6 +67,7 @@ from app.services.storage_backend import (
     S3StorageBackend,
     StorageBackend,
     StorageTier,
+    UnavailableStorageBackend,
     bind_backend,
 )
 from app.services.task_queue import LocalTaskQueue
@@ -115,27 +117,50 @@ def _safe_db_url(value: str) -> str:
         return "<invalid-db-url>"
 
 
-def _compose_storage_backend() -> StorageBackend:
-    """Bind and recover the configured backend before serving requests."""
-    if settings.storage_backend in {"nextcloud", "webdav", "sftp"}:
-        from app.services.storage_opendal import OpenDALStorageBackend
-        from app.services.storage_providers import (
-            parse_provider_config,
-            resolve_transport,
-        )
+def _compose_storage_backend(
+    *, recover_publications: bool = True, recovery_only: bool = False
+) -> StorageBackend:
+    """Bind the configured backend before serving requests.
 
-        provider_config = parse_provider_config(
-            json.loads(str(settings.storage_provider_config))
-        )
-        storage_backend = OpenDALStorageBackend(resolve_transport(provider_config))
-    elif settings.storage_backend == "s3":
-        storage_backend: StorageBackend = S3StorageBackend()
-    else:
-        storage_backend = LocalStorageBackend()
-    storage_backend.ensure_setup()
+    Restore maintenance is entered before startup repair.  In that state the
+    adapter is still useful for reads and for the explicitly journaled restore,
+    but setup probes are unsafe: they can create remote probe objects or
+    mutate a mounted root while the active database is being established.
+    """
+    try:
+        if settings.storage_provider_error:
+            raise RuntimeError(settings.storage_provider_error)
+        if settings.storage_backend in {"nextcloud", "webdav", "sftp"}:
+            from app.services.storage_opendal import OpenDALStorageBackend
+            from app.services.storage_providers import (
+                parse_provider_config,
+                resolve_transport,
+            )
+
+            provider_config = parse_provider_config(
+                json.loads(str(settings.storage_provider_config))
+            )
+            storage_backend = OpenDALStorageBackend(resolve_transport(provider_config))
+        elif settings.storage_backend == "s3":
+            storage_backend = S3StorageBackend(check_bucket=not recovery_only)
+        else:
+            storage_backend = LocalStorageBackend()
+    except Exception as exc:
+        # An explicit but invalid provider must never silently become local
+        # storage. Keep the API/health surface available in recovery mode while
+        # every storage mutation fails closed.
+        logger.exception("selected storage provider unavailable")
+        storage_backend = UnavailableStorageBackend(exc.__class__.__name__)
+    if not recovery_only:
+        storage_backend.ensure_setup()
     if (
-        storage_backend.capabilities.tier is StorageTier.UNGUARDED
-        and not settings.storage_allow_unverified
+        not recovery_only
+        and storage_backend.backend_name != "unavailable"
+        and (
+            storage_backend.capabilities.tier is StorageTier.UNGUARDED
+            and not settings.storage_allow_unverified
+            and not getattr(storage_backend, "recovery_mode", False)
+        )
     ):
         raise RuntimeError(
             "unguarded storage refused; set "
@@ -150,24 +175,30 @@ def _compose_storage_backend() -> StorageBackend:
     for warning in storage_backend.capabilities.warnings:
         logger.warning("storage capability warning: %s", warning)
     bound = bind_backend(storage_backend)
-    from app.services.inbox import reconcile_storage_publications
+    if recover_publications:
+        from app.services.inbox import reconcile_storage_publications
 
-    recovered = reconcile_storage_publications()
-    if recovered:
-        logger.warning("reconciled %d pending storage publication(s)", recovered)
+        recovered = reconcile_storage_publications()
+        if recovered:
+            logger.warning("reconciled %d pending storage publication(s)", recovered)
     return bound
 
 
-def _prepare_storage_for_startup() -> StorageBackend:
+def _prepare_storage_for_startup(
+    *, recover_publications: bool = True, recovery_only: bool = False
+) -> StorageBackend:
     """Bind storage and recover its durable publications before Inbox recovery."""
-    backend = _compose_storage_backend()
+    backend = _compose_storage_backend(
+        recover_publications=recover_publications, recovery_only=recovery_only
+    )
     from app.services.inbox import reconcile_interrupted_items
 
-    interrupted_imports = reconcile_interrupted_items()
-    if interrupted_imports:
-        logger.warning(
-            "reconciled %d interrupted pending import(s)", interrupted_imports
-        )
+    if recover_publications:
+        interrupted_imports = reconcile_interrupted_items()
+        if interrupted_imports:
+            logger.warning(
+                "reconciled %d interrupted pending import(s)", interrupted_imports
+            )
     return backend
 
 
@@ -182,40 +213,63 @@ async def lifespan(app: FastAPI):
     app.state.process_lock = process_lock
     logger.info("starting %s v%s", settings.app_name, settings.app_version)
     _app_info.info({"version": settings.app_version, "name": settings.app_name})
-    # DB must exist before we can read the runtime overlay.
+    # Inspect the filesystem journal before opening or migrating the database.
+    # A crash marker is the recovery authority; startup must not run normal
+    # schema/identity/storage repairs before deciding whether it is present.
+    restore_maintenance = inspect_restore_recovery()
+    # DB must still exist before we can read the runtime overlay. The journal
+    # decision above gates every application-owned repair after initialization.
     init_db()
     with get_session_factory().scoped_session() as session:
         apply_overlay(session)
-        apply_environment_storage_provider(session)
-        # Persisted runtime configuration can differ from environment
-        # defaults, so revalidate before creating the secrets key.
-        validate_runtime_storage_paths()
-        # Must run after apply_overlay: that call clears the overlay dict.
-        ensure_jwt_secret(session)
-        configured = is_configured(session)
-        # Clear any NAS scans stranded RUNNING by a previous unclean shutdown,
-        # otherwise the scheduler would skip them forever.
-        from app.services.external_library import reset_orphaned_scans
+        from app.services.runtime_config import (
+            enroll_legacy_local_roots,
+            ensure_storage_identity,
+        )
 
-        reset_count = reset_orphaned_scans(session)
-        if reset_count:
-            logger.warning(
-                "reset %d external library scan(s) stranded by restart", reset_count
-            )
+        if not restore_maintenance:
+            ensure_storage_identity(session)
+            enroll_legacy_local_roots(session)
+            apply_environment_storage_provider(session)
+            # Persisted runtime configuration can differ from environment
+            # defaults, so revalidate before creating the secrets key.
+            validate_runtime_storage_paths()
+            # Must run after apply_overlay: that call clears the overlay dict.
+            ensure_jwt_secret(session)
+            # Clear any NAS scans stranded RUNNING by a previous unclean
+            # shutdown, otherwise the scheduler would skip them forever.
+            from app.services.external_library import reset_orphaned_scans
+
+            reset_count = reset_orphaned_scans(session)
+            if reset_count:
+                logger.warning(
+                    "reset %d external library scan(s) stranded by restart",
+                    reset_count,
+                )
+        configured = is_configured(session)
+    if restore_maintenance:
+        logger.critical(
+            "interrupted restore detected; application remains in restore maintenance"
+        )
     # Storage must be configured and bound before either publication recovery
     # or Inbox recovery can inspect durable capture-slot receipts.
-    _backend = _prepare_storage_for_startup()
+    _backend = _prepare_storage_for_startup(
+        recover_publications=not restore_maintenance,
+        recovery_only=restore_maintenance,
+    )
     from app.services.jobs import reconcile_interrupted_jobs
 
-    interrupted_jobs = reconcile_interrupted_jobs()
+    interrupted_jobs = reconcile_interrupted_jobs() if not restore_maintenance else 0
     if interrupted_jobs:
         logger.warning("reconciled %d interrupted background job(s)", interrupted_jobs)
     from app.services.vault_audit import reconcile_interrupted_runs
 
-    interrupted_audits = reconcile_interrupted_runs()
+    interrupted_audits = reconcile_interrupted_runs() if not restore_maintenance else 0
     if interrupted_audits:
         logger.warning("reconciled %d interrupted vault audit(s)", interrupted_audits)
-    stranded_dispatches = reconcile_stranded_dispatches()
+    stranded_dispatches = (
+        reconcile_stranded_dispatches() if not restore_maintenance else 0
+    )
     if stranded_dispatches:
         logger.warning("reconciled %d stranded fleet dispatch(es)", stranded_dispatches)
     if not configured:

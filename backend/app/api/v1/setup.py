@@ -21,7 +21,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
-from app.core.config import FrozenSettings, settings
+from app.core.config import FrozenSettings, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.db.models import User
 from app.db.session import get_session
@@ -377,6 +377,30 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
     session.refresh(user)
     # Runtime state changes only after the DB transaction has committed.
     runtime_config.activate_config(config)
+    # A fresh setup owns the empty roots it just created.  Enroll them with
+    # the persisted installation identity so the next startup can distinguish
+    # this mount from an accidental empty shadow directory.
+    if settings.storage_backend == "local":
+        # First-run setup is the sole flow allowed to provision managed roots.
+        ensure_dirs(create_managed_roots=True)
+        from app.services.storage_backend import enroll_legacy_local_root
+
+        identity = runtime_config.ensure_storage_identity(session)
+        for role, root in (
+            ("data", Path(settings.data_dir)),
+            ("thumb", Path(settings.thumb_dir)),
+        ):
+            if not enroll_legacy_local_root(
+                root,
+                role=role,
+                installation=identity,
+                proofs=[],
+                allow_empty=True,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="storage_root_enrollment_failed",
+                )
 
     logger.info(
         "first-run setup complete: user=%s data_dir=%s thumb_dir=%s",

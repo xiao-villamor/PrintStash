@@ -694,3 +694,43 @@ class TestMakerWorld:
         response = getattr(client, method)(path, headers=headers)
 
         assert response.status_code == 403, response.text
+
+
+class TestStorageRootEnrollment:
+    def test_requires_an_explicit_confirmation(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "storage_root_confirmation_required"
+
+    def test_superuser_can_enroll_an_existing_markerless_root(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        root = Path(_overlay["data_dir"])
+        root.mkdir(parents=True, exist_ok=True)
+
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "enrolled": True,
+            "role": "data",
+            "restart_required": True,
+        }
+        marker = json.loads(
+            (root / ".printstash-storage-root.json").read_text(encoding="utf-8")
+        )
+        assert marker["role"] == "data"
+        assert marker["installation"]

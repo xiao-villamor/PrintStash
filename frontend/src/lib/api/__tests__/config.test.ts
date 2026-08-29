@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   completeSetup,
+  enrollStorageRoot,
   getHealthDetails,
   getLatestRelease,
   getSetupStatus,
@@ -94,6 +95,17 @@ describe("getHealthDetails", () => {
     // already fixed, or not looking for one that is not.
     expectRequest("/api/v1/health/details");
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+});
+
+describe("enrollStorageRoot", () => {
+  it("POSTs an explicit confirmation for the selected root role", async () => {
+    respondWith({ enrolled: true, role: "data", restart_required: true });
+
+    await enrollStorageRoot("data");
+
+    expectRequest("/api/v1/config/storage-roots/enroll", "POST");
+    expect(lastBody()).toEqual({ role: "data", confirm: true });
   });
 });
 

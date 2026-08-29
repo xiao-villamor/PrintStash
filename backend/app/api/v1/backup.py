@@ -69,6 +69,43 @@ def list_backups() -> list[dict]:
     ]
 
 
+@router.post(
+    "/adopt-local",
+    dependencies=[Depends(require_superuser)],
+    summary="Adopt a legacy local backup",
+    description=(
+        "Validate and register one unowned legacy archive. Archives are not "
+        "auto-adopted during listing; the filename must be in the configured "
+        "backup directory."
+    ),
+)
+def adopt_local_backup(filename: str) -> dict:
+    try:
+        meta = backup.adopt_local_backup(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="backup_not_found") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "backup_id": meta.id,
+        "created_at": meta.created_at,
+        "size_bytes": meta.size_bytes,
+        "file_count": meta.file_count,
+        "storage_backend": meta.storage_backend,
+        "app_version": meta.app_version,
+        "location": meta.location,
+    }
+
+
+@router.get(
+    "/unowned-local",
+    dependencies=[Depends(require_superuser)],
+    summary="Discover valid unowned legacy local backups",
+)
+def discover_unowned_local_backups() -> list[dict[str, object]]:
+    return backup.discover_unowned_local_backups()
+
+
 @router.get(
     "/capabilities/database",
     dependencies=[Depends(require_superuser)],

@@ -111,6 +111,7 @@ from app.services.moonraker import MoonrakerError
 from app.services.printer_jobs import reproducibility_payload
 from app.services.storage_backend import get_backend
 from app.services.storage_deletion import (
+    cleanup_status,
     enqueue_owned_key,
     process_storage_delete_intents,
 )
@@ -729,15 +730,14 @@ def purge_expired_trash(
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    storage_result = process_storage_delete_intents(
-        allow_unverified=confirm_storage_risk
-    )
+    storage_result = process_storage_delete_intents()
     return TrashPurgeRead(
         purged_model_ids=purged_model_ids,
         purged_count=len(purged_model_ids),
         storage_completed=storage_result.completed,
         storage_pending=storage_result.pending,
         storage_blocked=storage_result.blocked,
+        storage_cleanup_status=cleanup_status(storage_result),
     )
 
 
@@ -1754,9 +1754,7 @@ def purge_model(
         CollectionRole.EDIT,
     )
     try:
-        hard_delete_model(
-            session, m, confirm_storage_risk=confirm_storage_risk
-        )
+        hard_delete_model(session, m, confirm_storage_risk=confirm_storage_risk)
     except StorageRiskConfirmationRequired as exc:
         session.rollback()
         raise HTTPException(
@@ -1769,15 +1767,14 @@ def purge_model(
             detail="storage_ownership_unverified",
         ) from exc
     session.commit()
-    storage_result = process_storage_delete_intents(
-        allow_unverified=confirm_storage_risk
-    )
+    storage_result = process_storage_delete_intents()
     return TrashPurgeRead(
         purged_model_ids=[model_id],
         purged_count=1,
         storage_completed=storage_result.completed,
         storage_pending=storage_result.pending,
         storage_blocked=storage_result.blocked,
+        storage_cleanup_status=cleanup_status(storage_result),
     )
 
 

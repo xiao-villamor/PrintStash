@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import secrets
 import shutil
 import sqlite3
 import tarfile
@@ -23,7 +24,7 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath
@@ -31,13 +32,19 @@ from typing import Callable, Iterator, ParamSpec, TypeVar
 
 from sqlalchemy.engine import URL
 from sqlalchemy.engine.url import make_url
-from sqlmodel import Session, create_engine, select
+from sqlmodel import Session, create_engine, delete, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.migrate import run_migrations
-from app.db.models import OwnedStorageObject, StagingLease, User
+from app.db.models import (
+    OwnedStorageObject,
+    RestoreMarker,
+    StagingLease,
+    StorageObjectState,
+    User,
+)
 from app.db.session import get_engine, get_session_factory
 from app.services import audit
 from app.services.jobs import registry
@@ -47,7 +54,9 @@ from app.services.storage_backend import (
     get_backend,
 )
 from app.services.storage_ownership import (
+    complete_publication,
     delete_owned_key,
+    publish_file,
     record_creation,
     require_owned_key,
 )
@@ -109,6 +118,89 @@ def restore_in_progress() -> bool:
     return _restore_gate.is_set()
 
 
+def inspect_restore_recovery() -> bool:
+    """Put the process in restore maintenance when a restore was interrupted.
+
+    A sidecar journal is deliberately treated as evidence of an unfinished
+    operation across process restarts.  In particular, a database-swap intent
+    cannot be safely inferred to be pre- or post-swap without querying the
+    marker in the active database.  Keeping the gate set makes reads and
+    operator recovery available while preventing background mutation work.
+    """
+    try:
+        journals = sorted(settings.backup_dir.glob(".restore-*.journal"))
+    except OSError:
+        journals = []
+    if not journals:
+        return False
+
+    # Even a pre-PONR journal represents staged ownership and an operation
+    # whose cleanup has not been proven. Gate mutations until the restore is
+    # explicitly resumed or the journal is resolved.
+    unresolved = bool(journals)
+    for path in journals:
+        try:
+            state = _load_restore_journal(path)
+        except Exception:
+            unresolved = True
+            continue
+        if state.database_swap_intent or state.database_active:
+            unresolved = True
+            # A marker query failure is intentionally indistinguishable from
+            # an active marker here: both require administrator recovery.
+            if state.database_swap_intent:
+                _active_restore_marker(
+                    str(state.started.get("backup_id", "")),
+                    operation_nonce=state.started.get("operation_nonce"),
+                    archive_sha256=state.started.get("archive_sha256"),
+                )
+    if unresolved:
+        with _mutation_condition:
+            _restore_gate.set()
+    return unresolved
+
+
+def unresolved_restore_backup_id() -> str | None:
+    """Return the only journaled backup allowed to resume recovery.
+
+    ``None`` is also returned for an invalid/ambiguous journal.  Callers must
+    fail closed in that case rather than allowing a new restore to bypass the
+    unresolved operation.
+    """
+    try:
+        journals = sorted(settings.backup_dir.glob(".restore-*.journal"))
+    except OSError:
+        return None
+    if len(journals) != 1:
+        return None
+    path = journals[0]
+    # The filename is the operation's durable routing identity.  A journal can
+    # be corrupt, or can contain a tampered ``backup_id``; either case must be
+    # routed to the operation named by the file so its normal parser returns a
+    # precise invalid/mismatch conflict rather than the generic recovery gate.
+    prefix, suffix = ".restore-", ".journal"
+    name = path.name
+    if not name.startswith(prefix) or not name.endswith(suffix):
+        return None
+    backup_id = name[len(prefix) : -len(suffix)]
+    return backup_id or None
+
+
+def _restore_journal_pending() -> bool:
+    """Return whether any restore evidence still requires maintenance.
+
+    The sidecar is the durable source of truth for the process gate.  A local
+    boolean is not enough: a retry can fail before resolving an older journal,
+    and clearing the gate in that case would let unrelated writes race the
+    unresolved restore on the next request.
+    """
+    try:
+        return any(settings.backup_dir.glob(".restore-*.journal"))
+    except OSError:
+        # An unreadable backup directory cannot prove resolution. Fail closed.
+        return True
+
+
 def begin_mutating_operation() -> bool:
     """Register a write-capable operation unless restore maintenance is active."""
     global _active_mutations
@@ -162,9 +254,10 @@ def _exclusive_backup_operation(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return serialized
 
 
-MANIFEST_VERSION = "2"
-_SUPPORTED_MANIFEST_VERSIONS = {"1", MANIFEST_VERSION}
-_RESTORE_JOURNAL_VERSION = 1
+MANIFEST_VERSION = "3"
+_LEGACY_MANIFEST_V2 = "2"
+_SUPPORTED_MANIFEST_VERSIONS = {"1", _LEGACY_MANIFEST_V2, MANIFEST_VERSION}
+_RESTORE_JOURNAL_VERSION = 2
 _BACKUP_S3_PREFIX = "printstash-backups/"
 _LEGACY_BACKUP_S3_PREFIX = "nexus3d-backups/"
 _BACKUP_NAME_PREFIX = "printstash-backup-"
@@ -332,7 +425,7 @@ def _find_snapshot_blobs(snapshot_path: Path) -> list[tuple[str, int]]:
 
 
 def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
-    """Build v2 evidence from the same DB snapshot archived in the backup."""
+    """Build v3 evidence from the same DB snapshot archived in the backup."""
     engine = create_engine(f"sqlite:///{snapshot_path}")
     try:
         with Session(engine) as session:
@@ -344,6 +437,8 @@ def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
                 *snapshot.embedded,
             ]
             backend = get_backend()
+            provider_id = str(getattr(backend, "provider_id", backend.backend_name))
+            transport = str(getattr(backend, "transport", backend.backend_name))
             entries: list[dict[str, str | int]] = []
             seen: set[str] = set()
             for blob in blobs:
@@ -374,7 +469,13 @@ def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
                         "member": member,
                         "arc": member,
                         "key": blob.key,
+                        # ``provider`` is retained for v2 readers.  The
+                        # explicit provider/transport pair is the v3 identity
+                        # and prevents a generic backend name from hiding a
+                        # changed remote configuration.
                         "provider": backend.backend_name,
+                        "provider_id": provider_id,
+                        "transport": transport,
                         "namespace": namespace,
                         "size": size,
                         "sha256": digest.hexdigest(),
@@ -486,6 +587,14 @@ def create_backup() -> BackupMeta:
             "created_at": ts,
             "app_version": settings.app_version,
             "storage_backend": backend_name,
+            "provider_id": str(
+                getattr(get_backend(), "provider_id", get_backend().backend_name)
+            ),
+            "transport": str(
+                getattr(get_backend(), "transport", get_backend().backend_name)
+            ),
+            "namespace": (str(file_entries[0]["namespace"]) if file_entries else None),
+            "namespaces": sorted({str(entry["namespace"]) for entry in file_entries}),
             "file_count": len(file_entries),
             "total_size_bytes": total_size,
             "files": file_entries,
@@ -518,16 +627,26 @@ def create_backup() -> BackupMeta:
                                 raise RuntimeError("backup_blob_size_changed")
                             written_files += 1
             _validate_created_archive_payload(archive_temp)
-            local_receipt = LocalStorageBackend().move_in(
-                archive_temp, str(archive_path)
-            )
+            # Reserve and commit the local archive through the ownership ledger
+            # before it becomes listable. A crash leaves a pending reservation
+            # for reconciliation instead of a phantom backup.
+            with get_session_factory().session() as publish_session:
+                local_receipt = publish_file(
+                    publish_session,
+                    LocalStorageBackend(),
+                    str(archive_path),
+                    archive_temp,
+                    object_kind="backup",
+                    move=True,
+                )
+                publish_session.commit()
         except Exception:
             archive_temp.unlink(missing_ok=True)
             logger.exception("backup %s failed while streaming owned blobs", backup_id)
             raise
 
     final_size = local_receipt.size
-    backup_receipts = [local_receipt]
+    archive_sha256 = _sha256_path(archive_path)
 
     logger.info(
         "backup %s created locally: %d files, %.1f MiB",
@@ -541,7 +660,21 @@ def create_backup() -> BackupMeta:
     if s3:
         try:
             s3_key = _backup_s3_key(archive_name)
+            namespace = f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"
             token = uuid.uuid4().hex
+            with get_session_factory().session() as reservation_session:
+                reservation = OwnedStorageObject(
+                    backend="backup-s3",
+                    namespace=namespace,
+                    key=s3_key,
+                    object_kind="backup",
+                    state=StorageObjectState.PENDING,
+                    size_bytes=final_size,
+                    sha256=archive_sha256,
+                    token=token,
+                )
+                reservation_session.add(reservation)
+                reservation_session.commit()
             with archive_path.open("rb") as source:
                 response = s3.put_object(
                     Bucket=settings.backup_s3_bucket,
@@ -550,23 +683,24 @@ def create_backup() -> BackupMeta:
                     IfNoneMatch="*",
                     Metadata={"printstash-create-token": token},
                 )
-            backup_receipts.append(
-                CreationReceipt(
-                    key=s3_key,
-                    size=final_size,
-                    token=token,
-                    backend="backup-s3",
-                    namespace=(f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"),
-                    etag=str(response.get("ETag")) if response.get("ETag") else None,
-                )
+            s3_receipt = CreationReceipt(
+                key=s3_key,
+                size=final_size,
+                token=token,
+                backend="backup-s3",
+                namespace=namespace,
+                etag=str(response.get("ETag")) if response.get("ETag") else None,
             )
+            with get_session_factory().session() as commit_session:
+                record_creation(commit_session, s3_receipt, object_kind="backup")
+                commit_session.commit()
             logger.info("backup %s uploaded to S3: %s", backup_id, s3_key)
         except Exception:
             logger.warning("backup %s: S3 upload failed", backup_id, exc_info=True)
 
+    # The destination ledger rows were committed immediately after each
+    # publication. Keep this audit transaction separate from ownership state.
     with get_session_factory().session() as session:
-        for receipt in backup_receipts:
-            record_creation(session, receipt, object_kind="backup")
         audit.record(
             session,
             action="backup.create",
@@ -577,6 +711,7 @@ def create_backup() -> BackupMeta:
                 "file_count": written_files,
             },
         )
+        session.commit()
 
     return BackupMeta(
         id=backup_id,
@@ -595,10 +730,130 @@ def create_backup() -> BackupMeta:
 # ---------------------------------------------------------------------------
 
 
+def reconcile_backup_publications(limit: int = 100) -> int:
+    """Finish or block backup reservations left across a publication crash."""
+    reconciled = 0
+    with get_session_factory().session() as session:
+        pending = session.exec(
+            select(OwnedStorageObject)
+            .where(
+                OwnedStorageObject.object_kind == "backup",
+                OwnedStorageObject.state == StorageObjectState.PENDING,
+            )
+            .order_by(OwnedStorageObject.id.asc())  # type: ignore[attr-defined]
+            .limit(limit)
+        ).all()
+        s3 = _get_backup_s3()
+        for row in pending:
+            receipt: CreationReceipt | None = None
+            try:
+                if row.backend == "local":
+                    if row.size_bytes is None or row.sha256 is None:
+                        raise RuntimeError("backup_publication_evidence_missing")
+                    receipt = LocalStorageBackend().adopt_existing(
+                        row.key,
+                        expected_size=row.size_bytes,
+                        expected_sha256=row.sha256,
+                    )
+                elif row.backend == "backup-s3" and s3 is not None:
+                    response = s3.head_object(
+                        Bucket=settings.backup_s3_bucket, Key=row.key
+                    )
+                    metadata = response.get("Metadata", {})
+                    if (
+                        not row.token
+                        or metadata.get("printstash-create-token") != row.token
+                        or int(response.get("ContentLength", -1)) != row.size_bytes
+                    ):
+                        raise RuntimeError("backup_publication_evidence_mismatch")
+                    # HEAD supplies only identity/size metadata.  It has no
+                    # response body, so fetch the exact object separately for
+                    # the digest and archive validation proof.
+                    get_kwargs: dict[str, str] = {
+                        "Bucket": settings.backup_s3_bucket,
+                        "Key": row.key,
+                    }
+                    if response.get("VersionId"):
+                        get_kwargs["VersionId"] = str(response["VersionId"])
+                    object_response = s3.get_object(**get_kwargs)
+                    fd, raw_name = tempfile.mkstemp(
+                        prefix=".printstash-backup-reconcile-",
+                        dir=settings.backup_dir,
+                    )
+                    os.close(fd)
+                    candidate = Path(raw_name)
+                    try:
+                        digest = hashlib.sha256()
+                        body = object_response["Body"]
+                        try:
+                            with candidate.open("wb") as output:
+                                while chunk := body.read(1024 * 1024):
+                                    digest.update(chunk)
+                                    output.write(chunk)
+                        finally:
+                            body.close()
+                        if row.sha256 and digest.hexdigest() != row.sha256:
+                            raise RuntimeError("backup_publication_digest_mismatch")
+                        _validate_created_archive_payload(candidate)
+                    finally:
+                        candidate.unlink(missing_ok=True)
+                    receipt = CreationReceipt(
+                        key=row.key,
+                        size=int(response["ContentLength"]),
+                        token=row.token,
+                        backend="backup-s3",
+                        namespace=row.namespace,
+                        etag=str(response.get("ETag"))
+                        if response.get("ETag")
+                        else None,
+                        version_id=(
+                            str(response.get("VersionId"))
+                            if response.get("VersionId")
+                            else None
+                        ),
+                    )
+                else:
+                    raise RuntimeError("backup_publication_backend_unavailable")
+                assert receipt is not None
+                complete_publication(
+                    session,
+                    int(row.id),
+                    receipt,
+                    object_kind="backup",
+                    sha256=row.sha256,
+                )
+                reconciled += 1
+            except RuntimeError as exc:
+                row.state = StorageObjectState.BLOCKED
+                row.last_error = type(exc).__name__[:255]
+                session.add(row)
+            except Exception as exc:
+                # A provider outage is retryable; do not turn an unavailable
+                # S3 endpoint into a permanent operator decision.
+                row.last_error = f"retryable:{type(exc).__name__}"[:255]
+                session.add(row)
+        session.commit()
+    return reconciled
+
+
+def _committed_backup_keys(backend: str, namespace: str | None = None) -> set[str]:
+    """Return only archives whose publication reached COMMITTED in the ledger."""
+    with get_session_factory().session() as session:
+        statement = select(OwnedStorageObject.key).where(
+            OwnedStorageObject.backend == backend,
+            OwnedStorageObject.object_kind == "backup",
+            OwnedStorageObject.state == StorageObjectState.COMMITTED,
+        )
+        if namespace is not None:
+            statement = statement.where(OwnedStorageObject.namespace == namespace)
+        return {str(key) for key in session.exec(statement).all()}
+
+
 def _list_local_backups() -> list[BackupMeta]:
     results: list[BackupMeta] = []
     if not settings.backup_dir.exists():
         return results
+    committed = _committed_backup_keys("local")
 
     for archive in sorted(
         [
@@ -608,6 +863,10 @@ def _list_local_backups() -> list[BackupMeta]:
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     ):
+        if str(archive) not in committed:
+            # A visible archive can be left by a crash between publication and
+            # its ownership commit; it is not a listable backup yet.
+            continue
         try:
             meta = _read_manifest(archive)
             if meta is not None:
@@ -626,6 +885,14 @@ def _list_s3_backups() -> list[BackupMeta]:
         return []
 
     results: list[BackupMeta] = []
+    committed = {
+        *_committed_backup_keys(
+            "backup-s3", f"{settings.backup_s3_bucket}/{_BACKUP_S3_PREFIX}"
+        ),
+        *_committed_backup_keys(
+            "backup-s3", f"{settings.backup_s3_bucket}/{_LEGACY_BACKUP_S3_PREFIX}"
+        ),
+    }
     try:
         paginator = s3.get_paginator("list_objects_v2")
         for prefix in (_BACKUP_S3_PREFIX, _LEGACY_BACKUP_S3_PREFIX):
@@ -634,6 +901,8 @@ def _list_s3_backups() -> list[BackupMeta]:
             ):
                 for obj in page.get("Contents", []):
                     key = obj["Key"]
+                    if key not in committed:
+                        continue
                     archive_name = key.rsplit("/", 1)[-1]
                     if not archive_name.startswith(
                         (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
@@ -684,6 +953,7 @@ def _list_s3_backups() -> list[BackupMeta]:
 
 def list_backups() -> list[BackupMeta]:
     """List all backups: local + S3, sorted by date descending."""
+    reconcile_backup_publications()
     local = _list_local_backups()
     s3 = _list_s3_backups()
     # Merge, dedup by ID (local wins if same ID exists in both)
@@ -723,6 +993,108 @@ def _read_manifest(archive_path: Path) -> BackupMeta | None:
                         location="local",
                     )
     return None
+
+
+def _validate_archive_for_adoption(archive_path: Path) -> BackupMeta:
+    """Validate an unowned local archive before making it listable.
+
+    Legacy archives are intentionally not auto-adopted during listing: an
+    administrator must identify the exact file.  The same manifest, storage
+    namespace, member, hash, and SQLite checks used by restore run before a
+    durable ownership row is created.
+    """
+    meta = _read_manifest(archive_path)
+    if meta is None:
+        raise RuntimeError("backup_manifest_invalid")
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        members = tar.getmembers()
+        if any(
+            _unsafe_member_name(member.name) or member.issym() or member.islnk()
+            for member in members
+        ):
+            raise RuntimeError("backup_manifest_invalid")
+        _restore_manifest_entries(tar)
+        db_members = [member for member in members if member.name == "db.sqlite3"]
+        if len(db_members) != 1 or not db_members[0].isfile():
+            raise RuntimeError("backup_member_missing:db.sqlite3")
+        # Validate the archived DB without trusting the current database.
+        fd, raw_db = tempfile.mkstemp(prefix=".printstash-adopt-db-")
+        os.close(fd)
+        db_path = Path(raw_db)
+        try:
+            stream = tar.extractfile(db_members[0])
+            if stream is None:
+                raise RuntimeError("backup_member_missing:db.sqlite3")
+            with db_path.open("wb") as destination:
+                shutil.copyfileobj(stream, destination)
+            _validate_sqlite_snapshot(db_path)
+        finally:
+            db_path.unlink(missing_ok=True)
+    return meta
+
+
+def adopt_local_backup(filename: str) -> BackupMeta:
+    """Explicitly adopt one validated legacy archive into the ownership ledger."""
+    if not filename or Path(filename).name != filename:
+        raise ValueError("backup_filename_invalid")
+    if not filename.startswith((_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)):
+        raise ValueError("backup_filename_invalid")
+    root = settings.backup_dir.expanduser().resolve(strict=False)
+    archive = (root / filename).resolve(strict=False)
+    if archive.parent != root or not archive.is_file():
+        raise FileNotFoundError(filename)
+    meta = _validate_archive_for_adoption(archive)
+    backend = LocalStorageBackend()
+    digest = _sha256_path(archive)
+    receipt = backend.adopt_existing(
+        str(archive), expected_size=archive.stat().st_size, expected_sha256=digest
+    )
+    with get_session_factory().session() as session:
+        record_creation(session, receipt, object_kind="backup", sha256=digest)
+        session.commit()
+    meta.path = str(archive)
+    meta.location = "local"
+    return meta
+
+
+def discover_unowned_local_backups() -> list[dict[str, object]]:
+    """Describe valid legacy archives awaiting explicit administrator adoption.
+
+    Normal listing remains ownership-only.  This bounded operator view exposes
+    only archives that pass the complete manifest, namespace, member, and
+    SQLite validation used by adoption; malformed candidates are logged but
+    never returned as actionable backups.
+    """
+    root = settings.backup_dir.expanduser().resolve(strict=False)
+    if not root.is_dir():
+        return []
+    committed = _committed_backup_keys("local")
+    candidates: list[dict[str, object]] = []
+    for archive in sorted(root.glob("*.tar.gz")):
+        if str(archive) in committed or not archive.name.startswith(
+            (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
+        ):
+            continue
+        try:
+            meta = _validate_archive_for_adoption(archive)
+        except Exception:
+            logger.info(
+                "backup: unowned archive failed adoption validation: %s", archive
+            )
+            continue
+        candidates.append(
+            {
+                "filename": archive.name,
+                "backup_id": meta.id,
+                "created_at": meta.created_at,
+                "size_bytes": meta.size_bytes,
+                "file_count": meta.file_count,
+                "storage_backend": meta.storage_backend,
+                "app_version": meta.app_version,
+                "location": "local",
+            }
+        )
+    return candidates
 
 
 def get_backup(backup_id: str) -> BackupMeta | None:
@@ -841,6 +1213,18 @@ def verify_backup(backup_id: str) -> BackupVerification:
                     {"code": "backup_member_missing", "member": "db.sqlite3"}
                 )
             if manifest is not None:
+                if manifest.get("version") == MANIFEST_VERSION and (
+                    not isinstance(manifest.get("provider_id"), str)
+                    or not isinstance(manifest.get("transport"), str)
+                    or not isinstance(manifest.get("namespace"), (str, type(None)))
+                    or not isinstance(manifest.get("namespaces"), list)
+                    or any(
+                        not isinstance(value, str) for value in manifest["namespaces"]
+                    )
+                ):
+                    findings.append(
+                        {"code": "backup_manifest_invalid", "member": "manifest.json"}
+                    )
                 expected_entries = manifest.get("files")
                 if not isinstance(expected_entries, list):
                     findings.append(
@@ -889,12 +1273,25 @@ def verify_backup(backup_id: str) -> BackupVerification:
                                 }
                             )
                         expected_sha = entry.get("sha256")
-                        if manifest.get("version") == MANIFEST_VERSION and (
+                        if str(manifest.get("version")) in {
+                            _LEGACY_MANIFEST_V2,
+                            MANIFEST_VERSION,
+                        } and (
                             not isinstance(entry.get("key"), str)
-                            or not isinstance(entry.get("provider"), str)
                             or not isinstance(entry.get("namespace"), str)
                             or not isinstance(expected_size, int)
                             or not isinstance(expected_sha, str)
+                            or (
+                                str(manifest.get("version")) == _LEGACY_MANIFEST_V2
+                                and not isinstance(entry.get("provider"), str)
+                            )
+                            or (
+                                str(manifest.get("version")) == MANIFEST_VERSION
+                                and (
+                                    not isinstance(entry.get("provider_id"), str)
+                                    or not isinstance(entry.get("transport"), str)
+                                )
+                            )
                         ):
                             findings.append(
                                 {"code": "backup_manifest_invalid", "member": arc[:255]}
@@ -913,7 +1310,10 @@ def verify_backup(backup_id: str) -> BackupVerification:
                                         "member": arc[:255],
                                     }
                                 )
-                    if manifest.get("version") == MANIFEST_VERSION:
+                    if str(manifest.get("version")) in {
+                        _LEGACY_MANIFEST_V2,
+                        MANIFEST_VERSION,
+                    }:
                         archived_regular_files = {
                             member.name
                             for member in members
@@ -1081,13 +1481,19 @@ def _download_backup_to_local(meta: BackupMeta) -> Path:
                 shutil.copyfileobj(response["Body"], destination)
             if download_temp.stat().st_size != owned.size_bytes:
                 raise RuntimeError("backup_download_size_mismatch")
-            receipt = LocalStorageBackend().move_in(download_temp, str(local_path))
+            with get_session_factory().session() as publish_session:
+                publish_file(
+                    publish_session,
+                    LocalStorageBackend(),
+                    str(local_path),
+                    download_temp,
+                    object_kind="backup",
+                    move=True,
+                )
+                publish_session.commit()
         except Exception:
             download_temp.unlink(missing_ok=True)
             raise
-        with get_session_factory().session() as session:
-            record_creation(session, receipt, object_kind="backup")
-            session.commit()
         logger.info("backup %s downloaded from S3 to %s", meta.id, local_path)
         return local_path
 
@@ -1149,6 +1555,14 @@ def _restore_manifest_entries(tar: tarfile.TarFile) -> tuple[dict, dict[str, dic
         raise RuntimeError("backup_manifest_invalid")
 
     version = str(manifest["version"])
+    if version == MANIFEST_VERSION and (
+        not isinstance(manifest.get("provider_id"), str)
+        or not isinstance(manifest.get("transport"), str)
+        or not isinstance(manifest.get("namespace"), (str, type(None)))
+        or not isinstance(manifest.get("namespaces"), list)
+        or any(not isinstance(value, str) for value in manifest["namespaces"])
+    ):
+        raise RuntimeError("backup_manifest_invalid")
     entries: dict[str, dict] = {}
     keys: set[str] = set()
     backend = get_backend()
@@ -1167,22 +1581,55 @@ def _restore_manifest_entries(tar: tarfile.TarFile) -> tuple[dict, dict[str, dic
         ):
             raise RuntimeError("backup_manifest_invalid")
         _validate_restore_key(key)
-        if version == MANIFEST_VERSION:
+        if version in {_LEGACY_MANIFEST_V2, MANIFEST_VERSION}:
+            provider_id = str(getattr(backend, "provider_id", backend.backend_name))
+            transport = str(getattr(backend, "transport", backend.backend_name))
             sha256 = entry.get("sha256")
             if (
-                entry.get("provider") != backend.backend_name
-                or entry.get("namespace") != backend.namespace_for(key)
+                entry.get("namespace") != backend.namespace_for(key)
                 or not isinstance(entry.get("size"), int)
                 or entry["size"] < 0
                 or not isinstance(sha256, str)
                 or len(sha256) != 64
                 or any(character not in "0123456789abcdef" for character in sha256)
+                or (
+                    version == _LEGACY_MANIFEST_V2
+                    and entry.get("provider") != backend.backend_name
+                )
+                or (
+                    version == MANIFEST_VERSION
+                    and (
+                        entry.get("provider_id") != provider_id
+                        or entry.get("transport") != transport
+                        # v3 keeps the v2 ``provider`` field for old readers.
+                        # When present it is still identity evidence, so a
+                        # foreign value must not be silently ignored.
+                        or (
+                            entry.get("provider") is not None
+                            and entry.get("provider") != backend.backend_name
+                        )
+                    )
+                )
             ):
                 raise RuntimeError("backup_storage_namespace_mismatch")
         entries[member] = entry
         keys.add(key)
     if version == MANIFEST_VERSION and manifest.get("file_count") != len(entries):
         raise RuntimeError("backup_manifest_invalid")
+    if version == MANIFEST_VERSION:
+        expected_provider_id = str(
+            getattr(backend, "provider_id", backend.backend_name)
+        )
+        expected_transport = str(getattr(backend, "transport", backend.backend_name))
+        namespaces = sorted({str(item["namespace"]) for item in entries.values()})
+        if (
+            manifest.get("provider_id") != expected_provider_id
+            or manifest.get("transport") != expected_transport
+            or manifest.get("namespaces") != namespaces
+            or manifest.get("namespace")
+            != (namespaces[0] if len(namespaces) == 1 else None)
+        ):
+            raise RuntimeError("backup_storage_namespace_mismatch")
     return manifest, entries
 
 
@@ -1217,7 +1664,7 @@ def _stage_restore_archive(
 
         manifest, manifest_entries = _restore_manifest_entries(tar)
         version = str(manifest["version"])
-        if version == MANIFEST_VERSION:
+        if version in {_LEGACY_MANIFEST_V2, MANIFEST_VERSION}:
             regular_by_name: dict[str, list[tarfile.TarInfo]] = {}
             for member in members:
                 if member.isfile():
@@ -1398,6 +1845,33 @@ def _sync_restored_ownership(
         connection.commit()
 
 
+def _sync_restored_storage_identity(database_path: Path) -> None:
+    """Carry the current installation binding into a restored database.
+
+    v1/v2 databases predate the durable identity column (or contain a NULL
+    value).  Swapping one in while the existing mount sentinel retains the
+    current identity would otherwise make the next startup classify every
+    managed root as a foreign mount.  The target identity is trusted only from
+    the already-running, validated installation and is written before the DB
+    swap PONR.
+    """
+    identity = str(getattr(settings, "storage_identity", "") or "").strip()
+    if not identity:
+        return
+    with sqlite3.connect(database_path) as connection:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(system_config)")
+        }
+        if "storage_identity" not in columns:
+            return
+        connection.execute(
+            "UPDATE system_config SET storage_identity = ? WHERE id = 1",
+            (identity,),
+        )
+        connection.commit()
+
+
 def _apply_staged_blobs(
     blobs: list[_StagedBlob],
     rollback_dir: Path,
@@ -1522,6 +1996,8 @@ class _RestoreJournalState:
     intents: dict[str, dict[str, object]]
     published: dict[str, dict[str, object]]
     generations: dict[str, int]
+    database_swap_intent: bool = False
+    database_active: bool = False
 
 
 def _fsync_directory(path: Path) -> None:
@@ -1553,6 +2029,69 @@ def _remove_restore_journal(path: Path) -> None:
     _fsync_directory(path.parent)
 
 
+def _stage_restore_marker(
+    database_path: Path,
+    backup_id: str,
+    *,
+    operation_nonce: str,
+    archive_sha256: str,
+) -> None:
+    """Commit the PONR marker into the private database before swapping it."""
+    engine = create_engine(URL.create("sqlite", database=str(database_path)))
+    try:
+        with Session(engine) as session:
+            # Markers are operation evidence, not a historical restore log.
+            # Remove stale rows copied from an older backup before inserting
+            # this operation's marker, avoiding a false active result when the
+            # same backup is restored again.
+            session.exec(delete(RestoreMarker))
+            session.add(
+                RestoreMarker(
+                    backup_id=backup_id,
+                    operation_nonce=operation_nonce,
+                    archive_sha256=archive_sha256,
+                    state="database_active",
+                )
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+    fd = os.open(database_path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _active_restore_marker(
+    backup_id: str,
+    *,
+    operation_nonce: str | None = None,
+    archive_sha256: str | None = None,
+) -> bool | None:
+    """Read the active DB's marker; ``None`` means the state is unknowable."""
+    try:
+        with get_session_factory().session() as session:
+            statement = select(RestoreMarker).where(
+                RestoreMarker.backup_id == backup_id
+            )
+            if operation_nonce is not None:
+                statement = statement.where(
+                    RestoreMarker.operation_nonce == operation_nonce
+                )
+            if archive_sha256 is not None:
+                statement = statement.where(
+                    RestoreMarker.archive_sha256 == archive_sha256
+                )
+            marker = session.exec(statement).first()
+            return marker is not None and marker.state == "database_active"
+    except Exception:
+        logger.exception(
+            "unable to prove restored database marker", extra={"backup_id": backup_id}
+        )
+        return None
+
+
 def _load_restore_journal(path: Path) -> _RestoreJournalState:
     try:
         raw_lines = path.read_bytes().splitlines()
@@ -1564,16 +2103,61 @@ def _load_restore_journal(path: Path) -> _RestoreJournalState:
     started = events[0]
     if started.get("event") != "started":
         raise RestoreConflictError("restore_journal_invalid")
+    if started.get("version") not in {1, _RESTORE_JOURNAL_VERSION}:
+        raise RestoreConflictError("restore_journal_invalid")
+    if started.get("version") == _RESTORE_JOURNAL_VERSION:
+        nonce = started.get("operation_nonce")
+        archive_sha = started.get("archive_sha256")
+        if (
+            not isinstance(nonce, str)
+            or len(nonce) != 64
+            or any(char not in "0123456789abcdef" for char in nonce)
+            or not isinstance(archive_sha, str)
+            or len(archive_sha) != 64
+            or any(char not in "0123456789abcdef" for char in archive_sha)
+        ):
+            raise RestoreConflictError("restore_journal_invalid")
     intents: dict[str, dict[str, object]] = {}
     published: dict[str, dict[str, object]] = {}
     generations: dict[str, int] = {}
+    database_swap_intent = False
+    database_active = False
     for event in events[1:]:
         event_name = event.get("event")
-        key = event.get("key")
+        if event_name == "database_swap_intent":
+            if (
+                database_swap_intent
+                or database_active
+                or event.get("backup_id") != started.get("backup_id")
+                or event.get("operation_nonce") != started.get("operation_nonce")
+                or event.get("archive_sha256") != started.get("archive_sha256")
+            ):
+                raise RestoreConflictError("restore_journal_invalid")
+            database_swap_intent = True
+            continue
+        if event_name == "journal_upgrade":
+            if (
+                event.get("backup_id") != started.get("backup_id")
+                or event.get("from_version") != 1
+                or event.get("to_version") != _RESTORE_JOURNAL_VERSION
+            ):
+                raise RestoreConflictError("restore_journal_invalid")
+            continue
+        if event_name == "database_active":
+            if (
+                database_active
+                or event.get("backup_id") != started.get("backup_id")
+                or event.get("operation_nonce") != started.get("operation_nonce")
+                or event.get("archive_sha256") != started.get("archive_sha256")
+            ):
+                raise RestoreConflictError("restore_journal_invalid")
+            database_active = True
+            continue
         if event_name not in {"intent", "published", "retracted", "complete"}:
             raise RestoreConflictError("restore_journal_invalid")
         if event_name == "complete":
             continue
+        key = event.get("key")
         generation = event.get("generation")
         if not isinstance(key, str) or not isinstance(generation, int):
             raise RestoreConflictError("restore_journal_invalid")
@@ -1593,7 +2177,14 @@ def _load_restore_journal(path: Path) -> _RestoreJournalState:
             continue
         intents.pop(key)
         published.pop(key)
-    return _RestoreJournalState(started, intents, published, generations)
+    return _RestoreJournalState(
+        started,
+        intents,
+        published,
+        generations,
+        database_swap_intent,
+        database_active,
+    )
 
 
 def _prepare_restore_journal(
@@ -1602,7 +2193,9 @@ def _prepare_restore_journal(
     backup_id: str,
     archive_sha256: str,
     blobs: list[_StagedBlob],
+    operation_nonce: str | None = None,
 ) -> _RestoreJournalState:
+    operation_nonce = operation_nonce or secrets.token_hex(32)
     for other in path.parent.glob(".restore-*.journal"):
         if other != path:
             raise RestoreConflictError("restore_incomplete_other_backup")
@@ -1612,6 +2205,7 @@ def _prepare_restore_journal(
         "version": _RESTORE_JOURNAL_VERSION,
         "backup_id": backup_id,
         "archive_sha256": archive_sha256,
+        "operation_nonce": operation_nonce,
         "backend": backend.backend_name,
         "namespaces": sorted({blob.namespace for blob in blobs}),
     }
@@ -1619,8 +2213,37 @@ def _prepare_restore_journal(
         _append_restore_journal(path, expected_start)
         return _RestoreJournalState(expected_start, {}, {}, {})
     state = _load_restore_journal(path)
+    if state.started.get("version") == _RESTORE_JOURNAL_VERSION:
+        existing_nonce = state.started.get("operation_nonce")
+        if isinstance(existing_nonce, str):
+            expected_start["operation_nonce"] = existing_nonce
     if state.started != expected_start:
-        raise RestoreConflictError("restore_journal_mismatch")
+        # v1 had no DB swap intent/marker. Upgrade only a journal whose
+        # identity and archive hash are an exact match, and keep its existing
+        # events for forward-only resume.
+        legacy_identity = {
+            key: state.started.get(key)
+            for key in expected_start
+            if key not in {"version", "operation_nonce"}
+        }
+        expected_identity = {
+            key: expected_start[key]
+            for key in expected_start
+            if key not in {"version", "operation_nonce"}
+        }
+        if state.started.get("version") != 1 or legacy_identity != expected_identity:
+            raise RestoreConflictError("restore_journal_mismatch")
+        _append_restore_journal(
+            path,
+            {
+                "event": "journal_upgrade",
+                "backup_id": backup_id,
+                "from_version": 1,
+                "to_version": _RESTORE_JOURNAL_VERSION,
+                "operation_nonce": operation_nonce,
+                "archive_sha256": archive_sha256,
+            },
+        )
     expected_keys = {blob.key for blob in blobs}
     if not set(state.intents).issubset(expected_keys) or not set(
         state.published
@@ -1783,6 +2406,10 @@ def restore_backup(backup_id: str) -> dict:
     grace period, rather than restoring underneath it.
     """
     _require_database_backup_support(restore=True)
+    if restore_in_progress():
+        recovery_id = unresolved_restore_backup_id()
+        if recovery_id != backup_id:
+            raise RestoreConflictError("restore_recovery_required")
     meta = get_backup(backup_id)
     if meta is None:
         raise FileNotFoundError(f"backup {backup_id} not found")
@@ -1792,6 +2419,7 @@ def restore_backup(backup_id: str) -> dict:
     # writing it from a session bound to the restored DB is easiest to read).
     restoring_actor_id, restoring_ip = audit.current_audit_context()
     restored_files = 0
+    maintenance_required = False
 
     _begin_restore_maintenance()
     try:
@@ -1862,37 +2490,179 @@ def restore_backup(backup_id: str) -> dict:
                 rollback_dir = staging_dir / "rollback"
                 rollback_dir.mkdir()
                 journal_path = settings.backup_dir / f".restore-{backup_id}.journal"
+                resuming_journal = journal_path.exists()
+                operation_nonce = secrets.token_hex(32)
                 journal_state = _prepare_restore_journal(
                     journal_path,
                     backup_id=backup_id,
                     archive_sha256=_sha256_path(archive_path),
                     blobs=staged_blobs,
+                    operation_nonce=operation_nonce,
                 )
+                operation_nonce = str(
+                    journal_state.started.get("operation_nonce", operation_nonce)
+                )
+                archive_sha256 = str(
+                    journal_state.started.get(
+                        "archive_sha256", _sha256_path(archive_path)
+                    )
+                )
+                marker_nonce = (
+                    operation_nonce
+                    if journal_state.started.get("version") == _RESTORE_JOURNAL_VERSION
+                    else None
+                )
+
+                def active_marker_state() -> bool | None:
+                    # Keep genuine v1 journal compatibility: its marker cannot
+                    # carry a nonce, so the archive hash remains the exact
+                    # binding and older test/maintenance adapters may expose
+                    # the original one-argument seam.
+                    if marker_nonce is None:
+                        return _active_restore_marker(backup_id)
+                    return _active_restore_marker(
+                        backup_id,
+                        operation_nonce=marker_nonce,
+                        archive_sha256=archive_sha256,
+                    )
+
+                # The database marker is authoritative if the process died
+                # after swapping but before its sidecar journal acknowledgement.
+                # Treat that database as active and finish forward.
+                # A successful prior restore leaves its marker in the active
+                # database. It is evidence for a journal being resumed, not
+                # proof that this fresh restore has already swapped databases.
+                if resuming_journal and active_marker_state() is True:
+                    journal_state = replace(
+                        journal_state,
+                        database_swap_intent=True,
+                        database_active=True,
+                    )
                 applied, created = _apply_staged_blobs(
                     staged_blobs,
                     rollback_dir,
                     journal_path=journal_path,
                     journal_state=journal_state,
                 )
+                db_swapped = False
                 try:
                     if any(not _stored_blob_matches(blob) for blob in staged_blobs):
                         raise RestoreConflictError("restore_destination_changed")
-                    _sync_restored_ownership(
-                        database_path,
-                        applied,
-                        archive_ownership=archive_ownership,
-                    )
-                    # Restore the DB last. Until this succeeds, rollback can put
-                    # every touched blob back under the still-current database.
-                    _restore_database_from_path(database_path)
+                    if not journal_state.database_active:
+                        _sync_restored_ownership(
+                            database_path,
+                            applied,
+                            archive_ownership=archive_ownership,
+                        )
+                        _sync_restored_storage_identity(database_path)
+                        # Commit an active marker into the staged DB, then
+                        # fsync the sidecar swap intent before touching the live
+                        # database. The marker is the cross-store PONR proof.
+                        _stage_restore_marker(
+                            database_path,
+                            backup_id,
+                            operation_nonce=operation_nonce,
+                            archive_sha256=archive_sha256,
+                        )
+                        _append_restore_journal(
+                            journal_path,
+                            {
+                                "event": "database_swap_intent",
+                                "backup_id": backup_id,
+                                "operation_nonce": operation_nonce,
+                                "archive_sha256": archive_sha256,
+                            },
+                        )
+                        # Restore the DB last. Until this succeeds, rollback
+                        # can put every touched blob back under the
+                        # still-current database.
+                        try:
+                            _restore_database_from_path(database_path)
+                        except Exception as exc:
+                            # SQLite's online backup can fail after replacing
+                            # the destination. Always query the marker before
+                            # deciding whether blob rollback is safe.
+                            marker_state = active_marker_state()
+                            if marker_state is True:
+                                # The swap is complete despite the reporting
+                                # exception. Continue forward and acknowledge
+                                # the durable marker; never retract blobs.
+                                db_swapped = True
+                                journal_state = replace(
+                                    journal_state,
+                                    database_swap_intent=True,
+                                    database_active=True,
+                                )
+                            elif marker_state is None:
+                                db_swapped = True
+                                maintenance_required = True
+                                raise RestoreConflictError(
+                                    "restore_database_state_unknown"
+                                ) from exc
+                            else:
+                                # The marker proves the old database remains
+                                # active, so pre-PONR rollback is safe.
+                                raise
+                        if not db_swapped:
+                            active_marker = active_marker_state()
+                            if active_marker is False:
+                                raise RestoreConflictError(
+                                    "restore_database_swap_not_active"
+                                )
+                            if active_marker is None:
+                                # We cannot prove whether the replacement
+                                # happened; preserving blobs is the only safe
+                                # recovery action.
+                                db_swapped = True
+                                maintenance_required = True
+                                raise RestoreConflictError(
+                                    "restore_database_state_unknown"
+                                )
+                            db_swapped = True
+                        # Database replacement is the restore point of no
+                        # return. A journal acknowledgement failure after this
+                        # point must never retract bytes referenced by the
+                        # marker. A later retry can finish the journal.
+                        if not journal_state.database_active:
+                            _append_restore_journal(
+                                journal_path,
+                                {
+                                    "event": "database_active",
+                                    "backup_id": backup_id,
+                                    "operation_nonce": operation_nonce,
+                                    "archive_sha256": archive_sha256,
+                                },
+                            )
+                            journal_state = replace(journal_state, database_active=True)
+                    else:
+                        db_swapped = True
                     _append_restore_journal(
                         journal_path,
-                        {"event": "complete", "backup_id": backup_id},
+                        {
+                            "event": "complete",
+                            "backup_id": backup_id,
+                            "operation_nonce": operation_nonce,
+                            "archive_sha256": archive_sha256,
+                        },
                     )
                     _remove_restore_journal(journal_path)
                 except Exception:
-                    _rollback_applied_blobs(created, journal_path=journal_path)
-                    raise
+                    if not db_swapped:
+                        _rollback_applied_blobs(created, journal_path=journal_path)
+                        raise
+                    if maintenance_required:
+                        # Marker lookup itself failed. Preserve the original
+                        # unknown outcome and the staged bytes for operator
+                        # recovery; do not mask it as a generic ack failure.
+                        raise
+                    # The marker proves the new database owns the staged
+                    # bytes. Keep maintenance enabled and leave the journal
+                    # for a forward retry when acknowledgement or cleanup
+                    # fails; never roll those bytes back.
+                    maintenance_required = True
+                    raise RestoreConflictError(
+                        "restore_post_swap_recovery_required"
+                    ) from None
                 restored_files = len(staged_blobs)
         except Exception:
             try:
@@ -1909,7 +2679,13 @@ def restore_backup(backup_id: str) -> dict:
                 )
             raise
     finally:
-        _end_restore_maintenance()
+        if not maintenance_required and not _restore_journal_pending():
+            _end_restore_maintenance()
+        else:
+            logger.critical(
+                "restore outcome is unknown; leaving the application in maintenance mode",
+                extra={"backup_id": backup_id},
+            )
 
     logger.info("backup %s restored: %d files", backup_id, restored_files)
 

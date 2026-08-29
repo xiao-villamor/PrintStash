@@ -276,6 +276,9 @@ class TrashPurgeRead(BaseModel):
     storage_completed: int = 0
     storage_pending: int = 0
     storage_blocked: int = 0
+    storage_cleanup_status: Literal["completed", "pending", "blocked", "partial"] = (
+        "completed"
+    )
     resources_blocked: int = 0
 
 
