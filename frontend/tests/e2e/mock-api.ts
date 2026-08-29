@@ -376,6 +376,16 @@ export function setExternalLibrariesEnabled(value: boolean): void {
 function vaultConfig() {
   return {
     storage_backend: "local",
+    storage_provider: "local",
+    storage_provider_config: {
+      provider: "local",
+      data_dir: "/data/files",
+      thumb_dir: "/data/thumbs",
+      root: "vault-data",
+    },
+    storage_tier: "unguarded",
+    storage_warnings: [],
+    storage_unverified_acknowledged: false,
     data_dir: "/data/files",
     thumb_dir: "/data/thumbs",
     s3_bucket: "",
@@ -399,6 +409,83 @@ function vaultConfig() {
     external_libraries_enabled: state.externalLibrariesEnabled,
     model_thumbnail_width: 640,
   };
+}
+
+function storageProviders() {
+  return [
+    {
+      id: "local",
+      label: "This machine",
+      category: "this_machine",
+      description: "Local filesystem directories.",
+      expected_tier: "verified",
+      expected_tier_note: "Verified on local filesystems with working hardlinks.",
+      consequences: [],
+      documentation_url: "/docs/storage-providers.md#local",
+      available: true,
+      selectable: true,
+      fields: [
+        {
+          name: "data_dir",
+          label: "Models directory",
+          help: "Directory for model files",
+          input_type: "path",
+          required: true,
+          secret: false,
+        },
+        {
+          name: "thumb_dir",
+          label: "Thumbnail directory",
+          help: "Directory for generated images",
+          input_type: "path",
+          required: true,
+          secret: false,
+        },
+        {
+          name: "root",
+          label: "Root",
+          help: "Ownership namespace",
+          input_type: "text",
+          required: true,
+          secret: false,
+          default: "vault-data",
+        },
+      ],
+    },
+    {
+      id: "sftp",
+      label: "SFTP",
+      category: "nas_sftp",
+      description: "NAS storage over SSH File Transfer Protocol.",
+      expected_tier: "guarded",
+      expected_tier_note: "SFTP cannot prove conditional ownership.",
+      consequences: [
+        "Manual permanent deletion requires one-shot confirmation; scheduled storage purge is skipped.",
+      ],
+      documentation_url: "/docs/storage-providers.md#sftp",
+      available: false,
+      selectable: false,
+      disabled_reason: "Requires the full image",
+      fields: [
+        {
+          name: "host",
+          label: "Host",
+          help: "SFTP hostname",
+          input_type: "text",
+          required: true,
+          secret: false,
+        },
+        {
+          name: "host_key",
+          label: "Host key",
+          help: "OpenSSH known-host entry",
+          input_type: "text",
+          required: true,
+          secret: false,
+        },
+      ],
+    },
+  ];
 }
 
 const externalLibrary = {
@@ -1287,6 +1374,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       return;
     }
     sendJson(res, vaultConfig());
+    return;
+  }
+  if (url.pathname === "/api/v1/storage/providers") {
+    sendJson(res, storageProviders());
     return;
   }
   if (url.pathname === "/api/v1/health/releases/latest") {

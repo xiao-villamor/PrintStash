@@ -154,6 +154,7 @@ class TestStorageProviders:
             provider="sftp",
             host="nas.example.test",
             username="printstash",
+            host_key="ssh-ed25519 AAAA",
             **credentials,
         )
 
@@ -164,6 +165,17 @@ class TestStorageProviders:
             "private_key_path"
         )
         assert spec.options.get("passphrase") == credentials.get("passphrase")
+
+    def test_rejects_sftp_activation_without_a_host_key(self) -> None:
+        config = SFTPProviderConfig(
+            provider="sftp",
+            host="nas.example.test",
+            username="printstash",
+            password="secret",
+        )
+
+        with pytest.raises(ValueError, match="sftp_host_key_required"):
+            resolve_transport(config)
 
     def test_public_provider_catalogue_needs_no_auth(self, client: TestClient) -> None:
         response = client.get("/api/v1/storage/providers")
@@ -295,6 +307,7 @@ class TestStorageProviders:
                 "provider": "sftp",
                 "host": "nas.example.test",
                 "username": "printstash",
+                "host_key": "ssh-ed25519 AAAA",
                 "password": "old-password",
                 "root": "models",
             },
@@ -307,6 +320,7 @@ class TestStorageProviders:
                 "provider": "sftp",
                 "host": "nas.example.test",
                 "username": "printstash",
+                "host_key": "ssh-ed25519 AAAA",
                 "private_key_path": "/run/keys/id_ed25519",
                 "passphrase": "new-passphrase",
                 "root": "models",

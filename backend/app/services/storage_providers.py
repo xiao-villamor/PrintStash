@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from importlib.util import find_spec
 from pathlib import PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -73,15 +73,15 @@ class S3ProviderConfig(_ProviderConfig):
     region: str = "auto"
     endpoint_url: str = ""
     account_id: str = ""
-    access_key: str = Field(min_length=1)
-    secret_key: str = Field(min_length=1)
+    access_key: str = Field(min_length=1, json_schema_extra={"secret": True})
+    secret_key: str = Field(min_length=1, json_schema_extra={"secret": True})
 
 
 class WebDAVProviderConfig(_ProviderConfig):
     provider: Literal["nextcloud", "webdav"]
     endpoint_url: str = Field(min_length=1)
     username: str = Field(min_length=1)
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=1, json_schema_extra={"secret": True})
 
 
 class SFTPProviderConfig(_ProviderConfig):
@@ -89,14 +89,20 @@ class SFTPProviderConfig(_ProviderConfig):
     host: str = Field(min_length=1)
     port: int = Field(default=22, ge=1, le=65535)
     username: str = Field(min_length=1)
-    password: str = ""
+    # Either a mounted known_hosts file path or one OpenSSH known-host entry.
+    # Empty is accepted only so pre-host-key rows remain readable and can be
+    # edited. ``resolve_transport`` is the activation boundary and rejects it,
+    # so no SFTP connection can fall back to trust-on-first-use.
+    host_key: str = ""
+    password: str = Field(default="", json_schema_extra={"secret": True})
     private_key_path: str = ""
-    passphrase: str = ""
+    passphrase: str = Field(default="", json_schema_extra={"secret": True})
 
     @model_validator(mode="after")
     def validate_auth(self):
         password = self.password.strip()
         key_path = self.private_key_path.strip()
+        self.host_key = self.host_key.strip()
         if bool(password) == bool(key_path):
             raise ValueError("sftp_exactly_one_authentication_required")
         if self.passphrase and not key_path:
@@ -107,6 +113,13 @@ class SFTPProviderConfig(_ProviderConfig):
         self.private_key_path = key_path
         return self
 
+
+_PROVIDER_CONFIG_MODELS = (
+    LocalProviderConfig,
+    S3ProviderConfig,
+    WebDAVProviderConfig,
+    SFTPProviderConfig,
+)
 
 StorageProviderConfig = Annotated[
     LocalProviderConfig | S3ProviderConfig | WebDAVProviderConfig | SFTPProviderConfig,
@@ -122,7 +135,30 @@ class TransportSpec(BaseModel):
     options: dict[str, str | int | bool]
 
 
-_SECRET_FIELDS = {"access_key", "secret_key", "password", "passphrase"}
+def _secret_field_names(
+    value: StorageProviderConfig | type[_ProviderConfig],
+) -> set[str]:
+    """Derive secret splitting from Pydantic field metadata.
+
+    The compatibility set is retained only for old provider classes/config
+    rows which predate metadata; new fields become secret by declaring
+    ``json_schema_extra={"secret": True}``, so business logic need not be
+    updated in a second location when a provider grows a credential.
+    """
+    model = value if isinstance(value, type) else type(value)
+    names: set[str] = set()
+    for name, field in model.model_fields.items():
+        extra = field.json_schema_extra
+        if isinstance(extra, dict) and extra.get("secret") is True:
+            names.add(name)
+    return names
+
+
+def _provider_model(provider: object) -> type[_ProviderConfig] | None:
+    for model in _PROVIDER_CONFIG_MODELS:
+        if provider in get_args(model.model_fields["provider"].annotation):
+            return model
+    return None
 
 
 def normalize_root(value: str) -> str:
@@ -143,10 +179,11 @@ def split_provider_config(
     value: StorageProviderConfig,
 ) -> tuple[dict[str, object], dict[str, str]]:
     raw = value.model_dump(mode="json")
+    secret_fields = _secret_field_names(value)
     secrets = {
         name: str(raw.pop(name))
         for name in tuple(raw)
-        if name in _SECRET_FIELDS and raw[name] not in (None, "")
+        if name in secret_fields and raw[name] not in (None, "")
     }
     return raw, secrets
 
@@ -160,9 +197,16 @@ def merge_provider_secrets(
 def sanitized_provider_config(
     config: dict[str, object], secrets: dict[str, str]
 ) -> dict[str, object]:
+    model = _provider_model(config.get("provider"))
+    secret_fields = _secret_field_names(model) if model is not None else set()
+    configured_secrets = {
+        name
+        for name in secret_fields
+        if config.get(name) not in (None, "") or secrets.get(name) not in (None, "")
+    }
     return {
-        **config,
-        "secret_fields_set": sorted(name for name, value in secrets.items() if value),
+        **{name: value for name, value in config.items() if name not in secret_fields},
+        "secret_fields_set": sorted(configured_secrets),
     }
 
 
@@ -244,7 +288,10 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
         "port": config.port,
         "username": config.username,
         "root": root,
+        "host_key": config.host_key,
     }
+    if not config.host_key:
+        raise ValueError("sftp_host_key_required")
     if config.password:
         options["password"] = config.password
     else:
@@ -393,10 +440,14 @@ def provider_catalogue() -> list[StorageProvider]:
                 label=label,
                 category=ProviderCategory.WEBDAV,
                 description="Remote storage over WebDAV.",
-                expected_tier="unguarded",
-                expected_tier_note="Remote rename does not prove conditional ownership.",
+                expected_tier="guarded",
+                expected_tier_note=(
+                    "Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual "
+                    "and confirmed only."
+                ),
                 consequences=[
-                    "Startup acknowledgement and purge confirmation are required."
+                    "Manual permanent deletion requires one-shot confirmation.",
+                    "Scheduled storage purge is skipped.",
                 ],
                 documentation_url=f"/docs/storage-providers.md#{provider_id}",
                 available=remote_available,
@@ -405,34 +456,41 @@ def provider_catalogue() -> list[StorageProvider]:
                 fields=remote_common,
             )
         )
-    sftp_available = remote_available
-    if remote_available:
-        from app.services.storage_opendal import opendal_transport_available
-
-        sftp_available = opendal_transport_available(TransportKind.SFTP)
+    sftp_available = find_spec("asyncssh") is not None
+    sftp_reason = (
+        None
+        if sftp_available
+        else "Requires the full image"
+        if not remote_available
+        else "SFTP transport is unavailable in this full image"
+    )
     entries.append(
         StorageProvider(
             id="sftp",
             label="SFTP",
             category=ProviderCategory.SFTP,
             description="NAS storage over SSH File Transfer Protocol.",
-            expected_tier="unguarded",
-            expected_tier_note="SFTP cannot prove conditional ownership.",
+            expected_tier="guarded",
+            expected_tier_note=(
+                "Publish uses SSH exclusive create (`x` mode); `host_key` is required "
+                "and purge is manual and confirmed only."
+            ),
             consequences=[
-                "Startup acknowledgement and purge confirmation are required."
+                "Manual permanent deletion requires one-shot confirmation.",
+                "Scheduled storage purge is skipped.",
             ],
             documentation_url="/docs/storage-providers.md#sftp",
             available=sftp_available,
             selectable=sftp_available,
-            disabled_reason=(
-                remote_reason
-                if not remote_available
-                else None
-                if sftp_available
-                else "SFTP transport is unavailable in this full image"
-            ),
+            disabled_reason=sftp_reason,
             fields=[
                 _field("host", "Host", "SFTP hostname"),
+                _field(
+                    "host_key",
+                    "Host key",
+                    "OpenSSH known-hosts file path or entry; required for verification",
+                    input_type="path",
+                ),
                 _field("port", "Port", "SFTP port", input_type="number", default=22),
                 _field("username", "Username", "SFTP account username"),
                 _field(
@@ -519,7 +577,7 @@ def render_storage_provider_docs() -> str:
         [
             "## Credentials and upgrades",
             "",
-            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one authentication mode: password, or a mounted private-key path with an optional passphrase. Inline private-key material is rejected.",
+            "Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one authentication mode: password, or a mounted private-key path with an optional passphrase. Inline private-key material is rejected. New and updated SFTP configurations require `host_key` as either a mounted known-hosts path or an OpenSSH known-host entry; legacy rows without it remain readable but cannot activate until it is added.",
             "",
             "PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.",
             "",

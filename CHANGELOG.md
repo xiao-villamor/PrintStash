@@ -8,6 +8,13 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
+- **Guarded remote storage hardening.** WebDAV publishes through atomic
+  `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.
+  Both are Guarded: permanent deletion requires confirmation and scheduled
+  purge remains disabled. NAS-linked files stay user-owned and are never
+  deleted by vault ownership maintenance; restores require the same provider
+  and namespace. Azure and GCS remain deferred.
+
 - **Runtime-probed storage capability tiers and remote providers.** Local and
   S3 storage now report Verified, Guarded, or Unguarded guarantees from runtime
   probes; durable publication intents and one-shot destructive confirmations

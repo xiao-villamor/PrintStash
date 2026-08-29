@@ -61,27 +61,16 @@ def _namespace_for(backend: StorageBackend, key: str) -> str:
     return _backend_name(backend)
 
 
-def _sqlite_write_transaction(session: Session) -> bool:
-    bind = session.get_bind()
-    if bind.dialect.name != "sqlite" or not session.in_transaction():
-        return False
-    connection = session.connection()
-    raw = connection.connection.driver_connection
-    return bool(getattr(raw, "in_transaction", False))
-
-
 @contextmanager
 def _publication_session(session: Session):
-    """Use a durable writer unless SQLite's caller already owns its only writer.
+    """Use a durable writer for every reservation and receipt transition.
 
-    A fresh engine-bound session is the normal path and makes the reservation
-    survive a later domain rollback. SQLite cannot open a second writer after
-    the caller has flushed domain rows, so those legacy ID-derived key paths
-    join the caller transaction until their keys can be decoupled from row IDs.
+    Publication ledgers are crash-recovery state, not caller-domain state.  A
+    caller rollback must therefore never erase a PENDING reservation.  Callers
+    publish only at seams which have ended their prior read/write transaction;
+    this is deliberate on SQLite, where sharing the caller transaction would
+    make durability depend on connection pooling.
     """
-    if _sqlite_write_transaction(session):
-        yield session, False
-        return
     with Session(bind=session.get_bind(), expire_on_commit=False) as independent:
         yield independent, True
 
@@ -91,6 +80,24 @@ def _commit_if_independent(session: Session, independent: bool) -> None:
         session.commit()
     else:
         session.flush()
+
+
+def _require_publication_before_sqlite_dml(session: Session) -> None:
+    """Reject publication after SQLite caller DML has acquired the write lock.
+
+    A durable reservation must commit on a distinct connection before storage
+    is mutated. SQLite cannot do that once the caller owns the database's write
+    lock, and committing the caller here would violate its transaction boundary.
+    Callers therefore order publication before their first write or establish a
+    separate durable domain lease before publishing.
+    """
+    bind = session.get_bind()
+    if bind.dialect.name != "sqlite" or not session.in_transaction():
+        return
+    connection = session.connection()
+    raw = connection.connection.driver_connection
+    if bool(getattr(raw, "in_transaction", False)):
+        raise RuntimeError("storage_publication_requires_clean_sqlite_transaction")
 
 
 def reserve_creation(
@@ -114,9 +121,8 @@ def reserve_creation(
             )
         ).first()
         if existing is not None:
-            if (
-                existing.state is not StorageObjectState.COMMITTED
-                or backend.exists(key)
+            if existing.state is not StorageObjectState.COMMITTED or backend.exists(
+                key
             ):
                 raise StorageCollisionError(key)
             existing.state = StorageObjectState.PENDING
@@ -189,13 +195,18 @@ def complete_publication(
         row.last_error = None
         reservation_session.add(row)
         _commit_if_independent(reservation_session, independent)
-    record_creation(
-        session,
-        receipt,
-        object_kind=object_kind,
-        sha256=sha256,
-        reservation_id=reservation_id,
-    )
+    # The caller may have pending domain rows which intentionally remain in its
+    # transaction. Do not trigger an autoflush while joining the durable receipt;
+    # publication must remain independently durable even if that transaction is
+    # subsequently rolled back.
+    with session.no_autoflush:
+        record_creation(
+            session,
+            receipt,
+            object_kind=object_kind,
+            sha256=sha256,
+            reservation_id=reservation_id,
+        )
 
 
 def publish_bytes(
@@ -208,6 +219,7 @@ def publish_bytes(
     sha256: str | None = None,
 ) -> CreationReceipt:
     """Reserve, create, then join ownership to the caller's transaction."""
+    _require_publication_before_sqlite_dml(session)
     digest = sha256 or hashlib.sha256(data).hexdigest()
     reservation_id = reserve_creation(
         session,
@@ -243,6 +255,7 @@ def publish_stream(
     sha256: str | None = None,
 ) -> CreationReceipt:
     """Publish a caller-owned stream without buffering it in memory."""
+    _require_publication_before_sqlite_dml(session)
     reservation_id = reserve_creation(
         session,
         backend,
@@ -277,6 +290,7 @@ def publish_file(
     move: bool = False,
 ) -> CreationReceipt:
     """Publish a staged file with evidence known before storage mutation."""
+    _require_publication_before_sqlite_dml(session)
     digest = sha256
     if digest is None:
         hasher = hashlib.sha256()
@@ -577,6 +591,7 @@ def replace_owned_bytes(
         row.inode = replacement.inode
         row.ctime_ns = replacement.ctime_ns
         row.object_kind = object_kind
+        row.sha256 = hashlib.sha256(data).hexdigest()
         session.add(row)
         return replacement
     raise UnsafeStorageDeleteError("storage_ownership_unverified")

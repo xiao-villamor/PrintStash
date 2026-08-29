@@ -109,6 +109,69 @@ const providers: StorageProvider[] = [
       },
     ],
   },
+  {
+    id: "sftp",
+    label: "SFTP",
+    category: "nas_sftp",
+    description: "NAS storage over SSH File Transfer Protocol.",
+    expected_tier: "guarded",
+    expected_tier_note: "SFTP cannot prove conditional ownership.",
+    consequences: [],
+    documentation_url: "/docs/storage-providers.md#sftp",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "host",
+        label: "Host",
+        help: "SFTP hostname.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "port",
+        label: "Port",
+        help: "SFTP port.",
+        input_type: "number",
+        required: true,
+        secret: false,
+        default: 22,
+      },
+      {
+        name: "username",
+        label: "Username",
+        help: "SFTP account username.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "host_key",
+        label: "Host key",
+        help: "OpenSSH known-host entry.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "password",
+        label: "Password",
+        help: "Optional password.",
+        input_type: "password",
+        required: false,
+        secret: true,
+      },
+      {
+        name: "private_key_path",
+        label: "Private key path",
+        help: "Mounted private key path.",
+        input_type: "path",
+        required: false,
+        secret: false,
+      },
+    ],
+  },
 ];
 
 const setupResponse: SetupResponse = {
@@ -279,5 +342,41 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: /Complete setup/ }));
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("requires the SFTP host key before completion", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "NAS over SFTP" }));
+    await user.click(screen.getByRole("button", { name: /^SFTP/ }));
+    await user.type(screen.getByLabelText("Host"), "nas.example.test");
+    await user.type(screen.getByLabelText("Username"), "printstash");
+
+    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Host key is required.");
+    expect(deps.completeSetup).not.toHaveBeenCalled();
+  });
+
+  it("submits the SFTP host key through provider configuration", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "NAS over SFTP" }));
+    await user.click(screen.getByRole("button", { name: /^SFTP/ }));
+    await user.type(screen.getByLabelText("Host"), "nas.example.test");
+    await user.type(screen.getByLabelText("Username"), "printstash");
+    await user.type(screen.getByLabelText("Host key"), "nas.example.test ssh-ed25519 AAAA");
+
+    await user.click(screen.getByRole("button", { name: /Complete setup/ }));
+
+    await waitFor(() =>
+      expect(deps.completeSetup).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storage_provider: "sftp",
+          storage_provider_config: expect.objectContaining({
+            provider: "sftp",
+            host_key: "nas.example.test ssh-ed25519 AAAA",
+          }),
+        }),
+      ),
+    );
   });
 });

@@ -10,9 +10,9 @@ PrintStash probes the configured storage at startup. The expected tier below is 
 | [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
 | [Wasabi](#wasabi) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
 | [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Unguarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [WebDAV](#webdav) | Nextcloud and WebDAV | Unguarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [SFTP](#sftp) | NAS over SFTP | Unguarded | `host`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
+| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
+| [WebDAV](#webdav) | Nextcloud and WebDAV | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
+| [SFTP](#sftp) | NAS over SFTP | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
 
 ## Safety tiers
 
@@ -62,23 +62,23 @@ Expected tier: **Guarded**. Verified when bucket versioning is enabled; otherwis
 
 Remote storage over WebDAV.
 
-Expected tier: **Unguarded**. Remote rename does not prove conditional ownership.
+Expected tier: **Guarded**. Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual and confirmed only.
 
 ## webdav
 
 Remote storage over WebDAV.
 
-Expected tier: **Unguarded**. Remote rename does not prove conditional ownership.
+Expected tier: **Guarded**. Publish uses WebDAV MOVE with `Overwrite: F`; purge is manual and confirmed only.
 
 ## sftp
 
 NAS storage over SSH File Transfer Protocol.
 
-Expected tier: **Unguarded**. SFTP cannot prove conditional ownership.
+Expected tier: **Guarded**. Publish uses SSH exclusive create (`x` mode); `host_key` is required and purge is manual and confirmed only.
 
 ## Credentials and upgrades
 
-Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one authentication mode: password, or a mounted private-key path with an optional passphrase. Inline private-key material is rejected.
+Secrets are write-only: configuration reads expose only which secret fields are set. SFTP accepts exactly one authentication mode: password, or a mounted private-key path with an optional passphrase. Inline private-key material is rejected. New and updated SFTP configurations require `host_key` as either a mounted known-hosts path or an OpenSSH known-host entry; legacy rows without it remain readable but cannot activate until it is added.
 
 PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.
 

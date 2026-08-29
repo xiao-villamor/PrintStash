@@ -182,9 +182,11 @@ def _collection_path_for(
     session: Session, library: ExternalLibrary, source_path: Path
 ) -> Optional[str]:
     """Resolve the collection (raw '/'-joined) path for a scanned file."""
+    library_root = Path(library.root_path).expanduser().resolve(strict=False)
+    source_path = source_path.expanduser().resolve(strict=False)
     if library.collection_mode == ExternalLibraryCollectionMode.MIRROR:
         try:
-            rel = source_path.parent.relative_to(Path(library.root_path))
+            rel = source_path.parent.relative_to(library_root)
         except ValueError:
             return None
         parts = [p for p in rel.parts if p not in ("", ".")]
@@ -418,7 +420,7 @@ def scan_library(
         # restart runs reset_orphaned_scans. Instead, always land in a terminal
         # state (#24 follow-up).
         try:
-            root = Path(library.root_path).resolve()
+            root = Path(library.root_path).expanduser().resolve(strict=False)
 
             # --- Safety guard: never mass-delete on an unmounted/unreadable root.
             if not root.exists() or not root.is_dir() or not os.access(root, os.R_OK):

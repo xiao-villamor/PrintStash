@@ -1425,6 +1425,9 @@ class StorageDeleteIntent(SQLModel, table=True):
     object_kind: str = Field(max_length=64, index=True)
     token: str = Field(max_length=64)
     size_bytes: int
+    # Content evidence is revalidated immediately before a Guarded/manual
+    # delete, preventing a replacement at the same key from being removed.
+    sha256: Optional[str] = Field(default=None, max_length=64, index=True)
     etag: Optional[str] = Field(default=None, max_length=255)
     version_id: Optional[str] = Field(default=None, max_length=1024)
     device: Optional[int] = Field(

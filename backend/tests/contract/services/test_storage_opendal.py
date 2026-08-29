@@ -7,10 +7,12 @@ protocol servers rather than mocks.
 
 from __future__ import annotations
 
+import json
 import shutil
 import socket
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 
@@ -20,9 +22,11 @@ import pytest
 
 from app.services.storage_backend import (
     StorageCollisionError,
+    StorageConfigurationError,
 )
 from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_providers import TransportKind, TransportSpec
+from tests.paths import BACKEND_DIR
 
 pytestmark = pytest.mark.contract
 
@@ -33,11 +37,17 @@ def _free_port() -> int:
         return int(listener.getsockname()[1])
 
 
+def _known_host_line(key: asyncssh.SSHKey, port: int) -> str:
+    public = key.export_public_key("openssh")
+    text = public.decode() if isinstance(public, bytes) else public
+    return f"[127.0.0.1]:{port} {text.strip()}\n"
+
+
 @pytest.fixture
 def webdav_endpoint(tmp_path: Path):
     executable = shutil.which("wsgidav")
     if executable is None:
-        venv_executable = Path(__file__).parents[3] / ".venv" / "bin" / "wsgidav"
+        venv_executable = BACKEND_DIR / ".venv" / "bin" / "wsgidav"
         if venv_executable.is_file():
             executable = str(venv_executable)
     if executable is None:
@@ -45,20 +55,39 @@ def webdav_endpoint(tmp_path: Path):
             "WsgiDAV contract dependency is not installed; install the dev extra"
         )
     port = _free_port()
+    (tmp_path / "storage").mkdir()
+    config_path = tmp_path / "wsgidav.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "host": "127.0.0.1",
+                "port": port,
+                "provider_mapping": {"/dav/base": str(tmp_path / "storage")},
+                "http_authenticator": {
+                    "accept_basic": True,
+                    "accept_digest": False,
+                    "default_to_digest": False,
+                },
+                "simple_dc": {
+                    "user_mapping": {
+                        "*": {"webdav-user": {"password": "webdav-password"}}
+                    }
+                },
+                "verbose": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
     process = subprocess.Popen(
         [
             executable,
-            "--host=127.0.0.1",
-            f"--port={port}",
-            f"--root={tmp_path}",
-            "--auth=anonymous",
-            "--no-config",
+            f"--config={config_path}",
             "--quiet",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
-    endpoint = f"http://127.0.0.1:{port}"
+    endpoint = f"http://127.0.0.1:{port}/dav/base"
     try:
         for _ in range(200):
             if process.poll() is not None:
@@ -86,6 +115,7 @@ def webdav_endpoint(tmp_path: Path):
 def sftp_endpoint(tmp_path: Path):
     port = _free_port()
     private_key = tmp_path / "client-key"
+    known_hosts = tmp_path / "known-hosts"
     authorized_keys = tmp_path / "authorized_keys"
     key = asyncssh.generate_private_key("ssh-ed25519")
     private_key.write_bytes(key.export_private_key("openssh"))
@@ -93,7 +123,7 @@ def sftp_endpoint(tmp_path: Path):
     authorized_keys.write_bytes(key.export_public_key("openssh"))
     process = subprocess.Popen(
         [
-            str(Path(__file__).parents[3] / ".venv" / "bin" / "python"),
+            str(BACKEND_DIR / ".venv" / "bin" / "python"),
             "-m",
             "tests.fakes.mock_sftp",
             "--port",
@@ -102,8 +132,10 @@ def sftp_endpoint(tmp_path: Path):
             str(tmp_path / "server"),
             "--authorized-keys",
             str(authorized_keys),
+            "--known-hosts",
+            str(known_hosts),
         ],
-        cwd=Path(__file__).parents[3],
+        cwd=BACKEND_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -111,7 +143,7 @@ def sftp_endpoint(tmp_path: Path):
     try:
         assert process.stdout is not None
         assert process.stdout.readline().strip() == "READY"
-        yield port, private_key
+        yield port, private_key, known_hosts
     finally:
         process.terminate()
         process.wait(timeout=5)
@@ -120,9 +152,10 @@ def sftp_endpoint(tmp_path: Path):
 @pytest.fixture
 def sftp_password_endpoint(tmp_path: Path):
     port = _free_port()
+    known_hosts = tmp_path / "password-known-hosts"
     process = subprocess.Popen(
         [
-            str(Path(__file__).parents[3] / ".venv" / "bin" / "python"),
+            str(BACKEND_DIR / ".venv" / "bin" / "python"),
             "-m",
             "tests.fakes.mock_sftp",
             "--port",
@@ -131,8 +164,10 @@ def sftp_password_endpoint(tmp_path: Path):
             str(tmp_path / "password-server"),
             "--password",
             "contract-secret",
+            "--known-hosts",
+            str(known_hosts),
         ],
-        cwd=Path(__file__).parents[3],
+        cwd=BACKEND_DIR,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -140,10 +175,62 @@ def sftp_password_endpoint(tmp_path: Path):
     try:
         assert process.stdout is not None
         assert process.stdout.readline().strip() == "READY"
-        yield port
+        yield port, known_hosts
     finally:
         process.terminate()
         process.wait(timeout=5)
+
+
+@pytest.fixture
+def changed_sftp_endpoint(tmp_path: Path):
+    port = _free_port()
+    private_key = tmp_path / "changed-client-key"
+    known_hosts = tmp_path / "changed-known-hosts"
+    authorized_keys = tmp_path / "changed-authorized-keys"
+    key = asyncssh.generate_private_key("ssh-ed25519")
+    private_key.write_bytes(key.export_private_key("openssh"))
+    private_key.chmod(0o600)
+    authorized_keys.write_bytes(key.export_public_key("openssh"))
+    current: list[subprocess.Popen[str]] = []
+
+    def start(*, record_host_key: bool) -> subprocess.Popen[str]:
+        command = [
+            str(BACKEND_DIR / ".venv" / "bin" / "python"),
+            "-m",
+            "tests.fakes.mock_sftp",
+            "--port",
+            str(port),
+            "--root",
+            str(tmp_path / "changed-server"),
+            "--authorized-keys",
+            str(authorized_keys),
+        ]
+        if record_host_key:
+            command.extend(["--known-hosts", str(known_hosts)])
+        process = subprocess.Popen(
+            command,
+            cwd=BACKEND_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "READY"
+        return process
+
+    current.append(start(record_host_key=True))
+
+    def rotate() -> None:
+        current[0].terminate()
+        current[0].wait(timeout=5)
+        time.sleep(0.05)
+        current[0] = start(record_host_key=False)
+
+    try:
+        yield port, private_key, known_hosts, rotate
+    finally:
+        current[0].terminate()
+        current[0].wait(timeout=5)
 
 
 def _spec(endpoint: str = "memory://") -> TransportSpec:
@@ -153,14 +240,14 @@ def _spec(endpoint: str = "memory://") -> TransportSpec:
         namespace="webdav/vault-data",
         options={
             "endpoint_url": endpoint,
-            "username": "user",
-            "password": "password",
+            "username": "webdav-user",
+            "password": "webdav-password",
             "root": "vault-data",
         },
     )
 
 
-def _sftp_spec(port: int, private_key: Path) -> TransportSpec:
+def _sftp_spec(port: int, private_key: Path, known_hosts: Path) -> TransportSpec:
     return TransportSpec(
         kind=TransportKind.SFTP,
         provider="sftp",
@@ -170,12 +257,15 @@ def _sftp_spec(port: int, private_key: Path) -> TransportSpec:
             "port": port,
             "username": "printstash",
             "private_key_path": str(private_key),
+            "host_key": str(known_hosts),
             "root": "vault-data",
         },
     )
 
 
 class _RenameFailure:
+    _printstash_test_double = True
+
     def __init__(self) -> None:
         self.inner = opendal.Operator("memory")
 
@@ -202,13 +292,34 @@ class TestOpenDALStorageBackend:
         assert backend.read_bytes(key) == payload
         assert receipt.size == len(payload)
         assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
-        assert backend.capabilities.tier.value == "unguarded"
+        assert backend.capabilities.tier.value == "guarded"
         with pytest.raises(StorageCollisionError):
             backend.create_bytes(b"replacement", key)
 
+    def test_concurrent_webdav_create_only_allows_one_publisher(
+        self, webdav_endpoint: str
+    ) -> None:
+        backend = OpenDALStorageBackend(_spec(webdav_endpoint))
+        key = backend.blob_key("race", 1, "part.stl")
+
+        def publish(index: int) -> tuple[int, str]:
+            try:
+                backend.create_bytes(f"publisher-{index}".encode(), key)
+            except StorageCollisionError:
+                return index, "collision"
+            return index, "created"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(publish, range(2)))
+        winners = [index for index, outcome in outcomes if outcome == "created"]
+
+        assert [outcome for _index, outcome in outcomes].count("collision") == 1
+        assert len(winners) == 1
+        assert backend.read_bytes(key) == f"publisher-{winners[0]}".encode()
+
     def test_sftp_mounted_key_stream_round_trip(self, sftp_endpoint) -> None:
-        port, private_key = sftp_endpoint
-        backend = OpenDALStorageBackend(_sftp_spec(port, private_key))
+        port, private_key, known_hosts = sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
         backend.ensure_setup()
         key = backend.blob_key("sftp-widget", 1, "widget.3mf")
         payload = b"sftp-model" * (1024 * 1024)
@@ -218,18 +329,20 @@ class TestOpenDALStorageBackend:
         assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
         assert receipt.size == len(payload)
         assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
-        assert backend.capabilities.tier.value == "unguarded"
+        assert backend.capabilities.tier.value == "guarded"
 
-    def test_sftp_password_stream_round_trip(self, sftp_password_endpoint: int) -> None:
+    def test_sftp_password_stream_round_trip(self, sftp_password_endpoint) -> None:
+        port, known_hosts = sftp_password_endpoint
         spec = TransportSpec(
             kind=TransportKind.SFTP,
             provider="sftp",
             namespace="sftp/vault-data",
             options={
                 "host": "127.0.0.1",
-                "port": sftp_password_endpoint,
+                "port": port,
                 "username": "printstash",
                 "password": "contract-secret",
+                "host_key": str(known_hosts),
                 "root": "vault-data",
             },
         )
@@ -242,6 +355,70 @@ class TestOpenDALStorageBackend:
 
         assert b"".join(backend.stream_chunks(key, 64 * 1024)) == payload
         assert receipt.size == len(payload)
+
+    def test_sftp_accepts_a_pinned_known_host_entry(self, sftp_endpoint) -> None:
+        port, private_key, known_hosts = sftp_endpoint
+        spec = _sftp_spec(port, private_key, known_hosts)
+        spec.options["host_key"] = known_hosts.read_text(encoding="utf-8")
+        backend = OpenDALStorageBackend(spec)
+
+        backend.ensure_setup()
+
+        assert backend.health_probe()["ok"] is True
+
+    def test_concurrent_sftp_create_only_allows_one_publisher(
+        self, sftp_endpoint
+    ) -> None:
+        port, private_key, known_hosts = sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        key = backend.blob_key("race", 1, "part.stl")
+
+        def publish(index: int) -> tuple[int, str]:
+            try:
+                backend.create_bytes(f"publisher-{index}".encode(), key)
+            except StorageCollisionError:
+                return index, "collision"
+            return index, "created"
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(publish, range(2)))
+        winners = [index for index, outcome in outcomes if outcome == "created"]
+
+        assert [outcome for _index, outcome in outcomes].count("collision") == 1
+        assert len(winners) == 1
+        assert backend.read_bytes(key) == f"publisher-{winners[0]}".encode()
+
+    def test_sftp_rejects_a_missing_host_key(self, sftp_endpoint) -> None:
+        port, private_key, _known_hosts = sftp_endpoint
+        spec = _sftp_spec(port, private_key, Path(""))
+        spec.options["host_key"] = ""
+
+        with pytest.raises(StorageConfigurationError, match="sftp_host_key_required"):
+            OpenDALStorageBackend(spec)
+
+    def test_sftp_rejects_a_wrong_host_key(self, sftp_endpoint, tmp_path: Path) -> None:
+        port, private_key, _known_hosts = sftp_endpoint
+        wrong_hosts = tmp_path / "wrong-known-hosts"
+        wrong_key = asyncssh.generate_private_key("ssh-ed25519")
+        wrong_hosts.write_text(_known_host_line(wrong_key, port), encoding="utf-8")
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, wrong_hosts))
+
+        with pytest.raises(asyncssh.HostKeyNotVerifiable):
+            backend.ensure_setup()
+
+    def test_sftp_rejects_a_changed_server_host_key(
+        self, changed_sftp_endpoint
+    ) -> None:
+        port, private_key, known_hosts, rotate = changed_sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        backend.ensure_setup()
+        rotate()
+        changed_backend = OpenDALStorageBackend(
+            _sftp_spec(port, private_key, known_hosts)
+        )
+
+        with pytest.raises(asyncssh.HostKeyNotVerifiable):
+            changed_backend.ensure_setup()
 
     def test_failed_remote_publication_removes_temporary_key(self) -> None:
         operator = _RenameFailure()

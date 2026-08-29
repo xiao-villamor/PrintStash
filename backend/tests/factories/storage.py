@@ -27,6 +27,7 @@ and lands in an `external:` namespace where ownership cannot be proven at all.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from sqlmodel import Session
@@ -48,7 +49,12 @@ def store_owned_bytes(
 ) -> CreationReceipt:
     """Write *data* at *key* and record the receipt that proves we own it."""
     receipt = backend.create_bytes(data, key)
-    record_creation(session, receipt, object_kind=object_kind)
+    record_creation(
+        session,
+        receipt,
+        object_kind=object_kind,
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
     session.commit()
     return receipt
 
@@ -93,7 +99,7 @@ def build_stored_file(
         # G-code per model. Two builders disagreeing on this would be its own
         # trap, since a test cannot see which one it happened to use.
         _demote_current_recommendation(session, model)
-    overrides.setdefault("sha256", unique_hash("stored_sha"))
+    overrides.setdefault("sha256", hashlib.sha256(data).hexdigest())
     return save(
         session,
         File(

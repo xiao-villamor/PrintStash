@@ -26,6 +26,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Session, create_engine, select
 
+from alembic import command
+from app.db import migrate as migrate_mod
 from app.db.migrate import run_migrations
 from app.db.models import (
     ArtifactProvenanceLink,
@@ -53,6 +55,11 @@ from tests.factories import (
     build_user,
     grant_collection_role,
     printer_config,
+)
+from tests.factories.migration_rows import (
+    RELEASED_V0121_REVISION,
+    create_released_v0121_postgres_schema,
+    seed_released_v0121_rows,
 )
 from tests.paths import ALEMBIC_INI
 
@@ -82,6 +89,42 @@ def clean_postgres(postgres_engine) -> None:
         connection.exec_driver_sql(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE")
 
 
+def _migration_config(postgres_engine) -> Config:
+    config = Config(str(ALEMBIC_INI))
+    config.set_main_option(
+        "sqlalchemy.url",
+        postgres_engine.url.render_as_string(hide_password=False).replace("%", "%%"),
+    )
+    return config
+
+
+def _reset_postgres_schema(postgres_engine) -> None:
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql("DROP SCHEMA public CASCADE")
+        connection.exec_driver_sql("CREATE SCHEMA public")
+
+
+@pytest.fixture
+def released_postgres(postgres_engine) -> Iterator:
+    """A v0.12.1 create-all PostgreSQL database, restored to head afterwards."""
+    _reset_postgres_schema(postgres_engine)
+    with postgres_engine.begin() as connection:
+        create_released_v0121_postgres_schema(connection)
+        seed_released_v0121_rows(connection)
+    command.stamp(_migration_config(postgres_engine), RELEASED_V0121_REVISION)
+    try:
+        yield postgres_engine
+    finally:
+        _reset_postgres_schema(postgres_engine)
+        run_migrations(postgres_engine.url.render_as_string(hide_password=False))
+
+
+@pytest.fixture
+def fresh_postgres_schema_issues(postgres_engine) -> tuple[str, ...]:
+    """Dialect-normalized comparator fingerprint of a fresh current install."""
+    return tuple(migrate_mod._orphan_schema_issues(postgres_engine))  # noqa: SLF001
+
+
 class TestBootstrap:
     def test_fresh_bootstrap_is_at_head_with_partial_default_index(
         self, postgres_engine
@@ -106,6 +149,86 @@ class TestBootstrap:
         assert index["unique"] is True
         predicate = str(index["dialect_options"]["postgresql_where"])
         assert "deleted_at IS NULL" in predicate
+
+    @pytest.mark.postgres
+    def test_released_rows_survive_the_upgrade(self, released_postgres) -> None:
+        command.upgrade(_migration_config(released_postgres), "head")
+
+        with released_postgres.connect() as connection:
+            stored = connection.execute(
+                text(
+                    "SELECT f.file_type, f.revision_status, f.revision_label, "
+                    "m.slicer_name, m.slicer_version, m.layer_height_mm, "
+                    "m.estimated_time_s, m.filament_weight_g, o.key, d.sha256 "
+                    "FROM files AS f JOIN metadata AS m ON m.file_id = f.id "
+                    "JOIN owned_storage_objects AS o ON o.id = 1 "
+                    "JOIN storage_delete_intents AS d ON d.id = 1 "
+                    "WHERE f.id = 2"
+                )
+            ).one()
+
+        assert stored == (
+            "GCODE",
+            "KNOWN_GOOD",
+            "Release slice",
+            "PrusaSlicer",
+            "2.8.1",
+            0.2,
+            3600,
+            12.5,
+            "models/released-model.gcode",
+            None,
+        )
+
+    @pytest.mark.postgres
+    def test_released_upgrade_records_the_current_head(self, released_postgres) -> None:
+        command.upgrade(_migration_config(released_postgres), "head")
+
+        with released_postgres.connect() as connection:
+            revision = MigrationContext.configure(connection).get_current_revision()
+
+        assert (
+            revision
+            == ScriptDirectory.from_config(
+                _migration_config(released_postgres)
+            ).get_current_head()
+        )
+
+    @pytest.mark.postgres
+    def test_released_upgrade_matches_the_fresh_schema(
+        self, fresh_postgres_schema_issues, released_postgres
+    ) -> None:
+        command.upgrade(_migration_config(released_postgres), "head")
+
+        upgraded_issues = tuple(
+            migrate_mod._orphan_schema_issues(released_postgres)  # noqa: SLF001
+        )
+
+        assert upgraded_issues == fresh_postgres_schema_issues
+
+    @pytest.mark.postgres
+    def test_convergence_downgrade_keeps_released_enum_types(
+        self, released_postgres
+    ) -> None:
+        config = _migration_config(released_postgres)
+        command.upgrade(config, "6acea2a5e555")
+
+        command.downgrade(config, "eb8435c9400e")
+
+        with released_postgres.connect() as connection:
+            enum_names = set(
+                connection.execute(
+                    text(
+                        "SELECT typname FROM pg_type WHERE typname IN "
+                        "('documentkind', 'filerevisionstatus', 'printerprovider')"
+                    )
+                ).scalars()
+            )
+        assert enum_names == {
+            "documentkind",
+            "filerevisionstatus",
+            "printerprovider",
+        }
 
 
 class TestCrud:

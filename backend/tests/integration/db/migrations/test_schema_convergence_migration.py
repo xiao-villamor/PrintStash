@@ -1,4 +1,4 @@
-"""The convergence chain makes an upgraded database identical to a fresh one.
+"""A released v0.12.1 database upgrades to the same schema as a fresh install.
 
 Two paths reach `head` and they had drifted 136 differences apart: `create_all` from
 the models for a fresh installation, the chain for an upgraded one. `eb8435c9400e`
@@ -25,102 +25,44 @@ What has to hold:
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import (
-    Boolean,
-    Date,
-    DateTime,
-    Float,
-    Integer,
-    MetaData,
-    Numeric,
-    Table,
-    create_engine,
-    text,
-)
+from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, text
 
 from alembic import command
 from app.db import migrate as migrate_mod
+from tests.factories.migration_rows import (
+    RELEASED_V0121_REVISION,
+    seed_released_v0121_rows,
+)
 
-PREVIOUS = "eb8435c9400e"
-REVISION = "5c777075c95b"
+PREVIOUS = RELEASED_V0121_REVISION
+REVISION = "head"
 
 # Tables the migration rebuilds that hold rows a user would notice losing.
-SEEDED_TABLES = ("collections", "files", "models", "printers", "tags")
-
-
-def _placeholder(column) -> object:
-    if isinstance(column.type, Integer):
-        return 0
-    if isinstance(column.type, Boolean):
-        return False
-    if isinstance(column.type, (DateTime, Date)):
-        return datetime(2026, 1, 1)
-    if isinstance(column.type, (Float, Numeric)):
-        return 0.0
-    return column.name
-
-
-def _seed(conn, table: str, **values: object) -> None:
-    """Insert one row into *table* at whatever shape this revision has it.
-
-    Reflected rather than written out: a literal `INSERT` naming columns is a guess
-    about a historical schema, and this file exists precisely because those two things
-    disagree.
-    """
-    table_obj = Table(table, MetaData(), autoload_with=conn)
-    row: dict[str, object] = {}
-    for column in table_obj.columns:
-        if column.name in values:
-            row[column.name] = values[column.name]
-        elif column.nullable or column.default is not None or column.server_default:
-            continue
-        elif column.primary_key and isinstance(column.type, Integer):
-            continue
-        else:
-            row[column.name] = _placeholder(column)
-    conn.execute(table_obj.insert().values(**row))
+SEEDED_TABLES = (
+    "collections",
+    "files",
+    "metadata",
+    "models",
+    "owned_storage_objects",
+    "storage_delete_intents",
+    "tags",
+)
 
 
 @pytest.fixture
-def seeded_chain(tmp_path: Path) -> str:
-    """A database one revision short of convergence, with rows in the rebuilt tables.
-
-    `files.file_type` and `files.revision_status` carry real enum members rather than
-    placeholders, because the converged column is a `VARCHAR` with a `CHECK` and the
-    rebuild has to carry the existing value through it.
-    """
-    url = f"sqlite:///{tmp_path / 'converge.sqlite'}"
+def released_sqlite(tmp_path: Path) -> str:
+    """A real released-chain v0.12.1 SQLite database with representative rows."""
+    url = f"sqlite:///{tmp_path / 'released-v0.12.1.sqlite'}"
     command.upgrade(migrate_mod._alembic_config(url), PREVIOUS)  # noqa: SLF001
 
     engine = create_engine(url)
     try:
         with engine.begin() as conn:
-            _seed(conn, "users", id=1, username="owner")
-            _seed(conn, "collections", id=1, name="Brackets", slug="brackets")
-            _seed(conn, "tags", id=1, name="fun", slug="fun")
-            _seed(
-                conn,
-                "models",
-                id=1,
-                name="Widget",
-                slug="widget",
-                hash="h",
-                collection_id=1,
-            )
-            _seed(
-                conn,
-                "files",
-                id=1,
-                model_id=1,
-                path="/v/w.stl",
-                file_type="STL",
-                revision_status="KNOWN_GOOD",
-            )
-            _seed(conn, "printers", id=1, name="Ender", provider="MOONRAKER")
+            seed_released_v0121_rows(conn)
     finally:
         engine.dispose()
     return url
@@ -137,11 +79,11 @@ def _count(url: str, table: str) -> int:
 
 class TestUpgrade:
     def test_leaves_no_structural_difference_from_the_models(
-        self, seeded_chain: str
+        self, released_sqlite: str
     ) -> None:
-        command.upgrade(migrate_mod._alembic_config(seeded_chain), REVISION)  # noqa: SLF001
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
 
-        engine = create_engine(seeded_chain)
+        engine = create_engine(released_sqlite)
         try:
             issues = migrate_mod._orphan_schema_issues(engine)  # noqa: SLF001
         finally:
@@ -153,33 +95,71 @@ class TestUpgrade:
         )
 
     @pytest.mark.parametrize("table", SEEDED_TABLES)
-    def test_the_rebuild_keeps_every_row(self, seeded_chain: str, table: str) -> None:
-        before = _count(seeded_chain, table)
+    def test_the_rebuild_keeps_every_row(
+        self, released_sqlite: str, table: str
+    ) -> None:
+        before = _count(released_sqlite, table)
 
-        command.upgrade(migrate_mod._alembic_config(seeded_chain), REVISION)  # noqa: SLF001
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
 
-        assert _count(seeded_chain, table) == before
+        assert _count(released_sqlite, table) == before
 
     def test_an_existing_enum_value_survives_the_converged_check_constraint(
-        self, seeded_chain: str
+        self, released_sqlite: str
     ) -> None:
         # The models declare `file_type` as an enum; the chain stored it as plain text.
         # A converged enum column on SQLite is a VARCHAR with a CHECK, so the rebuild
         # re-inserts every existing value through that constraint.
-        command.upgrade(migrate_mod._alembic_config(seeded_chain), REVISION)  # noqa: SLF001
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
 
-        engine = create_engine(seeded_chain)
+        engine = create_engine(released_sqlite)
         try:
             with engine.connect() as conn:
                 stored = conn.execute(
-                    text("SELECT file_type, revision_status FROM files WHERE id = 1")
+                    text("SELECT file_type, revision_status FROM files WHERE id = 2")
                 ).one()
         finally:
             engine.dispose()
-        assert stored == ("STL", "KNOWN_GOOD")
+        assert stored == ("GCODE", "KNOWN_GOOD")
+
+    def test_released_content_metadata_survives(self, released_sqlite: str) -> None:
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
+
+        engine = create_engine(released_sqlite)
+        try:
+            with engine.connect() as conn:
+                stored = conn.execute(
+                    text(
+                        "SELECT slicer_name, slicer_version, layer_height_mm, "
+                        "estimated_time_s, filament_weight_g FROM metadata WHERE id = 1"
+                    )
+                ).one()
+        finally:
+            engine.dispose()
+
+        assert stored == ("PrusaSlicer", "2.8.1", 0.2, 3600, 12.5)
+
+    def test_records_the_current_head(self, released_sqlite: str) -> None:
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
+
+        engine = create_engine(released_sqlite)
+        try:
+            with engine.connect() as conn:
+                revision = conn.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).scalar_one()
+        finally:
+            engine.dispose()
+
+        assert (
+            revision
+            == ScriptDirectory.from_config(
+                migrate_mod._alembic_config(released_sqlite)  # noqa: SLF001
+            ).get_current_head()
+        )
 
     def test_the_orphan_rescue_path_can_now_adopt_an_upgraded_database(
-        self, seeded_chain: str
+        self, released_sqlite: str
     ) -> None:
         """The consequence worth having: `run_migrations` can adopt this schema.
 
@@ -188,17 +168,17 @@ class TestUpgrade:
         of no upgraded one, which made the rescue path useless for the installations
         most likely to need it.
         """
-        command.upgrade(migrate_mod._alembic_config(seeded_chain), REVISION)  # noqa: SLF001
-        engine = create_engine(seeded_chain)
+        command.upgrade(migrate_mod._alembic_config(released_sqlite), REVISION)  # noqa: SLF001
+        engine = create_engine(released_sqlite)
         try:
             with engine.begin() as conn:
                 conn.execute(text("DROP TABLE alembic_version"))
         finally:
             engine.dispose()
 
-        migrate_mod.run_migrations(seeded_chain)
+        migrate_mod.run_migrations(released_sqlite)
 
-        engine = create_engine(seeded_chain)
+        engine = create_engine(released_sqlite)
         try:
             with engine.connect() as conn:
                 stamped = conn.execute(
@@ -212,15 +192,15 @@ class TestUpgrade:
 class TestDowngrade:
     @pytest.mark.parametrize("table", SEEDED_TABLES)
     def test_the_downgrade_rebuild_keeps_every_row(
-        self, seeded_chain: str, table: str
+        self, released_sqlite: str, table: str
     ) -> None:
-        cfg = migrate_mod._alembic_config(seeded_chain)  # noqa: SLF001
+        cfg = migrate_mod._alembic_config(released_sqlite)  # noqa: SLF001
         command.upgrade(cfg, REVISION)
-        before = _count(seeded_chain, table)
+        before = _count(released_sqlite, table)
 
         command.downgrade(cfg, PREVIOUS)
 
-        assert _count(seeded_chain, table) == before
+        assert _count(released_sqlite, table) == before
 
 
 class TestGeneratedMigrations:

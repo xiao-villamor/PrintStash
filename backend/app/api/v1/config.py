@@ -6,11 +6,10 @@ from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.security import require_superuser
-from app.db.models import Collection, Document, File, Model
 from app.db.session import get_session
 from app.services import runtime_config
 from app.services.storage_backend import get_backend
@@ -292,59 +291,32 @@ def update_config(
             detail="storage_backend must be 'local' or 's3'",
         )
 
-    def changed(value: str | None, current: object, *, path: bool = False) -> bool:
-        if value is None:
-            return False
-        if value == "":
-            # Clearing an override can expose a different environment default;
-            # treat it as a namespace change unless it is already empty.
-            return str(current) != ""
-        if path:
-            from pathlib import Path
-
-            return Path(value).expanduser().resolve(strict=False) != Path(
-                str(current)
-            ).expanduser().resolve(strict=False)
-        return value != str(current)
-
-    namespace_change = any(
-        (
-            changed(body.storage_backend, settings.storage_backend),
-            changed(body.data_dir, settings.data_dir, path=True),
-            changed(body.thumb_dir, settings.thumb_dir, path=True),
-            changed(body.s3_bucket, settings.s3_bucket),
-            changed(body.s3_endpoint_url, settings.s3_endpoint_url),
-            changed(body.s3_region, settings.s3_region),
-        )
-    )
-    requested_provider = None
-    if body.storage_provider is not None and body.storage_provider_config is not None:
-        config_row = runtime_config.get_config(session)
-        try:
-            requested_provider = runtime_config.resolve_requested_storage_provider(
-                config_row,
-                provider=body.storage_provider,
-                raw_config=body.storage_provider_config,
+    try:
+        namespace_change, requested_provider = (
+            runtime_config.storage_namespace_change_requires_migration(
+                session,
+                storage_backend=body.storage_backend,
+                data_dir=body.data_dir,
+                thumb_dir=body.thumb_dir,
+                s3_bucket=body.s3_bucket,
+                s3_endpoint_url=body.s3_endpoint_url,
+                s3_region=body.s3_region,
+                storage_provider=body.storage_provider,
+                storage_provider_config=body.storage_provider_config,
             )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=str(exc),
-            ) from exc
-        current_provider = runtime_config._stored_provider_config(config_row)
-        namespace_change = current_provider is None or (
-            runtime_config.storage_provider_signature(current_provider)
-            != runtime_config.storage_provider_signature(requested_provider)
         )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if namespace_change:
         # Runtime remapping would make row-derived keys point at a new root or
         # bucket. There is intentionally no in-place shortcut: a future storage
         # migration must copy, verify, and atomically switch every exact object.
-        owned_state_exists = any(
-            session.exec(select(table.id).limit(1)).first() is not None
-            for table in (File, Document, Model, Collection)
-        )
-        if runtime_config.is_configured(session) or owned_state_exists:
+        if runtime_config.is_configured(session) or runtime_config.has_storage_state(
+            session
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="storage_migration_required",

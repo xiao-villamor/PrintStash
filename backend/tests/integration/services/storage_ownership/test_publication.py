@@ -10,10 +10,11 @@ import hashlib
 from io import BytesIO
 
 import pytest
-from sqlmodel import Session, select
+from sqlalchemy import event
+from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.db.models import OwnedStorageObject, StorageObjectState
-from app.db.session import get_session_factory
+from app.db.models import OwnedStorageObject, StorageObjectState, User
+from app.db.session import _set_sqlite_pragmas, get_session_factory
 from app.services.storage_backend import (
     CreationReceipt,
     LocalStorageBackend,
@@ -27,6 +28,7 @@ from app.services.storage_ownership import (
     publish_stream,
     reserve_creation,
 )
+from tests.factories import build_user
 
 
 class _FailingLocalStorageBackend(LocalStorageBackend):
@@ -145,6 +147,38 @@ class TestPublishBytes:
                 select(OwnedStorageObject).where(OwnedStorageObject.key == key)
             ).one()
             assert row.state is StorageObjectState.PENDING
+
+    def test_flushed_caller_dml_rolls_back_after_publication(self, tmp_path) -> None:
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'publication-atomicity.sqlite'}",
+            connect_args={"check_same_thread": False},
+        )
+        event.listen(engine, "connect", _set_sqlite_pragmas)
+        SQLModel.metadata.create_all(engine)
+        backend = get_backend()
+        key = backend.thumbnail_key(904)
+
+        with Session(engine) as caller:
+            user = build_user(caller, "rolled-back-before-publication")
+            user.email = "must-rollback@example.test"
+            caller.add(user)
+            caller.flush()
+
+            with pytest.raises(
+                RuntimeError,
+                match="storage_publication_requires_clean_sqlite_transaction",
+            ):
+                publish_bytes(
+                    caller, backend, key, b"thumbnail", object_kind="thumbnail"
+                )
+            caller.rollback()
+
+        with Session(engine) as independent:
+            persisted = independent.exec(
+                select(User).where(User.username == "rolled-back-before-publication")
+            ).one()
+            assert persisted.email is None
+        engine.dispose()
 
 
 class TestPublishStream:

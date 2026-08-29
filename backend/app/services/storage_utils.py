@@ -20,6 +20,7 @@ from app.db.models import (
     Collection,
     Document,
     File,
+    ModelSourceCover,
 )
 from app.services.storage_backend import get_backend
 
@@ -147,6 +148,19 @@ def ownership_snapshot(
                     )
                 )
 
+    # Provenance covers are vault-owned blobs even though they are not attached
+    # to a File.  Keep them in the census so backup/restore cannot silently lose
+    # the private representative image.
+    for row in session.exec(select(ModelSourceCover)).all():
+        result.primary.append(
+            OwnedBlob(
+                key=row.storage_key,
+                resource_type="model_source_cover",
+                resource_id=row.id or 0,
+                expected_size=row.size_bytes,
+                display_name="source-cover.webp",
+            )
+        )
     if discover:
         result.discovered_keys.update(backend.walk_keys())
         # Local storage keeps derived objects under a separate root. S3's

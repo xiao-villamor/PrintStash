@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -56,6 +57,17 @@ def _intent_receipt(row: StorageDeleteIntent) -> CreationReceipt:
     )
 
 
+def _content_sha256(backend: StorageBackend, key: str) -> str | None:
+    """Hash a candidate object through the streaming backend seam."""
+    try:
+        digest = hashlib.sha256()
+        for chunk in backend.stream_chunks(key):
+            digest.update(chunk)
+        return digest.hexdigest()
+    except Exception:
+        return None
+
+
 def enqueue_owned_key(
     session: Session,
     backend: StorageBackend,
@@ -82,12 +94,23 @@ def enqueue_owned_key(
         receipt = _owned_receipt(owned)
         try:
             if allow_unverified:
+                if not owned.sha256:
+                    if required_proof:
+                        raise UnsafeStorageDeleteError("storage_hash_unavailable")
+                    continue
                 info = backend.object_info(receipt.key)
                 matches = info is not None and info.size == receipt.size
                 if matches and receipt.etag is not None:
                     matches = info.etag == receipt.etag
+                if matches:
+                    digest = _content_sha256(backend, receipt.key)
+                    if digest is None:
+                        raise UnsafeStorageDeleteError("storage_hash_unavailable")
+                    matches = digest == owned.sha256.lower()
             else:
                 matches = backend.creation_matches(receipt)
+        except UnsafeStorageDeleteError:
+            raise
         except Exception as exc:
             if required_proof:
                 raise UnsafeStorageDeleteError("storage_verification_failed") from exc
@@ -101,6 +124,7 @@ def enqueue_owned_key(
             object_kind=owned.object_kind,
             token=owned.token,
             size_bytes=owned.size_bytes,
+            sha256=owned.sha256,
             etag=owned.etag,
             version_id=owned.version_id,
             device=owned.device,
@@ -134,6 +158,9 @@ def enqueue_creation_receipt(
     """
     if not backend.creation_matches(receipt):
         raise UnsafeStorageDeleteError("storage_object_no_longer_matches_receipt")
+    digest = _content_sha256(backend, receipt.key)
+    if digest is None:
+        raise UnsafeStorageDeleteError("storage_hash_unavailable")
     existing = session.exec(
         select(StorageDeleteIntent).where(
             StorageDeleteIntent.backend == receipt.backend,
@@ -151,6 +178,7 @@ def enqueue_creation_receipt(
         object_kind="capture_upload_slot",
         token=receipt.token,
         size_bytes=receipt.size,
+        sha256=digest,
         etag=receipt.etag,
         version_id=receipt.version_id,
         device=receipt.device,
@@ -200,6 +228,15 @@ def process_storage_delete_intents(
                 session.add(intent)
                 session.commit()
                 continue
+            if allow_unverified and intent.sha256 is None:
+                intent.status = "blocked"
+                intent.last_error = "storage_hash_unavailable"
+                intent.attempts += 1
+                intent.updated_at = utcnow()
+                blocked += 1
+                session.add(intent)
+                session.commit()
+                continue
             try:
                 receipt = _intent_receipt(intent)
                 removed = (
@@ -207,6 +244,7 @@ def process_storage_delete_intents(
                         receipt.key,
                         expected_size=receipt.size,
                         expected_etag=receipt.etag,
+                        expected_sha256=intent.sha256,
                         expected_version_id=receipt.version_id,
                     )
                     if allow_unverified

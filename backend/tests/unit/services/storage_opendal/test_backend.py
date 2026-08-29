@@ -68,6 +68,8 @@ class _Reader:
 
 
 class _MemoryOperator:
+    _printstash_test_double = True
+
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
 
@@ -84,6 +86,11 @@ class _MemoryOperator:
 
     def write(self, key: str, data: bytes | memoryview) -> None:
         self.objects[key] = bytes(data)
+
+    def write_exclusive(self, key: str, source: BinaryIO) -> None:
+        if key in self.objects:
+            raise FileExistsError(key)
+        self.objects[key] = source.read()
 
     def rename(self, source: str, destination: str) -> None:
         self.objects[destination] = self.objects.pop(source)

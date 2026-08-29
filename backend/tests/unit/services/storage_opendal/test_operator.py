@@ -1,6 +1,6 @@
-"""OpenDAL operator construction maps catalogue transports safely.
+"""Remote operator construction maps catalogue transports safely.
 
-The adapter must select WebDAV, mounted-key SFTP, or the AsyncSSH fallback from
+The adapter must select OpenDAL WebDAV or pinned-host AsyncSSH SFTP from
 typed transport options and surface unavailable remote support clearly.
 """
 
@@ -97,23 +97,12 @@ class TestOperatorFor:
                     "username": "user",
                     "root": "vault",
                     "private_key_path": "/tmp/key",
+                    "host_key": "ssh-ed25519 AAAA",
                 },
             )
         )
 
-        assert result is not None
-        assert calls == [
-            (
-                "sftp",
-                {
-                    "endpoint": "ssh://sftp.example:22",
-                    "root": "vault",
-                    "user": "user",
-                    "known_hosts_strategy": "Accept",
-                    "key": "/tmp/key",
-                },
-            )
-        ]
+        assert isinstance(result, storage_opendal._AsyncSSHSFTPOperator)
 
     def test_uses_asyncssh_for_password_sftp_auth(self) -> None:
         result = storage_opendal._operator_for(
@@ -125,13 +114,14 @@ class TestOperatorFor:
                     "username": "user",
                     "root": "vault",
                     "password": "secret",
+                    "host_key": "ssh-ed25519 AAAA",
                 },
             )
         )
 
         assert isinstance(result, storage_opendal._AsyncSSHSFTPOperator)
 
-    def test_falls_back_when_sftp_is_not_registered(
+    def test_uses_asyncssh_when_opendal_sftp_is_not_registered(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake_opendal = ModuleType("opendal")
@@ -150,6 +140,7 @@ class TestOperatorFor:
                     "port": 22,
                     "username": "user",
                     "root": "vault",
+                    "host_key": "ssh-ed25519 AAAA",
                 },
             )
         )
@@ -167,7 +158,7 @@ class TestOperatorFor:
         fake_opendal.Operator = broken  # type: ignore[attr-defined]
         monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
 
-        with pytest.raises(StorageConfigurationError, match="unavailable"):
+        with pytest.raises(StorageConfigurationError, match="host_key_required"):
             storage_opendal._operator_for(
                 _spec(
                     TransportKind.SFTP,
@@ -176,6 +167,7 @@ class TestOperatorFor:
                         "port": 22,
                         "username": "user",
                         "root": "vault",
+                        "host_key": "",
                     },
                 )
             )

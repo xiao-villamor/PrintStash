@@ -17,6 +17,7 @@ covers the endpoint's own contract.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,34 @@ class TestGetConfig:
         assert response.json()["storage_provider_config"]["secret_fields_set"] == [
             "password"
         ]
+
+    def test_reads_a_legacy_sftp_config_without_a_host_key(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_provider = "sftp"
+        config.storage_provider_config_json = json.dumps(
+            {
+                "provider": "sftp",
+                "host": "nas.example.test",
+                "username": "printstash",
+                "password": "legacy-password",
+                "root": "models",
+            }
+        )
+        db_session.add(config)
+        db_session.commit()
+
+        response = client.get("/api/v1/config", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        provider = response.json()["storage_provider_config"]
+        assert provider["host"] == "nas.example.test"
+        assert provider["secret_fields_set"] == ["password"]
+        assert "legacy-password" not in response.text
 
     def test_defaults_the_currency_to_usd(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -398,6 +427,98 @@ class TestUpdateConfig:
         )
 
         assert response.status_code == 403, response.text
+
+    def test_updates_a_legacy_sftp_config_with_its_host_key(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_provider = "sftp"
+        config.storage_provider_config_json = json.dumps(
+            {
+                "provider": "sftp",
+                "host": "nas.example.test",
+                "username": "printstash",
+                "root": "models",
+            }
+        )
+        config.storage_provider_secret_json = json.dumps(
+            {"password": "legacy-password"}
+        )
+        db_session.add(config)
+        db_session.commit()
+
+        response = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={
+                "storage_provider": "sftp",
+                "storage_provider_config": {
+                    "provider": "sftp",
+                    "host_key": "nas.example.test ssh-ed25519 AAAA",
+                },
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        provider = response.json()["storage_provider_config"]
+        assert provider["host"] == "nas.example.test"
+        assert provider["host_key"] == "nas.example.test ssh-ed25519 AAAA"
+        assert provider["secret_fields_set"] == ["password"]
+
+    def test_rejects_a_new_sftp_config_without_a_host_key(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={
+                "storage_provider": "sftp",
+                "storage_provider_config": {
+                    "provider": "sftp",
+                    "host": "nas.example.test",
+                    "username": "printstash",
+                    "password": "fake-password",
+                    "root": "models",
+                },
+            },
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "sftp_host_key_required"
+
+    def test_updates_an_unrelated_setting_with_a_legacy_sftp_config(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_provider = "sftp"
+        config.storage_provider_config_json = json.dumps(
+            {
+                "provider": "sftp",
+                "host": "nas.example.test",
+                "username": "printstash",
+                "root": "models",
+            }
+        )
+        config.storage_provider_secret_json = json.dumps(
+            {"password": "legacy-password"}
+        )
+        db_session.add(config)
+        db_session.commit()
+
+        response = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"currency": "EUR"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["currency"] == "EUR"
 
 
 class TestStorageRemap:

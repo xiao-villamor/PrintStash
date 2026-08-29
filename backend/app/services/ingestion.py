@@ -37,7 +37,11 @@ from app.services.hashing import sha256_file
 from app.services.jobs import registry
 from app.services.mesh_processing import FallbackThumbnail
 from app.services.profile_detection import upsert_detected_profiles
-from app.services.storage_backend import StorageCollisionError, get_backend
+from app.services.storage_backend import (
+    LocalStorageBackend,
+    StorageCollisionError,
+    get_backend,
+)
 from app.services.storage_ownership import publish_bytes, publish_file
 
 if TYPE_CHECKING:
@@ -168,6 +172,21 @@ def _reserve_next_version(session: Session, model_id: int) -> int:
     if next_value is None:
         raise RuntimeError("artifact_model_not_found")
     return int(next_value) - 1
+
+
+def _reserve_version_before_publication(session: Session, model: Model) -> int:
+    """Durably allocate the logical version before storage publication.
+
+    The short independent transaction avoids holding SQLite's caller write lock
+    while the ownership ledger reserves its storage key. A failed publication
+    may leave a harmless version gap; no File row can observe a duplicate.
+    """
+    assert model.id is not None
+    with Session(bind=session.get_bind(), expire_on_commit=False) as reservation:
+        version = _reserve_next_version(reservation, model.id)
+        reservation.commit()
+    session.expire(model, ["next_file_version"])
+    return version
 
 
 def _serialize_artifact_persistence(func: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -342,7 +361,7 @@ def persist_artifact(
     # counter UPDATE so SQLite never has to upgrade a stale read transaction
     # while another process owns the write lock.
     session.commit()
-    version = _reserve_next_version(session, model_id)
+    version = _reserve_version_before_publication(session, model)
     dest_key = (
         dest_key_override
         if dest_key_override is not None
@@ -354,14 +373,29 @@ def persist_artifact(
         )
     )
     blob_receipt = None
-    thumbnail_receipt = None
     try:
         if move_blob:
             # ``move_in`` performs the only authoritative collision check using
             # the backend's atomic create-only primitive. An earlier exists()
             # check would be a TOCTOU race.
             if is_external:
-                blob_receipt = backend.move_in(staged_path, dest_key)
+                # A NAS path is independent of the active vault backend. Bind
+                # a local adapter to this library root so its ownership proof
+                # cannot be interpreted as an S3/WebDAV key.
+                library = (
+                    session.get(ExternalLibrary, external_library_id)
+                    if external_library_id is not None
+                    else None
+                )
+                library_root = (
+                    Path(library.root_path).expanduser().resolve(strict=False)
+                    if library is not None
+                    else Path(dest_key).parent
+                )
+                external_backend = LocalStorageBackend(external_roots=(library_root,))
+                # Linked NAS bytes remain user-owned: publish add-only and do
+                # not create a vault ownership-ledger row or delete intent.
+                blob_receipt = external_backend.move_in(staged_path, dest_key)
             else:
                 blob_receipt = publish_file(
                     session,
@@ -372,21 +406,23 @@ def persist_artifact(
                     sha256=blob_hash,
                     move=True,
                 )
-        size_bytes = (
-            blob_receipt.size
-            if blob_receipt is not None
-            else backend.stat_size(dest_key)
-        )
+        if blob_receipt is not None:
+            size_bytes = blob_receipt.size
+        elif is_external and not move_blob:
+            # An external Artifact is indexed in place.  Its opaque ``path``
+            # is a NAS path, not a key in the active vault backend (which may
+            # be S3/WebDAV), so never ask that backend to stat it.
+            size_bytes = staged_path.stat().st_size
+        else:
+            size_bytes = backend.stat_size(dest_key)
 
         # For write-back into a NAS library, capture the on-disk mtime of the file we
         # just wrote so the next scan recognises it as unchanged (no re-import).
         if is_external and source_mtime is None:
-            direct = backend.direct_path(dest_key)
-            if direct is not None:
-                try:
-                    source_mtime = direct.stat().st_mtime
-                except OSError:
-                    source_mtime = None
+            try:
+                source_mtime = Path(dest_key).stat().st_mtime
+            except OSError:
+                source_mtime = None
 
         if file_type == FileType.GCODE:
             recommended_rows = session.exec(
@@ -438,30 +474,6 @@ def persist_artifact(
             # A provenance failure therefore follows the established rollback
             # path for both its link and the bytes/row it describes.
             _attach_ingested_artifact(session, file_row, provenance_context)
-        if thumb_bytes:
-            candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
-            try:
-                encoded_thumbnail = thumbnail.to_webp(thumb_bytes)
-                thumbnail_receipt = publish_bytes(
-                    session,
-                    backend,
-                    candidate_thumbnail_key,
-                    encoded_thumbnail,
-                    object_kind="thumbnail",
-                )
-            except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
-                logger.exception(
-                    "thumbnail derivation failed; continuing Artifact persistence",
-                    extra={"file_id": file_row.id},
-                )
-            else:
-                file_row.thumbnail_path = candidate_thumbnail_key
-                session.add(file_row)
-                if overwrite_thumbnail or not model.thumbnail_path:
-                    model.thumbnail_path = candidate_thumbnail_key
-                    model.thumbnail_file_id = file_row.id
-                    session.add(model)
-
         # The parser may carry detection-only keys (e.g. printer_preset_name)
         # that have no Metadata column.
         md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
@@ -487,14 +499,43 @@ def persist_artifact(
         session.rollback()
         # Delete only exact destinations selected by this failed write.  Never
         # rely on a later directory walk to infer ownership.
-        if thumbnail_receipt is not None:
-            backend.rollback_create(thumbnail_receipt)
         # External-library bytes become user-owned at publication and are never
         # removed by rollback cleanup. A failed DB transaction may leave an
         # unindexed file, which is safer and the next scan can discover it.
         if blob_receipt is not None and not is_external:
             backend.rollback_create(blob_receipt)
         raise
+
+    # A thumbnail is a retryable derivative, not part of the File+Metadata
+    # integrity boundary. Publish it only after that transaction commits so its
+    # own durable reservation never competes with an already-open SQLite writer.
+    if thumb_bytes:
+        candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
+        thumbnail_receipt = None
+        try:
+            encoded_thumbnail = thumbnail.to_webp(thumb_bytes)
+            thumbnail_receipt = publish_bytes(
+                session,
+                backend,
+                candidate_thumbnail_key,
+                encoded_thumbnail,
+                object_kind="thumbnail",
+            )
+            file_row.thumbnail_path = candidate_thumbnail_key
+            session.add(file_row)
+            if overwrite_thumbnail or not model.thumbnail_path:
+                model.thumbnail_path = candidate_thumbnail_key
+                model.thumbnail_file_id = file_row.id
+                session.add(model)
+            session.commit()
+        except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
+            session.rollback()
+            if thumbnail_receipt is not None:
+                backend.rollback_create(thumbnail_receipt)
+            logger.exception(
+                "thumbnail derivation failed; continuing Artifact persistence",
+                extra={"file_id": file_row.id},
+            )
 
     session.refresh(file_row)
     return file_row
@@ -569,11 +610,10 @@ def resolve_write_target(
     library = session.get(ExternalLibrary, library_id)
     if library is None:
         return vault
-    backend = get_backend()
-    if backend.direct_path(backend.blob_key("probe", 0, "probe")) is None:
-        raise RuntimeError("external_library_requires_local_storage_backend")
-
-    root = Path(library.root_path)
+    # Store and derive destinations from one canonical root.  This keeps scan
+    # paths, collection mapping, and write-back keys identical even when an
+    # operator configured the library through a symlink or relative path.
+    root = Path(library.root_path).expanduser().resolve(strict=False)
     subpath = ""
     if (
         library.collection_mode == ExternalLibraryCollectionMode.MIRROR
@@ -594,7 +634,8 @@ def resolve_write_target(
         # boundary. The final create remains atomic/no-replace for collision
         # safety after this topology check.
         raise StorageCollisionError("external_library_symlink_escape") from exc
-    return WriteTarget(str(dest_path), True, library_id, None)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    return WriteTarget(str(canonical_target), True, library_id, None)
 
 
 def run_ingestion_pipeline(

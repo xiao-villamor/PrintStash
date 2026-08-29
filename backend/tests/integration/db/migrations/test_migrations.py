@@ -1230,6 +1230,38 @@ class TestOfflineRendering:
 
         assert buffer.getvalue().strip()
 
+    def test_convergence_renders_exact_sqlalchemy_enum_labels(self) -> None:
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            command.upgrade(
+                migrate_mod._alembic_config(_POSTGRES_URL),  # noqa: SLF001
+                "eb8435c9400e:6acea2a5e555",
+                sql=True,
+            )
+
+        rendered = buffer.getvalue()
+        assert (
+            "CREATE TYPE documentkind AS ENUM ('MARKDOWN', 'PDF', 'OTHER')" in rendered
+        )
+        assert (
+            "CREATE TYPE filerevisionstatus AS ENUM "
+            "('KNOWN_GOOD', 'NEEDS_TEST', 'FAILED', 'ARCHIVED')"
+        ) in rendered
+        assert 'USING upper("revision_status"::text)::filerevisionstatus' in rendered
+
+    def test_convergence_downgrade_keeps_released_enum_types(self) -> None:
+        buffer = io.StringIO()
+
+        with contextlib.redirect_stdout(buffer):
+            command.downgrade(
+                migrate_mod._alembic_config(_POSTGRES_URL),  # noqa: SLF001
+                "6acea2a5e555:eb8435c9400e",
+                sql=True,
+            )
+
+        assert "DROP TYPE" not in buffer.getvalue()
+
     def test_offline_sqlite_is_unavailable_while_batch_mode_reflects(self) -> None:
         """A limitation, pinned so it is a known cost rather than a surprise.
 

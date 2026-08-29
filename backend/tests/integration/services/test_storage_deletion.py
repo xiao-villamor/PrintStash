@@ -19,6 +19,8 @@ retrying), and blocked (needs a human).
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from sqlmodel import Session, select
 
@@ -37,12 +39,14 @@ def owned(db_session: Session):
     """Write bytes and record ownership of them, the way ingestion does."""
     made = {"n": 0}
 
-    def build(data: bytes = b"owned-bytes") -> tuple[str, object]:
+    def build(
+        data: bytes = b"owned-bytes", *, sha256: str | None = None
+    ) -> tuple[str, object]:
         made["n"] += 1
         backend = get_backend()
         key = backend.blob_key("deletion", made["n"], "object.bin")
         receipt = backend.create_bytes(data, key)
-        record_creation(db_session, receipt, object_kind="artifact")
+        record_creation(db_session, receipt, object_kind="artifact", sha256=sha256)
         db_session.commit()
         return key, receipt
 
@@ -136,6 +140,63 @@ class TestEnqueueOwnedKey:
         # A background sweep must not fail the whole pass over one unreachable
         # object; it just does not authorize that one.
         assert enqueue_owned_key(db_session, get_backend(), key) is False
+
+    def test_guarded_deletion_requires_hash_evidence(
+        self, db_session: Session, owned
+    ) -> None:
+        key, _receipt = owned()
+
+        with pytest.raises(UnsafeStorageDeleteError, match="storage_hash_unavailable"):
+            enqueue_owned_key(
+                db_session,
+                get_backend(),
+                key,
+                required_proof=True,
+                allow_unverified=True,
+            )
+
+    def test_guarded_deletion_authorizes_matching_hash(
+        self, db_session: Session, owned
+    ) -> None:
+        data = b"guarded-owned-bytes"
+        digest = hashlib.sha256(data).hexdigest()
+        key, _receipt = owned(data, sha256=digest)
+
+        assert enqueue_owned_key(
+            db_session,
+            get_backend(),
+            key,
+            required_proof=True,
+            allow_unverified=True,
+        )
+        db_session.commit()
+
+        intent = _intents(db_session)[0]
+        assert intent.sha256 == digest
+
+    def test_guarded_deletion_rejects_mismatched_hash(
+        self, db_session: Session, owned
+    ) -> None:
+        data = b"guarded-owned-bytes"
+        digest = hashlib.sha256(data).hexdigest()
+        key, _receipt = owned(data, sha256=digest)
+        direct = get_backend().direct_path(key)
+        assert direct is not None
+        replacement = b"x" * len(data)
+        direct.write_bytes(replacement)
+
+        with pytest.raises(
+            UnsafeStorageDeleteError, match="storage_ownership_unverified"
+        ):
+            enqueue_owned_key(
+                db_session,
+                get_backend(),
+                key,
+                required_proof=True,
+                allow_unverified=True,
+            )
+
+        assert direct.read_bytes() == replacement
 
 
 class TestEnqueueCreationReceipt:
@@ -241,6 +302,19 @@ class TestProcessStorageDeleteIntents:
 
         assert result.blocked == 1
         assert direct.exists()
+
+    def test_guarded_processing_blocks_intent_without_hash_evidence(
+        self, db_session: Session, owned
+    ) -> None:
+        key, _receipt = owned()
+        enqueue_owned_key(db_session, get_backend(), key)
+        db_session.commit()
+
+        result = process_storage_delete_intents(allow_unverified=True)
+
+        assert result.blocked == 1
+        assert get_backend().exists(key)
+        assert _intents(db_session)[0].last_error == "storage_hash_unavailable"
 
     def test_leaves_an_intent_pending_when_the_backend_is_unreachable(
         self, db_session: Session, owned, monkeypatch: pytest.MonkeyPatch

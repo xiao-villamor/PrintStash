@@ -295,6 +295,12 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ["Expected:", "Esperado:"],
   ["Active:", "Activo:"],
+  ["Guarded storage consequences", "Consecuencias del almacenamiento protegido"],
+  [
+    "Manual permanent deletion requires one-shot confirmation.",
+    "La eliminación permanente manual requiere una confirmación única.",
+  ],
+  ["Scheduled storage purge is skipped.", "Se omite la purga programada del almacenamiento."],
   ["Storage used", "Almacenamiento usado"],
   ["Local paths", "Rutas locales"],
   ["Local disk", "Disco local"],

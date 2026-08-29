@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
 import pytest
@@ -254,6 +255,7 @@ class TestReplaceOwnedBytes:
         assert row.device == replacement_receipt.device
         assert row.inode == replacement_receipt.inode
         assert row.ctime_ns == replacement_receipt.ctime_ns
+        assert row.sha256 == hashlib.sha256(b"new-bytes").hexdigest()
 
 
 class TestDeleteOwnedKey:

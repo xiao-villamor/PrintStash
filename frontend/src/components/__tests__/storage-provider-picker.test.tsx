@@ -46,8 +46,11 @@ const providers = [
       },
     ],
   }),
-  provider("s3", "Amazon S3", "s3_compatible"),
+  provider("s3", "Amazon S3", "s3_compatible", {
+    expected_tier: "guarded",
+  }),
   provider("webdav", "WebDAV", "nextcloud_webdav", {
+    expected_tier: "guarded",
     fields: [
       {
         name: "password",
@@ -63,6 +66,24 @@ const providers = [
     available: false,
     selectable: false,
     disabled_reason: "Requires the full image",
+    fields: [
+      {
+        name: "host",
+        label: "Host",
+        help: "SFTP hostname.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "host_key",
+        label: "Host key",
+        help: "OpenSSH known-host entry.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+    ],
   }),
 ];
 
@@ -98,7 +119,7 @@ describe("StorageProviderPicker", () => {
       />,
     );
 
-    const tier = screen.getByText("Expected: verified");
+    const tier = screen.getByText(/Expected:\s*Verified/);
     const field = screen.getByLabelText("Data directory");
     expect(tier.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -135,5 +156,52 @@ describe("StorageProviderPicker", () => {
     expect(password).toHaveValue("");
     expect(password).toHaveAttribute("placeholder", "Stored — leave blank to keep");
     expect(screen.getByText(/A value is currently stored/)).toBeVisible();
+  });
+
+  it("explains guarded deletion consequences", () => {
+    render(
+      <StorageProviderPicker
+        providers={providers}
+        providerId="s3"
+        values={{}}
+        onProviderChange={vi.fn<(provider: StorageProvider) => void>()}
+        onValueChange={vi.fn<(name: string, value: string | number) => void>()}
+      />,
+    );
+
+    expect(screen.getByText(/Expected:\s*Guarded/)).toBeVisible();
+    expect(screen.getByText("Guarded storage consequences")).toBeVisible();
+    expect(
+      screen.getByText(/manual permanent deletion requires one-shot confirmation/i),
+    ).toBeVisible();
+    expect(screen.getByText(/scheduled storage purge is skipped/i)).toBeVisible();
+  });
+
+  it("reports the required SFTP host key field", async () => {
+    const onValueChange = vi.fn<(name: string, value: string | number) => void>();
+    const sftp = providers.find((item) => item.id === "sftp");
+    if (!sftp) throw new Error("SFTP fixture missing");
+    const selectableSftp: StorageProvider = {
+      ...sftp,
+      available: true,
+      selectable: true,
+      disabled_reason: null,
+    };
+
+    render(
+      <StorageProviderPicker
+        providers={providers.map((item) => (item.id === "sftp" ? selectableSftp : item))}
+        providerId="sftp"
+        values={{ host: "nas.example.test" }}
+        onProviderChange={vi.fn<(provider: StorageProvider) => void>()}
+        onValueChange={onValueChange}
+      />,
+    );
+
+    const hostKey = screen.getByLabelText("Host key");
+    expect(hostKey).toBeRequired();
+    expect(screen.getByRole("button", { name: /^SFTP/ })).not.toBeDisabled();
+    await userEvent.type(hostKey, "nas.example.test ssh-ed25519 AAAA");
+    expect(onValueChange).toHaveBeenLastCalledWith("host_key", "A");
   });
 });

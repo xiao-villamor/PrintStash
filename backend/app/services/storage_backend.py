@@ -67,9 +67,7 @@ class StorageCapabilities:
                 "overwrite each other."
             )
         if self.object_identity is ObjectIdentity.NONE:
-            warnings.append(
-                "PrintStash cannot verify that a file is the one it wrote."
-            )
+            warnings.append("PrintStash cannot verify that a file is the one it wrote.")
         if not self.verified_delete:
             warnings.append(
                 "Interrupted uploads can leave files for the orphan sweep to reclaim."
@@ -228,6 +226,10 @@ class StorageBackend(ABC):
         """Return the owned namespace that contains an opaque storage key."""
         del key
         raise NotImplementedError("storage_namespace_not_supported")
+
+    def validate_restore_key(self, key: str) -> None:
+        """Validate that a restore destination belongs to this backend."""
+        self.namespace_for(key)
 
     def reclaim_unverified(
         self,
@@ -452,7 +454,7 @@ class StorageBackend(ABC):
 class LocalStorageBackend(StorageBackend):
     backend_name = "local"
 
-    def __init__(self) -> None:
+    def __init__(self, *, external_roots: tuple[Path, ...] = ()) -> None:
         self._capabilities = StorageCapabilities(
             conditional_create=True,
             object_identity=ObjectIdentity.INODE,
@@ -462,10 +464,15 @@ class LocalStorageBackend(StorageBackend):
             direct_path=True,
         )
         self._probe_diagnostics: dict[str, object] = {"probed": False}
+        self._external_roots = tuple(
+            Path(root).expanduser().resolve(strict=False) for root in external_roots
+        )
 
     @staticmethod
     def _probe_root(role: str, root: Path) -> LocalRootProbe:
-        fd, source_name = tempfile.mkstemp(prefix=".printstash-hardlink-probe-", dir=root)
+        fd, source_name = tempfile.mkstemp(
+            prefix=".printstash-hardlink-probe-", dir=root
+        )
         os.close(fd)
         source = Path(source_name)
         target = source.with_name(f"{source.name}.link")
@@ -492,11 +499,10 @@ class LocalStorageBackend(StorageBackend):
             directory_fsync=directory_fsync,
         )
 
-    @staticmethod
-    def _assert_no_managed_escape(path: Path) -> None:
+    def _assert_no_managed_escape(self, path: Path) -> None:
         """Reject a key lexically inside a managed root that resolves outside it."""
         lexical = path.expanduser().absolute()
-        roots = [settings.data_dir, settings.thumb_dir]
+        roots = [settings.data_dir, settings.thumb_dir, *self._external_roots]
         backup_root = getattr(settings, "backup_dir", None)
         if backup_root is not None:
             roots.append(backup_root)
@@ -511,8 +517,7 @@ class LocalStorageBackend(StorageBackend):
                     raise StorageCollisionError("managed_storage_symlink_escape")
                 return
 
-    @staticmethod
-    def _owned_namespace(path: Path) -> str | None:
+    def _owned_namespace(self, path: Path) -> str | None:
         resolved = path.resolve(strict=False)
         roots: list[tuple[str, Path]] = [
             ("data", settings.data_dir),
@@ -521,6 +526,7 @@ class LocalStorageBackend(StorageBackend):
         backup_root = getattr(settings, "backup_dir", None)
         if backup_root is not None:
             roots.append(("backup", backup_root))
+        roots.extend((f"external:{root}", root) for root in self._external_roots)
         for role, configured_root in roots:
             root = Path(configured_root).resolve(strict=False)
             if resolved == root or resolved.is_relative_to(root):
@@ -532,6 +538,22 @@ class LocalStorageBackend(StorageBackend):
         if namespace is None:
             raise StorageCollisionError("storage_key_outside_managed_root")
         return namespace
+
+    def validate_restore_key(self, key: str) -> None:
+        path = self.direct_path(key)
+        if path is None:
+            raise StorageConfigurationError("local_restore_key_not_a_path")
+        target = path.resolve(strict=False)
+        roots = (
+            Path(settings.data_dir).resolve(strict=False),
+            Path(settings.thumb_dir).resolve(strict=False),
+            Path(getattr(settings, "backup_dir", settings.data_dir)).resolve(
+                strict=False
+            ),
+            *self._external_roots,
+        )
+        if not any(target != root and target.is_relative_to(root) for root in roots):
+            raise StorageConfigurationError("backup_restore_key_outside_storage")
 
     def reclaim_unverified(
         self,
@@ -931,7 +953,9 @@ class LocalStorageBackend(StorageBackend):
         stable_inodes = hardlinks and all(root.fs_kind == "local" for root in roots)
         self._capabilities = StorageCapabilities(
             conditional_create=hardlinks,
-            object_identity=(ObjectIdentity.INODE if stable_inodes else ObjectIdentity.NONE),
+            object_identity=(
+                ObjectIdentity.INODE if stable_inodes else ObjectIdentity.NONE
+            ),
             verified_delete=stable_inodes,
             conditional_replace=stable_inodes,
             namespace_ownership=True,

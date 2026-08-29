@@ -29,6 +29,22 @@ export function defaultProviderValues(provider: StorageProvider): ProviderValues
   );
 }
 
+function tierLabel(tier: string): string {
+  return tier.charAt(0).toUpperCase() + tier.slice(1);
+}
+
+function providerConsequences(provider: StorageProvider): string[] {
+  if (provider.expected_tier !== "guarded") return provider.consequences;
+
+  // Keep the deletion contract visible even if an older backend catalogue has
+  // not populated its free-form consequences list yet.
+  return [
+    "Manual permanent deletion requires one-shot confirmation.",
+    "Scheduled storage purge is skipped.",
+    ...provider.consequences,
+  ].filter((consequence, index, all) => all.indexOf(consequence) === index);
+}
+
 export function StorageProviderPicker(props: {
   providers: StorageProvider[];
   providerId: string;
@@ -44,6 +60,7 @@ export function StorageProviderPicker(props: {
   const secretFieldsSet = new Set(
     Array.isArray(props.values.secret_fields_set) ? props.values.secret_fields_set : [],
   );
+  const consequences = selected ? providerConsequences(selected) : [];
 
   return (
     <div className="space-y-5">
@@ -119,13 +136,18 @@ export function StorageProviderPicker(props: {
         <section className="space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">Expected: {selected.expected_tier}</Badge>
-              {props.activeTier && <Badge variant="outline">Active: {props.activeTier}</Badge>}
+              <Badge variant="secondary">Expected: {tierLabel(selected.expected_tier)}</Badge>
+              {props.activeTier && (
+                <Badge variant="outline">Active: {tierLabel(props.activeTier)}</Badge>
+              )}
             </div>
             <p className="text-sm text-on-surface">{selected.expected_tier_note}</p>
-            {selected.consequences.length > 0 && (
+            {selected.expected_tier === "guarded" && (
+              <p className="text-xs font-medium text-on-surface">Guarded storage consequences</p>
+            )}
+            {consequences.length > 0 && (
               <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
-                {selected.consequences.map((consequence) => (
+                {consequences.map((consequence) => (
                   <li key={consequence}>{consequence}</li>
                 ))}
               </ul>

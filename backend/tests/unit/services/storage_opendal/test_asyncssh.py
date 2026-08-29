@@ -44,6 +44,14 @@ class _AsyncWriter:
         return None
 
 
+class _AsyncReader:
+    async def read(self, _size: int = -1) -> bytes:
+        return b"read"
+
+    async def close(self) -> None:
+        return None
+
+
 class _AsyncClient:
     def __init__(
         self, *, paths: dict[str, list[SimpleNamespace]] | None = None
@@ -51,6 +59,7 @@ class _AsyncClient:
         self.paths = paths or {}
         self.files: dict[str, bytes] = {}
         self.removed: list[str] = []
+        self.opened_modes: list[str] = []
 
     async def makedirs(self, _path: str, *, exist_ok: bool) -> None:
         del exist_ok
@@ -61,14 +70,12 @@ class _AsyncClient:
     async def exists(self, path: str) -> bool:
         return path in self.paths or path in self.files
 
-    async def open(self, _path: str, _mode: str) -> _AsyncWriter:
-        return _AsyncWriter()
+    async def open(self, _path: str, mode: str) -> _AsyncWriter | _AsyncReader:
+        self.opened_modes.append(mode)
+        return _AsyncReader() if mode == "rb" else _AsyncWriter()
 
     async def rename(self, _source: str, _destination: str) -> None:
         return None
-
-    async def read(self, _path: str) -> bytes:
-        return b"read"
 
     async def remove(self, path: str) -> None:
         self.removed.append(path)
@@ -83,6 +90,7 @@ def _async_operator() -> storage_opendal._AsyncSSHSFTPOperator:
             "host": "sftp.example",
             "port": 22,
             "username": "user",
+            "host_key": "sftp.example ssh-ed25519 AAAA",
             "root": "vault",
         }
     )
@@ -97,7 +105,49 @@ class TestAsyncSSHSFTPOperator:
                 {"host": "host", "port": 22, "username": "user", "root": "vault"}
             )
 
-    def test_builds_password_connection_options(self) -> None:
+    def test_builds_password_connection_options(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = storage_opendal._AsyncSSHSFTPOperator(
+            {
+                "host": "host",
+                "port": 22,
+                "username": "user",
+                "host_key": "host ssh-ed25519 AAAA",
+                "password": "secret",
+                "root": "vault",
+            }
+        )
+        monkeypatch.setattr(operator, "_known_hosts", lambda: "verified-hosts")
+
+        assert operator._connection_options() == {
+            "host": "host",
+            "port": 22,
+            "username": "user",
+            "known_hosts": "verified-hosts",
+            "password": "secret",
+            "client_keys": None,
+        }
+
+    def test_builds_key_connection_options_with_passphrase(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = storage_opendal._AsyncSSHSFTPOperator(
+            {
+                "host": "host",
+                "port": 22,
+                "username": "user",
+                "host_key": "host ssh-ed25519 AAAA",
+                "private_key_path": "/tmp/key",
+                "passphrase": "phrase",
+                "root": "vault",
+            }
+        )
+        monkeypatch.setattr(operator, "_known_hosts", lambda: "verified-hosts")
+
+        assert operator._connection_options()["passphrase"] == "phrase"
+
+    def test_rejects_missing_host_key_verification(self) -> None:
         operator = storage_opendal._AsyncSSHSFTPOperator(
             {
                 "host": "host",
@@ -108,28 +158,8 @@ class TestAsyncSSHSFTPOperator:
             }
         )
 
-        assert operator._connection_options() == {
-            "host": "host",
-            "port": 22,
-            "username": "user",
-            "known_hosts": None,
-            "password": "secret",
-            "client_keys": None,
-        }
-
-    def test_builds_key_connection_options_with_passphrase(self) -> None:
-        operator = storage_opendal._AsyncSSHSFTPOperator(
-            {
-                "host": "host",
-                "port": 22,
-                "username": "user",
-                "private_key_path": "/tmp/key",
-                "passphrase": "phrase",
-                "root": "vault",
-            }
-        )
-
-        assert operator._connection_options()["passphrase"] == "phrase"
+        with pytest.raises(StorageConfigurationError, match="sftp_host_key_required"):
+            operator._connection_options()
 
     def test_checks_the_remote_root(self, monkeypatch: pytest.MonkeyPatch) -> None:
         operator = _async_operator()
@@ -174,6 +204,19 @@ class TestAsyncSSHSFTPOperator:
         )
 
         assert operator.write("file", b"payload") is None
+
+    def test_writes_exclusively_with_sftp_x_mode(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _async_operator()
+        client = _AsyncClient()
+        monkeypatch.setattr(
+            operator, "_run", lambda operation: asyncio.run(operation(client))
+        )
+
+        operator.write_exclusive("file", BytesIO(b"payload"))
+
+        assert client.opened_modes == ["xb"]
 
     def test_renames_a_file_when_the_root_has_no_parent(
         self, monkeypatch: pytest.MonkeyPatch

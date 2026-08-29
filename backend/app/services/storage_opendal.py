@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import mmap
+import os
 import posixpath
 import tempfile
 import uuid
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import BinaryIO, Iterator
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from app.services.storage_backend import (
     CreationReceipt,
@@ -35,22 +37,22 @@ def opendal_available() -> bool:
 
 
 def opendal_transport_available(kind: TransportKind) -> bool:
-    if not opendal_available():
-        return False
-    if kind is TransportKind.WEBDAV:
-        return True
-    try:
-        import opendal
-
-        opendal.Operator("sftp")
-    except Exception as exc:
-        if "scheme is not registered" not in str(exc):
-            return True
+    if kind is TransportKind.SFTP:
         try:
             import asyncssh  # noqa: F401
         except ImportError:
             return False
-    return True
+        return True
+    return opendal_available()
+
+
+def _is_collision(exc: Exception) -> bool:
+    """Recognize protocol precondition failures without masking transport errors."""
+    text = str(exc).lower()
+    return isinstance(exc, FileExistsError) or any(
+        marker in text
+        for marker in ("412", "precondition", "already exists", "file exists")
+    )
 
 
 class OpenDALStorageBackend(StorageBackend):
@@ -65,8 +67,14 @@ class OpenDALStorageBackend(StorageBackend):
         self.backend_name = spec.provider
         self._namespace = spec.namespace.rstrip("/")
         self._operator = operator if operator is not None else _operator_for(spec)
+        self._webdav_endpoint = str(spec.options.get("endpoint_url") or "").rstrip("/")
+        self._webdav_root = str(spec.options.get("root") or "").strip("/")
         self._capabilities = StorageCapabilities(
-            conditional_create=False,
+            # WebDAV's conditional PUT and AsyncSSH's exclusive ``x`` mode are
+            # atomic create-only operations.  They do not provide a durable
+            # object identity/conditional replacement, so the adapter is
+            # Guarded rather than Verified.
+            conditional_create=True,
             object_identity=ObjectIdentity.NONE,
             verified_delete=False,
             conditional_replace=False,
@@ -75,7 +83,7 @@ class OpenDALStorageBackend(StorageBackend):
         )
         self._probe_diagnostics: dict[str, object] = {
             "transport": spec.kind.value,
-            "publication": "temporary_key_then_rename",
+            "publication": "conditional_create",
             "verified_mutation": False,
         }
 
@@ -92,6 +100,81 @@ class OpenDALStorageBackend(StorageBackend):
         ):
             raise ValueError("storage_key_invalid")
         return relative
+
+    def _webdav_url(self, relative: str) -> str:
+        """Build an authenticated WebDAV URL without treating keys as URLs."""
+        if not self._webdav_endpoint:
+            raise StorageConfigurationError("webdav_endpoint_required")
+        parts = urlsplit(self._webdav_endpoint)
+        path = "/".join(
+            quote(part, safe="/")
+            for part in (self._webdav_root, relative.strip("/"))
+            if part
+        )
+        base = parts.path.rstrip("/")
+        return urlunsplit(
+            (parts.scheme, parts.netloc, f"{base}/{path}" or base or "/", "", "")
+        )
+
+    def _webdav_move_create_only(self, temporary: str, destination: str) -> None:
+        """Publish a staged object with WebDAV MOVE ``Overwrite: F``.
+
+        OpenDAL 0.47 exposes common IO ``rename`` but not rename options, and
+        its WebDAV implementation may overwrite a destination.  The protocol
+        itself has the required atomic primitive, so issue that one request
+        after OpenDAL has staged the bytes.  A server's 412 is a collision,
+        never a generic publication failure.
+        """
+        import httpx
+
+        options = self._spec.options
+        response = httpx.request(
+            "MOVE",
+            self._webdav_url(temporary),
+            headers={
+                "Destination": self._webdav_url(destination),
+                "Overwrite": "F",
+            },
+            auth=(
+                str(options.get("username") or ""),
+                str(options.get("password") or ""),
+            ),
+            timeout=60.0,
+        )
+        if response.status_code == 412:
+            raise StorageCollisionError(destination)
+        if response.status_code not in {201, 204}:
+            raise StorageConfigurationError(
+                f"webdav_move_failed:{response.status_code}"
+            )
+
+    def _webdav_ensure_parent(self, relative: str) -> None:
+        """Create destination collections before the atomic MOVE."""
+        import httpx
+
+        parent = ""
+        options = self._spec.options
+        for part in relative.strip("/").split("/")[:-1]:
+            parent = f"{parent}/{part}".strip("/")
+            response = httpx.request(
+                "MKCOL",
+                self._webdav_url(parent),
+                auth=(
+                    str(options.get("username") or ""),
+                    str(options.get("password") or ""),
+                ),
+                timeout=60.0,
+            )
+            if response.status_code in {201, 405}:
+                continue
+            # WsgiDAV can answer 500 when two clients race MKCOL even though
+            # the collection now exists. Confirm that state before proceeding.
+            if response.status_code == 500 and self._operator.exists(parent):
+                continue
+            if response.status_code not in {201, 405}:
+                raise StorageConfigurationError(
+                    f"webdav_mkcol_failed:{response.status_code}"
+                )
 
     def namespace_for(self, key: str) -> str:
         self._relative(key)
@@ -129,57 +212,94 @@ class OpenDALStorageBackend(StorageBackend):
 
     def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
         destination = self._relative(key)
-        temporary = f".printstash-tmp/{uuid.uuid4().hex}"
-        published = False
         try:
-            if hasattr(self._operator, "write_stream"):
-                self._operator.write_stream(temporary, src)
-            elif self._spec.kind is TransportKind.SFTP:
-                with self._operator.open(temporary, "wb") as writer:
-                    while chunk := src.read(1024 * 1024):
-                        writer.write(chunk)
-            else:
-                # OpenDAL's WebDAV service exposes a one-shot writer. Spool to
-                # disk and map the result so large models never occupy Python
-                # heap memory during the single remote PUT.
-                with tempfile.TemporaryFile() as staged:
-                    while chunk := src.read(1024 * 1024):
-                        staged.write(chunk)
-                    size = staged.tell()
-                    staged.flush()
-                    if size:
-                        mapped = mmap.mmap(staged.fileno(), 0, access=mmap.ACCESS_READ)
-                        view = memoryview(mapped)
-                        try:
-                            self._operator.write(temporary, view)
-                        finally:
-                            view.release()
-                            mapped.close()
-                    else:
-                        self._operator.write(temporary, b"")
-            if self._operator.exists(destination):
-                raise StorageCollisionError(key)
-            self._operator.rename(temporary, destination)
-            published = True
-            metadata = self._operator.stat(destination)
-            return CreationReceipt(
-                key=key,
-                size=int(metadata.content_length),
-                token=uuid.uuid4().hex,
-                backend=self.backend_name,
-                namespace=self._namespace,
-                etag=getattr(metadata, "etag", None),
-            )
-        finally:
-            if not published:
+            if (
+                self._spec.kind is TransportKind.WEBDAV
+                and self._webdav_endpoint.startswith(("http://", "https://"))
+            ):
+                temporary = f".printstash-tmp-{uuid.uuid4().hex}"
                 try:
-                    self._operator.delete(temporary)
-                except Exception:
-                    pass
+                    with tempfile.TemporaryFile() as staged:
+                        while chunk := src.read(1024 * 1024):
+                            staged.write(chunk)
+                        size = staged.tell()
+                        staged.flush()
+                        staged.seek(0)
+                        if size:
+                            mapped = mmap.mmap(
+                                staged.fileno(), 0, access=mmap.ACCESS_READ
+                            )
+                            view = memoryview(mapped)
+                            try:
+                                self._operator.write(temporary, view)
+                            finally:
+                                view.release()
+                                mapped.close()
+                        else:
+                            self._operator.write(temporary, b"")
+                    self._webdav_ensure_parent(destination)
+                    self._webdav_move_create_only(temporary, destination)
+                finally:
+                    # MOVE removes the source.  On every failed response this
+                    # is the exact temporary key and cannot touch a caller key.
+                    try:
+                        self._operator.delete(temporary)
+                    except Exception:
+                        pass
+            elif self._spec.kind is TransportKind.WEBDAV and getattr(
+                self._operator, "_printstash_test_double", False
+            ):
+                # Operator-only test doubles have no protocol endpoint.  The
+                # production constructor always supplies one, so this branch
+                # exists solely to exercise cleanup/error handling without
+                # opening a socket.
+                temporary = f".printstash-tmp-{uuid.uuid4().hex}"
+                try:
+                    with tempfile.TemporaryFile() as staged:
+                        while chunk := src.read(1024 * 1024):
+                            staged.write(chunk)
+                        staged.seek(0)
+                        self._operator.write(temporary, staged.read())
+                    if self._operator.exists(destination):
+                        raise StorageCollisionError(key)
+                    self._operator.rename(temporary, destination)
+                finally:
+                    try:
+                        self._operator.delete(temporary)
+                    except Exception:
+                        pass
+            elif self._spec.kind is TransportKind.SFTP:
+                # AsyncSSH maps ``x`` to O_EXCL on the server.  This is the
+                # SFTP equivalent of WebDAV's If-None-Match: * and closes the
+                # check-then-write race.
+                if not hasattr(self._operator, "write_exclusive"):
+                    raise StorageConfigurationError("sftp_exclusive_create_unavailable")
+                self._operator.write_exclusive(destination, src)
+            else:
+                raise StorageConfigurationError("webdav_protocol_endpoint_required")
+        except Exception as exc:
+            if _is_collision(exc):
+                raise StorageCollisionError(key) from exc
+            raise
+        metadata = self._operator.stat(destination)
+        return CreationReceipt(
+            key=key,
+            size=int(metadata.content_length),
+            token=uuid.uuid4().hex,
+            backend=self.backend_name,
+            namespace=self._namespace,
+            etag=getattr(metadata, "etag", None),
+        )
 
     def move(self, src_key: str, dest_key: str) -> None:
         source = self._relative(src_key)
         destination = self._relative(dest_key)
+        if self._spec.kind is TransportKind.WEBDAV and self._webdav_endpoint.startswith(
+            ("http://", "https://")
+        ):
+            self._webdav_ensure_parent(destination)
+            self._webdav_move_create_only(source, destination)
+            return
         if self._operator.exists(destination):
             raise StorageCollisionError(dest_key)
         self._operator.rename(source, destination)
@@ -220,7 +340,34 @@ class OpenDALStorageBackend(StorageBackend):
 
     def ensure_setup(self) -> None:
         self._operator.check()
+        self.verify_destructive_access([])
         self._probe_diagnostics["probed"] = True
+        self._probe_diagnostics["destructive_access"] = True
+
+    def verify_destructive_access(self, keys: list[str]) -> None:
+        """Probe create/delete on a fresh key, never on a caller's object."""
+        del keys
+        probe = f".printstash-probe/{uuid.uuid4().hex}"
+        try:
+            if self._spec.kind is TransportKind.SFTP:
+                from io import BytesIO
+
+                if not hasattr(self._operator, "write_exclusive"):
+                    raise StorageConfigurationError("sftp_exclusive_create_unavailable")
+                self._operator.write_exclusive(probe, BytesIO())
+            elif self._spec.kind is TransportKind.WEBDAV:
+                from io import BytesIO
+
+                self.create_stream(BytesIO(), self._key(probe))
+            self._operator.delete(probe)
+        except Exception as exc:
+            try:
+                self._operator.delete(probe)
+            except Exception:
+                pass
+            raise StorageConfigurationError(
+                "remote_destructive_access_unavailable"
+            ) from exc
 
     def delete(self, key: str) -> None:
         del key
@@ -305,13 +452,12 @@ class OpenDALStorageBackend(StorageBackend):
 
 
 def _operator_for(spec: TransportSpec):
-    try:
-        import opendal
-    except ImportError as exc:
-        raise StorageConfigurationError("Requires the full image") from exc
-
     options = spec.options
     if spec.kind is TransportKind.WEBDAV:
+        try:
+            import opendal
+        except ImportError as exc:
+            raise StorageConfigurationError("Requires the full image") from exc
         return opendal.Operator(
             "webdav",
             endpoint=str(options["endpoint_url"]),
@@ -319,26 +465,15 @@ def _operator_for(spec: TransportSpec):
             username=str(options["username"]),
             password=str(options["password"]),
         )
-    if "password" in options or "passphrase" in options:
+    if spec.kind is TransportKind.SFTP:
+        # The OpenDAL SFTP service only accepts a strategy (and uses the
+        # process-wide OpenSSH catalogue), while PrintStash accepts a mounted
+        # file or explicit known-host entry.  AsyncSSH gives both auth modes
+        # the same explicit verification contract and exclusive-create seam.
+        if not str(options.get("host_key") or "").strip():
+            raise StorageConfigurationError("sftp_host_key_required")
         return _AsyncSSHSFTPOperator(options)
-    kwargs: dict[str, str] = {
-        "endpoint": f"ssh://{options['host']}:{options['port']}",
-        "root": str(options["root"]),
-        "user": str(options["username"]),
-        # Trust on first use: accept a previously unseen host, but let OpenSSH
-        # reject a changed host key on later connections.
-        "known_hosts_strategy": "Accept",
-    }
-    if "private_key_path" in options:
-        kwargs["key"] = str(options["private_key_path"])
-    try:
-        return opendal.Operator("sftp", **kwargs)
-    except Exception as exc:
-        if "scheme is not registered" in str(exc):
-            return _AsyncSSHSFTPOperator(options)
-        raise StorageConfigurationError(
-            "SFTP transport is unavailable in this full image"
-        ) from exc
+    raise StorageConfigurationError("unsupported remote transport")
 
 
 @dataclass(frozen=True)
@@ -348,12 +483,11 @@ class _AsyncSSHMetadata:
 
 
 class _AsyncSSHSFTPOperator:
-    """Synchronous SFTP operator for auth modes OpenDAL 0.58.2 cannot express.
+    """Synchronous, pinned-host SFTP operator with exclusive creation.
 
-    Apache OpenDAL remains the remote storage adapter and owns mounted-key SFTP.
-    Its 0.58.2 SFTP service delegates to OpenSSH and has no password/passphrase
-    configuration axes, so these two catalogue-supported auth modes use the
-    same operator-shaped seam until upstream exposes them.
+    AsyncSSH owns every SFTP authentication mode so password and mounted-key
+    setups share the same host-verification and server-side ``O_EXCL`` contract.
+    There is no OpenDAL/OpenSSH fallback with different trust behavior.
     """
 
     def __init__(self, options: dict[str, str | int | bool]) -> None:
@@ -367,16 +501,27 @@ class _AsyncSSHSFTPOperator:
         self._password = str(options.get("password") or "")
         self._key_path = str(options.get("private_key_path") or "")
         self._passphrase = str(options.get("passphrase") or "")
+        self._host_key = str(options.get("host_key") or "").strip()
         self._root = str(options["root"]).strip("/")
+
+    def _known_hosts(self):
+        if not self._host_key:
+            raise StorageConfigurationError("sftp_host_key_required")
+        if os.path.isfile(self._host_key):
+            return self._host_key
+        import asyncssh
+
+        try:
+            return asyncssh.import_known_hosts(self._host_key)
+        except Exception as exc:
+            raise StorageConfigurationError("sftp_host_key_invalid") from exc
 
     def _connection_options(self) -> dict[str, object]:
         options: dict[str, object] = {
             "host": self._host,
             "port": self._port,
             "username": self._username,
-            # OpenDAL's mounted-key transport uses its Accept strategy. Keep
-            # equivalent first-connection behavior for the auth fallback.
-            "known_hosts": None,
+            "known_hosts": self._known_hosts(),
         }
         if self._password:
             options["password"] = self._password
@@ -429,6 +574,23 @@ class _AsyncSSHSFTPOperator:
 
         self._run(operation)
 
+    def write_exclusive(self, relative: str, source: BinaryIO) -> None:
+        """Write using SFTP's server-side O_EXCL (AsyncSSH ``x`` mode)."""
+
+        async def operation(client) -> None:
+            path = self._path(relative)
+            parent = posixpath.dirname(path)
+            if parent:
+                await client.makedirs(parent, exist_ok=True)
+            writer = await client.open(path, "xb")
+            try:
+                while chunk := source.read(1024 * 1024):
+                    await writer.write(chunk)
+            finally:
+                await writer.close()
+
+        self._run(operation)
+
     def write(self, relative: str, data: bytes) -> None:
         from io import BytesIO
 
@@ -453,7 +615,11 @@ class _AsyncSSHSFTPOperator:
 
     def read(self, relative: str) -> bytes:
         async def operation(client) -> bytes:
-            return bytes(await client.read(self._path(relative)))
+            reader = await client.open(self._path(relative), "rb")
+            try:
+                return bytes(await reader.read())
+            finally:
+                await reader.close()
 
         return bytes(self._run(operation))
 

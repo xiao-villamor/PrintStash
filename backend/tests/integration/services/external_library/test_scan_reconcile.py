@@ -22,6 +22,7 @@ import os
 import shutil
 from pathlib import Path
 
+import opendal
 import pytest
 from sqlmodel import Session, select
 
@@ -29,7 +30,9 @@ from app.db.models import (
     File,
     Model,
 )
-from app.services import external_library
+from app.services import external_library, ingestion
+from app.services.storage_opendal import OpenDALStorageBackend
+from app.services.storage_providers import TransportKind, TransportSpec
 from tests._env import use_local_storage
 from tests.factories import build_external_library
 from tests.integration.services.external_library._helpers import (
@@ -40,6 +43,32 @@ from tests.integration.services.external_library._helpers import (
 
 
 class TestScanLibrary:
+    def test_remote_vault_still_indexes_new_nas_file(
+        self, tmp_path: Path, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """NAS source paths are never stat'ed through a remote vault adapter."""
+        use_local_storage(tmp_path)
+        enable_feature(db_session)
+        nas = tmp_path / "nas"
+        drop_gcode(nas, "remote-vault.gcode", marker="remote-vault")
+        lib = build_external_library(db_session, nas, name="nas")
+        remote = OpenDALStorageBackend(
+            TransportSpec(
+                kind=TransportKind.WEBDAV,
+                provider="webdav",
+                namespace="webdav/vault-data",
+                options={"endpoint_url": "memory://", "root": "vault-data"},
+            ),
+            operator=opendal.Operator("memory"),
+        )
+        monkeypatch.setattr(external_library, "get_backend", lambda: remote)
+        monkeypatch.setattr(ingestion, "get_backend", lambda: remote)
+
+        summary = external_library.scan_library(lib.id)
+
+        assert summary["added"] == 1
+        assert external_files(db_session)[0].is_external is True
+
     def test_rescan_is_idempotent(self, tmp_path: Path, db_session: Session) -> None:
         use_local_storage(tmp_path)
         enable_feature(db_session)

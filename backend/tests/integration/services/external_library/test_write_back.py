@@ -33,6 +33,8 @@ from app.db.models import (
     ExternalLibraryCollectionMode,
     File,
     Model,
+    OwnedStorageObject,
+    StorageDeleteIntent,
 )
 from app.services import external_library
 from app.services.ingestion import add_gcode_revision_to_model, ingest_orca_gcode
@@ -131,6 +133,44 @@ class TestIngestIntoExternalLibrary:
         # The next scan recognises the written-back revision as already-indexed.
         summary = external_library.scan_library(lib.id)
         assert summary["added"] == 0
+
+    def test_revision_keeps_nas_bytes_outside_vault_lifecycle_ledgers(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        use_local_storage(tmp_path)
+        enable_feature(db_session)
+        nas = tmp_path / "nas"
+        drop_gcode(nas, "bracket.gcode", marker="ledger-v1")
+        lib = build_external_library(
+            db_session,
+            nas,
+            name="nas-ledger",
+            collection_mode=ExternalLibraryCollectionMode.MIRROR,
+        )
+        external_library.scan_library(lib.id)
+        model = db_session.get(Model, external_files(db_session)[0].model_id)
+        staged = stage("bracket-v2.gcode", gcode_bytes("ledger-v2"))
+
+        revision = add_gcode_revision_to_model(
+            session=db_session,
+            model=model,
+            staged_path=staged,
+            original_filename="bracket-v2.gcode",
+            revision_label="v2",
+            revision_status=None,
+            revision_notes=None,
+            is_recommended=False,
+        )
+
+        owned = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == revision.path)
+        ).all()
+        delete_intents = db_session.exec(
+            select(StorageDeleteIntent).where(StorageDeleteIntent.key == revision.path)
+        ).all()
+        assert Path(revision.path).read_bytes() == gcode_bytes("ledger-v2")
+        assert owned == []
+        assert delete_intents == []
 
     def test_write_back_never_overwrites_existing_nas_file(
         self, tmp_path: Path, db_session: Session

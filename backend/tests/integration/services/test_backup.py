@@ -12,13 +12,16 @@ a local storage root under ``tmp_path``.
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import sqlite3
 import tarfile
 import threading
 import time
+from functools import partial
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,13 +44,378 @@ from app.services.auth import create_access_token
 from app.services.storage_backend import get_backend
 from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
 from tests.factories import (
+    build_cover,
     build_file,
     build_model,
     build_print_job,
     build_printer,
+    build_provenance_source,
     build_user,
 )
 from tests.integration._backup_harness import BackupEnv, seed_model_with_blob
+
+
+def _rewrite_backup_archive(
+    env: BackupEnv,
+    archive: Path,
+    mutate_manifest: Callable[[dict], None] | None,
+    *,
+    raw_manifest: bytes | None = None,
+    drop_member: str | None = None,
+    duplicate_member: str | None = None,
+    directory_member: str | None = None,
+    extra_member: tuple[str, bytes] | None = None,
+) -> None:
+    """Rewrite one owned archive while refreshing its exact ownership proof."""
+    entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with tarfile.open(archive, mode="r:gz") as source:
+        for member in source.getmembers():
+            data = source.extractfile(member).read() if member.isfile() else None
+            entries.append((member, data))
+    manifest_info, manifest_data = next(
+        (member, data)
+        for member, data in entries
+        if member.name == "manifest.json" and data is not None
+    )
+    if raw_manifest is None:
+        manifest = json.loads(manifest_data)
+        assert mutate_manifest is not None
+        mutate_manifest(manifest)
+        rewritten_manifest = json.dumps(manifest).encode("utf-8")
+    else:
+        rewritten_manifest = raw_manifest
+
+    output = io.BytesIO()
+    duplicate: tuple[tarfile.TarInfo, bytes] | None = None
+    with gzip.GzipFile(fileobj=output, mode="wb") as compressed:
+        with tarfile.open(fileobj=compressed, mode="w:") as destination:
+            for member, data in entries:
+                if member.name == drop_member:
+                    continue
+                if member is manifest_info:
+                    info = tarfile.TarInfo("manifest.json")
+                    info.size = len(rewritten_manifest)
+                    destination.addfile(info, io.BytesIO(rewritten_manifest))
+                    if member.name == duplicate_member:
+                        duplicate_info = tarfile.TarInfo("manifest.json")
+                        duplicate_info.size = len(rewritten_manifest)
+                        destination.addfile(
+                            duplicate_info, io.BytesIO(rewritten_manifest)
+                        )
+                    continue
+                if member.name == directory_member:
+                    info = tarfile.TarInfo(member.name)
+                    info.type = tarfile.DIRTYPE
+                    destination.addfile(info)
+                    continue
+                if data is None:
+                    destination.addfile(member)
+                    continue
+                destination.addfile(member, io.BytesIO(data))
+                if member.name == duplicate_member:
+                    duplicate = (member, data)
+            if duplicate is not None:
+                destination.addfile(duplicate[0], io.BytesIO(duplicate[1]))
+            if extra_member is not None:
+                name, data = extra_member
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                destination.addfile(info, io.BytesIO(data))
+
+    from app.services.storage_ownership import replace_owned_bytes
+
+    with env.new_session() as session:
+        replace_owned_bytes(
+            session,
+            storage_backend.LocalStorageBackend(),
+            str(archive),
+            output.getvalue(),
+            object_kind="backup",
+        )
+        session.commit()
+
+
+def _archive_manifest(archive: Path) -> dict:
+    with tarfile.open(archive, mode="r:gz") as source:
+        stream = source.extractfile("manifest.json")
+        assert stream is not None
+        manifest = json.loads(stream.read())
+    assert isinstance(manifest, dict)
+    return manifest
+
+
+def _leave_manifest_unchanged(_manifest: dict) -> None:
+    pass
+
+
+def _set_unsupported_version(manifest: dict) -> None:
+    manifest["version"] = "999"
+
+
+def _remove_files_evidence(manifest: dict) -> None:
+    manifest.pop("files")
+
+
+def _replace_entry_with_invalid_shape(manifest: dict) -> None:
+    manifest["files"][0] = "invalid"
+
+
+def _remove_entry_sha256(manifest: dict) -> None:
+    manifest["files"][0].pop("sha256")
+
+
+def _remove_entry_provider(manifest: dict) -> None:
+    manifest["files"][0].pop("provider")
+
+
+def _duplicate_manifest_entry(manifest: dict) -> None:
+    manifest["files"].append(dict(manifest["files"][0]))
+    manifest["file_count"] += 1
+
+
+def _increment_manifest_file_count(manifest: dict) -> None:
+    manifest["file_count"] += 1
+
+
+def _increment_manifest_entry_size(manifest: dict) -> None:
+    manifest["files"][0]["size"] += 1
+
+
+def _replace_entry_sha256(manifest: dict) -> None:
+    manifest["files"][0]["sha256"] = "0" * 64
+
+
+def _rewrite_manifest_with(
+    env: BackupEnv,
+    archive: Path,
+    _member: str,
+    *,
+    mutation: Callable[[dict], None],
+) -> None:
+    _rewrite_backup_archive(env, archive, mutation)
+
+
+def _rewrite_raw_manifest(
+    env: BackupEnv, archive: Path, _member: str, *, payload: bytes
+) -> None:
+    _rewrite_backup_archive(env, archive, None, raw_manifest=payload)
+
+
+def _drop_named_member(
+    env: BackupEnv, archive: Path, _member: str, *, name: str
+) -> None:
+    _rewrite_backup_archive(env, archive, _leave_manifest_unchanged, drop_member=name)
+
+
+def _duplicate_named_member(
+    env: BackupEnv, archive: Path, _member: str, *, name: str
+) -> None:
+    _rewrite_backup_archive(
+        env, archive, _leave_manifest_unchanged, duplicate_member=name
+    )
+
+
+def _drop_manifest_blob(env: BackupEnv, archive: Path, member: str) -> None:
+    _rewrite_backup_archive(env, archive, _leave_manifest_unchanged, drop_member=member)
+
+
+def _duplicate_manifest_blob(env: BackupEnv, archive: Path, member: str) -> None:
+    _rewrite_backup_archive(
+        env, archive, _leave_manifest_unchanged, duplicate_member=member
+    )
+
+
+def _replace_manifest_blob_with_directory(
+    env: BackupEnv, archive: Path, member: str
+) -> None:
+    _rewrite_backup_archive(
+        env, archive, _leave_manifest_unchanged, directory_member=member
+    )
+
+
+def _add_named_member(
+    env: BackupEnv,
+    archive: Path,
+    _member: str,
+    *,
+    name: str,
+    content: bytes,
+) -> None:
+    _rewrite_backup_archive(
+        env,
+        archive,
+        _leave_manifest_unchanged,
+        extra_member=(name, content),
+    )
+
+
+def _manifest_member_name(_member: str) -> str:
+    return "manifest.json"
+
+
+def _blob_member_name(member: str) -> str:
+    return member
+
+
+def _write_journal_events(path: Path, events: list[object]) -> None:
+    path.write_text("".join(f"{json.dumps(event)}\n" for event in events))
+
+
+def _append_malformed_journal(
+    path: Path, _events: list[object], _intent: dict, _key: str
+) -> None:
+    path.write_bytes(path.read_bytes() + b"{\n")
+
+
+def _append_non_object_event(
+    path: Path, events: list[object], _intent: dict, _key: str
+) -> None:
+    events.append([])
+    _write_journal_events(path, events)
+
+
+def _replace_first_journal_event(
+    path: Path, events: list[object], _intent: dict, _key: str
+) -> None:
+    events[0]["event"] = "intent"
+    _write_journal_events(path, events)
+
+
+def _append_unknown_journal_event(
+    path: Path, events: list[object], _intent: dict, key: str
+) -> None:
+    events.append({"event": "unknown", "key": key, "generation": 1})
+    _write_journal_events(path, events)
+
+
+def _replace_generation_with_text(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    intent["generation"] = "one"
+    _write_journal_events(path, events)
+
+
+def _skip_journal_generation(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    intent["generation"] = 2
+    _write_journal_events(path, events)
+
+
+def _append_duplicate_intent(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    events.append(dict(intent))
+    _write_journal_events(path, events)
+
+
+def _publish_before_intent(
+    path: Path, events: list[object], _intent: dict, key: str
+) -> None:
+    events[1] = {"event": "published", "key": key, "generation": 1}
+    _write_journal_events(path, events)
+
+
+def _publish_wrong_generation(
+    path: Path, events: list[object], _intent: dict, key: str
+) -> None:
+    events.append({"event": "published", "key": key, "generation": 2})
+    _write_journal_events(path, events)
+
+
+def _append_duplicate_publication(
+    path: Path, events: list[object], _intent: dict, key: str
+) -> None:
+    published = {"event": "published", "key": key, "generation": 1}
+    events.extend([published, dict(published)])
+    _write_journal_events(path, events)
+
+
+def _replace_started_field(
+    path: Path,
+    events: list[object],
+    _intent: dict,
+    _key: str,
+    *,
+    field: str,
+    value: object,
+) -> None:
+    events[0][field] = value
+    _write_journal_events(path, events)
+
+
+def _replace_intent_key(
+    path: Path, events: list[object], intent: dict, key: str
+) -> None:
+    intent["key"] = str(Path(key).parent / "unlisted.bin")
+    _write_journal_events(path, events)
+
+
+def _increment_intent_size(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    intent["size"] += 1
+    _write_journal_events(path, events)
+
+
+def _replace_intent_hash(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    intent["sha256"] = "0" * 64
+    _write_journal_events(path, events)
+
+
+def _replace_intent_namespace(
+    path: Path, events: list[object], intent: dict, _key: str
+) -> None:
+    intent["namespace"] = "foreign:/vault"
+    _write_journal_events(path, events)
+
+
+def _invalidate_receipt_token(published: dict) -> None:
+    published["token"] = None
+
+
+def _increment_receipt_size(published: dict) -> None:
+    published["size"] += 1
+
+
+def _return_invalid_size_receipt(
+    backend: storage_backend.StorageBackend,
+    _real_create: Callable,
+    content: bytes,
+    _source,
+    destination: str,
+):
+    return storage_backend.CreationReceipt(
+        key=destination,
+        size=len(content) + 1,
+        token="invalid-size",
+        backend=backend.backend_name,
+        namespace=backend.namespace_for(destination),
+    )
+
+
+def _publish_wrong_hash(
+    _backend: storage_backend.StorageBackend,
+    real_create: Callable,
+    content: bytes,
+    _source,
+    destination: str,
+):
+    return real_create(io.BytesIO(b"x" * len(content)), destination)
+
+
+def _publish_vanished_object(
+    _backend: storage_backend.StorageBackend,
+    real_create: Callable,
+    content: bytes,
+    _source,
+    destination: str,
+):
+    receipt = real_create(io.BytesIO(b"x" * len(content)), destination)
+    Path(destination).unlink()
+    return receipt
 
 
 def _seed_document_with_blob(env: BackupEnv, *, name: str, content: bytes) -> str:
@@ -330,6 +698,38 @@ class TestCreateBackup:
         # The partial archive must not be left behind as if it were valid.
         assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
+    def test_create_backup_rejects_same_size_content_change_during_streaming(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        original = b"same-size-old"
+        replacement = b"same-size-new"
+        _, key = seed_model_with_blob(
+            backup_env, name="Changing Content", content=original
+        )
+        real_add = backup._add_file_to_tar
+
+        def replace_before_stream(
+            archive: tarfile.TarFile, source_key: str, member: str
+        ) -> int:
+            Path(source_key).write_bytes(replacement)
+            return real_add(archive, source_key, member)
+
+        monkeypatch.setattr(backup, "_add_file_to_tar", replace_before_stream)
+
+        with pytest.raises(RuntimeError, match="backup_blob_hash_changed"):
+            backup.create_backup()
+
+        assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
+        with backup_env.new_session() as session:
+            backup_rows = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup"
+                )
+            ).all()
+        assert backup_rows == []
+
     @requires_s3
     def test_create_backup_uploads_to_s3(self, backup_s3_env: BackupEnv):
         seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
@@ -436,6 +836,171 @@ class TestCreateBackup:
 
         fetched = backup.get_backup(meta.id)
         assert fetched is not None and fetched.id == meta.id
+
+    def test_create_backup_records_v2_content_evidence(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Evidence", content=b"content-evidence"
+        )
+
+        meta = backup.create_backup()
+
+        with tarfile.open(meta.path, mode="r:gz") as archive:
+            stream = archive.extractfile("manifest.json")
+            assert stream is not None
+            manifest = json.loads(stream.read())
+        assert manifest["version"] == "2"
+        assert manifest["files"] == [
+            {
+                "member": manifest["files"][0]["member"],
+                "arc": manifest["files"][0]["member"],
+                "key": key,
+                "provider": "local",
+                "namespace": get_backend().namespace_for(key),
+                "size": len(b"content-evidence"),
+                "sha256": "5cd0da5638341f7227386d0fab6742f51f6f740a7971e20e2be0bbdb1a4386f5",
+            }
+        ]
+
+    def test_create_backup_deduplicates_shared_owned_storage_keys(
+        self, backup_env: BackupEnv
+    ) -> None:
+        content = b"shared-primary-cover"
+        with backup_env.new_session() as session:
+            model = build_model(session, name="Shared")
+            key = str(backup_env.data_dir / "shared.bin")
+            Path(key).write_bytes(content)
+            build_file(
+                session,
+                model,
+                path=key,
+                filename="shared.bin",
+                file_type=FileType.STL,
+                size_bytes=len(content),
+            )
+            source = build_provenance_source(session, model)
+            build_cover(session, source, storage_key=key, size_bytes=len(content))
+
+        meta = backup.create_backup()
+
+        manifest = _archive_manifest(Path(meta.path))
+        assert meta.file_count == 1
+        assert [entry["key"] for entry in manifest["files"]] == [key]
+
+    def test_create_backup_rejects_a_missing_source_cover(
+        self, backup_env: BackupEnv
+    ) -> None:
+        with backup_env.new_session() as session:
+            model = build_model(session, name="Missing Cover")
+            source = build_provenance_source(session, model)
+            key = get_backend().source_cover_key(source.id)
+            build_cover(session, source, storage_key=key, size_bytes=12)
+
+        with pytest.raises(FileNotFoundError):
+            backup.create_backup()
+
+        assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
+
+
+class TestValidateCreatedArchivePayload:
+    @pytest.mark.parametrize(
+        ("mutation", "error_type", "error"),
+        [
+            pytest.param(
+                partial(_drop_named_member, name="manifest.json"),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="missing-manifest",
+            ),
+            pytest.param(
+                partial(_duplicate_named_member, name="manifest.json"),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="duplicate-manifest",
+            ),
+            pytest.param(
+                partial(_rewrite_raw_manifest, payload=b"{"),
+                json.JSONDecodeError,
+                None,
+                id="malformed-manifest",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_set_unsupported_version),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="unsupported-version",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_remove_files_evidence),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="missing-files-evidence",
+            ),
+            pytest.param(
+                partial(
+                    _rewrite_manifest_with,
+                    mutation=_replace_entry_with_invalid_shape,
+                ),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="malformed-entry",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_remove_entry_sha256),
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="missing-entry-evidence",
+            ),
+            pytest.param(
+                _drop_manifest_blob,
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="missing-member",
+            ),
+            pytest.param(
+                _duplicate_manifest_blob,
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="duplicate-member",
+            ),
+            pytest.param(
+                _replace_manifest_blob_with_directory,
+                RuntimeError,
+                "backup_manifest_invalid",
+                id="directory-member",
+            ),
+            pytest.param(
+                partial(
+                    _rewrite_manifest_with, mutation=_increment_manifest_entry_size
+                ),
+                RuntimeError,
+                "backup_blob_size_changed",
+                id="size-mismatch",
+            ),
+        ],
+    )
+    def test_completed_archive_rejects_invalid_payload(
+        self,
+        backup_env: BackupEnv,
+        mutation: Callable[[BackupEnv, Path, str], None],
+        error_type: type[Exception],
+        error: str | None,
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="Completed Invalid", content=b"completed-payload"
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        member = _archive_manifest(archive)["files"][0]["member"]
+
+        mutation(backup_env, archive, member)
+        before = archive.read_bytes()
+
+        with pytest.raises(error_type, match=error):
+            backup._validate_created_archive_payload(archive)
+
+        assert archive.read_bytes() == before
 
 
 class TestListLocalBackups:
@@ -666,6 +1231,65 @@ class TestVerifyBackup:
         assert result.app_compatible is True
         assert result.checked_members == 3
 
+    @pytest.mark.parametrize(
+        ("mutation", "expected_code", "expected_member"),
+        [
+            pytest.param(
+                partial(_duplicate_named_member, name="manifest.json"),
+                "backup_manifest_invalid",
+                _manifest_member_name,
+                id="duplicate-manifest",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_remove_entry_provider),
+                "backup_manifest_invalid",
+                _blob_member_name,
+                id="missing-evidence",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_duplicate_manifest_entry),
+                "backup_manifest_invalid",
+                _blob_member_name,
+                id="duplicate-declaration",
+            ),
+            pytest.param(
+                _drop_manifest_blob,
+                "backup_member_missing",
+                _blob_member_name,
+                id="missing-member",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_replace_entry_sha256),
+                "backup_member_hash_mismatch",
+                _blob_member_name,
+                id="hash-mismatch",
+            ),
+        ],
+    )
+    def test_verify_backup_reports_invalid_archive_evidence(
+        self,
+        backup_env: BackupEnv,
+        mutation: Callable[[BackupEnv, Path, str], None],
+        expected_code: str,
+        expected_member: Callable[[str], str],
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="Verify Invalid", content=b"verify-invalid"
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        member = _archive_manifest(archive)["files"][0]["member"]
+
+        mutation(backup_env, archive, member)
+
+        result = backup.verify_backup(meta.id)
+
+        assert result.valid is False
+        assert {
+            "code": expected_code,
+            "member": expected_member(member),
+        } in result.findings
+
 
 class TestDeleteBackup:
     def test_delete_backup_removes_archive(self, backup_env: BackupEnv):
@@ -879,7 +1503,263 @@ class TestRestoreKeyMap:
             assert backup._restore_key_map(tar) == {}
 
 
+class TestStageRestoreArchive:
+    @pytest.mark.parametrize(
+        ("mutation", "error"),
+        [
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_set_unsupported_version),
+                "backup_manifest_invalid",
+                id="unsupported-version",
+            ),
+            pytest.param(
+                partial(_duplicate_named_member, name="manifest.json"),
+                "backup_manifest_invalid",
+                id="duplicate-manifest",
+            ),
+            pytest.param(
+                partial(_drop_named_member, name="db.sqlite3"),
+                "backup_manifest_invalid",
+                id="missing-database",
+            ),
+            pytest.param(
+                partial(_duplicate_named_member, name="db.sqlite3"),
+                "backup_manifest_invalid",
+                id="duplicate-database",
+            ),
+            pytest.param(
+                partial(
+                    _rewrite_manifest_with,
+                    mutation=_replace_entry_with_invalid_shape,
+                ),
+                "backup_manifest_invalid",
+                id="malformed-entry",
+            ),
+            pytest.param(
+                partial(_rewrite_manifest_with, mutation=_duplicate_manifest_entry),
+                "backup_manifest_invalid",
+                id="duplicate-entry",
+            ),
+            pytest.param(
+                partial(_add_named_member, name="../escape", content=b"unsafe"),
+                "backup_manifest_invalid",
+                id="unsafe-member",
+            ),
+            pytest.param(
+                partial(_add_named_member, name="notes.txt", content=b"unlisted"),
+                "backup_manifest_invalid",
+                id="unlisted-member",
+            ),
+            pytest.param(
+                partial(
+                    _rewrite_manifest_with, mutation=_increment_manifest_file_count
+                ),
+                "backup_manifest_invalid",
+                id="file-count",
+            ),
+            pytest.param(
+                partial(
+                    _rewrite_manifest_with, mutation=_increment_manifest_entry_size
+                ),
+                "backup_member_size_mismatch",
+                id="member-size",
+            ),
+        ],
+    )
+    def test_restore_rejects_invalid_archive_structure(
+        self,
+        backup_env: BackupEnv,
+        mutation: Callable[[BackupEnv, Path, str], None],
+        error: str,
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Restore Invalid", content=b"restore-structure"
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        member = _archive_manifest(archive)["files"][0]["member"]
+        mutation(backup_env, archive, member)
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match=error):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_accepts_a_v1_archive(self, backup_env: BackupEnv) -> None:
+        content = b"legacy-v1"
+        _, key = seed_model_with_blob(backup_env, name="Legacy", content=content)
+        meta = backup.create_backup()
+
+        def downgrade(manifest: dict) -> None:
+            manifest["version"] = "1"
+            for entry in manifest["files"]:
+                for field in ("member", "provider", "namespace", "sha256"):
+                    entry.pop(field, None)
+
+        _rewrite_backup_archive(backup_env, Path(meta.path), downgrade)
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_rejects_a_missing_v2_member(self, backup_env: BackupEnv) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Missing Member", content=b"missing-member"
+        )
+        meta = backup.create_backup()
+        with tarfile.open(meta.path, mode="r:gz") as archive:
+            stream = archive.extractfile("manifest.json")
+            assert stream is not None
+            member = json.loads(stream.read())["files"][0]["member"]
+        _rewrite_backup_archive(
+            backup_env, Path(meta.path), lambda _manifest: None, drop_member=member
+        )
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_rejects_a_duplicate_v2_member(self, backup_env: BackupEnv) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Duplicate Member", content=b"duplicate-member"
+        )
+        meta = backup.create_backup()
+        with tarfile.open(meta.path, mode="r:gz") as archive:
+            stream = archive.extractfile("manifest.json")
+            assert stream is not None
+            member = json.loads(stream.read())["files"][0]["member"]
+        _rewrite_backup_archive(
+            backup_env,
+            Path(meta.path),
+            lambda _manifest: None,
+            duplicate_member=member,
+        )
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_rejects_an_unlisted_v2_member(self, backup_env: BackupEnv) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Unlisted Member", content=b"listed-member"
+        )
+        meta = backup.create_backup()
+        _rewrite_backup_archive(
+            backup_env,
+            Path(meta.path),
+            lambda _manifest: None,
+            extra_member=("files/unlisted.bin", b"unlisted"),
+        )
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_rejects_tampered_v2_bytes(self, backup_env: BackupEnv) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Tampered", content=b"original-bytes"
+        )
+        meta = backup.create_backup()
+
+        def replace_hash(manifest: dict) -> None:
+            manifest["files"][0]["sha256"] = "0" * 64
+
+        _rewrite_backup_archive(backup_env, Path(meta.path), replace_hash)
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_member_hash_mismatch"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("provider", "foreign", id="provider"),
+            pytest.param("namespace", "data:/foreign-vault", id="namespace"),
+        ],
+    )
+    def test_restore_rejects_foreign_storage_identity_before_writing(
+        self, backup_env: BackupEnv, field: str, value: str
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Foreign Identity", content=b"foreign-identity"
+        )
+        meta = backup.create_backup()
+
+        def replace_identity(manifest: dict) -> None:
+            manifest["files"][0][field] = value
+
+        _rewrite_backup_archive(backup_env, Path(meta.path), replace_identity)
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_storage_namespace_mismatch"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_rejects_a_destination_outside_storage(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Outside Destination", content=b"outside-destination"
+        )
+        meta = backup.create_backup()
+        outside = backup_env.root / "outside-storage.bin"
+
+        def replace_key(manifest: dict) -> None:
+            manifest["files"][0]["key"] = str(outside)
+
+        _rewrite_backup_archive(backup_env, Path(meta.path), replace_key)
+        Path(key).unlink()
+
+        with pytest.raises(RuntimeError, match="backup_restore_key_outside_storage"):
+            backup.restore_backup(meta.id)
+
+        assert not outside.exists()
+
+
 class TestRestoreDatabase:
+    def test_backup_round_trips_a_source_cover(self, backup_env: BackupEnv) -> None:
+        content = b"private-source-cover"
+        with backup_env.new_session() as session:
+            model = build_model(session, name="Covered")
+            source = build_provenance_source(session, model)
+            key = get_backend().source_cover_key(source.id)
+            get_backend().write_bytes(content, key)
+            build_cover(session, source, storage_key=key, size_bytes=len(content))
+        meta = backup.create_backup()
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_preserves_ownership_sha256(self, backup_env: BackupEnv) -> None:
+        content = b"ownership-evidence"
+        _, key = seed_model_with_blob(backup_env, name="Owned", content=content)
+        meta = backup.create_backup()
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+
+        with backup_env.new_session() as session:
+            ownership = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+        assert (
+            ownership.sha256
+            == "a671576405ad7071ea8f8c077e8698c0b795ccf037ca7c12c353d34599deb241"
+        )
+
     def test_restore_database_raises_for_non_file_db(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ):
@@ -1067,6 +1947,648 @@ class TestRestoreDatabase:
 
         assert not Path(first_key).exists()
         assert not Path(second_key).exists()
+
+    def test_restore_rejects_a_duplicate_destination_before_publish(
+        self, backup_env: BackupEnv
+    ) -> None:
+        content = b"duplicate-destination"
+        staged = backup_env.root / "staged-duplicate.bin"
+        staged.write_bytes(content)
+        key = str(backup_env.data_dir / "duplicate-destination.bin")
+        blob = backup._StagedBlob(
+            key=key,
+            path=staged,
+            size=len(content),
+            sha256="0" * 64,
+            namespace=get_backend().namespace_for(key),
+        )
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_duplicate_destination"
+        ):
+            backup._apply_staged_blobs([blob, blob], backup_env.root / "rollback")
+
+        assert not Path(key).exists()
+
+    def test_restore_rolls_back_blob_when_database_restore_fails(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Database Failure", content=b"database-failure"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        monkeypatch.setattr(
+            backup,
+            "_restore_database_from_path",
+            lambda _path: (_ for _ in ()).throw(OSError("database failed")),
+        )
+
+        with pytest.raises(OSError, match="database failed"):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_preserves_final_destination_mutation(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Final Mutation", content=b"restore-content"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_apply = backup._apply_staged_blobs
+
+        def mutate_after_apply(*args, **kwargs):
+            result = real_apply(*args, **kwargs)
+            Path(key).write_bytes(b"foreign-final-mutation")
+            return result
+
+        monkeypatch.setattr(backup, "_apply_staged_blobs", mutate_after_apply)
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_destination_changed"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == b"foreign-final-mutation"
+
+    def test_restore_reloads_the_latest_valid_publication_generation(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"generation-content"
+        _, first_key = seed_model_with_blob(
+            backup_env, name="Generation First", content=content
+        )
+        _, second_key = seed_model_with_blob(
+            backup_env, name="Generation Second", content=b"generation-second"
+        )
+        meta = backup.create_backup()
+        Path(first_key).unlink()
+        Path(second_key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+        first_receipts: list[storage_backend.CreationReceipt] = []
+
+        def fail_second(source, destination: str):
+            if destination == second_key:
+                raise OSError("attempt one failure")
+            receipt = real_create(source, destination)
+            first_receipts.append(receipt)
+            return receipt
+
+        monkeypatch.setattr(backend, "create_stream", fail_second)
+        with pytest.raises(OSError, match="attempt one failure"):
+            backup.restore_backup(meta.id)
+
+        def crash_second_attempt(source, destination: str):
+            if destination == second_key:
+                raise KeyboardInterrupt
+            receipt = real_create(source, destination)
+            first_receipts.append(receipt)
+            return receipt
+
+        monkeypatch.setattr(backend, "create_stream", crash_second_attempt)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        adopted_inode = Path(first_key).stat().st_ino
+
+        backup.restore_backup(meta.id)
+
+        assert len(first_receipts) == 2
+        assert first_receipts[0].token != first_receipts[1].token
+        assert Path(first_key).stat().st_ino == adopted_inode
+        assert Path(first_key).read_bytes() == content
+
+    def test_restore_resumes_an_intent_recorded_before_publish(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"before-publish"
+        _, key = seed_model_with_blob(
+            backup_env, name="Before Publish", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def crash_before_publish(source, destination: str):
+            del source, destination
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", crash_before_publish)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            pytest.param(_append_malformed_journal, id="malformed-json"),
+            pytest.param(_append_non_object_event, id="non-object-event"),
+            pytest.param(_replace_first_journal_event, id="invalid-first-event"),
+            pytest.param(_append_unknown_journal_event, id="unknown-event"),
+            pytest.param(_replace_generation_with_text, id="invalid-generation"),
+            pytest.param(_skip_journal_generation, id="skipped-generation"),
+            pytest.param(_append_duplicate_intent, id="duplicate-intent"),
+            pytest.param(_publish_before_intent, id="published-before-intent"),
+            pytest.param(_publish_wrong_generation, id="published-generation-mismatch"),
+            pytest.param(_append_duplicate_publication, id="duplicate-publication"),
+        ],
+    )
+    def test_restore_rejects_a_corrupt_journal_sequence(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        mutation: Callable[[Path, list[object], dict, str], None],
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Journal Invalid", content=b"journal-sequence"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def interrupt(_source, _destination: str):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        events: list[object] = [
+            json.loads(line) for line in journal.read_text().splitlines()
+        ]
+        intent = events[1]
+        assert isinstance(intent, dict)
+
+        mutation(journal, events, intent, key)
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_journal_invalid"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    @pytest.mark.parametrize(
+        ("mutation", "error"),
+        [
+            pytest.param(
+                partial(
+                    _replace_started_field,
+                    field="archive_sha256",
+                    value="0" * 64,
+                ),
+                "restore_journal_mismatch",
+                id="archive",
+            ),
+            pytest.param(
+                partial(_replace_started_field, field="backend", value="foreign"),
+                "restore_journal_mismatch",
+                id="backend",
+            ),
+            pytest.param(
+                partial(
+                    _replace_started_field,
+                    field="namespaces",
+                    value=["foreign:/vault"],
+                ),
+                "restore_journal_mismatch",
+                id="namespace",
+            ),
+            pytest.param(
+                partial(_replace_started_field, field="backup_id", value="foreign"),
+                "restore_journal_mismatch",
+                id="backup-id",
+            ),
+            pytest.param(
+                _replace_intent_key, "restore_journal_invalid", id="unlisted-key"
+            ),
+            pytest.param(
+                _increment_intent_size,
+                "restore_journal_mismatch",
+                id="intent-size",
+            ),
+            pytest.param(
+                _replace_intent_hash,
+                "restore_journal_mismatch",
+                id="intent-hash",
+            ),
+            pytest.param(
+                _replace_intent_namespace,
+                "restore_journal_mismatch",
+                id="intent-namespace",
+            ),
+        ],
+    )
+    def test_restore_rejects_a_mismatched_journal(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        mutation: Callable[[Path, list[object], dict, str], None],
+        error: str,
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Journal Mismatch", content=b"journal-mismatch"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def interrupt(_source, _destination: str):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", interrupt)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        events: list[object] = [
+            json.loads(line) for line in journal.read_text().splitlines()
+        ]
+        intent = events[1]
+        assert isinstance(intent, dict)
+        mutation(journal, events, intent, key)
+
+        with pytest.raises(backup.RestoreConflictError, match=error):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_rejects_another_active_journal(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Other Journal", content=b"other-journal"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        other = backup_env.backup_dir / ".restore-another.journal"
+        other.write_text("reserved")
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_incomplete_other_backup"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_retracts_a_vanished_publication_generation(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"vanished-publication"
+        _, key = seed_model_with_blob(
+            backup_env, name="Vanished Publication", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def interrupt_after_publication(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "published":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(
+            backup, "_append_restore_journal", interrupt_after_publication
+        )
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def interrupt_second_generation(_source, _destination: str):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", interrupt_second_generation)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        durable_events = [json.loads(line) for line in journal.read_text().splitlines()]
+        transitions = [
+            (event.get("event"), event.get("generation"))
+            for event in durable_events[-2:]
+        ]
+        assert transitions == [("retracted", 1), ("intent", 2)]
+
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_successful_restore_removes_the_terminal_journal(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Journal Cleanup", content=b"journal-cleanup"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+
+        assert not (backup_env.backup_dir / f".restore-{meta.id}.journal").exists()
+
+    def test_successful_restore_preserves_backup_archive_ownership(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Archive Ownership", content=b"archive-ownership"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+
+        backup.restore_backup(meta.id)
+
+        with backup_env.new_session() as session:
+            ownership = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(meta.path)
+                )
+            ).one()
+        assert ownership.object_kind == "backup"
+
+    def test_restore_adopts_bytes_published_before_receipt_journaling(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"after-publish"
+        _, key = seed_model_with_blob(backup_env, name="After Publish", content=content)
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def crash_after_publish(source, destination: str):
+            real_create(source, destination)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", crash_after_publish)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_reuses_a_journaled_publication(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"after-journal"
+        _, key = seed_model_with_blob(backup_env, name="After Journal", content=content)
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def crash_after_journal(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "published":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_append_restore_journal", crash_after_journal)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    @pytest.mark.parametrize(
+        ("mutation", "error"),
+        [
+            pytest.param(
+                _invalidate_receipt_token,
+                "restore_journal_invalid",
+                id="invalid-receipt",
+            ),
+            pytest.param(
+                _increment_receipt_size,
+                "restore_journal_mismatch",
+                id="receipt-mismatch",
+            ),
+        ],
+    )
+    def test_restore_rejects_invalid_published_receipt_evidence(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        mutation: Callable[[dict], None],
+        error: str,
+    ) -> None:
+        content = b"published-evidence"
+        _, key = seed_model_with_blob(
+            backup_env, name="Published Invalid", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def interrupt_after_publication(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "published":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(
+            backup, "_append_restore_journal", interrupt_after_publication
+        )
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        events = [json.loads(line) for line in journal.read_text().splitlines()]
+        published = events[-1]
+        assert published["event"] == "published"
+        mutation(published)
+        journal.write_text("".join(f"{json.dumps(event)}\n" for event in events))
+
+        with pytest.raises(backup.RestoreConflictError, match=error):
+            backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_reports_creation_match_failure(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"creation-match"
+        _, key = seed_model_with_blob(
+            backup_env, name="Creation Match", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def interrupt_after_publication(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "published":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(
+            backup, "_append_restore_journal", interrupt_after_publication
+        )
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+        monkeypatch.setattr(
+            get_backend(),
+            "creation_matches",
+            lambda _receipt: (_ for _ in ()).throw(OSError("match failed")),
+        )
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_destination_changed"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_uses_guarded_adoption_fallback(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"guarded-adoption"
+        _, key = seed_model_with_blob(
+            backup_env, name="Guarded Adoption", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def interrupt_after_create(source, destination: str):
+            real_create(source, destination)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", interrupt_after_create)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        monkeypatch.setattr(
+            backend,
+            "adopt_existing",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(NotImplementedError),
+        )
+
+        backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    def test_restore_reports_adoption_failure(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        content = b"adoption-failure"
+        _, key = seed_model_with_blob(
+            backup_env, name="Adoption Failure", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def interrupt_after_create(source, destination: str):
+            real_create(source, destination)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", interrupt_after_create)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        monkeypatch.setattr(
+            backend,
+            "adopt_existing",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("adopt failed")),
+        )
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_destination_changed"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == content
+
+    @pytest.mark.parametrize(
+        ("fault", "error"),
+        [
+            pytest.param(
+                _return_invalid_size_receipt,
+                "restore_blob_size_mismatch",
+                id="receipt-size",
+            ),
+            pytest.param(
+                _publish_wrong_hash,
+                "restore_blob_hash_mismatch",
+                id="stored-hash",
+            ),
+            pytest.param(
+                _publish_vanished_object,
+                "restore_blob_hash_mismatch",
+                id="vanished-object",
+            ),
+        ],
+    )
+    def test_restore_rejects_invalid_created_object_evidence(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        fault: Callable,
+        error: str,
+    ) -> None:
+        content = b"created-evidence"
+        _, key = seed_model_with_blob(
+            backup_env, name="Created Invalid", content=content
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def invalid_create(source, destination: str):
+            return fault(backend, real_create, content, source, destination)
+
+        monkeypatch.setattr(backend, "create_stream", invalid_create)
+
+        with pytest.raises(RuntimeError, match=error):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
+    def test_restore_blocks_changed_bytes_from_an_interrupted_publish(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Changed Resume", content=b"restore-owned"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        backend = get_backend()
+        real_create = backend.create_stream
+
+        def crash_after_publish(source, destination: str):
+            real_create(source, destination)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backend, "create_stream", crash_after_publish)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backend, "create_stream", real_create)
+        Path(key).write_bytes(b"foreign-replacement")
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_destination_changed"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert Path(key).read_bytes() == b"foreign-replacement"
 
     def test_restore_skips_directory_entries_under_files_prefix(
         self,

@@ -214,17 +214,18 @@ def create_library(
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> LibraryRead:
-    _validate_root_path(body.root_path, session)
+    canonical_root = str(Path(body.root_path).expanduser().resolve(strict=False))
+    _validate_root_path(canonical_root, session)
     _validate_schedule(body.scan_schedule)
     _require_target_collection(session, body.target_collection_id)
     lib = ExternalLibrary(
         name=body.name.strip(),
-        root_path=body.root_path,
+        root_path=canonical_root,
         enabled=body.enabled,
         scan_schedule=body.scan_schedule,
         watch_mode=body.watch_mode,
         # Detect up front so watch_active is meaningful before the first scan.
-        fs_kind=external_library.detect_fs_kind(body.root_path),
+        fs_kind=external_library.detect_fs_kind(canonical_root),
         collection_mode=body.collection_mode,
         target_collection_id=body.target_collection_id,
     )
@@ -249,9 +250,12 @@ def update_library(
 ) -> LibraryRead:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
     if body.root_path is not None and body.root_path != lib.root_path:
-        _validate_root_path(body.root_path, session, exclude_library_id=lib.id)
-        lib.root_path = body.root_path
-        lib.fs_kind = external_library.detect_fs_kind(body.root_path)
+        canonical_root = str(
+            Path(body.root_path).expanduser().resolve(strict=False)
+        )
+        _validate_root_path(canonical_root, session, exclude_library_id=lib.id)
+        lib.root_path = canonical_root
+        lib.fs_kind = external_library.detect_fs_kind(canonical_root)
     if body.name is not None:
         lib.name = body.name.strip()
     if body.enabled is not None:

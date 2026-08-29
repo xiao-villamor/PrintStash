@@ -37,9 +37,15 @@ async def serve(
     port: int,
     root: Path,
     password: str | None,
+    known_hosts: Path | None,
 ) -> None:
     root.mkdir(parents=True, exist_ok=True)
     host_key = asyncssh.generate_private_key("ssh-ed25519")
+    if known_hosts is not None:
+        public = host_key.export_public_key("openssh")
+        if isinstance(public, bytes):
+            public = public.decode()
+        known_hosts.write_text(f"[127.0.0.1]:{port} {public.strip()}\n")
     await asyncssh.listen(
         host,
         port,
@@ -60,6 +66,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--authorized-keys", type=Path)
     parser.add_argument("--password")
+    parser.add_argument("--known-hosts", type=Path)
     args = parser.parse_args()
     asyncio.run(
         serve(
@@ -67,6 +74,7 @@ def main() -> None:
             port=args.port,
             root=args.root,
             password=args.password,
+            known_hosts=args.known_hosts,
         )
     )
 

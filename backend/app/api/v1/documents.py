@@ -319,9 +319,12 @@ async def upload_document(
         session.refresh(doc)
         return _read(session, current_user, doc)
 
-    # Binary doc — store the blob keyed by the new row id.
+    # Binary docs need their row id in the storage key. Persist that small,
+    # recoverable intent before publication so SQLite's caller transaction does
+    # not hold a write lock while the ownership ledger commits its reservation.
     session.add(doc)
-    session.flush()
+    session.commit()
+    session.refresh(doc)
     safe = _safe_filename(raw)
     backend = get_backend()
     key = backend.document_file_key(doc.id, safe)
@@ -345,6 +348,8 @@ async def upload_document(
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()
+        session.delete(doc)
+        session.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="storage_destination_exists",
@@ -353,6 +358,10 @@ async def upload_document(
         session.rollback()
         if receipt is not None:
             backend.rollback_create(receipt)
+        persisted = session.get(Document, doc.id)
+        if persisted is not None:
+            session.delete(persisted)
+            session.commit()
         raise
     session.refresh(doc)
     return _read(session, current_user, doc)

@@ -11,6 +11,7 @@ allows a "local vault + cloud backup" split architecture.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -50,7 +51,6 @@ from app.services.storage_ownership import (
     record_creation,
     require_owned_key,
 )
-from app.services.storage_paths import canonical_path
 from app.services.storage_utils import ownership_snapshot
 
 logger = get_logger(__name__)
@@ -162,7 +162,9 @@ def _exclusive_backup_operation(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return serialized
 
 
-MANIFEST_VERSION = "1"
+MANIFEST_VERSION = "2"
+_SUPPORTED_MANIFEST_VERSIONS = {"1", MANIFEST_VERSION}
+_RESTORE_JOURNAL_VERSION = 1
 _BACKUP_S3_PREFIX = "printstash-backups/"
 _LEGACY_BACKUP_S3_PREFIX = "nexus3d-backups/"
 _BACKUP_NAME_PREFIX = "printstash-backup-"
@@ -329,12 +331,119 @@ def _find_snapshot_blobs(snapshot_path: Path) -> list[tuple[str, int]]:
         engine.dispose()
 
 
+def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
+    """Build v2 evidence from the same DB snapshot archived in the backup."""
+    engine = create_engine(f"sqlite:///{snapshot_path}")
+    try:
+        with Session(engine) as session:
+            snapshot = ownership_snapshot(session, discover=False)
+            external_keys = {blob.key for blob in snapshot.external}
+            blobs = [
+                *[blob for blob in snapshot.primary if blob.key not in external_keys],
+                *snapshot.derived,
+                *snapshot.embedded,
+            ]
+            backend = get_backend()
+            entries: list[dict[str, str | int]] = []
+            seen: set[str] = set()
+            for blob in blobs:
+                if blob.key in seen:
+                    continue
+                seen.add(blob.key)
+                _validate_restore_key(blob.key)
+                try:
+                    size = backend.stat_size(blob.key)
+                except FileNotFoundError:
+                    # Thumbnails and caches are rebuildable projections; an
+                    # absent one must not make an otherwise complete backup
+                    # impossible. Primary/source-cover bytes remain mandatory.
+                    if blob.resource_type not in {
+                        "thumbnail",
+                        "legacy_thumbnail",
+                        "stl_cache",
+                    }:
+                        raise
+                    continue
+                digest = hashlib.sha256()
+                for chunk in backend.stream_chunks(blob.key):
+                    digest.update(chunk)
+                namespace = backend.namespace_for(blob.key)
+                member = f"files/{len(entries):08d}-{Path(blob.key).name}"
+                entries.append(
+                    {
+                        "member": member,
+                        "arc": member,
+                        "key": blob.key,
+                        "provider": backend.backend_name,
+                        "namespace": namespace,
+                        "size": size,
+                        "sha256": digest.hexdigest(),
+                    }
+                )
+            return entries
+    finally:
+        engine.dispose()
+
+
 def _add_file_to_tar(tar: tarfile.TarFile, key: str, arcname: str) -> int:
     # local_path() yields the real file locally, or a self-cleaning temp
     # download for remote backends — no branching on backend type.
     with get_backend().local_path(key) as path:
         tar.add(str(path), arcname=arcname)
         return path.stat().st_size
+
+
+def _validate_created_archive_payload(archive_path: Path) -> None:
+    """Prove the completed archive contains the exact v2 manifest bytes."""
+    with tarfile.open(archive_path, mode="r:gz") as archive:
+        manifests = archive.getmembers()
+        manifest_members = [
+            member
+            for member in manifests
+            if member.name == "manifest.json" and member.isfile()
+        ]
+        if len(manifest_members) != 1:
+            raise RuntimeError("backup_manifest_invalid")
+        stream = archive.extractfile(manifest_members[0])
+        if stream is None:
+            raise RuntimeError("backup_manifest_invalid")
+        manifest = json.loads(stream.read().decode("utf-8"))
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("version") != MANIFEST_VERSION
+        ):
+            raise RuntimeError("backup_manifest_invalid")
+        entries = manifest.get("files")
+        if not isinstance(entries, list):
+            raise RuntimeError("backup_manifest_invalid")
+        by_name: dict[str, list[tarfile.TarInfo]] = {}
+        for member in manifests:
+            by_name.setdefault(member.name, []).append(member)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RuntimeError("backup_manifest_invalid")
+            member_name = entry.get("member")
+            expected_size = entry.get("size")
+            expected_sha256 = entry.get("sha256")
+            if (
+                not isinstance(member_name, str)
+                or not isinstance(expected_size, int)
+                or not isinstance(expected_sha256, str)
+            ):
+                raise RuntimeError("backup_manifest_invalid")
+            members = by_name.get(member_name, [])
+            if len(members) != 1 or not members[0].isfile():
+                raise RuntimeError("backup_manifest_invalid")
+            if members[0].size != expected_size:
+                raise RuntimeError("backup_blob_size_changed")
+            source = archive.extractfile(members[0])
+            if source is None:
+                raise RuntimeError("backup_manifest_invalid")
+            digest = hashlib.sha256()
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise RuntimeError("backup_blob_hash_changed")
 
 
 # ---------------------------------------------------------------------------
@@ -362,20 +471,16 @@ def create_backup() -> BackupMeta:
 
     written_files = 0
     with _sqlite_snapshot_file() as db_snapshot:
-        blobs = _find_snapshot_blobs(db_snapshot)
-
-        # Map each tar entry back to the exact storage key it came from. Keys can
-        # be absolute paths (local) or object keys (S3), so the manifest is the
-        # authoritative reverse mapping used by restore.
-        file_entries: list[dict[str, str | int]] = [
-            {
-                "arc": f"files/{key.replace('vault-data/', '').lstrip('/')}",
-                "key": key,
-                "size": size,
-            }
-            for key, size in blobs
-        ]
-        total_size = db_snapshot.stat().st_size + sum(size for _key, size in blobs)
+        censused_sizes = dict(_find_snapshot_blobs(db_snapshot))
+        file_entries = _manifest_blobs(db_snapshot)
+        for entry in file_entries:
+            key = str(entry["key"])
+            if key in censused_sizes and int(entry["size"]) != censused_sizes[key]:
+                logger.error("backup %s failed while streaming owned blobs", backup_id)
+                raise RuntimeError("backup_blob_size_changed")
+        total_size = db_snapshot.stat().st_size + sum(
+            int(entry["size"]) for entry in file_entries
+        )
         manifest = {
             "version": MANIFEST_VERSION,
             "created_at": ts,
@@ -406,12 +511,13 @@ def create_backup() -> BackupMeta:
 
                         for entry in file_entries:
                             key = str(entry["key"])
-                            arc = str(entry["arc"])
+                            arc = str(entry["member"])
                             written = _add_file_to_tar(tar, key, arc)
                             expected = int(entry["size"])
                             if written != expected:
                                 raise RuntimeError("backup_blob_size_changed")
                             written_files += 1
+            _validate_created_archive_payload(archive_temp)
             local_receipt = LocalStorageBackend().move_in(
                 archive_temp, str(archive_path)
             )
@@ -682,6 +788,21 @@ def _unsafe_member_name(name: str) -> bool:
     return path.is_absolute() or ".." in path.parts or not name or "\\" in name
 
 
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _sha256_key(key: str) -> str:
+    digest = hashlib.sha256()
+    for chunk in get_backend().stream_chunks(key):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
 def verify_backup(backup_id: str) -> BackupVerification:
     """Validate archive structure, manifest membership, sizes, and safe paths."""
     archive = get_backup_archive_path(backup_id)
@@ -729,17 +850,27 @@ def verify_backup(backup_id: str) -> BackupVerification:
                     by_name: dict[str, list[tarfile.TarInfo]] = {}
                     for member in members:
                         by_name.setdefault(member.name, []).append(member)
+                    declared_members: set[str] = set()
                     for entry in expected_entries:
-                        if not isinstance(entry, dict) or not isinstance(
-                            entry.get("arc"), str
-                        ):
+                        if not isinstance(entry, dict):
                             findings.append(
                                 {"code": "backup_manifest_invalid", "member": "files"}
                             )
                             continue
-                        arc = entry["arc"]
+                        arc = entry.get("member", entry.get("arc"))
+                        if not isinstance(arc, str):
+                            findings.append(
+                                {"code": "backup_manifest_invalid", "member": "files"}
+                            )
+                            continue
+                        if arc in declared_members:
+                            findings.append(
+                                {"code": "backup_manifest_invalid", "member": arc[:255]}
+                            )
+                            continue
+                        declared_members.add(arc)
                         matches = by_name.get(arc, [])
-                        if len(matches) != 1:
+                        if len(matches) != 1 or not matches[0].isfile():
                             findings.append(
                                 {"code": "backup_member_missing", "member": arc[:255]}
                             )
@@ -757,11 +888,56 @@ def verify_backup(backup_id: str) -> BackupVerification:
                                     "actual_size": matches[0].size,
                                 }
                             )
+                        expected_sha = entry.get("sha256")
+                        if manifest.get("version") == MANIFEST_VERSION and (
+                            not isinstance(entry.get("key"), str)
+                            or not isinstance(entry.get("provider"), str)
+                            or not isinstance(entry.get("namespace"), str)
+                            or not isinstance(expected_size, int)
+                            or not isinstance(expected_sha, str)
+                        ):
+                            findings.append(
+                                {"code": "backup_manifest_invalid", "member": arc[:255]}
+                            )
+                            continue
+                        if isinstance(expected_sha, str) and len(expected_sha) == 64:
+                            stream = tar.extractfile(matches[0])
+                            digest = hashlib.sha256()
+                            if stream is not None:
+                                while chunk := stream.read(1024 * 1024):
+                                    digest.update(chunk)
+                            if digest.hexdigest() != expected_sha.lower():
+                                findings.append(
+                                    {
+                                        "code": "backup_member_hash_mismatch",
+                                        "member": arc[:255],
+                                    }
+                                )
+                    if manifest.get("version") == MANIFEST_VERSION:
+                        archived_regular_files = {
+                            member.name
+                            for member in members
+                            if member.isfile() and member.name.startswith("files/")
+                        }
+                        if archived_regular_files != declared_members:
+                            findings.append(
+                                {
+                                    "code": "backup_manifest_invalid",
+                                    "member": "files",
+                                }
+                            )
+                        if manifest.get("file_count") != len(expected_entries):
+                            findings.append(
+                                {
+                                    "code": "backup_manifest_invalid",
+                                    "member": "file_count",
+                                }
+                            )
     except (tarfile.TarError, OSError, EOFError):
         findings.append({"code": "backup_manifest_invalid", "member": "archive"})
 
     manifest_version = str(manifest.get("version")) if manifest else None
-    app_compatible = manifest_version == MANIFEST_VERSION
+    app_compatible = manifest_version in _SUPPORTED_MANIFEST_VERSIONS
     if manifest is not None and not app_compatible:
         findings.append({"code": "backup_manifest_invalid", "member": "version"})
     result = BackupVerification(
@@ -941,23 +1117,90 @@ def _restore_key_map(tar: tarfile.TarFile) -> dict[str, str]:
         manifest = json.loads(f.read().decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return {}
-    return {
-        entry["arc"]: entry["key"]
-        for entry in manifest.get("files", [])
-        if "arc" in entry and "key" in entry
-    }
+    result: dict[str, str] = {}
+    for entry in manifest.get("files", []):
+        if not isinstance(entry, dict):
+            continue
+        member = entry.get("member", entry.get("arc"))
+        key = entry.get("key")
+        if isinstance(member, str) and isinstance(key, str):
+            result[member] = key
+    return result
+
+
+def _restore_manifest_entries(tar: tarfile.TarFile) -> tuple[dict, dict[str, dict]]:
+    """Read and validate manifest metadata before any destination is written."""
+    if not _has_member(tar, "manifest.json"):
+        raise RuntimeError("backup_manifest_invalid")
+    source = tar.extractfile("manifest.json")
+    if source is None:
+        raise RuntimeError("backup_manifest_invalid")
+    try:
+        manifest = json.loads(source.read().decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise RuntimeError("backup_manifest_invalid") from exc
+    if (
+        not isinstance(manifest, dict)
+        or str(manifest.get("version")) not in _SUPPORTED_MANIFEST_VERSIONS
+    ):
+        raise RuntimeError("backup_manifest_invalid")
+    files = manifest.get("files")
+    if not isinstance(files, list):
+        raise RuntimeError("backup_manifest_invalid")
+
+    version = str(manifest["version"])
+    entries: dict[str, dict] = {}
+    keys: set[str] = set()
+    backend = get_backend()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise RuntimeError("backup_manifest_invalid")
+        member = entry.get("member", entry.get("arc"))
+        key = entry.get("key")
+        if not isinstance(member, str) or not isinstance(key, str):
+            raise RuntimeError("backup_manifest_invalid")
+        if (
+            member in entries
+            or key in keys
+            or _unsafe_member_name(member)
+            or not member.startswith("files/")
+        ):
+            raise RuntimeError("backup_manifest_invalid")
+        _validate_restore_key(key)
+        if version == MANIFEST_VERSION:
+            sha256 = entry.get("sha256")
+            if (
+                entry.get("provider") != backend.backend_name
+                or entry.get("namespace") != backend.namespace_for(key)
+                or not isinstance(entry.get("size"), int)
+                or entry["size"] < 0
+                or not isinstance(sha256, str)
+                or len(sha256) != 64
+                or any(character not in "0123456789abcdef" for character in sha256)
+            ):
+                raise RuntimeError("backup_storage_namespace_mismatch")
+        entries[member] = entry
+        keys.add(key)
+    if version == MANIFEST_VERSION and manifest.get("file_count") != len(entries):
+        raise RuntimeError("backup_manifest_invalid")
+    return manifest, entries
 
 
 @dataclass(frozen=True)
 class _StagedBlob:
     key: str
     path: Path
+    size: int
+    sha256: str
+    namespace: str
 
 
 @dataclass(frozen=True)
 class _AppliedBlob:
     key: str
     receipt: CreationReceipt
+    sha256: str
+    generation: int
 
 
 def _stage_restore_archive(
@@ -972,6 +1215,30 @@ def _stage_restore_archive(
             if _unsafe_member_name(member.name) or member.issym() or member.islnk():
                 raise RuntimeError("backup_manifest_invalid")
 
+        manifest, manifest_entries = _restore_manifest_entries(tar)
+        version = str(manifest["version"])
+        if version == MANIFEST_VERSION:
+            regular_by_name: dict[str, list[tarfile.TarInfo]] = {}
+            for member in members:
+                if member.isfile():
+                    regular_by_name.setdefault(member.name, []).append(member)
+            if len(regular_by_name.get("manifest.json", [])) != 1:
+                raise RuntimeError("backup_manifest_invalid")
+            if len(regular_by_name.get("db.sqlite3", [])) != 1:
+                raise RuntimeError("backup_manifest_invalid")
+            archived_files = {
+                name for name in regular_by_name if name.startswith("files/")
+            }
+            if archived_files != set(manifest_entries):
+                raise RuntimeError("backup_manifest_invalid")
+            if any(len(regular_by_name[name]) != 1 for name in archived_files):
+                raise RuntimeError("backup_manifest_invalid")
+            if set(regular_by_name) != {
+                "manifest.json",
+                "db.sqlite3",
+                *manifest_entries,
+            }:
+                raise RuntimeError("backup_manifest_invalid")
         arc_to_key = _restore_key_map(tar)
         db_member = (
             tar.extractfile("db.sqlite3") if _has_member(tar, "db.sqlite3") else None
@@ -994,7 +1261,24 @@ def _stage_restore_archive(
                 shutil.copyfileobj(source, destination)
             if staged_path.stat().st_size != member.size:
                 raise RuntimeError("backup_member_size_mismatch")
-            staged_blobs.append(_StagedBlob(key=key, path=staged_path))
+            entry = manifest_entries.get(member.name)
+            digest = _sha256_path(staged_path)
+            if entry is not None and isinstance(entry.get("size"), int):
+                if member.size != int(entry["size"]):
+                    raise RuntimeError("backup_member_size_mismatch")
+                expected_sha = entry.get("sha256")
+                if isinstance(expected_sha, str):
+                    if digest != expected_sha:
+                        raise RuntimeError("backup_member_hash_mismatch")
+            staged_blobs.append(
+                _StagedBlob(
+                    key=key,
+                    path=staged_path,
+                    size=member.size,
+                    sha256=digest,
+                    namespace=get_backend().namespace_for(key),
+                )
+            )
     return database_path, staged_blobs
 
 
@@ -1003,11 +1287,23 @@ def _write_staged_blob(staged_path: Path, key: str) -> int:
         return get_backend().create_stream(source, key).size
 
 
-def _rollback_applied_blobs(applied: list[_AppliedBlob]) -> None:
+def _rollback_applied_blobs(
+    applied: list[_AppliedBlob], *, journal_path: Path | None = None
+) -> None:
     backend = get_backend()
     for item in reversed(applied):
         try:
-            if not backend.rollback_create(item.receipt):
+            removed = backend.rollback_create(item.receipt)
+            if removed and journal_path is not None:
+                _append_restore_journal(
+                    journal_path,
+                    {
+                        "event": "retracted",
+                        "key": item.key,
+                        "generation": item.generation,
+                    },
+                )
+            if not removed:
                 logger.error(
                     "restore rollback preserved uncertain storage key %s", item.key
                 )
@@ -1015,7 +1311,12 @@ def _rollback_applied_blobs(applied: list[_AppliedBlob]) -> None:
             logger.exception("restore rollback failed for storage key %s", item.key)
 
 
-def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -> None:
+def _sync_restored_ownership(
+    database_path: Path,
+    applied: list[_AppliedBlob],
+    *,
+    archive_ownership: OwnedStorageObject,
+) -> None:
     """Replace archived fingerprints with proof from this restore operation."""
     with sqlite3.connect(database_path) as connection:
         for item in applied:
@@ -1034,9 +1335,9 @@ def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -
                 """
                 INSERT INTO owned_storage_objects (
                     backend, namespace, key, object_kind, state, token,
-                    size_bytes, etag, version_id, device, inode, ctime_ns,
+                    size_bytes, sha256, etag, version_id, device, inode, ctime_ns,
                     committed_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     receipt.backend,
@@ -1046,6 +1347,7 @@ def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -
                     "committed",
                     receipt.token,
                     receipt.size,
+                    item.sha256,
                     receipt.etag,
                     receipt.version_id,
                     receipt.device,
@@ -1055,12 +1357,54 @@ def _sync_restored_ownership(database_path: Path, applied: list[_AppliedBlob]) -
                     utcnow().isoformat(sep=" "),
                 ),
             )
+        connection.execute(
+            """
+            DELETE FROM owned_storage_objects
+            WHERE backend = ? AND namespace = ? AND key = ?
+            """,
+            (
+                archive_ownership.backend,
+                archive_ownership.namespace,
+                archive_ownership.key,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO owned_storage_objects (
+                backend, namespace, key, object_kind, state, token,
+                size_bytes, sha256, etag, version_id, device, inode, ctime_ns,
+                committed_at, created_at, last_error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                archive_ownership.backend,
+                archive_ownership.namespace,
+                archive_ownership.key,
+                archive_ownership.object_kind,
+                archive_ownership.state.value,
+                archive_ownership.token,
+                archive_ownership.size_bytes,
+                archive_ownership.sha256,
+                archive_ownership.etag,
+                archive_ownership.version_id,
+                archive_ownership.device,
+                archive_ownership.inode,
+                archive_ownership.ctime_ns,
+                archive_ownership.committed_at,
+                archive_ownership.created_at,
+                archive_ownership.last_error,
+            ),
+        )
         connection.commit()
 
 
 def _apply_staged_blobs(
-    blobs: list[_StagedBlob], rollback_dir: Path
-) -> list[_AppliedBlob]:
+    blobs: list[_StagedBlob],
+    rollback_dir: Path,
+    *,
+    journal_path: Path | None = None,
+    journal_state: _RestoreJournalState | None = None,
+) -> tuple[list[_AppliedBlob], list[_AppliedBlob]]:
     """Publish a restore only into empty, in-bound destinations.
 
     Restore used to overwrite every manifest key and then attempt a best-effort
@@ -1071,6 +1415,7 @@ def _apply_staged_blobs(
     del rollback_dir
     backend = get_backend()
     applied: list[_AppliedBlob] = []
+    created: list[_AppliedBlob] = []
 
     seen: set[str] = set()
     for blob in blobs:
@@ -1078,43 +1423,350 @@ def _apply_staged_blobs(
         if blob.key in seen:
             raise RestoreConflictError("restore_duplicate_destination")
         seen.add(blob.key)
-        if backend.exists(blob.key):
+        if not backend.exists(blob.key):
+            continue
+        intent = journal_state.intents.get(blob.key) if journal_state else None
+        if intent is None or not _journal_intent_matches(intent, blob):
             raise RestoreConflictError("restore_destination_exists")
+        if not _stored_blob_matches(blob):
+            raise RestoreConflictError("restore_destination_changed")
 
     try:
         for blob in blobs:
+            intent = journal_state.intents.get(blob.key) if journal_state else None
+            published = journal_state.published.get(blob.key) if journal_state else None
+            if backend.exists(blob.key):
+                receipt = _adopt_restored_blob(blob, published)
+                assert intent is not None
+                item = _AppliedBlob(
+                    key=blob.key,
+                    receipt=receipt,
+                    sha256=blob.sha256,
+                    generation=_journal_generation(intent),
+                )
+                applied.append(item)
+                if journal_path is not None and published is None:
+                    event = _published_restore_event(item)
+                    _append_restore_journal(journal_path, event)
+                    if journal_state is not None:
+                        journal_state.published[blob.key] = event
+                continue
+
+            if published is not None and journal_path is not None:
+                generation = _journal_generation(published)
+                _append_restore_journal(
+                    journal_path,
+                    {
+                        "event": "retracted",
+                        "key": blob.key,
+                        "generation": generation,
+                    },
+                )
+                if journal_state is not None:
+                    journal_state.intents.pop(blob.key, None)
+                    journal_state.published.pop(blob.key, None)
+                intent = None
+
+            if intent is None:
+                generation = (
+                    journal_state.generations.get(blob.key, 0) + 1
+                    if journal_state is not None
+                    else 1
+                )
+                intent = {
+                    "event": "intent",
+                    "key": blob.key,
+                    "size": blob.size,
+                    "sha256": blob.sha256,
+                    "namespace": blob.namespace,
+                    "generation": generation,
+                }
+            else:
+                generation = _journal_generation(intent)
+            if journal_path is not None and (
+                journal_state is None or blob.key not in journal_state.intents
+            ):
+                _append_restore_journal(journal_path, intent)
+                if journal_state is not None:
+                    journal_state.intents[blob.key] = intent
+                    journal_state.generations[blob.key] = generation
             with blob.path.open("rb") as source:
                 receipt = backend.create_stream(source, blob.key)
-            applied.append(_AppliedBlob(key=blob.key, receipt=receipt))
             if receipt.size != blob.path.stat().st_size:
                 raise RuntimeError("restore_blob_size_mismatch")
+            if not _stored_blob_matches(blob):
+                backend.rollback_create(receipt)
+                raise RuntimeError("restore_blob_hash_mismatch")
+            item = _AppliedBlob(
+                key=blob.key,
+                receipt=receipt,
+                sha256=blob.sha256,
+                generation=generation,
+            )
+            applied.append(item)
+            created.append(item)
+            if journal_path is not None:
+                event = _published_restore_event(item)
+                _append_restore_journal(journal_path, event)
+                if journal_state is not None:
+                    journal_state.published[blob.key] = event
     except Exception:
-        _rollback_applied_blobs(applied)
+        _rollback_applied_blobs(created, journal_path=journal_path)
         raise
-    return applied
+    return applied, created
+
+
+@dataclass(frozen=True)
+class _RestoreJournalState:
+    started: dict[str, object]
+    intents: dict[str, dict[str, object]]
+    published: dict[str, dict[str, object]]
+    generations: dict[str, int]
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(path, flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _append_restore_journal(path: Path, event: dict[str, object]) -> None:
+    """Durably append one restore transition before proceeding."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        written = 0
+        while written < len(payload):
+            written += os.write(fd, payload[written:])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    _fsync_directory(path.parent)
+
+
+def _remove_restore_journal(path: Path) -> None:
+    path.unlink(missing_ok=True)
+    _fsync_directory(path.parent)
+
+
+def _load_restore_journal(path: Path) -> _RestoreJournalState:
+    try:
+        raw_lines = path.read_bytes().splitlines()
+        events = [json.loads(line.decode("utf-8")) for line in raw_lines]
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise RestoreConflictError("restore_journal_invalid") from exc
+    if not events or any(not isinstance(event, dict) for event in events):
+        raise RestoreConflictError("restore_journal_invalid")
+    started = events[0]
+    if started.get("event") != "started":
+        raise RestoreConflictError("restore_journal_invalid")
+    intents: dict[str, dict[str, object]] = {}
+    published: dict[str, dict[str, object]] = {}
+    generations: dict[str, int] = {}
+    for event in events[1:]:
+        event_name = event.get("event")
+        key = event.get("key")
+        if event_name not in {"intent", "published", "retracted", "complete"}:
+            raise RestoreConflictError("restore_journal_invalid")
+        if event_name == "complete":
+            continue
+        generation = event.get("generation")
+        if not isinstance(key, str) or not isinstance(generation, int):
+            raise RestoreConflictError("restore_journal_invalid")
+        if event_name == "intent":
+            if key in intents or generation != generations.get(key, 0) + 1:
+                raise RestoreConflictError("restore_journal_invalid")
+            intents[key] = event
+            generations[key] = generation
+            continue
+        active_intent = intents.get(key)
+        if active_intent is None or active_intent.get("generation") != generation:
+            raise RestoreConflictError("restore_journal_invalid")
+        if event_name == "published":
+            if key in published:
+                raise RestoreConflictError("restore_journal_invalid")
+            published[key] = event
+            continue
+        intents.pop(key)
+        published.pop(key)
+    return _RestoreJournalState(started, intents, published, generations)
+
+
+def _prepare_restore_journal(
+    path: Path,
+    *,
+    backup_id: str,
+    archive_sha256: str,
+    blobs: list[_StagedBlob],
+) -> _RestoreJournalState:
+    for other in path.parent.glob(".restore-*.journal"):
+        if other != path:
+            raise RestoreConflictError("restore_incomplete_other_backup")
+    backend = get_backend()
+    expected_start: dict[str, object] = {
+        "event": "started",
+        "version": _RESTORE_JOURNAL_VERSION,
+        "backup_id": backup_id,
+        "archive_sha256": archive_sha256,
+        "backend": backend.backend_name,
+        "namespaces": sorted({blob.namespace for blob in blobs}),
+    }
+    if not path.exists():
+        _append_restore_journal(path, expected_start)
+        return _RestoreJournalState(expected_start, {}, {}, {})
+    state = _load_restore_journal(path)
+    if state.started != expected_start:
+        raise RestoreConflictError("restore_journal_mismatch")
+    expected_keys = {blob.key for blob in blobs}
+    if not set(state.intents).issubset(expected_keys) or not set(
+        state.published
+    ).issubset(expected_keys):
+        raise RestoreConflictError("restore_journal_invalid")
+    by_key = {blob.key: blob for blob in blobs}
+    if any(
+        not _journal_intent_matches(event, by_key[key])
+        for key, event in state.intents.items()
+    ):
+        raise RestoreConflictError("restore_journal_mismatch")
+    return state
+
+
+def _journal_intent_matches(event: dict[str, object], blob: _StagedBlob) -> bool:
+    generation = event.get("generation")
+    return isinstance(generation, int) and event == {
+        "event": "intent",
+        "key": blob.key,
+        "size": blob.size,
+        "sha256": blob.sha256,
+        "namespace": blob.namespace,
+        "generation": generation,
+    }
+
+
+def _journal_generation(event: dict[str, object]) -> int:
+    generation = event.get("generation")
+    if not isinstance(generation, int):
+        raise RestoreConflictError("restore_journal_invalid")
+    return generation
+
+
+def _stored_blob_matches(blob: _StagedBlob) -> bool:
+    backend = get_backend()
+    try:
+        return (
+            backend.stat_size(blob.key) == blob.size
+            and _sha256_key(blob.key) == blob.sha256
+        )
+    except FileNotFoundError:
+        return False
+
+
+def _receipt_from_event(event: dict[str, object]) -> CreationReceipt:
+    key = event.get("key")
+    size = event.get("size")
+    token = event.get("token")
+    backend = event.get("backend")
+    namespace = event.get("namespace")
+    etag = event.get("etag")
+    version_id = event.get("version_id")
+    device = event.get("device")
+    inode = event.get("inode")
+    ctime_ns = event.get("ctime_ns")
+    if (
+        not isinstance(key, str)
+        or not isinstance(size, int)
+        or not isinstance(token, str)
+        or not isinstance(backend, str)
+        or not isinstance(namespace, str)
+        or (etag is not None and not isinstance(etag, str))
+        or (version_id is not None and not isinstance(version_id, str))
+        or (device is not None and not isinstance(device, int))
+        or (inode is not None and not isinstance(inode, int))
+        or (ctime_ns is not None and not isinstance(ctime_ns, int))
+    ):
+        raise RestoreConflictError("restore_journal_invalid")
+    return CreationReceipt(
+        key=key,
+        size=size,
+        token=token,
+        backend=backend,
+        namespace=namespace,
+        etag=etag,
+        version_id=version_id,
+        device=device,
+        inode=inode,
+        ctime_ns=ctime_ns,
+    )
+
+
+def _published_restore_event(item: _AppliedBlob) -> dict[str, object]:
+    receipt = item.receipt
+    return {
+        "event": "published",
+        "key": item.key,
+        "generation": item.generation,
+        "size": receipt.size,
+        "sha256": item.sha256,
+        "token": receipt.token,
+        "backend": receipt.backend,
+        "namespace": receipt.namespace,
+        "etag": receipt.etag,
+        "version_id": receipt.version_id,
+        "device": receipt.device,
+        "inode": receipt.inode,
+        "ctime_ns": receipt.ctime_ns,
+    }
+
+
+def _adopt_restored_blob(
+    blob: _StagedBlob, published: dict[str, object] | None
+) -> CreationReceipt:
+    backend = get_backend()
+    if published is not None:
+        receipt = _receipt_from_event(published)
+        if (
+            receipt.key != blob.key
+            or receipt.size != blob.size
+            or receipt.namespace != blob.namespace
+            or published.get("sha256") != blob.sha256
+        ):
+            raise RestoreConflictError("restore_journal_mismatch")
+        try:
+            if backend.creation_matches(receipt):
+                return receipt
+        except Exception as exc:
+            raise RestoreConflictError("restore_destination_changed") from exc
+    try:
+        return backend.adopt_existing(
+            blob.key,
+            expected_size=blob.size,
+            expected_sha256=blob.sha256,
+        )
+    except NotImplementedError:
+        # Guarded transports deliberately cannot promise a deletable identity.
+        # The content hash is nevertheless sufficient to resume without
+        # overwriting or deleting the existing object; ownership keeps that SHA.
+        return CreationReceipt(
+            key=blob.key,
+            size=blob.size,
+            token=blob.sha256,
+            backend=backend.backend_name,
+            namespace=blob.namespace,
+        )
+    except Exception as exc:
+        raise RestoreConflictError("restore_destination_changed") from exc
 
 
 def _validate_restore_key(key: str) -> None:
-    """Reject manifest destinations outside the active private storage roots."""
-    backend = get_backend()
-    direct = backend.direct_path(key)
-    if direct is None:
-        path = PurePosixPath(key)
-        if (
-            path.is_absolute()
-            or ".." in path.parts
-            or not key.startswith("vault-data/")
-        ):
-            raise RuntimeError("backup_restore_key_outside_storage")
-        return
-
-    target = canonical_path(direct)
-    roots = (
-        canonical_path(settings.data_dir),
-        canonical_path(settings.thumb_dir),
-    )
-    if not any(target != root and target.is_relative_to(root) for root in roots):
-        raise RuntimeError("backup_restore_key_outside_storage")
+    """Delegate destination policy to the active storage backend."""
+    try:
+        get_backend().validate_restore_key(key)
+    except Exception as exc:
+        raise RuntimeError("backup_restore_key_outside_storage") from exc
 
 
 @_exclusive_backup_operation
@@ -1122,7 +1774,8 @@ def restore_backup(backup_id: str) -> dict:
     """Restore a backup with staged blobs and SQLite's online backup API.
 
     Downloads from S3 if the backup is only in cloud storage.
-    WARNING: This replaces the current database and all files.
+    WARNING: This replaces the current database, but publishes archived files
+    only into empty destinations and refuses conflicting live storage keys.
 
     Sets a process-wide gate so background loops (GC, external scans, printer
     sync) skip their tick instead of racing the restore. Refuses with
@@ -1190,20 +1843,55 @@ def restore_backup(backup_id: str) -> dict:
                 # Detect replacement/in-place mutation while the archive was
                 # being staged, before any live blob or database mutation.
                 _require_backup_archive_owned(meta)
+                archive_ownership = _require_backup_archive_owned(
+                    BackupMeta(
+                        id=meta.id,
+                        created_at=meta.created_at,
+                        size_bytes=archive_path.stat().st_size,
+                        storage_backend=meta.storage_backend,
+                        file_count=meta.file_count,
+                        app_version=meta.app_version,
+                        path=str(archive_path),
+                        location="local",
+                    )
+                )
                 # Upgrade the private staged copy before touching live bytes.
                 # This keeps old backups restorable and guarantees the
                 # ownership ledger exists for this operation's receipts.
                 run_migrations(str(URL.create("sqlite", database=str(database_path))))
                 rollback_dir = staging_dir / "rollback"
                 rollback_dir.mkdir()
-                applied = _apply_staged_blobs(staged_blobs, rollback_dir)
+                journal_path = settings.backup_dir / f".restore-{backup_id}.journal"
+                journal_state = _prepare_restore_journal(
+                    journal_path,
+                    backup_id=backup_id,
+                    archive_sha256=_sha256_path(archive_path),
+                    blobs=staged_blobs,
+                )
+                applied, created = _apply_staged_blobs(
+                    staged_blobs,
+                    rollback_dir,
+                    journal_path=journal_path,
+                    journal_state=journal_state,
+                )
                 try:
-                    _sync_restored_ownership(database_path, applied)
+                    if any(not _stored_blob_matches(blob) for blob in staged_blobs):
+                        raise RestoreConflictError("restore_destination_changed")
+                    _sync_restored_ownership(
+                        database_path,
+                        applied,
+                        archive_ownership=archive_ownership,
+                    )
                     # Restore the DB last. Until this succeeds, rollback can put
                     # every touched blob back under the still-current database.
                     _restore_database_from_path(database_path)
+                    _append_restore_journal(
+                        journal_path,
+                        {"event": "complete", "backup_id": backup_id},
+                    )
+                    _remove_restore_journal(journal_path)
                 except Exception:
-                    _rollback_applied_blobs(applied)
+                    _rollback_applied_blobs(created, journal_path=journal_path)
                     raise
                 restored_files = len(staged_blobs)
         except Exception:

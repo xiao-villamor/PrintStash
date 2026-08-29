@@ -90,6 +90,69 @@ const PROVIDERS: StorageProvider[] = [
       },
     ],
   },
+  {
+    id: "sftp",
+    label: "SFTP",
+    category: "nas_sftp",
+    description: "Store artifacts on a NAS over SFTP.",
+    expected_tier: "guarded",
+    expected_tier_note: "SFTP cannot prove conditional ownership.",
+    consequences: [],
+    documentation_url: "/docs/storage-providers.md#sftp",
+    available: true,
+    selectable: true,
+    fields: [
+      {
+        name: "host",
+        label: "Host",
+        help: "SFTP hostname.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "port",
+        label: "Port",
+        help: "SFTP port.",
+        input_type: "number",
+        required: true,
+        secret: false,
+        default: 22,
+      },
+      {
+        name: "username",
+        label: "Username",
+        help: "SFTP account username.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "host_key",
+        label: "Host key",
+        help: "OpenSSH known-host entry.",
+        input_type: "text",
+        required: true,
+        secret: false,
+      },
+      {
+        name: "password",
+        label: "Password",
+        help: "Optional password.",
+        input_type: "password",
+        required: false,
+        secret: true,
+      },
+      {
+        name: "private_key_path",
+        label: "Private key path",
+        help: "Mounted private key path.",
+        input_type: "path",
+        required: false,
+        secret: false,
+      },
+    ],
+  },
 ];
 
 function aConfig(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
@@ -332,6 +395,35 @@ describe("StorageConfigCard", () => {
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
           storage_provider_config: { access_key: "not-a-real-key" },
+        }),
+      );
+    });
+
+    it("sends the SFTP host key the operator entered", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderCard({
+        config: aConfig({
+          storage_provider: "sftp",
+          storage_provider_config: {
+            provider: "sftp",
+            host: "nas.example.test",
+            port: 22,
+            username: "printstash",
+          },
+        }),
+      });
+      const hostKey = await screen.findByLabelText("Host key");
+      await user.type(hostKey, "nas.example.test ssh-ed25519 AAAA");
+
+      await user.click(screen.getByRole("button", { name: /Save configuration/ }));
+
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
+          storage_provider: "sftp",
+          storage_provider_config: {
+            provider: "sftp",
+            host_key: "nas.example.test ssh-ed25519 AAAA",
+          },
         }),
       );
     });

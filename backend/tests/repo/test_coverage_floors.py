@@ -64,7 +64,6 @@ PINNED_BELOW_FLOOR = {
     "app/services/capture_provider_connections.py": 86.5,
     "app/services/ws_tickets.py": 87.0,
     "app/services/library_watcher.py": 87.5,
-    "app/services/backup.py": 88.5,
     "app/schemas/provenance.py": 89.0,
     "app/services/importer.py": 89.5,
 }
@@ -76,7 +75,7 @@ PIN_SLACK = 3.0
 
 # Two-sided, the same shape as the other ratchets in this directory: the list may
 # not grow, and when it shrinks this has to come down with it.
-MAX_PINNED = 12
+MAX_PINNED = 11
 
 
 def _report() -> dict:

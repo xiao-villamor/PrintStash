@@ -23,7 +23,7 @@ test.describe("storage provider setup", () => {
 
     await page.getByRole("button", { name: /Nextcloud and WebDAV/ }).click();
     await page.getByRole("button", { name: /^WebDAV/ }).click();
-    await expect(page.getByText("Expected: unguarded")).toBeVisible();
+    await expect(page.getByText("Expected: Guarded")).toBeVisible();
     await page.getByLabel("Server URL").fill(`http://127.0.0.1:${webdavPort}`);
     await page.getByLabel("Username").fill("webdav-user");
     await page.getByLabel("Password").fill("webdav-password");
@@ -46,11 +46,11 @@ test.describe("storage provider setup", () => {
           return null;
         }
       })
-      .toEqual({ provider: "webdav", tier: "unguarded" });
+      .toEqual({ provider: "webdav", tier: "guarded" });
 
     await page.goto("/settings?section=storage");
     await expect(page.getByRole("heading", { name: "Storage configuration" })).toBeVisible();
-    await expect(page.getByText("Active: unguarded")).toBeVisible();
+    await expect(page.getByText("Active: Guarded")).toBeVisible();
     await expect(page.getByPlaceholder("Stored — leave blank to keep")).toBeVisible();
   });
 });

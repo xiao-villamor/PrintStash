@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import SystemConfig, User
 from app.services.storage_providers import (
+    SFTPProviderConfig,
     StorageProviderConfig,
     merge_provider_secrets,
     parse_provider_config,
@@ -245,9 +246,10 @@ def resolve_requested_storage_provider(
     provider: str,
     raw_config: dict[str, Any],
 ) -> StorageProviderConfig:
+    prior_config = _json_object(config.storage_provider_config_json)
     prior_secrets = _json_object(config.storage_provider_secret_json)
     if config.storage_provider == provider:
-        merged = {**prior_secrets, **raw_config}
+        merged = {**prior_config, **prior_secrets, **raw_config}
         if provider == "sftp":
             if raw_config.get("password"):
                 merged.pop("private_key_path", None)
@@ -260,8 +262,31 @@ def resolve_requested_storage_provider(
 
 
 def storage_provider_signature(config: StorageProviderConfig) -> tuple[object, ...]:
+    # Host-key and authentication rotation must not look like a namespace
+    # migration. Legacy SFTP rows may lack a host key, so build this identity
+    # without crossing the stricter activation boundary in ``resolve_transport``.
+    if isinstance(config, SFTPProviderConfig):
+        return (
+            "sftp",
+            config.provider,
+            f"sftp/{config.root}",
+            config.host,
+            config.port,
+            config.username,
+        )
     spec = resolve_transport(config)
-    secret_names = {"access_key", "secret_key", "password", "passphrase"}
+    namespace_options = {
+        "bucket",
+        "data_dir",
+        "endpoint_url",
+        "host",
+        "path_style",
+        "port",
+        "region",
+        "root",
+        "thumb_dir",
+        "username",
+    }
     return (
         spec.kind.value,
         spec.provider,
@@ -270,9 +295,71 @@ def storage_provider_signature(config: StorageProviderConfig) -> tuple[object, .
             sorted(
                 (key, str(value))
                 for key, value in spec.options.items()
-                if key not in secret_names
+                if key in namespace_options
             )
         ),
+    )
+
+
+def storage_namespace_change_requires_migration(
+    session: Session,
+    *,
+    storage_backend: str | None = None,
+    data_dir: str | None = None,
+    thumb_dir: str | None = None,
+    s3_bucket: str | None = None,
+    s3_endpoint_url: str | None = None,
+    s3_region: str | None = None,
+    storage_provider: str | None = None,
+    storage_provider_config: dict[str, Any] | None = None,
+) -> tuple[bool, StorageProviderConfig | None]:
+    """Own provider projection and migration gating for config routes."""
+    config = get_config(session)
+
+    def changed(value: str | None, current: object, *, path: bool = False) -> bool:
+        if value is None:
+            return False
+        if value == "":
+            return str(current) != ""
+        if path:
+            return Path(value).expanduser().resolve(strict=False) != Path(
+                str(current)
+            ).expanduser().resolve(strict=False)
+        return value != str(current)
+
+    changed_legacy = any(
+        (
+            changed(storage_backend, settings.storage_backend),
+            changed(data_dir, settings.data_dir, path=True),
+            changed(thumb_dir, settings.thumb_dir, path=True),
+            changed(s3_bucket, settings.s3_bucket),
+            changed(s3_endpoint_url, settings.s3_endpoint_url),
+            changed(s3_region, settings.s3_region),
+        )
+    )
+    requested = None
+    if storage_provider is not None and storage_provider_config is not None:
+        requested = resolve_requested_storage_provider(
+            config, provider=storage_provider, raw_config=storage_provider_config
+        )
+        current = _stored_provider_config(config)
+        changed_legacy = current is None or (
+            storage_provider_signature(current) != storage_provider_signature(requested)
+        )
+        # This is also the validation boundary for API updates. In particular,
+        # old SFTP rows remain readable, while saving/activating one without a
+        # pinned host key returns the actionable validation error.
+        resolve_transport(requested)
+    return changed_legacy, requested
+
+
+def has_storage_state(session: Session) -> bool:
+    """Whether changing the namespace would orphan existing domain rows."""
+    from app.db.models import Collection, Document, File, Model
+
+    return any(
+        session.exec(select(table.id).limit(1)).first() is not None
+        for table in (File, Document, Model, Collection)
     )
 
 
