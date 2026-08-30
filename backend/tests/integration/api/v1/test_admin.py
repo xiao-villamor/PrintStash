@@ -26,6 +26,7 @@ from tests.factories import (
     build_model,
     build_printer,
     build_user,
+    store_owned_bytes,
 )
 
 
@@ -483,17 +484,17 @@ class TestAdminDeleteResource:
         self, client: TestClient, db_session: Session, tmp_path
     ) -> None:
         from app.services.storage_backend import get_backend
-        from app.services.storage_ownership import record_creation
 
         admin = build_user(db_session, "admin-n", superuser=True)
         backend = get_backend()
         key = backend.blob_key("host", 1, "test-admin-hard-delete.bin")
-        record_creation(
+        store_owned_bytes(
             db_session,
-            backend.create_bytes(b"hello", key),
+            backend,
+            key,
+            b"hello",
             object_kind="artifact",
         )
-        db_session.commit()
         assert backend.exists(key)
 
         model = build_model(db_session, name="host", slug="host", hash="9" * 64)

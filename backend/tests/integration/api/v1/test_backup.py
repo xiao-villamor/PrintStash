@@ -482,7 +482,7 @@ class TestDownloadBackup:
             lambda backup_id, **_kwargs: paths[backup_id],
         )
 
-        def download(name: str) -> tuple[str | None, str, BackgroundTasks]:
+        def download(name: str) -> tuple[str | None, Path, BackgroundTasks]:
             tasks = BackgroundTasks()
             result = backup_api.download_backup(
                 tasks, name, source_ref=f"{name}-source"
@@ -496,7 +496,7 @@ class TestDownloadBackup:
             meta.path for meta in metas.values()
         }
         assert {path for _filename, path, _tasks in results} == {
-            str(path) for path in paths.values()
+            path for path in paths.values()
         }
         for _filename, _path, tasks in results:
             asyncio.run(tasks())
@@ -515,7 +515,7 @@ class TestDownloadBackup:
     def test_surfaces_an_unexpected_failure(
         self,
         client: TestClient,
-        backup_env: BackupEnv,
+        a_backup: backup.BackupMeta,
         admin_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -525,7 +525,7 @@ class TestDownloadBackup:
         monkeypatch.setattr(backup, "get_backup_archive_path", unreadable)
 
         response = client.get(
-            "/api/v1/backups/whatever/download", headers=admin_headers
+            f"/api/v1/backups/{a_backup.id}/download", headers=admin_headers
         )
 
         assert response.status_code == 500, response.text
@@ -550,6 +550,7 @@ class TestDownloadBackup:
             observed["source_ref"] = source_ref
             return Path(a_backup.path)
 
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: a_backup)
         monkeypatch.setattr(backup, "get_backup_archive_path", path)
         response = client.get(
             f"/api/v1/backups/{a_backup.id}/download",
@@ -563,6 +564,7 @@ class TestDownloadBackup:
     def test_maps_source_identity_conflict_to_http_conflict(
         self, client: TestClient, admin_headers, a_backup, monkeypatch
     ) -> None:
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: a_backup)
         _assert_source_identity_conflict(
             client,
             admin_headers,

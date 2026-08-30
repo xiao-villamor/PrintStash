@@ -24,7 +24,6 @@ nothing will ever clean up.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
 import pytest
 from sqlmodel import Session, select
@@ -42,15 +41,13 @@ from app.db.models import (
 )
 from app.schemas.provenance import CaptureManifestV2
 from app.services import provenance, storage_deletion, trash
-from app.services.storage_backend import StorageBackend, get_backend
-from app.services.storage_ownership import (
-    UnsafeStorageDeleteError,
-    record_creation,
-)
+from app.services.storage_backend import get_backend
+from app.services.storage_ownership import UnsafeStorageDeleteError
 from tests.factories import (
     build_file,
     build_model,
     build_user,
+    store_owned_bytes,
 )
 
 
@@ -249,14 +246,19 @@ class TestUpsertCapture:
 
         backend = get_backend()
         key = backend.source_cover_key(legacy.source.id)
-        receipt = backend.create_bytes(b"legacy-cover", key)
+        receipt = store_owned_bytes(
+            db_session,
+            backend,
+            key,
+            b"legacy-cover",
+            object_kind="model_source_cover",
+        )
         obsolete_cover = ModelSourceCover(
             provenance_source_id=legacy.source.id,
             storage_key=key,
             size_bytes=receipt.size,
         )
         db_session.add(obsolete_cover)
-        record_creation(db_session, receipt, object_kind="model_source_cover")
         db_session.commit()
 
         merged = provenance.upsert_capture(
@@ -287,8 +289,20 @@ class TestUpsertCapture:
         backend = get_backend()
         target_key = backend.source_cover_key(stable.source.id)
         obsolete_key = backend.source_cover_key(legacy.source.id)
-        target_receipt = backend.create_bytes(b"stable-cover", target_key)
-        obsolete_receipt = backend.create_bytes(b"legacy-cover", obsolete_key)
+        target_receipt = store_owned_bytes(
+            db_session,
+            backend,
+            target_key,
+            b"stable-cover",
+            object_kind="model_source_cover",
+        )
+        obsolete_receipt = store_owned_bytes(
+            db_session,
+            backend,
+            obsolete_key,
+            b"legacy-cover",
+            object_kind="model_source_cover",
+        )
         target_cover = ModelSourceCover(
             provenance_source_id=stable.source.id,
             storage_key=target_key,
@@ -300,8 +314,6 @@ class TestUpsertCapture:
             size_bytes=obsolete_receipt.size,
         )
         db_session.add_all([target_cover, obsolete_cover])
-        record_creation(db_session, target_receipt, object_kind="model_source_cover")
-        record_creation(db_session, obsolete_receipt, object_kind="model_source_cover")
         db_session.commit()
 
         provenance.upsert_capture(
@@ -425,8 +437,20 @@ class TestUpsertCapture:
         backend = get_backend()
         target_key = backend.source_cover_key(stable.source.id)
         obsolete_key = backend.source_cover_key(legacy.source.id)
-        target_receipt = backend.create_bytes(b"stable-cover", target_key)
-        obsolete_receipt = backend.create_bytes(b"legacy-cover", obsolete_key)
+        target_receipt = store_owned_bytes(
+            db_session,
+            backend,
+            target_key,
+            b"stable-cover",
+            object_kind="model_source_cover",
+        )
+        obsolete_receipt = store_owned_bytes(
+            db_session,
+            backend,
+            obsolete_key,
+            b"legacy-cover",
+            object_kind="model_source_cover",
+        )
         target_cover = ModelSourceCover(
             provenance_source_id=stable.source.id,
             storage_key=target_key,
@@ -438,13 +462,9 @@ class TestUpsertCapture:
             size_bytes=obsolete_receipt.size,
         )
         db_session.add_all([target_cover, obsolete_cover])
-        record_creation(db_session, target_receipt, object_kind="model_source_cover")
-        record_creation(db_session, obsolete_receipt, object_kind="model_source_cover")
         db_session.commit()
 
-        unverified = MagicMock(spec=StorageBackend)
-        unverified.creation_matches.return_value = False
-        monkeypatch.setattr(provenance, "get_backend", lambda: unverified)
+        monkeypatch.setattr(backend, "creation_matches", lambda _receipt: False)
 
         with pytest.raises(
             UnsafeStorageDeleteError, match="storage_ownership_unverified"

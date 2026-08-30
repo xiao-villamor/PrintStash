@@ -29,7 +29,12 @@ from app.db.models import CollectionRole, Document, User
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
 from tests._env import use_local_storage
-from tests.factories import bearer, build_user, grant_collection_role
+from tests.factories import (
+    bearer,
+    build_user,
+    grant_collection_role,
+    store_owned_bytes,
+)
 
 _PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
@@ -728,14 +733,17 @@ class TestPermanentlyDeleteDocument:
         admin_headers: dict[str, str],
         uploaded_pdf,
     ) -> None:
-        from app.services.storage_ownership import record_creation
-
         doc = uploaded_pdf()
         backend = get_backend()
         image_name = f"{'a' * 64}.png"
         image_key = backend.document_image_key(doc["id"], image_name)
-        receipt = backend.create_bytes(_PNG, image_key)
-        record_creation(db_session, receipt, object_kind="document_image")
+        store_owned_bytes(
+            db_session,
+            backend,
+            image_key,
+            _PNG,
+            object_kind="document_image",
+        )
         row = db_session.get(Document, doc["id"])
         row.body = f"![image](/api/v1/documents/{doc['id']}/images/{image_name})"
         db_session.add(row)

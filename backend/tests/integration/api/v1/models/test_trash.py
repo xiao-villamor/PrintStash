@@ -28,7 +28,7 @@ from app.services.storage_backend import (
     get_backend,
 )
 from app.services.storage_ownership import UnsafeStorageDeleteError
-from tests.factories import build_model, build_stored_file
+from tests.factories import build_model, build_stored_file, store_owned_bytes
 
 
 def _make_guarded(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,7 +352,6 @@ class TestPurgeExpiredTrash:
         from app.core.config import _overlay
         from app.db.models import FileType
         from app.services.storage_backend import get_backend
-        from app.services.storage_ownership import record_creation
         from tests._env import use_local_storage
         from tests.factories import build_file
 
@@ -372,9 +371,11 @@ class TestPurgeExpiredTrash:
                 size_bytes=3,
                 sha256=chr(ord("a") + index) * 64,
             )
-            record_creation(
+            store_owned_bytes(
                 db_session,
-                get_backend().create_bytes(name.encode(), path),
+                get_backend(),
+                path,
+                name.encode(),
                 object_kind="artifact",
             )
             paths[name] = Path(path)

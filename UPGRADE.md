@@ -28,6 +28,41 @@ previous application image until validation is complete.
   download, trash/restore/permanent-purge behavior, and backup
   create/verify/download/restore against the configured storage provider.
 
+### Existing storage: safe upgrade path
+
+The storage providers available before 0.13.0 remain supported: local filesystem
+and generic S3-compatible storage. Upgrading does not require copying, renaming,
+or re-uploading managed objects. Do not switch provider presets during the first
+upgrade boot; first prove the existing configuration and bytes in place.
+
+1. Stop all writers and preserve the database, secrets key, and storage bytes as
+   one rollback set.
+2. Keep the previous storage configuration unchanged:
+   - **Local:** retain the exact `VAULT_DATA_DIR` and `VAULT_THUMB_DIR` mounts.
+     An empty replacement mount is not the old storage, even when it uses the
+     same container path.
+   - **S3-compatible:** retain `VAULT_STORAGE_BACKEND=s3` and the existing
+     `VAULT_S3_BUCKET`, endpoint, region, access key, and secret key. Leave the
+     new typed-provider fields unset for this first boot. The historical
+     `vault-data/` object prefix is pinned during the database upgrade; existing
+     keys are neither moved nor rewritten.
+3. Start 0.13.0 normally. If Settings reports read-only recovery, stop there:
+   restore the exact missing mount, bucket, endpoint, or credentials. Do not
+   point PrintStash at an empty location to clear the warning. When the original
+   local root is present but has no identity marker, use the explicit enrollment
+   action in Settings after verifying the displayed path and evidence.
+4. Download at least one pre-upgrade Artifact and thumbnail, then upload and
+   download one new Artifact. Confirm that both old and new content are present
+   before enabling scheduled writers or destructive maintenance.
+5. Moving an existing S3 installation to the typed `s3` provider is optional.
+   Do it only after the compatibility boot is validated, using the same bucket,
+   endpoint, credentials, and root `vault-data`. This changes configuration,
+   not object locations; no storage copy should be performed.
+
+Cloudflare R2, Backblaze B2, Wasabi, self-hosted S3, Nextcloud, WebDAV, and SFTP
+presets are new in 0.13.0. An existing generic S3 installation does not need to
+select a vendor preset merely because its bucket is hosted by that vendor.
+
 ## 0.12.1 notes
 
 This patch has no database migrations or configuration changes. API images now

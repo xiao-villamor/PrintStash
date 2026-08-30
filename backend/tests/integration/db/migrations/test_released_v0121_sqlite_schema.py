@@ -3,25 +3,112 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Iterator
 
+import boto3
 import pytest
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from alembic import command
 from app.core.config import _overlay, settings
 from app.db import migrate as migrate_mod
+from app.db.models import File
 from app.services import runtime_config
 from app.services.storage_backend import S3StorageBackend
+from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
 from tests.factories.migration_rows import (
     RELEASED_V0121_REVISION,
     create_released_v0121_sqlite_schema,
     seed_released_v0121_rows,
     seed_schema_row,
 )
+
+
+@dataclass(frozen=True)
+class _MigratedS3Installation:
+    engine: Engine
+    backend: S3StorageBackend
+    released_key: str
+    released_payload: bytes
+
+
+@pytest.fixture
+def released_v0121_s3(
+    tmp_path: Path,
+) -> Iterator[_MigratedS3Installation]:
+    """A released SQLite database pointing at bytes in the real S3 test store."""
+    endpoint = s3_endpoint()
+    bucket = f"printstash-upgrade-{uuid.uuid4().hex[:12]}"
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        region_name="us-east-1",
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+    )
+    client.create_bucket(Bucket=bucket)
+    released_key = "vault-data/files/released-model/v1/released-model.stl"
+    released_payload = b"released-v0.12.1-object-bytes"
+    client.put_object(Bucket=bucket, Key=released_key, Body=released_payload)
+
+    url = f"sqlite:///{tmp_path / 'released-v0.12.1-real-s3.sqlite'}"
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            create_released_v0121_sqlite_schema(connection)
+            seed_released_v0121_rows(connection)
+            seed_schema_row(
+                connection,
+                "system_config",
+                id=1,
+                storage_backend="s3",
+                s3_bucket=bucket,
+                s3_endpoint_url=endpoint,
+                s3_region="us-east-1",
+                s3_access_key=S3_ACCESS_KEY,
+                s3_secret_key=S3_SECRET_KEY,
+            )
+            connection.execute(
+                text(
+                    "UPDATE files SET path = :path, size_bytes = :size_bytes, "
+                    "sha256 = :sha256 WHERE id = 1"
+                ),
+                {
+                    "path": released_key,
+                    "size_bytes": len(released_payload),
+                    "sha256": hashlib.sha256(released_payload).hexdigest(),
+                },
+            )
+
+        command.stamp(
+            migrate_mod._alembic_config(url),  # noqa: SLF001
+            RELEASED_V0121_REVISION,
+        )
+        command.upgrade(migrate_mod._alembic_config(url), "head")  # noqa: SLF001
+        with Session(engine) as session:
+            runtime_config.apply_overlay(session)
+        backend = S3StorageBackend()
+
+        yield _MigratedS3Installation(
+            engine=engine,
+            backend=backend,
+            released_key=released_key,
+            released_payload=released_payload,
+        )
+    finally:
+        _overlay.clear()
+        engine.dispose()
+        listed = client.list_objects_v2(Bucket=bucket).get("Contents", [])
+        for item in listed:
+            client.delete_object(Bucket=bucket, Key=item["Key"])
+        client.delete_bucket(Bucket=bucket)
 
 
 def _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
@@ -263,3 +350,34 @@ class TestReleasedV0121Upgrade:
             ]
         finally:
             engine.dispose()
+
+
+@pytest.mark.s3
+class TestReleasedV0121S3Upgrade:
+    def test_reads_a_released_artifact_through_the_migrated_backend(
+        self, released_v0121_s3: _MigratedS3Installation
+    ) -> None:
+        with Session(released_v0121_s3.engine) as session:
+            artifact = session.get(File, 1)
+            assert artifact is not None
+            assert artifact.path == released_v0121_s3.released_key
+
+        assert (
+            released_v0121_s3.backend.read_bytes(artifact.path)
+            == released_v0121_s3.released_payload
+        )
+
+    def test_publishes_a_post_upgrade_object_beside_the_released_one(
+        self, released_v0121_s3: _MigratedS3Installation
+    ) -> None:
+        new_key = released_v0121_s3.backend.blob_key("post-upgrade", 1, "new-model.stl")
+        released_v0121_s3.backend.create_bytes(b"post-upgrade-bytes", new_key)
+
+        assert released_v0121_s3.backend.read_bytes(new_key) == b"post-upgrade-bytes"
+        assert (
+            released_v0121_s3.backend.read_bytes(released_v0121_s3.released_key)
+            == released_v0121_s3.released_payload
+        )
+        assert {released_v0121_s3.released_key, new_key} <= set(
+            released_v0121_s3.backend.list_keys()
+        )
