@@ -13,7 +13,7 @@ reach — another fixture, a `conftest.py`, a test with its own engine — and w
 in one is documented in `tests/factories/__init__.py`.
 
 Adding a table to the app means adding its builder in the same PR: see
-`.agents/skills/create-tests/references/fixtures.md`.
+`.agents/skills/printstash/references/tests/fixtures.md`.
 """
 
 from __future__ import annotations

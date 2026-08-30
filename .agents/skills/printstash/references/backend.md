@@ -71,7 +71,7 @@ Files in `backend/alembic/versions/`, named `<rev>_snake_description.py`
 ### Test layers
 
 The directory is the tier, and `backend/tests/` mirrors `app/`. Full conventions
-live in the `create-tests` skill; the homes are:
+live in the [test-design reference](testing.md); the homes are:
 
 - **Unit** — `backend/tests/unit/<app path>/test_<module>.py`. Pure logic. A
   conftest guard fails any test here that asks for `db_session`/`client` or opens
@@ -147,7 +147,7 @@ went in, neither of them a regression — branches now count (95.07% by lines,
 93.35% with branches), and the frontend include widened from `src/lib/**` to all
 of `src/` (86% → 36%), which had also never run in CI at all.
 
-The create-tests skill carries the workflow: how to get a report, how to turn a
+[Test design](testing.md) carries the workflow: how to get a report, how to turn a
 partial branch into a matrix row, and why the report is the audit pass rather
 than the source of the matrix.
 

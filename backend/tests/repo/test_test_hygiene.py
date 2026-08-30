@@ -78,7 +78,7 @@ BUILDER_NAME = re.compile(
 #
 # Migrating one is usually mechanical: delete the local builder, call the
 # factory, and make any state the local default was hiding explicit at the call
-# site. See .agents/skills/create-tests/references/fixtures.md
+# site. See .agents/skills/printstash/references/tests/fixtures.md
 # ---------------------------------------------------------------------------
 PENDING_DUPLICATE_BUILDERS = {
     "_job",
@@ -268,7 +268,7 @@ class TestSuiteHygiene:
             f"{_relative(module)} defines {len(offenders)} test(s) at module "
             f"level: {', '.join(offenders[:5])}. Move each into the "
             "`class Test<Unit>` for the production unit it exercises, in that "
-            "module's own order. See .agents/skills/create-tests/SKILL.md"
+            "module's own order. See .agents/skills/printstash/references/testing.md"
         )
 
     @pytest.mark.parametrize("module", _all_test_modules(), ids=_relative)
@@ -284,7 +284,7 @@ class TestSuiteHygiene:
         assert header, (
             f"{_relative(module)} has no module docstring. Open it with a few lines "
             "on what this file defends and why it matters when it goes red — see "
-            "Inside a test file in .agents/skills/create-tests/SKILL.md"
+            "Inside a test file in .agents/skills/printstash/references/testing.md"
         )
 
     @pytest.mark.parametrize("module", _mirror_checked_modules(), ids=_relative)
@@ -308,7 +308,7 @@ class TestSuiteHygiene:
             "module it defends, or move it into a folder named for that module "
             "when one file would be too long. If it defends the repository rather "
             "than a module, it belongs in tests/repo/ — see "
-            "Where tests live in .agents/skills/create-tests/SKILL.md"
+            "Where tests live in .agents/skills/printstash/references/testing.md"
         )
 
     def test_the_unmirrored_list_has_no_stale_entries(self) -> None:
@@ -390,7 +390,7 @@ class TestSuiteHygiene:
             "rather than `deleted_at`, `provider=` rather than four credential "
             "fields — and a row that gets one wrong is invisible to the code under "
             "test rather than an error. See "
-            ".agents/skills/create-tests/references/fixtures.md"
+            ".agents/skills/printstash/references/tests/fixtures.md"
         )
 
     def test_no_new_duplicate_row_builder_names_appear(self) -> None:
@@ -417,7 +417,7 @@ class TestSuiteHygiene:
         assert not duplicated, (
             f"new duplicate row-builder name(s): {sorted(duplicated)}. Promote the "
             "builder to tests/factories/ rather than defining it a second time — see "
-            ".agents/skills/create-tests/references/fixtures.md"
+            ".agents/skills/printstash/references/tests/fixtures.md"
         )
 
     def test_the_duplicate_builder_list_has_no_stale_entries(self) -> None:

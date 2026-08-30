@@ -49,7 +49,7 @@ model came from), `capture` (the inbox pipeline), `ops` (everything operational)
 `scenarios` holds multi-row shapes promoted once three files needed them; read
 its docstring before adding one.
 
-Full guidance: `.agents/skills/create-tests/references/fixtures.md`.
+Full guidance: `.agents/skills/printstash/references/tests/fixtures.md`.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # Playwright tests
 
-Three suites with different jobs. Policy is in [SKILL.md](../SKILL.md); this is
+Three suites with different jobs. Policy is in [testing.md](../testing.md); this is
 the runtime-specific how.
 
 | Suite | Dir | Config | Backend | Job |

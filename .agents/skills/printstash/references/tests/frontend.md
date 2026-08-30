@@ -2,7 +2,7 @@
 
 Conventions for `frontend/src/**/__tests__/**` and
 `frontend/packages/{ui,domain}/src/__tests__/**`. Policy is in
-[SKILL.md](../SKILL.md); this is the runtime-specific how.
+[testing.md](../testing.md); this is the runtime-specific how.
 
 ## Where a test lives
 

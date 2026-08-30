@@ -2,7 +2,7 @@
 
 Conventions for `backend/tests/**` and `backend/packages/printstash-core/tests/**`.
 The policy (matrix, tiers, file anatomy, parametrization rules) is in
-[SKILL.md](../SKILL.md); this file is the runtime-specific how.
+[testing.md](../testing.md); this file is the runtime-specific how.
 
 ## Layout
 
@@ -60,7 +60,7 @@ backend/tests/
 
 ## File anatomy (pytest specifics)
 
-Follow the anatomy in SKILL.md. In pytest that means:
+Follow the anatomy in [testing.md](../testing.md). In pytest that means:
 
 ```python
 """``persist_artifact`` writes one artifact, or nothing at all.

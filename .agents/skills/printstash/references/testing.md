@@ -1,23 +1,18 @@
----
-name: create-tests
-description: Use when touching any test — creating a test file, adding a case to an existing file, editing or deleting a test, auditing whether a module is covered, or choosing which tier (unit / integration / contract / e2e / Playwright) a scenario belongs to. Carries the mandatory coverage matrix, the tier policy, the mirrored test layout, file anatomy and parametrization rules, the fixture/factory system every arrange step uses, and the per-runtime conventions for pytest, vitest, and Playwright in this repo. Also applies when a production entity changes, since its factory changes with it. Not for running the suites or closing a coverage gate — that is `run-tests`.
----
-
-# Create Tests
+# Test design
 
 Any time you touch a test — a new file, a new case, an edited assertion, a
-deletion — this skill applies. A one-line assertion change counts; there is no
+deletion — this reference applies. A one-line assertion change counts; there is no
 "small tweak" carve-out.
 
 Read this file in full, then the one reference for the runtime you're writing in:
 
 | Writing in | Read |
 | --- | --- |
-| `backend/tests/**` (pytest) or `backend/packages/printstash-core/tests/**` | [references/backend.md](references/backend.md) |
-| `frontend/src/**/__tests__/**` or `frontend/packages/*/src/__tests__/**` (vitest) | [references/frontend.md](references/frontend.md) |
-| `frontend/tests/e2e-real/**` or `frontend/tests/e2e/**` (Playwright) | [references/playwright.md](references/playwright.md) |
+| `backend/tests/**` (pytest) or `backend/packages/printstash-core/tests/**` | [tests/backend.md](tests/backend.md) |
+| `frontend/src/**/__tests__/**` or `frontend/packages/*/src/__tests__/**` (vitest) | [tests/frontend.md](tests/frontend.md) |
+| `frontend/tests/e2e-real/**` or `frontend/tests/e2e/**` (Playwright) | [tests/playwright.md](tests/playwright.md) |
 
-Plus [references/fixtures.md](references/fixtures.md) whenever you write an
+Plus [tests/fixtures.md](tests/fixtures.md) whenever you write an
 **arrange step**, add or change a **builder**, or change a **production entity** —
 an entity change is incomplete until its factory matches, in the same PR.
 
@@ -29,7 +24,7 @@ most common way this suite has gone wrong: the same helper reappeared 347 times,
 Worse, a hand-built row that encodes state wrongly (`deleted_at` unset, a
 provider's credentials missing, a manifest that matches no source) **inserts
 cleanly and is then invisible to the code under test** — the test passes while
-asserting against a path it never reached. `references/fixtures.md` has the rules;
+asserting against a path it never reached. `tests/fixtures.md` has the rules;
 `tests/factories/__init__.py` has the inventory.
 
 ## How much to test
@@ -559,7 +554,7 @@ Every test file, in every runtime, has the same anatomy, top to bottom:
    inline in its test, where the reader can see it next to the assertion.
    Anything three files share moves to the nearest `conftest.py`, and anything
    that builds a database row belongs in `tests/factories/` instead — see
-   [references/fixtures.md](references/fixtures.md).
+   [tests/fixtures.md](tests/fixtures.md).
 4. **One group per production unit, in the production module's order** —
    `class Test<Function|Endpoint|Method>` in pytest, `describe("<unit>")` in
    vitest. Never an ad-hoc group (`TestMisc`, `describe("extra cases")`, or a
@@ -707,7 +702,7 @@ channel.
   test. Builders create-or-fail and generate their own unique columns — never
   create-or-reuse, which hides collisions, and never a hard-coded slug or sha,
   which collides on the second row. Full rules and the maintenance contract:
-  [references/fixtures.md](references/fixtures.md).
+  [tests/fixtures.md](tests/fixtures.md).
 - **Real slicer files** live in `backend/tests/fixtures/` (Orca, Prusa, Cura,
   Bambu Studio, real MK4/Ender-3 outputs). Reach for one before hand-writing
   G-code; hand-write only when the header under test must be minimal.

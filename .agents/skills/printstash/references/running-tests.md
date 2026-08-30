@@ -1,15 +1,10 @@
----
-name: run-tests
-description: Use when running the suites and closing what they report — a failing test to diagnose, a coverage floor to clear or raise, a red gate to get green, a merge that left tests pointing at renamed seams, or a session spent driving a suite's coverage up. Carries the lane order that fails cheapest first, the two-sided ratchet procedure, the recurring failure→cause table (ambiguous roles across breakpoints, `accept` swallowing uploads, FormData bodies, module-level caches, jsdom gaps), and how to say honestly that code is unreachable in the harness. For deciding what to test and writing it, use `create-tests` — this skill starts once tests exist.
----
+# Running tests
 
-# Run Tests
-
-`create-tests` decides *what* to test and writes it. This skill is the other
+[Test design](testing.md) decides *what* to test and writes it. This reference is the other
 half: running the suites, reading what they report, and closing the loop until
 every gate is green for a reason you can state.
 
-Load `create-tests` too whenever the answer turns out to be "write another
+Load [test design](testing.md) too whenever the answer turns out to be "write another
 test" — which it usually does. The two are one workflow; the split is only that
 this file knows about failure modes, floors and lanes, and never about matrices
 or tiers.
@@ -121,7 +116,7 @@ The report tells you *where*, never *what*:
   (`96->105`) — an arrow is a path taken, not a line missed, and needs a test
   that makes the *other* branch happen.
 
-Then hand those line ranges to `create-tests`: the ranges say which code never
+Then hand those line ranges to [test design](testing.md): the ranges say which code never
 ran, and the matrix says which behaviour was never asserted. **They are not the
 same question.** Coverage is produced by running the implementation, so it can
 find matrix rows you forgot and can never supply them. Playwright is invisible

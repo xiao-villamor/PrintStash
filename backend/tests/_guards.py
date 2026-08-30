@@ -1,9 +1,10 @@
 """Guards that keep a tier honest about what it touches.
 
-The tier of a test is its directory (see ``create-tests``), and a directory only means
-something if it is enforced. These two guards are the enforcement: a test that reaches
-for the database from ``unit/``, or opens a real connection from ``unit/`` or
-``integration/``, fails on the spot with a message that names the tier it belongs in.
+The tier of a test is its directory (see the PrintStash test-design reference), and a
+directory only means something if it is enforced. These two guards are the enforcement:
+a test that reaches for the database from ``unit/``, or opens a real connection from
+``unit/`` or ``integration/``, fails on the spot with a message that names the tier it
+belongs in.
 """
 
 from __future__ import annotations

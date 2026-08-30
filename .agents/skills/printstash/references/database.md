@@ -1,6 +1,6 @@
 # Database
 
-Invoke before any schema change, migration, or query that touches soft-deleted rows.
+Read before any schema change, migration, or query that touches soft-deleted rows.
 SQLite is the default installation and PostgreSQL is optional, so every rule here
 has to hold on both.
 

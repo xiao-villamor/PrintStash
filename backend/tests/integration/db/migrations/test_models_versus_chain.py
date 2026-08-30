@@ -242,7 +242,7 @@ class TestAutogenerateIsEmpty:
     schemas ourselves, ask the tool that writes migrations whether it would write one.
     On a converged database it produces `pass`.
 
-    This is also the reassuring half of the workflow the database skill describes.
+    This is also the reassuring half of the database workflow reference.
     "Read the generated migration and delete what is not your change" sounds alarming
     until you know that a synchronised repo generates *only* your change — the 890
     lines and 212 operations that had to be trimmed once were the accumulated drift of

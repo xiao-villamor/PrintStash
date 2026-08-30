@@ -59,7 +59,8 @@ nothing, and containers start only on the first test that needs one.
 
 ## Before you add one
 
-Read `.agents/skills/create-tests/SKILL.md`. The coverage matrix it prescribes is the
-definition of done, and it is derived from requirements — the issue, `CONTEXT.md`,
+Read `.agents/skills/printstash/references/testing.md`. The coverage matrix it
+prescribes is the definition of done, and it is derived from requirements — the issue,
+`CONTEXT.md`,
 `docs/provider-support.md`, the router contract — never from reading the implementation,
 because matrixing what the code happens to do reproduces its bugs as "expected".
