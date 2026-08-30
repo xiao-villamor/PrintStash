@@ -17,12 +17,13 @@ import {
   getLatestVaultAudit,
   getVaultAudit,
   ignoreAuditFinding,
-  listBackups,
+  listBackupSources,
   repairAuditFinding,
   startVaultAudit,
   verifyBackup,
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
+import { useI18n } from "@/lib/i18n";
 import type { BackupMeta } from "@/lib/api";
 import type { BackupVerification, VaultAuditFinding, VaultAuditRun } from "@/types";
 
@@ -55,7 +56,19 @@ function isActive(run: VaultAuditRun | null): boolean {
   return run?.state === "pending" || run?.state === "running";
 }
 
+function sourceKey(item: BackupMeta): string {
+  return (
+    item.source_ref ??
+    `${item.location}:${item.namespace ?? ""}:${item.key ?? ""}:${item.backup_id}`
+  );
+}
+
+function shortOpaque(value: string | null | undefined): string {
+  return value ? `${value.slice(0, 16)}…` : "unavailable";
+}
+
 export function MaintenancePanel() {
+  const { t } = useI18n();
   const [run, setRun] = useState<VaultAuditRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [severity, setSeverity] = useState<"all" | "critical" | "warning" | "info">("all");
@@ -73,7 +86,7 @@ export function MaintenancePanel() {
 
   useEffect(() => {
     refresh();
-    listBackups()
+    listBackupSources()
       .then(setBackups)
       .catch(() => setBackups([]));
   }, [refresh]);
@@ -128,10 +141,15 @@ export function MaintenancePanel() {
   }
 
   async function checkBackup(item: BackupMeta) {
-    setVerifying(item.backup_id);
+    const sourceRef = sourceKey(item);
+    if (!item.source_ref) {
+      toast.error(t("settings.backupSourceUnavailable"));
+      return;
+    }
+    setVerifying(sourceRef);
     try {
-      const result = await verifyBackup(item.backup_id);
-      setVerifications((current) => ({ ...current, [item.backup_id]: result }));
+      const result = await verifyBackup(item.backup_id, item.source_ref);
+      setVerifications((current) => ({ ...current, [sourceRef]: result }));
     } catch (error) {
       toast.error(error);
     } finally {
@@ -293,10 +311,11 @@ export function MaintenancePanel() {
             <p className="text-sm text-muted-foreground">No backups available.</p>
           ) : (
             backups.map((item) => {
-              const result = verifications[item.backup_id];
+              const sourceRef = sourceKey(item);
+              const result = verifications[sourceRef];
               return (
                 <div
-                  key={item.backup_id}
+                  key={sourceRef}
                   className="flex items-center gap-3 rounded-md border border-border p-3"
                 >
                   {result?.valid ? (
@@ -306,6 +325,33 @@ export function MaintenancePanel() {
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{item.backup_id}</p>
+                    <p className="truncate font-mono text-2xs text-muted-foreground">
+                      {t("settings.backupSourceLocator", {
+                        source: item.source_ref ?? t("settings.backupSourceUnavailable"),
+                      })}
+                    </p>
+                    <p className="truncate font-mono text-2xs text-muted-foreground">
+                      {t("settings.backupProviderRef", {
+                        provider: shortOpaque(item.provider_ref),
+                      })}
+                    </p>
+                    {item.key && (
+                      <p className="truncate font-mono text-2xs text-muted-foreground">
+                        {t("settings.backupExactKey", { key: item.key })}
+                      </p>
+                    )}
+                    {item.prefix && (
+                      <p className="truncate font-mono text-2xs text-muted-foreground">
+                        {t("settings.backupPrefix", { prefix: item.prefix })}
+                      </p>
+                    )}
+                    {item.archive_sha256 && (
+                      <p className="truncate font-mono text-2xs text-muted-foreground">
+                        {t("settings.backupSha256", {
+                          digest: shortOpaque(item.archive_sha256),
+                        })}
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {result
                         ? result.valid
@@ -317,7 +363,9 @@ export function MaintenancePanel() {
                   <Button
                     size="xs"
                     variant="outline"
-                    loading={verifying === item.backup_id}
+                    loading={verifying === sourceRef}
+                    disabled={!item.source_ref}
+                    title={!item.source_ref ? t("settings.backupSourceUnavailable") : undefined}
                     onClick={() => void checkBackup(item)}
                   >
                     <RefreshCw className="h-3.5 w-3.5" /> Verify

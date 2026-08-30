@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterator
 
 from sqlmodel import Session, select
@@ -21,6 +21,7 @@ from app.services.storage_backend import (
     StorageObjectInfo,
 )
 from app.services.storage_ownership import (
+    provider_ref_for_backend,
     publish_bytes,
     record_creation,
     replace_owned_bytes,
@@ -34,6 +35,34 @@ class SourceCoverWrite:
     creation_receipt: CreationReceipt | None = None
     replacement_receipt: CreationReceipt | None = None
     replaced_bytes: bytes | None = None
+
+
+class _ReceiptBindingError(RuntimeError):
+    """Persisted receipt cannot be safely used by the active backend."""
+
+
+def _bind_receipt(backend: StorageBackend, receipt: CreationReceipt) -> CreationReceipt:
+    """Attach the active destination identity to a newly returned receipt."""
+    expected_ref = provider_ref_for_backend(backend, namespace=receipt.namespace)
+    if receipt.provider_ref not in (None, expected_ref):
+        raise _ReceiptBindingError("storage_receipt_provider_identity_mismatch")
+    return replace(receipt, provider_ref=receipt.provider_ref or expected_ref)
+
+
+def _backend_scope(backend: StorageBackend, key: str) -> tuple[str, str, str]:
+    """Resolve a backend scope while retaining compatibility with test fakes."""
+    try:
+        name = str(backend.backend_name)
+    except AttributeError:
+        name = "unknown"
+    try:
+        namespace = str(backend.namespace_for(key))
+    except (AttributeError, NotImplementedError, TypeError, ValueError):
+        try:
+            namespace = str(backend.namespace)
+        except AttributeError:
+            namespace = "unknown"
+    return name, namespace, provider_ref_for_backend(backend, namespace=namespace)
 
 
 @contextmanager
@@ -54,13 +83,26 @@ def _intent_session(caller: Session) -> Iterator[Session]:
 def _delete_durable_cover_intent(
     caller: Session,
     *,
+    backend: StorageBackend,
     cover_id: int,
     storage_key: str,
     preserve_ownership_intent: bool = False,
 ) -> None:
     """Remove a failed new-cover intent in its own committed transaction."""
+    backend_name, namespace, provider_ref = _backend_scope(backend, storage_key)
     for instance in tuple(caller.identity_map.values()):
-        if isinstance(instance, OwnedStorageObject) and instance.key == storage_key:
+        if (
+            isinstance(instance, OwnedStorageObject)
+            and instance.key == storage_key
+            and (
+                backend_name == "unknown"
+                or (
+                    instance.backend == backend_name
+                    and instance.namespace == namespace
+                    and instance.provider_ref == provider_ref
+                )
+            )
+        ):
             caller.expunge(instance)
     with _intent_session(caller) as intent:
         cover = intent.get(ModelSourceCover, cover_id)
@@ -74,9 +116,16 @@ def _delete_durable_cover_intent(
         ).all():
             intent.delete(lease)
         if not preserve_ownership_intent:
-            for proof in intent.exec(
-                select(OwnedStorageObject).where(OwnedStorageObject.key == storage_key)
-            ).all():
+            statement = select(OwnedStorageObject).where(
+                OwnedStorageObject.key == storage_key
+            )
+            if backend_name != "unknown":
+                statement = statement.where(
+                    OwnedStorageObject.backend == backend_name,
+                    OwnedStorageObject.namespace == namespace,
+                    OwnedStorageObject.provider_ref == provider_ref,
+                )
+            for proof in intent.exec(statement).all():
                 intent.delete(proof)
         intent.commit()
 
@@ -96,7 +145,14 @@ def _finish_replacement_rollback(
         # The durable lease remains available for restart reconciliation.
         return
     with _intent_session(caller) as intent:
-        record_creation(intent, restored, object_kind="model_source_cover")
+        record_creation(
+            intent,
+            restored,
+            object_kind="model_source_cover",
+            provider_ref=provider_ref_for_backend(
+                backend, namespace=restored.namespace
+            ),
+        )
         for lease in intent.exec(
             select(StagingLease).where(StagingLease.model_source_cover_id == cover_id)
         ).all():
@@ -104,7 +160,9 @@ def _finish_replacement_rollback(
         intent.commit()
 
 
-def _receipt_json(receipt: CreationReceipt) -> str:
+def _receipt_json(
+    receipt: CreationReceipt, backend: StorageBackend | None = None
+) -> str:
     return json.dumps(
         {
             "key": receipt.key,
@@ -117,6 +175,10 @@ def _receipt_json(receipt: CreationReceipt) -> str:
             "device": receipt.device,
             "inode": receipt.inode,
             "ctime_ns": receipt.ctime_ns,
+            # Publication already bound this receipt to one configured
+            # destination. Recomputing from the active backend would make a
+            # provider switch look like a valid ownership transition.
+            "provider_ref": receipt.provider_ref,
         },
         sort_keys=True,
     )
@@ -150,6 +212,7 @@ def _owned_receipt(row: OwnedStorageObject) -> CreationReceipt:
         device=row.device,
         inode=row.inode,
         ctime_ns=row.ctime_ns,
+        provider_ref=row.provider_ref,
     )
 
 
@@ -184,13 +247,26 @@ def _durable_pending_cover_intent(
             if recovered is not None:
                 persisted.size_bytes = lease.size_bytes
                 persisted.updated_at = utcnow()
-                record_creation(intent, recovered, object_kind="model_source_cover")
+                record_creation(
+                    intent,
+                    recovered,
+                    object_kind="model_source_cover",
+                    provider_ref=provider_ref_for_backend(
+                        backend, namespace=recovered.namespace
+                    ),
+                )
                 intent.delete(lease)
             else:
                 current_owned = False
                 for proof in intent.exec(
                     select(OwnedStorageObject).where(
-                        OwnedStorageObject.key == persisted.storage_key
+                        OwnedStorageObject.backend
+                        == _backend_scope(backend, persisted.storage_key)[0],
+                        OwnedStorageObject.namespace
+                        == _backend_scope(backend, persisted.storage_key)[1],
+                        OwnedStorageObject.provider_ref
+                        == _backend_scope(backend, persisted.storage_key)[2],
+                        OwnedStorageObject.key == persisted.storage_key,
                     )
                 ).all():
                     if backend.creation_matches(_owned_receipt(proof)):
@@ -269,8 +345,23 @@ def _recover_pending_cover(
     receipt = _receipt_from_json(lease.receipt_json)
     if receipt is not None:
         try:
+            expected_ref = provider_ref_for_backend(
+                backend, namespace=receipt.namespace
+            )
+            backend_name, _namespace, _provider_ref = _backend_scope(
+                backend, receipt.namespace
+            )
+            if receipt.provider_ref is None and backend_name not in {
+                "local",
+                "unknown",
+            }:
+                raise _ReceiptBindingError("storage_receipt_provider_identity_missing")
+            if receipt.provider_ref not in (None, expected_ref):
+                raise _ReceiptBindingError("storage_receipt_provider_identity_mismatch")
             if backend.creation_matches(receipt):
-                return receipt
+                return replace(
+                    receipt, provider_ref=receipt.provider_ref or expected_ref
+                )
         except Exception:
             raise
     try:
@@ -281,12 +372,14 @@ def _recover_pending_cover(
         )
     except (FileNotFoundError, OSError, RuntimeError, ValueError, NotImplementedError):
         return None
+    if not isinstance(receipt, CreationReceipt):
+        return None
     if (
         receipt.key != (lease.destination_key or cover.storage_key)
         or receipt.size != lease.size_bytes
     ):
         return None
-    return receipt
+    return _bind_receipt(backend, receipt)
 
 
 def _discard_cover_if_absent(
@@ -313,7 +406,13 @@ def _discard_cover_if_absent(
     # as an ownership claim for a later object.
     for proof in session.exec(
         select(OwnedStorageObject).where(
-            OwnedStorageObject.key == (lease.destination_key or cover.storage_key)
+            OwnedStorageObject.backend
+            == _backend_scope(backend, lease.destination_key or cover.storage_key)[0],
+            OwnedStorageObject.namespace
+            == _backend_scope(backend, lease.destination_key or cover.storage_key)[1],
+            OwnedStorageObject.provider_ref
+            == _backend_scope(backend, lease.destination_key or cover.storage_key)[2],
+            OwnedStorageObject.key == (lease.destination_key or cover.storage_key),
         )
     ).all():
         session.delete(proof)
@@ -358,10 +457,17 @@ def expire_pending(
         return False
     if recovered is not None:
         lease.destination_key = recovered.key
-        lease.receipt_json = _receipt_json(recovered)
+        lease.receipt_json = _receipt_json(recovered, backend)
         cover.size_bytes = lease.size_bytes
         cover.updated_at = utcnow()
-        record_creation(session, recovered, object_kind="model_source_cover")
+        record_creation(
+            session,
+            recovered,
+            object_kind="model_source_cover",
+            provider_ref=provider_ref_for_backend(
+                backend, namespace=recovered.namespace
+            ),
+        )
         session.delete(lease)
         session.flush()
         return True
@@ -398,14 +504,19 @@ def reconcile_pending(session: Session, backend: StorageBackend) -> int:
                 recovered += 1
             continue
         lease.destination_key = receipt.key
-        lease.receipt_json = _receipt_json(receipt)
+        lease.receipt_json = _receipt_json(receipt, backend)
         # Replacement metadata may have rolled back with the crashed process;
         # the durable pending lease is the source of truth for the intended
         # bytes until the next request can complete the write.
         cover.size_bytes = lease.size_bytes
         cover.updated_at = utcnow()
         session.add(cover)
-        record_creation(session, receipt, object_kind="model_source_cover")
+        record_creation(
+            session,
+            receipt,
+            object_kind="model_source_cover",
+            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+        )
         # A cover row is already durable for new covers; replacement metadata
         # is updated by the original transaction when it can be resumed.
         session.delete(lease)
@@ -457,8 +568,15 @@ def put(
             existing.content_type = processed.content_type
             existing.size_bytes = len(processed.data)
             existing.updated_at = utcnow()
-            lease.receipt_json = _receipt_json(recovered)
-            record_creation(session, recovered, object_kind="model_source_cover")
+            lease.receipt_json = _receipt_json(recovered, backend)
+            record_creation(
+                session,
+                recovered,
+                object_kind="model_source_cover",
+                provider_ref=provider_ref_for_backend(
+                    backend, namespace=recovered.namespace
+                ),
+            )
             session.delete(lease)
             session.add(existing)
             return SourceCoverWrite(
@@ -475,6 +593,9 @@ def put(
                 processed.data,
                 object_kind="model_source_cover",
             )
+            replacement = _bind_receipt(backend, replacement)
+        except _ReceiptBindingError:
+            raise
         except Exception:
             # A replacement adapter may fail before publication, or after it
             # has become externally visible. Compare the exact bytes only
@@ -551,8 +672,17 @@ def put(
                 if receipt is None:
                     raise
         staging_leases.record_cover_receipt(session, lease=lease, receipt=receipt)
-        record_creation(session, receipt, object_kind="model_source_cover")
+        record_creation(
+            session,
+            receipt,
+            object_kind="model_source_cover",
+            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+        )
         staging_leases.release_cover_lease(session, model_source_cover_id=cover.id)
+    except _ReceiptBindingError:
+        # A mismatched or legacy remote receipt is not evidence of absence.
+        # Keep the durable intent without even probing the active provider.
+        raise
     except Exception:
         if receipt is not None:
             # Roll back only an object positively matched by its receipt. If
@@ -562,6 +692,7 @@ def put(
             if removed:
                 _delete_durable_cover_intent(
                     session,
+                    backend=backend,
                     cover_id=cover.id or 0,
                     storage_key=key,
                 )
@@ -577,6 +708,7 @@ def put(
             if not published:
                 _delete_durable_cover_intent(
                     session,
+                    backend=backend,
                     cover_id=cover.id or 0,
                     storage_key=key,
                     preserve_ownership_intent=True,
@@ -595,7 +727,10 @@ def rollback_after_commit_failure(
             cover = result.cover
             if cover.id is not None:
                 _delete_durable_cover_intent(
-                    session, cover_id=cover.id, storage_key=cover.storage_key
+                    session,
+                    backend=backend,
+                    cover_id=cover.id,
+                    storage_key=cover.storage_key,
                 )
         return
     if result.replacement_receipt is None or result.replaced_bytes is None:

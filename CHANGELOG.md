@@ -134,6 +134,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 - Legacy local Artifacts can be adopted safely into the storage-ownership
   ledger, while garbage collection and permanent deletion continue to preserve
   bytes that PrintStash cannot prove it owns.
+- Legacy local and S3 backup archives can be discovered and explicitly adopted
+  after full validation without copying their bytes. Exact-source identity keeps
+  same-id replicas collision-safe across listing, restore, deletion, and
+  retention, while restore journals and interrupted S3 publication recovery now
+  fail closed on ambiguous archive or provider identity.
 - Fleet scheduling and printer queues now exclude deleted jobs, and fleet editor
   selections are validated instead of being accepted through stale UI state.
 - Frontend hardening uncovered and fixed a missing-`starred` Model-card crash,

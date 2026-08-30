@@ -1375,7 +1375,24 @@ class OwnedStorageObject(SQLModel, table=True):
     __tablename__ = "owned_storage_objects"
     __table_args__ = (
         UniqueConstraint(
-            "backend", "namespace", "key", name="uq_owned_storage_locator"
+            "backend",
+            "provider_ref",
+            "namespace",
+            "key",
+            name="uq_owned_storage_provider_locator",
+        ),
+        # Historical rows have no provider identity.  Keep those rows
+        # collision-safe as well: SQLite/Postgres both allow multiple NULLs in
+        # a normal UNIQUE constraint, so the partial index is the legacy
+        # equivalent while new rows use the provider-aware constraint above.
+        Index(
+            "uq_owned_storage_legacy_locator",
+            "backend",
+            "namespace",
+            "key",
+            unique=True,
+            sqlite_where=text("provider_ref IS NULL"),
+            postgresql_where=text("provider_ref IS NULL"),
         ),
     )
 
@@ -1383,6 +1400,12 @@ class OwnedStorageObject(SQLModel, table=True):
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024, index=True)
     key: str = Field(max_length=2048)
+    # Credential-free identity of the provider destination.  This is a stable
+    # digest of the normalized endpoint/region/bucket (or local namespace),
+    # never of access credentials.  It lets recovery distinguish a receipt
+    # written against an old target from one written against the current
+    # target even when a bucket/key happens to be reused.
+    provider_ref: Optional[str] = Field(default=None, max_length=64, index=True)
     object_kind: str = Field(max_length=64, index=True)
     state: StorageObjectState = Field(
         default=StorageObjectState.PENDING,
@@ -1423,10 +1446,21 @@ class StorageDeleteIntent(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint(
             "backend",
+            "provider_ref",
             "namespace",
             "key",
             "token",
-            name="uq_storage_delete_intent_receipt",
+            name="uq_storage_delete_intent_provider_receipt",
+        ),
+        Index(
+            "uq_storage_delete_intent_legacy_receipt",
+            "backend",
+            "namespace",
+            "key",
+            "token",
+            unique=True,
+            sqlite_where=text("provider_ref IS NULL"),
+            postgresql_where=text("provider_ref IS NULL"),
         ),
     )
 
@@ -1434,6 +1468,10 @@ class StorageDeleteIntent(SQLModel, table=True):
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024)
     key: str = Field(max_length=2048)
+    # Credential-free identity of the configured destination. NULL is retained
+    # for old outbox rows, but recovery must block those rows rather than
+    # guessing which provider now owns their key.
+    provider_ref: Optional[str] = Field(default=None, max_length=64, index=True)
     object_kind: str = Field(max_length=64, index=True)
     token: str = Field(max_length=64)
     size_bytes: int

@@ -111,4 +111,12 @@ describe("verifyBackup", () => {
 
     expectRequest("/api/v1/backups/2026-01-01T00%3A00%3A00Z/verify", "POST");
   });
+
+  it("forwards the exact source reference", async () => {
+    respondWith({ valid: true });
+
+    await verifyBackup("same-id", "s3/source");
+
+    expectRequest("/api/v1/backups/same-id/verify?source_ref=s3%2Fsource", "POST");
+  });
 });

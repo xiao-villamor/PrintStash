@@ -78,6 +78,12 @@ const A_BACKUP = {
   file_count: 42,
   size_bytes: 1024,
   storage_backend: "local",
+  source_ref: "local-source",
+  provider_ref: "local",
+  namespace: "vault-backups",
+  key: "printstash-backups/2026-01-01T000000Z.tar.gz",
+  prefix: "printstash-backups/",
+  archive_sha256: "a".repeat(64),
 };
 
 function renderPanel(options: RenderAppOptions & { audit?: VaultAuditRun | null } = {}) {
@@ -87,7 +93,7 @@ function renderPanel(options: RenderAppOptions & { audit?: VaultAuditRun | null 
       "GET /api/v1/maintenance/audits/latest": audit
         ? json(audit)
         : json({ detail: "not_found" }, 404),
-      "GET /api/v1/backups": json([]),
+      "GET /api/v1/backups/sources": json([]),
       ...routes,
     },
     ...rest,
@@ -277,10 +283,22 @@ describe("MaintenancePanel", () => {
   });
 
   describe("verifying a backup", () => {
+    it("shows the credential-free source details", async () => {
+      renderPanel({ routes: { "GET /api/v1/backups/sources": json([A_BACKUP]) } });
+
+      expect(await screen.findByText("Locator: local-source")).toBeInTheDocument();
+      expect(screen.getByText("Provider: local…")).toBeInTheDocument();
+      expect(
+        screen.getByText("Exact key: printstash-backups/2026-01-01T000000Z.tar.gz"),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Prefix: printstash-backups/")).toBeInTheDocument();
+      expect(screen.getByText(/SHA-256 a{16}/)).toBeInTheDocument();
+    });
+
     it("says a backup has not been checked this session", async () => {
       // Verification reads the whole archive, so it is never done implicitly —
       // and an unverified backup must not read as a verified one.
-      renderPanel({ routes: { "GET /api/v1/backups": json([A_BACKUP]) } });
+      renderPanel({ routes: { "GET /api/v1/backups/sources": json([A_BACKUP]) } });
 
       expect(await screen.findByText("Not verified this session")).toBeInTheDocument();
     });
@@ -289,7 +307,7 @@ describe("MaintenancePanel", () => {
       const user = userEvent.setup();
       renderPanel({
         routes: {
-          "GET /api/v1/backups": json([A_BACKUP]),
+          "GET /api/v1/backups/sources": json([A_BACKUP]),
           "POST /api/v1/backups/2026-01-01T000000Z/verify": json({
             backup_id: A_BACKUP.backup_id,
             valid: true,
@@ -306,13 +324,49 @@ describe("MaintenancePanel", () => {
       expect(await screen.findByText("42 members verified")).toBeInTheDocument();
     });
 
+    it("keeps verification state keyed by exact source", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderPanel({
+        routes: {
+          "GET /api/v1/backups/sources": json([
+            { ...A_BACKUP, source_ref: "local-source" },
+            { ...A_BACKUP, source_ref: "s3-source", location: "s3" },
+          ]),
+          "POST /api/v1/backups/2026-01-01T000000Z/verify": json({
+            backup_id: A_BACKUP.backup_id,
+            valid: true,
+            app_compatible: true,
+            manifest_version: "1",
+            checked_members: 42,
+            findings: [],
+          }),
+        },
+      });
+
+      await screen.findAllByRole("button", { name: /Verify/ });
+      expect(requests().some((call) => call.url.endsWith("/api/v1/backups/sources"))).toBe(true);
+      const verifyButtons = await screen.findAllByRole("button", { name: /Verify/ });
+      await user.click(verifyButtons[0]);
+      await waitFor(() =>
+        expect(requests().some((call) => call.url.includes("verify?source_ref=local-source"))).toBe(
+          true,
+        ),
+      );
+      await user.click(verifyButtons[1]);
+      await waitFor(() =>
+        expect(requests().some((call) => call.url.includes("verify?source_ref=s3-source"))).toBe(
+          true,
+        ),
+      );
+    });
+
     it("reports an archive that did not verify", async () => {
       // A backup nobody can restore is worse than no backup, because it is
       // counted on.
       const user = userEvent.setup();
       renderPanel({
         routes: {
-          "GET /api/v1/backups": json([A_BACKUP]),
+          "GET /api/v1/backups/sources": json([A_BACKUP]),
           "POST /api/v1/backups/2026-01-01T000000Z/verify": json({
             backup_id: A_BACKUP.backup_id,
             valid: false,

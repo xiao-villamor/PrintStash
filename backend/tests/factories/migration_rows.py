@@ -203,6 +203,32 @@ def seed_schema_row(connection, table: str, **values: object) -> None:
     connection.execute(table_obj.insert().values(**row))
 
 
+def seed_legacy_backup_s3_receipt(
+    connection,
+    *,
+    key: str,
+    token: str,
+    size_bytes: int,
+    sha256: str | None = None,
+    object_kind: str = "backup",
+) -> None:
+    """Seed one v0.12.1 backup-S3 ownership row before provider identity existed."""
+    seed_schema_row(
+        connection,
+        "owned_storage_objects",
+        backend="backup-s3",
+        namespace="bucket/nexus3d-backups/",
+        key=key,
+        object_kind=object_kind,
+        state="committed",
+        token=token,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        created_at=datetime(2026, 1, 1),
+        committed_at=datetime(2026, 1, 1),
+    )
+
+
 def create_released_v0121_postgres_schema(connection) -> None:
     """Create the exact PostgreSQL schema emitted by the v0.12.1 models."""
     if connection.dialect.name != "postgresql":

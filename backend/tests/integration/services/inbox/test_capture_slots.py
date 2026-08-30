@@ -23,6 +23,7 @@ import uuid
 from datetime import timedelta
 from io import BytesIO
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -50,11 +51,12 @@ from app.db.models import (
 )
 from app.db.session import get_session_factory
 from app.schemas.inbox import CaptureUploadSlotsCreate, InboxImportRequest
-from app.services import inbox
+from app.services import inbox, staging_leases
 from app.services.auth import create_access_token
 from app.services.source_covers import SourceCoverWrite
-from app.services.storage_backend import CreationReceipt
+from app.services.storage_backend import CreationReceipt, StorageBackend
 from app.services.storage_deletion import process_storage_delete_intents
+from app.services.storage_ownership import provider_ref_for_backend
 from tests.factories import build_model, build_user
 
 
@@ -126,6 +128,111 @@ def _upload(session, slot, data: bytes = b"slot-owned"):
 
 
 class TestUploadCaptureSlot:
+    def test_persists_the_publication_provider_ref_before_an_active_switch(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        owner = build_user(db_session, "slot-provider-switch", superuser=True)
+        _row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        slot = slots[0]
+        backend = inbox.get_backend()
+        switched = MagicMock(spec=StorageBackend)
+        switched.backend_name = "s3"
+        switched.provider_id = "s3"
+        switched.transport = "s3"
+        switched_ref = provider_ref_for_backend(switched, namespace="test")
+        monkeypatch.setattr(
+            staging_leases,
+            "provider_ref_for_backend",
+            lambda *_args, **_kwargs: switched_ref,
+        )
+
+        uploaded = _upload(db_session, slot)
+
+        expected_ref = provider_ref_for_backend(
+            backend, namespace=backend.namespace_for(uploaded.storage_key or "")
+        )
+        persisted_slot = json.loads(uploaded.receipt_json or "{}")
+        lease = db_session.exec(
+            select(StagingLease).where(
+                (StagingLease.capture_upload_slot_id == uploaded.id)
+                | (StagingLease.capture_upload_slot_origin_id == uploaded.id)
+            )
+        ).one()
+        persisted_lease = json.loads(lease.receipt_json or "{}")
+        assert persisted_slot["provider_ref"] == expected_ref
+        assert persisted_lease["provider_ref"] == expected_ref
+
+    def test_rejects_a_remote_legacy_receipt_without_a_provider_probe(
+        self, db_session: Session
+    ) -> None:
+        owner = build_user(db_session, "slot-remote-legacy", superuser=True)
+        _row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        slot = slots[0]
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot.id)
+        ).one()
+        legacy = {
+            "key": slot.storage_key,
+            "size": slot.size_bytes,
+            "token": "legacy",
+            "backend": "s3",
+            "namespace": "bucket/prefix",
+        }
+        slot.receipt_json = json.dumps(legacy)
+        lease.receipt_json = json.dumps(legacy)
+        db_session.add(slot)
+        db_session.add(lease)
+        db_session.commit()
+        backend = MagicMock(spec=StorageBackend)
+        backend.backend_name = "s3"
+        backend.provider_id = "s3"
+        backend.transport = "s3"
+        backend.namespace_for.return_value = "bucket/prefix"
+
+        assert not staging_leases.reconcile_capture_slot(db_session, backend, slot)
+        backend.creation_matches.assert_not_called()
+        backend.adopt_existing.assert_not_called()
+        backend.object_info.assert_not_called()
+
+    def test_rejects_a_foreign_remote_receipt_without_a_provider_probe(
+        self, db_session: Session
+    ) -> None:
+        owner = build_user(db_session, "slot-foreign-provider", superuser=True)
+        _row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _slot_payload()
+        )
+        slot = slots[0]
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot.id)
+        ).one()
+        receipt = {
+            "key": slot.storage_key,
+            "size": slot.size_bytes,
+            "token": "foreign",
+            "backend": "s3",
+            "namespace": "bucket/prefix",
+            "provider_ref": "foreign-provider",
+        }
+        slot.receipt_json = json.dumps(receipt)
+        lease.receipt_json = json.dumps(receipt)
+        db_session.add(slot)
+        db_session.add(lease)
+        db_session.commit()
+        backend = MagicMock(spec=StorageBackend)
+        backend.backend_name = "s3"
+        backend.provider_id = "s3"
+        backend.transport = "s3"
+        backend.namespace_for.return_value = "bucket/prefix"
+
+        assert not staging_leases.reconcile_capture_slot(db_session, backend, slot)
+        backend.creation_matches.assert_not_called()
+        backend.adopt_existing.assert_not_called()
+        backend.object_info.assert_not_called()
+
     def test_a_slot_is_invisible_to_anyone_but_its_owner(
         self, db_session: Session
     ) -> None:

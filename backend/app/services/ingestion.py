@@ -44,7 +44,11 @@ from app.services.storage_backend import (
     StorageCollisionError,
     get_backend,
 )
-from app.services.storage_ownership import publish_bytes, publish_file
+from app.services.storage_ownership import (
+    provider_ref_for_backend,
+    publish_bytes,
+    publish_file,
+)
 
 if TYPE_CHECKING:
     from app.services.provenance import ProvenanceContext
@@ -108,10 +112,21 @@ def _resolve_committed_artifact(
 ) -> File | None:
     """Resolve a commit acknowledgement failure without touching the blob."""
     with get_session_factory().session() as verification:
+        namespace = backend.namespace_for(key)
+        provider_ref = provider_ref_for_backend(backend, namespace=namespace)
+        provider_scope = OwnedStorageObject.provider_ref == provider_ref
+        # Local receipts written before provider_ref was introduced are safe
+        # to resolve only within the current backend namespace. Remote legacy
+        # NULL receipts intentionally have no compatibility path: their
+        # destination cannot be proven and destructive recovery must fail
+        # closed.
+        if backend.backend_name == "local":
+            provider_scope = provider_scope | OwnedStorageObject.provider_ref.is_(None)  # type: ignore[union-attr]
         ownership = verification.exec(
             select(OwnedStorageObject).where(
                 OwnedStorageObject.backend == backend.backend_name,
-                OwnedStorageObject.namespace == backend.namespace_for(key),
+                OwnedStorageObject.namespace == namespace,
+                provider_scope,
                 OwnedStorageObject.key == key,
                 OwnedStorageObject.state == StorageObjectState.COMMITTED,
             )

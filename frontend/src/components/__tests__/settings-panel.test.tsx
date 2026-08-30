@@ -132,6 +132,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/maintenance/audits/latest": json(null),
       "GET /api/v1/models/trash": json([]),
       "GET /api/v1/backups": json([]),
+      "GET /api/v1/backups/sources": json([]),
       "GET /api/v1/backups/unowned-local": json([]),
       "GET /api/v1/models/stats": json(VAULT_STATS),
       ...routes,
@@ -653,6 +654,12 @@ describe("SettingsPanel", () => {
       file_count: 42,
       size_bytes: 1024 * 1024,
       storage_backend: "local",
+      namespace: "vault-backups",
+      source_ref: "local-source-ref",
+      provider_ref: "local",
+      key: "printstash-backups/2026-01-01T000000Z.tar.gz",
+      prefix: "printstash-backups/",
+      archive_sha256: "a".repeat(64),
     };
 
     it("says so when nothing has been backed up", async () => {
@@ -662,12 +669,42 @@ describe("SettingsPanel", () => {
     });
 
     it("lists the backups taken", async () => {
-      renderSettings({
+      const { requests } = renderSettings({
         at: "/settings?section=storage",
-        routes: { "GET /api/v1/backups": json([BACKUP]) },
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
       expect(await screen.findByText("2026-01-01T000000Z")).toBeInTheDocument();
+      expect(screen.getByText("Locator: vault-backups · local-source-ref")).toBeInTheDocument();
+      expect(requests().some((call) => call.url.endsWith("/api/v1/backups/sources"))).toBe(true);
+    });
+
+    it("keeps same-id sources independent for exact downloads", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/sources": json([
+            { ...BACKUP, source_ref: "local-source", location: "local" },
+            { ...BACKUP, source_ref: "s3-source", location: "s3" },
+          ]),
+          "GET /api/v1/backups/2026-01-01T000000Z/download": json([]),
+        },
+      });
+
+      const downloads = await screen.findAllByRole("button", { name: "Download" });
+      await user.click(downloads[0]);
+      await waitFor(() =>
+        expect(
+          requests().some((call) => call.url.includes("/download?source_ref=local-source")),
+        ).toBe(true),
+      );
+      await user.click(downloads[1]);
+      await waitFor(() =>
+        expect(requests().some((call) => call.url.includes("/download?source_ref=s3-source"))).toBe(
+          true,
+        ),
+      );
     });
 
     it("surfaces validated legacy candidates", async () => {
@@ -691,6 +728,77 @@ describe("SettingsPanel", () => {
 
       expect(await screen.findByText("nexus3d-backup-2025.tar.gz")).toBeInTheDocument();
       expect(screen.getByText(/8 files.*v0\.11\.0/)).toBeInTheDocument();
+    });
+
+    it("surfaces validated legacy S3 candidates with their exact locator", async () => {
+      renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/unowned-s3": json([
+            {
+              key: "nexus3d-backups/legacy.tar.gz",
+              prefix: "nexus3d-backups/",
+              namespace: "printstash-bucket/nexus3d-backups",
+              source_ref: "s3-source",
+              archive_sha256: "a".repeat(64),
+              backup_id: "legacy-1",
+              created_at: "2025-01-01T00:00:00Z",
+              location: "s3",
+              app_version: "0.11.0",
+              file_count: 8,
+              size_bytes: 2048,
+              storage_backend: "s3",
+            },
+          ]),
+        },
+      });
+
+      expect(await screen.findByText("nexus3d-backups/legacy.tar.gz")).toBeInTheDocument();
+      expect(screen.getByText("Namespace: printstash-bucket/nexus3d-backups")).toBeInTheDocument();
+      expect(screen.getByText(/SHA-256 a{16}/)).toBeInTheDocument();
+    });
+
+    it("adopts one S3 candidate only after confirmation", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/unowned-s3": json([
+            {
+              key: "nexus3d-backups/legacy.tar.gz",
+              prefix: "nexus3d-backups/",
+              namespace: "printstash-bucket/nexus3d-backups",
+              source_ref: "s3-source",
+              archive_sha256: "a".repeat(64),
+              backup_id: "legacy-1",
+              created_at: "2025-01-01T00:00:00Z",
+              location: "s3",
+              app_version: "0.11.0",
+              file_count: 8,
+              size_bytes: 2048,
+              storage_backend: "s3",
+            },
+          ]),
+          "POST /api/v1/backups/adopt-s3": json({ backup_id: "legacy-1" }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Adopt backup" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent("nexus3d-backups/legacy.tar.gz");
+      expect(dialog).toHaveTextContent("printstash-bucket/nexus3d-backups");
+      expect(dialog).toHaveTextContent("a".repeat(16));
+      await user.click(within(dialog).getByRole("button", { name: "Adopt backup" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) =>
+            call.url.includes(
+              "/backups/adopt-s3?key=nexus3d-backups%2Flegacy.tar.gz&source_ref=s3-source&expected_archive_sha256=",
+            ),
+          ),
+        ).toBe(true),
+      );
     });
 
     it("confirms one legacy candidate before adopting", async () => {
@@ -735,7 +843,7 @@ describe("SettingsPanel", () => {
       // schema its code cannot read.
       renderSettings({
         at: "/settings?section=storage",
-        routes: { "GET /api/v1/backups": json([BACKUP]) },
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
       expect(await screen.findByText("v0.12.1")).toBeInTheDocument();
@@ -755,13 +863,50 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("keeps older id-only backups when the new response lacks a source reference", async () => {
+      const user = userEvent.setup();
+      const olderLocal = {
+        ...BACKUP,
+        backup_id: "older-local",
+        source_ref: undefined,
+        namespace: undefined,
+      };
+      const olderCloud = {
+        ...BACKUP,
+        backup_id: "older-cloud",
+        location: "s3",
+        source_ref: undefined,
+        namespace: undefined,
+      };
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "GET /api/v1/backups/sources": json([olderLocal, olderCloud]),
+          "POST /api/v1/backups": json({
+            ...BACKUP,
+            backup_id: "new-backup",
+            source_ref: undefined,
+            namespace: undefined,
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Backup now/ }));
+      await waitFor(() =>
+        expect(requestsWithMethod("POST").some((call) => call.url.endsWith("/backups"))).toBe(true),
+      );
+      expect(await screen.findByText("older-local")).toBeInTheDocument();
+      expect(screen.getByText("older-cloud")).toBeInTheDocument();
+      expect(screen.getByText("new-backup")).toBeInTheDocument();
+    });
+
     it("asks before restoring over the live vault", async () => {
       // A restore replaces the database and every stored file; doing it on one
       // click is unrecoverable.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=storage",
-        routes: { "GET /api/v1/backups": json([BACKUP]) },
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
       await user.click(await screen.findByRole("button", { name: /Restore/ }));
@@ -1237,6 +1382,9 @@ describe("SettingsPanel", () => {
       file_count: 42,
       size_bytes: 1024,
       storage_backend: "local",
+      source_ref: "local-source",
+      namespace: "vault-backups",
+      archive_sha256: "b".repeat(64),
     };
 
     it("restores the backup once confirmed", async () => {
@@ -1244,7 +1392,7 @@ describe("SettingsPanel", () => {
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=storage",
         routes: {
-          "GET /api/v1/backups": json([BACKUP_META]),
+          "GET /api/v1/backups/sources": json([BACKUP_META]),
           "POST /api/v1/backups/2026-01-01T000000Z/restore": json({ restored_files: 42 }),
         },
       });
@@ -1255,7 +1403,11 @@ describe("SettingsPanel", () => {
       );
 
       await waitFor(() =>
-        expect(requestsWithMethod("POST").some((call) => call.url.includes("/restore"))).toBe(true),
+        expect(
+          requestsWithMethod("POST").some((call) =>
+            call.url.includes("/restore?source_ref=local-source"),
+          ),
+        ).toBe(true),
       );
     });
 
@@ -1265,16 +1417,19 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({
         at: "/settings?section=storage",
-        routes: { "GET /api/v1/backups": json([BACKUP_META]) },
+        routes: { "GET /api/v1/backups/sources": json([BACKUP_META]) },
       });
 
       await user.click(await screen.findByRole("button", { name: /Restore/ }));
 
-      expect(
-        await screen.findByText(
-          "This replaces the current database and stored files with the selected backup.",
-        ),
-      ).toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog");
+      expect(dialog).toHaveTextContent(
+        "This replaces the current database and stored files with the selected backup.",
+      );
+      expect(dialog).toHaveTextContent(
+        "Exact source: local · local-source · namespace vault-backups",
+      );
+      expect(dialog).toHaveTextContent("SHA-256 bbbbbbbbbbbbbbbb");
     });
 
     it("downloads a backup off the server", async () => {
@@ -1282,7 +1437,7 @@ describe("SettingsPanel", () => {
       const { requests } = renderSettings({
         at: "/settings?section=storage",
         routes: {
-          "GET /api/v1/backups": json([BACKUP_META]),
+          "GET /api/v1/backups/sources": json([BACKUP_META]),
           "GET /api/v1/backups/2026-01-01T000000Z/download": json([]),
         },
       });

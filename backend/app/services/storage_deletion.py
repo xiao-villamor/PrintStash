@@ -19,7 +19,10 @@ from app.services.storage_backend import (
     StorageTier,
     get_backend,
 )
-from app.services.storage_ownership import UnsafeStorageDeleteError
+from app.services.storage_ownership import (
+    UnsafeStorageDeleteError,
+    provider_ref_for_backend,
+)
 
 logger = get_logger(__name__)
 
@@ -54,6 +57,7 @@ def _owned_receipt(row: OwnedStorageObject) -> CreationReceipt:
         device=row.device,
         inode=row.inode,
         ctime_ns=row.ctime_ns,
+        provider_ref=row.provider_ref,
     )
 
 
@@ -69,6 +73,7 @@ def _intent_receipt(row: StorageDeleteIntent) -> CreationReceipt:
         device=row.device,
         inode=row.inode,
         ctime_ns=row.ctime_ns,
+        provider_ref=row.provider_ref,
     )
 
 
@@ -114,6 +119,7 @@ def record_legacy_blocked_intent(
     recover or adopt explicitly later.
     """
     namespace = backend.namespace_for(key)
+    provider_ref = provider_ref_for_backend(backend, namespace=namespace)
     token_material = (
         f"legacy:{backend.backend_name}:{namespace}:{key}:{size_bytes}:{sha256 or ''}"
     )
@@ -121,6 +127,7 @@ def record_legacy_blocked_intent(
     existing = session.exec(
         select(StorageDeleteIntent).where(
             StorageDeleteIntent.backend == backend.backend_name,
+            StorageDeleteIntent.provider_ref == provider_ref,
             StorageDeleteIntent.namespace == namespace,
             StorageDeleteIntent.key == key,
             StorageDeleteIntent.token == token,
@@ -133,6 +140,7 @@ def record_legacy_blocked_intent(
         backend=backend.backend_name,
         namespace=namespace,
         key=key,
+        provider_ref=provider_ref,
         object_kind=object_kind,
         token=token,
         size_bytes=size_bytes,
@@ -166,9 +174,19 @@ def enqueue_owned_key(
     deletes storage bytes; rollback therefore restores both the logical row and
     its ownership proof.
     """
+    try:
+        namespace = backend.namespace_for(key)
+        provider_ref = provider_ref_for_backend(backend, namespace=namespace)
+    except Exception as exc:
+        if required_proof:
+            raise UnsafeStorageDeleteError("storage_ownership_unverified") from exc
+        return False
     rows = session.exec(
         select(OwnedStorageObject).where(
+            OwnedStorageObject.backend == backend.backend_name,
+            OwnedStorageObject.namespace == namespace,
             OwnedStorageObject.key == key,
+            OwnedStorageObject.provider_ref == provider_ref,
             OwnedStorageObject.state == StorageObjectState.COMMITTED,
         )
     ).all()
@@ -204,6 +222,7 @@ def enqueue_owned_key(
             backend=owned.backend,
             namespace=owned.namespace,
             key=owned.key,
+            provider_ref=owned.provider_ref,
             object_kind=owned.object_kind,
             token=owned.token,
             size_bytes=owned.size_bytes,
@@ -245,6 +264,13 @@ def enqueue_creation_receipt(
     transaction owns both this intent and its source rows; a rollback leaves
     the bytes and the source receipt intact.
     """
+    expected_provider_ref = provider_ref_for_backend(
+        backend, namespace=receipt.namespace
+    )
+    if receipt.provider_ref is None and backend.backend_name != "local":
+        raise UnsafeStorageDeleteError("storage_provider_identity_missing")
+    if receipt.provider_ref not in (None, expected_provider_ref):
+        raise UnsafeStorageDeleteError("storage_provider_mismatch")
     if not backend.creation_matches(receipt):
         raise UnsafeStorageDeleteError("storage_object_no_longer_matches_receipt")
     digest = _content_sha256(backend, receipt.key)
@@ -253,6 +279,7 @@ def enqueue_creation_receipt(
     existing = session.exec(
         select(StorageDeleteIntent).where(
             StorageDeleteIntent.backend == receipt.backend,
+            StorageDeleteIntent.provider_ref == expected_provider_ref,
             StorageDeleteIntent.namespace == receipt.namespace,
             StorageDeleteIntent.key == receipt.key,
             StorageDeleteIntent.token == receipt.token,
@@ -265,6 +292,7 @@ def enqueue_creation_receipt(
         backend=receipt.backend,
         namespace=receipt.namespace,
         key=receipt.key,
+        provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
         object_kind="capture_upload_slot",
         token=receipt.token,
         size_bytes=receipt.size,
@@ -325,6 +353,35 @@ def process_storage_delete_intents(
             if intent.backend != getattr(backend, "backend_name", intent.backend):
                 intent.status = "blocked"
                 intent.last_error = "storage_backend_mismatch"
+                intent.quarantine_state = "blocked"
+                intent.updated_at = utcnow()
+                blocked += 1
+                session.add(intent)
+                session.commit()
+                continue
+            if intent.provider_ref is None:
+                intent.status = "blocked"
+                intent.last_error = "storage_provider_identity_missing"
+                intent.quarantine_state = "blocked"
+                intent.updated_at = utcnow()
+                blocked += 1
+                session.add(intent)
+                session.commit()
+                continue
+            try:
+                expected_namespace = backend.namespace_for(intent.key)
+                expected_provider_ref = provider_ref_for_backend(
+                    backend, namespace=expected_namespace
+                )
+            except Exception:
+                expected_namespace = None
+                expected_provider_ref = None
+            if (
+                expected_namespace != intent.namespace
+                or expected_provider_ref != intent.provider_ref
+            ):
+                intent.status = "blocked"
+                intent.last_error = "storage_provider_mismatch"
                 intent.quarantine_state = "blocked"
                 intent.updated_at = utcnow()
                 blocked += 1

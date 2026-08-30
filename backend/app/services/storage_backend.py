@@ -188,6 +188,10 @@ class CreationReceipt:
     device: int | None = None
     inode: int | None = None
     ctime_ns: int | None = None
+    # Credential-free configured-destination identity. Older serialized
+    # receipts omit it and are accepted only by explicitly compatible local
+    # recovery paths; remote recovery fails closed.
+    provider_ref: str | None = None
 
 
 class StorageBackend(ABC):
@@ -1908,6 +1912,11 @@ class S3StorageBackend(StorageBackend):
         self._s3_root = self._normalized_root(
             str(getattr(settings, "s3_root", "vault-data") or "vault-data")
         )
+        # Provider identity is derived from the adapter's immutable target,
+        # never from mutable runtime settings after composition.
+        self._endpoint_url = str(getattr(settings, "s3_endpoint_url", "") or "")
+        self._region = str(getattr(settings, "s3_region", "auto") or "auto")
+        self._addressing_style = "path"
 
         client_kwargs: dict = {
             "service_name": "s3",

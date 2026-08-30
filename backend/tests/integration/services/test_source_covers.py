@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import uuid
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,7 +38,7 @@ from app.services.storage_backend import (
     StorageObjectInfo,
     get_backend,
 )
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import provider_ref_for_backend, record_creation
 from tests.factories import build_model, build_user
 
 
@@ -68,13 +69,28 @@ def _source(session: Session) -> ModelProvenanceSource:
 
 def _backend() -> MagicMock:
     backend = MagicMock(spec=StorageBackend)
+    # Keep the fake's locator identity as explicit as a production adapter's;
+    # publication helpers now bind receipts to this destination.
+    backend.backend_name = "fake"
+    backend.namespace = "test"
+    backend.provider_id = "fake"
+    backend.transport = "fake"
+    backend.namespace_for.side_effect = lambda _key: "test"
     backend.source_cover_key.side_effect = lambda ident: f"opaque/covers/{ident}.webp"
     return backend
 
 
 def _receipt(key: str = "opaque/covers/1.webp", token: str = "new") -> CreationReceipt:
     return CreationReceipt(
-        key=key, size=10, token=token, backend="fake", namespace="test"
+        key=key,
+        size=10,
+        token=token,
+        backend="fake",
+        namespace="test",
+        provider_ref=provider_ref_for_backend(
+            SimpleNamespace(backend_name="fake", namespace="test"),
+            namespace="test",
+        ),
     )
 
 
@@ -95,6 +111,36 @@ def _put_cover(session, backend, source, colour: str):
 
 
 class TestPut:
+    def test_persists_the_publication_provider_ref_after_an_active_switch(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = _source(db_session)
+        backend = _backend()
+        receipt = _receipt(f"opaque/covers/{source.id}.webp")
+        backend.create_bytes.return_value = receipt
+        switched = _backend()
+        switched.backend_name = "s3"
+        switched.provider_id = "s3"
+        switched.transport = "s3"
+        switched_ref = provider_ref_for_backend(switched, namespace="test")
+        monkeypatch.setattr(
+            staging_leases,
+            "provider_ref_for_backend",
+            lambda *_args, **_kwargs: switched_ref,
+        )
+
+        source_covers.put(
+            db_session,
+            backend,
+            provenance_source_id=source.id,
+            actor_id=None,
+            data=_png(),
+            content_type="image/png",
+        )
+
+        proof = db_session.exec(select(OwnedStorageObject)).one()
+        assert proof.provider_ref == receipt.provider_ref
+
     def test_create_rolls_back_published_bytes_when_recording_the_receipt_fails(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -171,6 +217,10 @@ class TestPut:
         assert latest.cover.id == first.cover.id
         expected = process_source_cover_upload(_png("gold"), "image/png").data
         assert backend.read_bytes(latest.cover.storage_key) == expected
+        proof = db_session.exec(select(OwnedStorageObject)).one()
+        assert proof.provider_ref == provider_ref_for_backend(
+            backend, namespace=proof.namespace
+        )
 
     def test_leaves_no_staging_lease_behind_after_a_replacement(
         self, db_session: Session
@@ -622,6 +672,58 @@ class TestPut:
 
 
 class TestReconcilePending:
+    def test_discard_absent_cover_only_removes_current_provider_receipt(
+        self, db_session: Session
+    ) -> None:
+        source = _source(db_session)
+        db_session.commit()
+        backend = get_backend()
+        cover = ModelSourceCover(
+            provenance_source_id=source.id,
+            storage_key=backend.source_cover_key(source.id),
+            size_bytes=4,
+        )
+        db_session.add(cover)
+        db_session.flush()
+        lease = staging_leases.create_cover_lease(
+            db_session,
+            model_source_cover_id=cover.id or 0,
+            owner_user_id=None,
+            destination_key=cover.storage_key,
+            size_bytes=4,
+            sha256="a" * 64,
+        )
+        namespace = backend.namespace_for(cover.storage_key)
+        current_ref = provider_ref_for_backend(backend, namespace=namespace)
+        for ref in (current_ref, "foreign-provider"):
+            db_session.add(
+                OwnedStorageObject(
+                    backend=backend.backend_name,
+                    namespace=namespace,
+                    key=cover.storage_key,
+                    object_kind="model_source_cover",
+                    state=StorageObjectState.COMMITTED,
+                    token=f"token-{ref}",
+                    size_bytes=4,
+                    provider_ref=ref,
+                )
+            )
+        db_session.commit()
+
+        assert (
+            source_covers._discard_cover_if_absent(  # noqa: SLF001
+                db_session, backend, cover=cover, lease=lease
+            )
+            is True
+        )
+        db_session.commit()
+        remaining = db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.key == cover.storage_key
+            )
+        ).all()
+        assert [row.provider_ref for row in remaining] == ["foreign-provider"]
+
     def test_restart_reconciles_replacement_without_restoring_old_bytes(
         self,
         db_session: Session,
@@ -766,6 +868,81 @@ class TestExpirePending:
         proof = db_session.exec(select(OwnedStorageObject)).one()
         assert proof.key == cover.storage_key
         assert proof.token == "published"
+
+    def test_local_legacy_receipt_remains_recoverable(
+        self, db_session: Session
+    ) -> None:
+        cover, lease = _expired_cover_lease(db_session)
+        lease.receipt_json = json.dumps(
+            {
+                "key": cover.storage_key,
+                "size": lease.size_bytes,
+                "token": "legacy-local",
+                "backend": "fake",
+                "namespace": "test",
+            }
+        )
+        db_session.add(lease)
+        db_session.commit()
+        backend = _backend()
+        backend.backend_name = "local"
+        backend.provider_id = "local"
+        backend.transport = "local"
+        backend.creation_matches.return_value = True
+
+        assert source_covers.expire_pending(db_session, backend, lease=lease) is True
+
+        proof = db_session.exec(select(OwnedStorageObject)).one()
+        assert proof.provider_ref == provider_ref_for_backend(backend, namespace="test")
+
+    def test_remote_legacy_receipt_fails_closed_without_a_storage_probe(
+        self, db_session: Session
+    ) -> None:
+        cover, lease = _expired_cover_lease(db_session)
+        lease.receipt_json = json.dumps(
+            {
+                "key": cover.storage_key,
+                "size": lease.size_bytes,
+                "token": "legacy-remote",
+                "backend": "s3",
+                "namespace": "bucket/prefix",
+            }
+        )
+        db_session.add(lease)
+        db_session.commit()
+        backend = MagicMock(spec=StorageBackend)
+        backend.backend_name = "s3"
+        backend.provider_id = "s3"
+        backend.transport = "s3"
+        backend.namespace_for.return_value = "bucket/prefix"
+
+        assert source_covers.expire_pending(db_session, backend, lease=lease) is False
+        backend.creation_matches.assert_not_called()
+        backend.adopt_existing.assert_not_called()
+        backend.object_info.assert_not_called()
+
+    def test_foreign_receipt_fails_closed_without_a_storage_probe(
+        self, db_session: Session
+    ) -> None:
+        cover, lease = _expired_cover_lease(db_session)
+        lease.receipt_json = json.dumps(
+            {
+                "key": cover.storage_key,
+                "size": lease.size_bytes,
+                "token": "foreign",
+                "backend": "fake",
+                "namespace": "test",
+                "provider_ref": "foreign-provider",
+            }
+        )
+        db_session.add(lease)
+        db_session.commit()
+        backend = _backend()
+
+        assert source_covers.expire_pending(db_session, backend, lease=lease) is False
+        backend.creation_matches.assert_not_called()
+        backend.adopt_existing.assert_not_called()
+        backend.object_info.assert_not_called()
 
     def test_leaves_everything_alone_when_the_backend_will_not_answer(
         self, db_session: Session

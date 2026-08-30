@@ -19,10 +19,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   adoptLocalBackup,
+  adoptS3Backup,
   createBackup,
   downloadBackup,
+  deleteBackup,
+  listBackupSources,
   listBackups,
   listUnownedLocalBackups,
+  listUnownedS3Backups,
   restoreBackup,
 } from "@/lib/api/backup";
 import { invalidateApiCache } from "@/lib/api/request";
@@ -87,6 +91,19 @@ describe("listBackups", () => {
   });
 });
 
+describe("listBackupSources", () => {
+  it("reads every exact source without collapsing collisions", async () => {
+    respondWith([
+      { backup_id: "same-id", source_ref: "local-source", canonical: true },
+      { backup_id: "same-id", source_ref: "remote-source", canonical: false },
+    ]);
+
+    await listBackupSources();
+
+    expectRequest("/api/v1/backups/sources");
+  });
+});
+
 describe("legacy local backup adoption", () => {
   it("lists only validated unowned archives", async () => {
     respondWith([{ filename: "nexus3d-backup-2025.tar.gz", file_count: 4 }]);
@@ -105,6 +122,30 @@ describe("legacy local backup adoption", () => {
   });
 });
 
+describe("listUnownedS3Backups", () => {
+  it("lists validated remote candidates", async () => {
+    respondWith([{ key: "nexus3d-backups/legacy.tar.gz", prefix: "nexus3d-backups/" }]);
+
+    await listUnownedS3Backups();
+
+    expectRequest("/api/v1/backups/unowned-s3");
+  });
+});
+
+describe("adoptS3Backup", () => {
+  it("serializes the exact remote locator with its archive digest", async () => {
+    respondWith({ backup_id: "legacy-1", source_ref: "s3-ref" });
+
+    await adoptS3Backup("nexus3d-backups/legacy one.tar.gz", "s3/ref", "a".repeat(64));
+
+    expectRequest(
+      "/api/v1/backups/adopt-s3?key=nexus3d-backups%2Flegacy+one.tar.gz&source_ref=s3%2Fref&expected_archive_sha256=" +
+        "a".repeat(64),
+      "POST",
+    );
+  });
+});
+
 describe("restoreBackup", () => {
   it("restores one by id", async () => {
     respondWith({ backup_id: "b1", restored_files: 3 });
@@ -113,6 +154,24 @@ describe("restoreBackup", () => {
 
     // The id is a timestamp, so it has to survive URL encoding.
     expectRequest("/api/v1/backups/2026-01-01T00%3A00%3A00Z/restore", "POST");
+  });
+
+  it("forwards the exact source reference", async () => {
+    respondWith({ backup_id: "b1", restored_files: 3 });
+
+    await restoreBackup("same-id", "s3/source");
+
+    expectRequest("/api/v1/backups/same-id/restore?source_ref=s3%2Fsource", "POST");
+  });
+});
+
+describe("deleteBackup", () => {
+  it("deletes only the exact source reference", async () => {
+    respondWith({ deleted: true });
+
+    await deleteBackup("same-id", "legacy/source");
+
+    expectRequest("/api/v1/backups/same-id?source_ref=legacy%2Fsource", "DELETE");
   });
 });
 
@@ -130,6 +189,16 @@ describe("downloadBackup", () => {
     await downloadBackup("b1");
 
     expect(clicked).toEqual(["printstash-b1.tar.gz"]);
+  });
+
+  it("downloads the exact source reference", async () => {
+    fetchMock.mockResolvedValue(new Response("archive", { status: 200 }));
+    stubDownload();
+    recordClicks();
+
+    await downloadBackup("same-id", "s3/source");
+
+    expectRequest("/api/v1/backups/same-id/download?source_ref=s3%2Fsource");
   });
 
   it("falls back to a sensible filename when the server names none", async () => {

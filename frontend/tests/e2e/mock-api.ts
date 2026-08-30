@@ -206,6 +206,8 @@ const state = {
   sourceOverride: false,
   sourceCover: true,
   browserDeviceRevoked: false,
+  s3LegacyCandidate: true,
+  s3LegacyAdopted: false,
 };
 
 export function resetMockApiState(): void {
@@ -219,6 +221,8 @@ export function resetMockApiState(): void {
   state.sourceOverride = false;
   state.sourceCover = true;
   state.browserDeviceRevoked = false;
+  state.s3LegacyCandidate = true;
+  state.s3LegacyAdopted = false;
 }
 
 function inboxItem() {
@@ -1392,12 +1396,77 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     sendJson(res, []);
     return;
   }
+  if (url.pathname === "/api/v1/backups/unowned-s3" && req.method === "GET") {
+    sendJson(
+      res,
+      state.s3LegacyCandidate
+        ? [
+            {
+              key: "nexus3d-backups/legacy-2025.tar.gz",
+              prefix: "nexus3d-backups/",
+              backup_id: "legacy-2025",
+              created_at: "2025-01-01T00:00:00Z",
+              size_bytes: 4096,
+              file_count: 12,
+              storage_backend: "s3",
+              app_version: "0.12.1",
+              location: "s3",
+              source_ref: "s3-legacy-source",
+              provider_ref: "provider-legacy-s3",
+              namespace: "printstash-bucket/nexus3d-backups",
+              candidate_kind: "unowned_archive",
+              archive_sha256: "a".repeat(64),
+            },
+          ]
+        : [],
+    );
+    return;
+  }
   if (url.pathname === "/api/v1/backups" && req.method === "GET") {
     sendJson(res, []);
     return;
   }
+  if (url.pathname === "/api/v1/backups/sources" && req.method === "GET") {
+    sendJson(
+      res,
+      state.s3LegacyAdopted
+        ? [
+            {
+              backup_id: "legacy-2025",
+              created_at: "2025-01-01T00:00:00Z",
+              size_bytes: 4096,
+              file_count: 12,
+              storage_backend: "s3",
+              app_version: "0.12.1",
+              location: "s3",
+              source_ref: "s3-legacy-source",
+              provider_ref: "provider-legacy-s3",
+              namespace: "printstash-bucket/nexus3d-backups",
+              key: "nexus3d-backups/legacy-2025.tar.gz",
+              prefix: "nexus3d-backups/",
+              archive_sha256: "a".repeat(64),
+              canonical: true,
+              precedence: 2,
+            },
+          ]
+        : [],
+    );
+    return;
+  }
   if (url.pathname === "/api/v1/backups/adopt-local" && req.method === "POST") {
     drainRequest(req, () => sendJson(res, { backup_id: "legacy-backup" }));
+    return;
+  }
+  if (url.pathname === "/api/v1/backups/adopt-s3" && req.method === "POST") {
+    state.s3LegacyCandidate = false;
+    state.s3LegacyAdopted = true;
+    drainRequest(req, () =>
+      sendJson(res, {
+        backup_id: "legacy-2025",
+        source_ref: "s3-legacy-source",
+        archive_sha256: "a".repeat(64),
+      }),
+    );
     return;
   }
   if (url.pathname === "/api/v1/config/storage-roots/enroll" && req.method === "POST") {

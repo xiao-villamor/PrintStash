@@ -679,6 +679,11 @@ def _receipt_json(receipt: CreationReceipt) -> str:
             "device": receipt.device,
             "inode": receipt.inode,
             "ctime_ns": receipt.ctime_ns,
+            # The receipt is the binding captured at publication time. Never
+            # derive this from the currently configured backend: a provider
+            # switch between upload and cleanup must fail closed, not relabel
+            # the object as belonging to its replacement.
+            "provider_ref": receipt.provider_ref,
         },
         sort_keys=True,
     )
@@ -1002,7 +1007,9 @@ def _parse_capture_source(value: str | None, source_url: str) -> CaptureSource |
             raw_provider = raw.get("provider")
             raw_item_id = raw.get("source_item_id")
             raw_url = raw.get("canonical_url")
-            if all(isinstance(item, str) for item in (raw_provider, raw_item_id, raw_url)):
+            if all(
+                isinstance(item, str) for item in (raw_provider, raw_item_id, raw_url)
+            ):
                 try:
                     submitted = _canonical_capture_source_url(
                         raw_provider, source_url, raw_item_id
@@ -1011,9 +1018,7 @@ def _parse_capture_source(value: str | None, source_url: str) -> CaptureSource |
                         raw_provider, raw_url, raw_item_id
                     )
                 except (KeyError, TypeError, ValueError, importer.ImportError_) as exc:
-                    raise importer.ImportError_(
-                        "capture_source_url_mismatch"
-                    ) from exc
+                    raise importer.ImportError_("capture_source_url_mismatch") from exc
                 if submitted != captured:
                     raise importer.ImportError_("capture_source_url_mismatch")
         source = CaptureSource.from_dict(raw)

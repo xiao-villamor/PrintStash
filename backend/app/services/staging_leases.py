@@ -14,6 +14,7 @@ import os
 import stat
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -32,6 +33,7 @@ from app.db.models import (
     StagingLease,
 )
 from app.services.storage_backend import CreationReceipt, StorageBackend
+from app.services.storage_ownership import provider_ref_for_backend
 
 _LEASE_TABLE = getattr(StagingLease, "__table__")  # noqa: B009
 _CAPTURE_MARKER = b"user.printstash.capture-slot"
@@ -724,6 +726,7 @@ def record_capture_slot_receipt(
             "device": receipt.device,
             "inode": receipt.inode,
             "ctime_ns": receipt.ctime_ns,
+            "provider_ref": receipt.provider_ref,
         },
         sort_keys=True,
     )
@@ -742,7 +745,9 @@ def _receipt_from_json(value: str | None) -> CreationReceipt | None:
         return None
 
 
-def _receipt_json(receipt: CreationReceipt) -> str:
+def _receipt_json(
+    receipt: CreationReceipt, backend: StorageBackend | None = None
+) -> str:
     return json.dumps(
         {
             "key": receipt.key,
@@ -755,6 +760,10 @@ def _receipt_json(receipt: CreationReceipt) -> str:
             "device": receipt.device,
             "inode": receipt.inode,
             "ctime_ns": receipt.ctime_ns,
+            # Keep the destination identity captured by publication. Reading
+            # the active backend here would silently rebind a receipt after a
+            # provider switch during restart/reconciliation.
+            "provider_ref": receipt.provider_ref,
         },
         sort_keys=True,
     )
@@ -785,8 +794,20 @@ def reconcile_capture_slot(
     )
     if receipt is not None:
         try:
+            expected_ref = provider_ref_for_backend(
+                backend, namespace=receipt.namespace
+            )
+            if receipt.provider_ref is None and backend.backend_name != "local":
+                return False
+            if receipt.provider_ref not in (None, expected_ref):
+                return False
             if not backend.creation_matches(receipt):
                 receipt = None
+            elif receipt.provider_ref is None:
+                # Local legacy receipts remain compatible, but a successful
+                # recovery upgrades their persisted evidence for future
+                # provider-switch checks.
+                receipt = replace(receipt, provider_ref=expected_ref)
         except Exception:
             raise
 
@@ -810,12 +831,17 @@ def reconcile_capture_slot(
 
     if receipt.key != slot.storage_key or receipt.size != slot.size_bytes:
         return False
+    if receipt.provider_ref is None:
+        receipt = replace(
+            receipt,
+            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+        )
     slot.state = CaptureUploadSlotState.UPLOADED
-    slot.receipt_json = _receipt_json(receipt)
+    slot.receipt_json = _receipt_json(receipt, backend)
     slot.uploaded_at = slot.uploaded_at or utcnow()
     slot.updated_at = utcnow()
     lease.destination_key = receipt.key
-    lease.receipt_json = _receipt_json(receipt)
+    lease.receipt_json = _receipt_json(receipt, backend)
     session.add(slot)
     session.add(lease)
     session.flush()
@@ -937,6 +963,7 @@ def record_cover_receipt(
             "device": receipt.device,
             "inode": receipt.inode,
             "ctime_ns": receipt.ctime_ns,
+            "provider_ref": receipt.provider_ref,
         },
         sort_keys=True,
     )

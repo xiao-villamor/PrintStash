@@ -41,6 +41,7 @@ from tests.factories.protocols import (
     MakeFile,
     MakeInboxItem,
     MakeModel,
+    MakeOwnedStorageObject,
     MakePrinter,
     MakePrinterFile,
     MakePrintJob,
@@ -250,6 +251,12 @@ def make_document(db_session: Session) -> MakeDocument:
 
 
 @pytest.fixture
+def make_owned_storage_object(db_session: Session) -> MakeOwnedStorageObject:
+    """An ownership ledger row with an explicit proof state and identity."""
+    return _bound(factories.build_owned_storage_object, db_session)
+
+
+@pytest.fixture
 def make_background_job(db_session: Session) -> Any:
     return _bound(factories.build_background_job, db_session)
 
@@ -334,6 +341,7 @@ __all__ = [
     "MakeFile",
     "MakeInboxItem",
     "MakeModel",
+    "MakeOwnedStorageObject",
     "MakePrintJob",
     "MakePrinter",
     "MakePrinterFile",
@@ -366,6 +374,7 @@ __all__ = [
     "make_metadata",
     "make_model",
     "make_notification_channel",
+    "make_owned_storage_object",
     "make_print_job",
     "make_printer",
     "make_printer_file",

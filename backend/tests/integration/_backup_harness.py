@@ -32,6 +32,10 @@ from app.db.session import (
 )
 from app.services.auth import create_access_token, hash_password
 from app.services.storage_backend import get_backend
+from tests.factories import store_owned_bytes as _store_owned_bytes
+
+# Kept here as part of the file-based backup harness API used by router tests.
+store_owned_bytes = _store_owned_bytes
 
 
 @dataclass

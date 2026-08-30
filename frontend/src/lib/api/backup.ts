@@ -1,4 +1,4 @@
-import { authHeaders, expectOk, getJson, getUrl, sendJson } from "@/lib/api/request";
+import { authHeaders, expectOk, getJson, getUrl, sendAction, sendJson } from "@/lib/api/request";
 
 export interface BackupMeta {
   backup_id: string;
@@ -8,11 +8,33 @@ export interface BackupMeta {
   storage_backend: string;
   app_version: string;
   location: string;
+  /** Opaque locator for one exact source. Never use backup_id as a locator. */
+  source_ref?: string | null;
+  /** Opaque, credential-free provider identity safe to show to an administrator. */
+  provider_ref?: string | null;
+  namespace?: string | null;
+  /** Exact object key (or local archive path) returned by the API. */
+  key?: string | null;
+  /** Configured object prefix for remote sources. */
+  prefix?: string | null;
+  /** Why a candidate is present, when the API supplies one. */
+  candidate_kind?: string | null;
+  canonical?: boolean;
+  precedence?: number;
+  archive_sha256?: string | null;
 }
 
 /** A validated local archive not yet registered in the ownership ledger. */
 export interface UnownedBackupCandidate extends BackupMeta {
   filename: string;
+}
+
+/** A validated remote archive awaiting explicit administrator adoption. */
+export interface UnownedS3BackupCandidate extends BackupMeta {
+  key: string;
+  prefix: string;
+  provider_ref?: string | null;
+  candidate_kind?: string | null;
 }
 
 export interface BackupRestoreResult {
@@ -28,6 +50,11 @@ export function listBackups(): Promise<BackupMeta[]> {
   return getJson<BackupMeta[]>("/api/v1/backups");
 }
 
+/** List every exact source, including replicas and ambiguous collisions. */
+export function listBackupSources(): Promise<BackupMeta[]> {
+  return getJson<BackupMeta[]>("/api/v1/backups/sources");
+}
+
 export function listUnownedLocalBackups(): Promise<UnownedBackupCandidate[]> {
   return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local");
 }
@@ -40,19 +67,53 @@ export function adoptLocalBackup(filename: string): Promise<BackupMeta> {
   );
 }
 
-export function restoreBackup(backupId: string): Promise<BackupRestoreResult> {
+export function listUnownedS3Backups(): Promise<UnownedS3BackupCandidate[]> {
+  return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3");
+}
+
+export function adoptS3Backup(
+  key: string,
+  sourceRef: string,
+  expectedArchiveSha256: string,
+): Promise<BackupMeta> {
+  const params = new URLSearchParams({
+    key,
+    source_ref: sourceRef,
+    expected_archive_sha256: expectedArchiveSha256,
+  });
+  return sendJson<BackupMeta>(`/api/v1/backups/adopt-s3?${params.toString()}`, "POST", undefined);
+}
+
+function sourceQuery(sourceRef?: string | null): string {
+  return sourceRef ? `?source_ref=${encodeURIComponent(sourceRef)}` : "";
+}
+
+export function restoreBackup(
+  backupId: string,
+  sourceRef?: string | null,
+): Promise<BackupRestoreResult> {
   return sendJson<BackupRestoreResult>(
-    `/api/v1/backups/${encodeURIComponent(backupId)}/restore`,
+    `/api/v1/backups/${encodeURIComponent(backupId)}/restore${sourceQuery(sourceRef)}`,
     "POST",
     {},
   );
 }
 
-export async function downloadBackup(backupId: string): Promise<void> {
-  const res = await fetch(getUrl(`/api/v1/backups/${encodeURIComponent(backupId)}/download`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
+export function deleteBackup(backupId: string, sourceRef?: string | null): Promise<void> {
+  return sendAction(
+    `/api/v1/backups/${encodeURIComponent(backupId)}${sourceQuery(sourceRef)}`,
+    "DELETE",
+  );
+}
+
+export async function downloadBackup(backupId: string, sourceRef?: string | null): Promise<void> {
+  const res = await fetch(
+    getUrl(`/api/v1/backups/${encodeURIComponent(backupId)}/download${sourceQuery(sourceRef)}`),
+    {
+      headers: authHeaders(),
+      cache: "no-store",
+    },
+  );
   await expectOk(res);
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") ?? "";

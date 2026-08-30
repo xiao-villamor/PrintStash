@@ -58,6 +58,7 @@ import {
   createAdminUser,
   createBackup,
   adoptLocalBackup,
+  adoptS3Backup,
   deactivateAdminUser,
   deleteCollectionPermission,
   deletePrinterPermission,
@@ -69,7 +70,8 @@ import {
   getHealthDetails,
   getLatestRelease,
   getVaultConfig,
-  listBackups,
+  listBackupSources,
+  listUnownedS3Backups,
   listUnownedLocalBackups,
   listCollectionPermissions,
   listCollections,
@@ -89,7 +91,12 @@ import {
   updateAdminUser,
   updateVaultConfig,
 } from "@/lib/api";
-import type { BackupMeta, ReleaseStatus, UnownedBackupCandidate } from "@/lib/api";
+import type {
+  BackupMeta,
+  ReleaseStatus,
+  UnownedBackupCandidate,
+  UnownedS3BackupCandidate,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { useVaultStats } from "@/lib/queries";
 import {
@@ -251,6 +258,26 @@ function formatDate(value: string | null | undefined): string {
   }).format(new Date(value));
 }
 
+function backupSourceKey(backup: BackupMeta): string {
+  return (
+    backup.source_ref ??
+    `${backup.location}:${backup.namespace ?? ""}:${backup.key ?? ""}:${backup.backup_id}`
+  );
+}
+
+function restoreSourceDescription(backup: BackupMeta, t: ReturnType<typeof useI18n>["t"]): string {
+  const source = backup.source_ref ?? "legacy source identity";
+  const namespace = backup.namespace ? ` · namespace ${backup.namespace}` : "";
+  const hash = backup.archive_sha256 ? ` · SHA-256 ${backup.archive_sha256.slice(0, 16)}…` : "";
+  return `${t("settings.backupRestoreWarning")} ${t("settings.backupExactSource", {
+    source: `${backup.location} · ${source}${namespace}${hash}`,
+  })}`;
+}
+
+function shortOpaque(value: string | null | undefined): string {
+  return value ? `${value.slice(0, 16)}…` : "unavailable";
+}
+
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
@@ -386,10 +413,13 @@ export function SettingsPanel() {
   const [backingUp, setBackingUp] = useState(false);
   const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
+  const [unownedS3Backups, setUnownedS3Backups] = useState<UnownedS3BackupCandidate[]>([]);
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [adoptTarget, setAdoptTarget] = useState<UnownedBackupCandidate | null>(null);
+  const [adoptS3Target, setAdoptS3Target] = useState<UnownedS3BackupCandidate | null>(null);
   const [adoptingBackup, setAdoptingBackup] = useState(false);
+  const [adoptingS3Backup, setAdoptingS3Backup] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
 
   const [downloadingBackup, setDownloadingBackup] = useState<string | null>(null);
@@ -528,13 +558,18 @@ export function SettingsPanel() {
     }
     setBackupsLoading(true);
     try {
-      const [owned, unowned] = await Promise.allSettled([listBackups(), listUnownedLocalBackups()]);
+      const [owned, unowned, unownedS3] = await Promise.allSettled([
+        listBackupSources(),
+        listUnownedLocalBackups(),
+        listUnownedS3Backups(),
+      ]);
       if (owned.status === "rejected") throw owned.reason;
       setBackups(owned.value);
       // The discovery endpoint is additive. Older servers may return 404, in
       // which case owned backups remain fully usable and the candidate panel
       // simply stays empty.
       setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
+      setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -555,6 +590,26 @@ export function SettingsPanel() {
       toast.error(e);
     } finally {
       setAdoptingBackup(false);
+    }
+  }
+
+  async function confirmAdoptS3Backup() {
+    if (!adoptS3Target) return;
+    const target = adoptS3Target;
+    if (!target.source_ref || !target.archive_sha256) {
+      toast.error(t("settings.backupLegacySourceUnavailable"));
+      return;
+    }
+    setAdoptingS3Backup(true);
+    try {
+      await adoptS3Backup(target.key, target.source_ref, target.archive_sha256);
+      toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
+      setAdoptS3Target(null);
+      await loadBackups();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAdoptingS3Backup(false);
     }
   }
 
@@ -668,7 +723,7 @@ export function SettingsPanel() {
       const mb = (meta.size_bytes / 1024 / 1024).toFixed(1);
       setBackups((current) => [
         meta,
-        ...current.filter((item) => item.backup_id !== meta.backup_id),
+        ...current.filter((item) => backupSourceKey(item) !== backupSourceKey(meta)),
       ]);
       toast.success(`Backup created — ${meta.file_count} files, ${mb} MB`);
     } catch (e) {
@@ -683,7 +738,7 @@ export function SettingsPanel() {
     const target = restoreTarget;
     setRestoringBackup(true);
     try {
-      const result = await restoreBackup(target.backup_id);
+      const result = await restoreBackup(target.backup_id, target.source_ref);
       toast.success(`Backup restored — ${result.restored_files} files`);
       setRestoreTarget(null);
       window.setTimeout(() => window.location.reload(), 800);
@@ -694,10 +749,11 @@ export function SettingsPanel() {
     }
   }
 
-  async function handleDownloadBackup(backupId: string) {
-    setDownloadingBackup(backupId);
+  async function handleDownloadBackup(backup: BackupMeta) {
+    const sourceRef = backupSourceKey(backup);
+    setDownloadingBackup(sourceRef);
     try {
-      await downloadBackup(backupId);
+      await downloadBackup(backup.backup_id, backup.source_ref);
       toast.success("Backup download started.");
     } catch (e) {
       toast.error(e);
@@ -1193,7 +1249,11 @@ export function SettingsPanel() {
           onConfirm={confirmRestoreBackup}
           busy={restoringBackup}
           title="Restore backup?"
-          description="This replaces the current database and stored files with the selected backup."
+          description={
+            restoreTarget
+              ? restoreSourceDescription(restoreTarget, t)
+              : t("settings.backupRestoreWarning")
+          }
           confirmLabel="Restore"
         />
         <ConfirmModal
@@ -1210,6 +1270,25 @@ export function SettingsPanel() {
                   filename: adoptTarget.filename,
                   files: String(adoptTarget.file_count),
                   size: formatBytes(adoptTarget.size_bytes),
+                })
+              : ""
+          }
+          confirmLabel={t("settings.backupLegacyAdoptAction")}
+        />
+        <ConfirmModal
+          open={adoptS3Target !== null}
+          onClose={() => {
+            if (!adoptingS3Backup) setAdoptS3Target(null);
+          }}
+          onConfirm={confirmAdoptS3Backup}
+          busy={adoptingS3Backup}
+          title={t("settings.backupS3ConfirmTitle")}
+          description={
+            adoptS3Target
+              ? t("settings.backupS3ConfirmDescription", {
+                  key: adoptS3Target.key,
+                  namespace: adoptS3Target.namespace ?? "unavailable",
+                  hash: adoptS3Target.archive_sha256?.slice(0, 16) ?? "unavailable",
                 })
               : ""
           }
@@ -2151,7 +2230,9 @@ export function SettingsPanel() {
                       </p>
                     ) : backupsLoading ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">Loading...</p>
-                    ) : backups.length === 0 && unownedBackups.length === 0 ? (
+                    ) : backups.length === 0 &&
+                      unownedBackups.length === 0 &&
+                      unownedS3Backups.length === 0 ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">No backups found.</p>
                     ) : (
                       <>
@@ -2192,9 +2273,75 @@ export function SettingsPanel() {
                             ))}
                           </div>
                         )}
+                        {unownedS3Backups.length > 0 && (
+                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {t("settings.backupS3Title")}
+                              </p>
+                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                {t("settings.backupS3Description")}
+                              </p>
+                            </div>
+                            {unownedS3Backups.map((candidate) => (
+                              <div
+                                key={candidate.source_ref ?? `${candidate.prefix}:${candidate.key}`}
+                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-mono text-xs text-foreground">
+                                    {candidate.key}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {t("settings.backupS3Namespace", {
+                                      namespace: candidate.namespace ?? "unavailable",
+                                    })}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {t("settings.backupProviderRef", {
+                                      provider: shortOpaque(candidate.provider_ref),
+                                    })}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {t("settings.backupPrefix", { prefix: candidate.prefix })} ·{" "}
+                                    {candidate.file_count} files ·{" "}
+                                    {formatBytes(candidate.size_bytes)} · v{candidate.app_version}
+                                  </p>
+                                  {candidate.candidate_kind && (
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                      {t("settings.backupCandidateKind", {
+                                        kind: candidate.candidate_kind,
+                                      })}
+                                    </p>
+                                  )}
+                                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                    {t("settings.backupSha256", {
+                                      digest: `${candidate.archive_sha256?.slice(0, 16) ?? "unavailable"}…`,
+                                    })}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdoptS3Target(candidate)}
+                                  disabled={
+                                    adoptingBackup ||
+                                    adoptingS3Backup ||
+                                    restoringBackup ||
+                                    backingUp ||
+                                    !candidate.source_ref ||
+                                    !candidate.archive_sha256
+                                  }
+                                  className={BTN_SECONDARY}
+                                >
+                                  {t("settings.backupLegacyAdoptAction")}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {backups.map((backup) => (
                           <div
-                            key={backup.backup_id}
+                            key={backupSourceKey(backup)}
                             className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[1fr_auto] lg:items-center"
                           >
                             <div className="min-w-0">
@@ -2212,6 +2359,42 @@ export function SettingsPanel() {
                               <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
                                 {backup.backup_id}
                               </p>
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                {t("settings.backupSourceLocator", {
+                                  source: backup.namespace
+                                    ? `${backup.namespace} · ${backup.source_ref?.slice(0, 16) ?? "legacy source"}`
+                                    : (backup.source_ref?.slice(0, 16) ?? "legacy source"),
+                                })}
+                              </p>
+                              <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                {t("settings.backupProviderRef", {
+                                  provider: shortOpaque(backup.provider_ref),
+                                })}
+                              </p>
+                              {backup.key && (
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                  {t("settings.backupExactKey", { key: backup.key })}
+                                </p>
+                              )}
+                              {backup.prefix && (
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                  {t("settings.backupPrefix", { prefix: backup.prefix })}
+                                </p>
+                              )}
+                              {backup.archive_sha256 && (
+                                <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                  {t("settings.backupSha256", {
+                                    digest: shortOpaque(backup.archive_sha256),
+                                  })}
+                                </p>
+                              )}
+                              {backup.candidate_kind && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {t("settings.backupCandidateKind", {
+                                    kind: backup.candidate_kind,
+                                  })}
+                                </p>
+                              )}
                               <p className="mt-1 text-xs text-muted-foreground">
                                 {backup.file_count} files · {formatBytes(backup.size_bytes)} ·{" "}
                                 {backup.storage_backend}
@@ -2220,13 +2403,21 @@ export function SettingsPanel() {
                             <div className="flex flex-wrap gap-2 lg:justify-end">
                               <button
                                 type="button"
-                                onClick={() => handleDownloadBackup(backup.backup_id)}
+                                onClick={() => handleDownloadBackup(backup)}
                                 disabled={
-                                  downloadingBackup !== null || restoringBackup || backingUp
+                                  downloadingBackup !== null ||
+                                  restoringBackup ||
+                                  backingUp ||
+                                  !backup.source_ref
+                                }
+                                title={
+                                  backup.source_ref
+                                    ? undefined
+                                    : t("settings.backupSourceUnavailable")
                                 }
                                 className={BTN_SECONDARY}
                               >
-                                {downloadingBackup === backup.backup_id ? (
+                                {downloadingBackup === backupSourceKey(backup) ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                 ) : (
                                   <Download className="h-3.5 w-3.5" />
@@ -2237,7 +2428,15 @@ export function SettingsPanel() {
                                 type="button"
                                 onClick={() => setRestoreTarget(backup)}
                                 disabled={
-                                  downloadingBackup !== null || restoringBackup || backingUp
+                                  downloadingBackup !== null ||
+                                  restoringBackup ||
+                                  backingUp ||
+                                  !backup.source_ref
+                                }
+                                title={
+                                  backup.source_ref
+                                    ? undefined
+                                    : t("settings.backupSourceUnavailable")
                                 }
                                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
                               >

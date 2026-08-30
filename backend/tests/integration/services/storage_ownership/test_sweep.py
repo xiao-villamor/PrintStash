@@ -117,6 +117,29 @@ class _GuardedBackend(LocalStorageBackend):
 
 
 class TestSweepOrphanedPublications:
+    def test_leaves_stale_backup_publication_for_backup_reconciler(
+        self, db_session: Session
+    ) -> None:
+        backend = get_backend()
+        key = backend.thumbnail_key(990)
+        row = OwnedStorageObject(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="backup-cloud-cache",
+            state=StorageObjectState.PENDING,
+            size_bytes=5,
+            sha256="a" * 64,
+            created_at=STALE_CREATED_AT,
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
+
+        assert result.pending == 1
+        assert db_session.get(OwnedStorageObject, row.id) is not None
+
     def test_ignores_a_fresh_pending_reservation(self, db_session: Session) -> None:
         backend = get_backend()
         key = backend.thumbnail_key(904)

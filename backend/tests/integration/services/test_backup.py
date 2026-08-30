@@ -13,12 +13,15 @@ a local storage root under ``tmp_path``.
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import json
+import os
 import sqlite3
 import tarfile
 import threading
 import time
+from datetime import timedelta
 from functools import partial
 from pathlib import Path
 from typing import Callable, Iterator
@@ -49,10 +52,12 @@ from tests.factories import (
     build_cover,
     build_file,
     build_model,
+    build_owned_storage_object,
     build_print_job,
     build_printer,
     build_provenance_source,
     build_user,
+    store_owned_bytes,
 )
 from tests.integration._backup_harness import BackupEnv, seed_model_with_blob
 
@@ -918,6 +923,52 @@ class TestCreateBackup:
 
         assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
+    def test_creates_a_local_archive_before_uploading_its_cloud_copy(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = _BackupObjectStore(b"", "unused")
+        store.local_archive_dir = backup_env.backup_dir
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        seed_model_with_blob(backup_env, name="Cloud upload", content=b"upload")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        meta = backup.create_backup()
+
+        assert store.uploaded == Path(meta.path).read_bytes()
+        assert store.upload_observations == [
+            (f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}", True)
+        ]
+        with backup_env.new_session() as session:
+            rows = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.backend == "backup-s3",
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].state is StorageObjectState.COMMITTED
+
+    def test_keeps_the_local_archive_when_cloud_upload_fails(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store = _BackupObjectStore(b"", "unused", fail_put=OSError("offline"))
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        seed_model_with_blob(backup_env, name="Cloud failure", content=b"upload")
+        meta = backup.create_backup()
+
+        assert Path(meta.path).is_file()
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.backend == "backup-s3",
+                )
+            ).one()
+            assert row.state is StorageObjectState.PENDING
+
 
 class TestValidateCreatedArchivePayload:
     @pytest.mark.parametrize(
@@ -1046,6 +1097,35 @@ class TestListLocalBackups:
         assert adopted.id == meta.id
         assert {item.id for item in backup.list_backups()} == {meta.id}
 
+    def test_legacy_null_receipt_is_unusable_until_full_adoption(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Legacy null receipt", content=b"legacy")
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(archive),
+                    OwnedStorageObject.object_kind == "backup",
+                )
+            ).one()
+            row.provider_ref = None
+            session.add(row)
+            session.commit()
+
+        assert backup.list_backups() == []
+        assert backup.delete_backup(meta.id) is False
+        with pytest.raises(FileNotFoundError):
+            backup.restore_backup(meta.id)
+        assert archive.exists()
+
+        adopted = backup.adopt_local_backup(archive.name)
+        assert adopted.id == meta.id
+        assert backup.get_backup(meta.id) is not None
+        assert backup.delete_backup(meta.id) is True
+        assert not archive.exists()
+
     def test_archive_adoption_rejects_tampered_bytes(self, backup_env: BackupEnv):
         seed_model_with_blob(backup_env, name="Tampered adoption", content=b"bytes")
         meta = backup.create_backup()
@@ -1060,6 +1140,67 @@ class TestListLocalBackups:
 
         with pytest.raises((RuntimeError, gzip.BadGzipFile, tarfile.TarError)):
             backup.adopt_local_backup(archive.name)
+
+    def test_archive_adoption_rejects_an_undeclared_regular_member(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="Undeclared adoption member", content=b"bytes"
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        _rewrite_backup_archive(
+            backup_env,
+            archive,
+            _leave_manifest_unchanged,
+            extra_member=("files/undeclared.bin", b"unlisted"),
+        )
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == str(archive),
+                    OwnedStorageObject.object_kind == "backup",
+                )
+            ).one()
+            session.delete(row)
+            session.commit()
+
+        with pytest.raises(RuntimeError, match="backup_manifest_invalid"):
+            backup.adopt_local_backup(archive.name)
+
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(archive),
+                    )
+                ).all()
+                == []
+            )
+
+    def test_cloud_cache_is_not_a_listable_backup_source(
+        self, backup_env: BackupEnv
+    ) -> None:
+        cache = backup_env.backup_dir / ".cloud-cache" / "source-ref-archive.tar.gz"
+        cache.parent.mkdir(parents=True)
+        payload = b"disposable cloud cache"
+        cache.write_bytes(payload)
+        backend = storage_backend.LocalStorageBackend()
+        with backup_env.new_session() as session:
+            build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=backend.namespace_for(str(cache)),
+                key=str(cache),
+                object_kind="backup-cloud-cache",
+                state=StorageObjectState.COMMITTED,
+                size_bytes=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+            )
+
+        assert backup.list_backups() == []
+        assert backup.list_backup_sources() == []
+        assert cache.exists()
 
     def test_unowned_discovery_returns_only_valid_adoption_candidates(
         self, backup_env: BackupEnv
@@ -1117,7 +1258,7 @@ class TestListBackups:
             path="printstash-backups/s3-only.tar.gz",
             location="s3",
         )
-        # Same id as the local backup but different metadata: local must win.
+        # Same content identity as the local backup: local has precedence.
         s3_dupe = backup.BackupMeta(
             id=local_meta.id,
             created_at=local_meta.created_at,
@@ -1127,6 +1268,7 @@ class TestListBackups:
             app_version="0.0.0",
             path="printstash-backups/dupe.tar.gz",
             location="s3",
+            archive_sha256=local_meta.archive_sha256,
         )
         monkeypatch.setattr(backup, "_list_s3_backups", lambda: [s3_only, s3_dupe])
 
@@ -1164,6 +1306,7 @@ class TestListBackups:
             app_version="stale",
             path="dup.tar.gz",
             location="s3",
+            archive_sha256=local_meta.archive_sha256,
         )
         monkeypatch.setattr(
             backup, "_list_s3_backups", lambda: [cloud_only, duplicate_of_local]
@@ -1394,6 +1537,71 @@ class TestDeleteBackup:
         # Cleanup so tmp_path teardown can remove the archive.
         backup.delete_backup(meta.id)
 
+    def test_cleanup_removes_only_the_owned_cloud_cache(self, backup_env: BackupEnv):
+        seed_model_with_blob(backup_env, name="Cache consumer", content=b"x")
+        meta = backup.create_backup()
+        cache = backup_env.backup_dir / ".cloud-cache" / "source-ref-archive.tar.gz"
+        cache.parent.mkdir(parents=True)
+        with backup_env.new_session() as session:
+            store_owned_bytes(
+                session,
+                storage_backend.LocalStorageBackend(),
+                str(cache),
+                b"cache-bytes",
+                object_kind="backup-cloud-cache",
+            )
+
+        backup.cleanup_backup_cache(cache)
+
+        assert not cache.exists()
+        assert Path(meta.path).exists()
+
+    def test_cleanup_keeps_a_cache_pinned_by_restore_journal(
+        self, backup_env: BackupEnv
+    ) -> None:
+        cache = backup_env.backup_dir / ".cloud-cache" / "pinned-archive.tar.gz"
+        cache.parent.mkdir(parents=True)
+        with backup_env.new_session() as session:
+            store_owned_bytes(
+                session,
+                storage_backend.LocalStorageBackend(),
+                str(cache),
+                b"pinned-cache",
+                object_kind="backup-cloud-cache",
+            )
+        journal = backup_env.backup_dir / ".restore-pinned.journal"
+        provider_ref = backup._restore_provider_ref()
+        journal.write_text(
+            "\n".join(
+                json.dumps(event, sort_keys=True)
+                for event in (
+                    {
+                        "event": "started",
+                        "version": 2,
+                        "backup_id": "pinned",
+                        "archive_sha256": "a" * 64,
+                        "operation_nonce": "b" * 64,
+                        "backend": "local",
+                        "namespaces": [],
+                        "provider_ref": provider_ref,
+                    },
+                    {
+                        "event": "cache_pinned",
+                        "cache_path": str(cache),
+                        "backup_id": "pinned",
+                        "operation_nonce": "b" * 64,
+                        "archive_sha256": "a" * 64,
+                        "provider_ref": provider_ref,
+                    },
+                )
+            )
+            + "\n"
+        )
+
+        backup.cleanup_backup_cache(cache)
+
+        assert cache.exists()
+
     @requires_s3
     def test_delete_backup_removes_s3_copy(self, backup_s3_env: BackupEnv):
         seed_model_with_blob(backup_s3_env, name="Widget", content=b"solid widget\n")
@@ -1403,7 +1611,13 @@ class TestDeleteBackup:
         key = backup._backup_s3_key(Path(meta.path).name)
         assert s3.head_object(Bucket=backup.settings.backup_s3_bucket, Key=key)
 
-        assert backup.delete_backup(meta.id) is True
+        cloud = next(
+            source
+            for source in backup.list_backup_sources()
+            if source.id == meta.id and source.location == "s3"
+        )
+        assert cloud.source_ref is not None
+        assert backup.delete_backup(meta.id, source_ref=cloud.source_ref) is True
 
         import botocore.exceptions
 
@@ -1412,6 +1626,75 @@ class TestDeleteBackup:
 
 
 class TestDownloadBackupToLocal:
+    def test_closes_the_s3_response_body_after_download(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = b"s3-download-payload"
+        key = "printstash-backups/remote.tar.gz"
+        digest = hashlib.sha256(payload).hexdigest()
+        body: io.BytesIO | None = None
+
+        class TrackedBody(io.BytesIO):
+            closed_by_consumer = False
+
+            def close(self) -> None:
+                self.closed_by_consumer = True
+                super().close()
+
+        class Store:
+            def get_object(self, **_kwargs: object) -> dict[str, object]:
+                nonlocal body
+                body = TrackedBody(payload)
+                return {
+                    "Body": body,
+                    "ContentLength": len(payload),
+                    "ETag": '"download-etag"',
+                    "VersionId": "download-version",
+                }
+
+            def head_object(self, **_kwargs: object) -> dict[str, object]:
+                return {
+                    "ContentLength": len(payload),
+                    "ETag": '"download-etag"',
+                    "VersionId": "download-version",
+                }
+
+        owned = OwnedStorageObject(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key=key,
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            size_bytes=len(payload),
+            sha256=digest,
+            etag='"download-etag"',
+            version_id="download-version",
+        )
+        meta = backup.BackupMeta(
+            id="remote",
+            created_at="2020-01-01T00:00:00+00:00",
+            size_bytes=len(payload),
+            storage_backend="s3",
+            file_count=0,
+            app_version="0.13.0",
+            path=key,
+            location="s3",
+            archive_sha256=digest,
+            source_ref="remote-source",
+            namespace=owned.namespace,
+        )
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: Store())
+        monkeypatch.setattr(
+            backup, "_require_backup_archive_owned", lambda *_args, **_kwargs: owned
+        )
+
+        downloaded = backup._download_backup_to_local(meta)
+
+        assert downloaded.is_file()
+        assert downloaded.read_bytes() == payload
+        assert body is not None and body.closed_by_consumer is True
+
     def test_download_backup_to_local_raises_when_local_file_missing(
         self,
         backup_env: BackupEnv,
@@ -1429,6 +1712,461 @@ class TestDownloadBackupToLocal:
         with pytest.raises(FileNotFoundError):
             backup._download_backup_to_local(meta)
 
+
+class TestBackupCacheRecovery:
+    def test_restore_carries_remote_and_cache_receipts_then_cleans_exact_cache(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Remote cache", content=b"remote-cache"
+        )
+        local_meta = backup.create_backup()
+        payload = Path(local_meta.path).read_bytes()
+        Path(key).unlink()
+        remote_key = "printstash-backups/remote-cache.tar.gz"
+        source_ref = "remote-source"
+        digest = hashlib.sha256(payload).hexdigest()
+        remote = OwnedStorageObject(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key=remote_key,
+            provider_ref="remote-provider",
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            token="cache-token",
+            size_bytes=len(payload),
+            sha256=digest,
+            etag='"archive-etag"',
+            version_id="version-cache",
+        )
+        meta = backup.BackupMeta(
+            id=local_meta.id,
+            created_at=local_meta.created_at,
+            size_bytes=len(payload),
+            storage_backend="s3",
+            file_count=local_meta.file_count,
+            app_version=local_meta.app_version,
+            path=remote_key,
+            location="s3",
+            archive_sha256=digest,
+            source_ref=source_ref,
+            namespace=remote.namespace,
+        )
+        store = _BackupObjectStore(payload, "cache-token")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: meta)
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setattr(
+            backup, "_require_backup_archive_owned", lambda *_args, **_kwargs: remote
+        )
+
+        backup.restore_backup(meta.id)
+
+        cache_identity = hashlib.sha256(
+            f"{source_ref}\x1f{remote.version_id}".encode("utf-8")
+        ).hexdigest()
+        cache_path = (
+            backup_env.backup_dir
+            / ".cloud-cache"
+            / f"{cache_identity}-remote-cache.tar.gz"
+        )
+        assert not cache_path.exists()
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.backend == "backup-s3",
+                        OwnedStorageObject.key == remote_key,
+                    )
+                )
+                .one()
+                .version_id
+                == "version-cache"
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.object_kind == "backup-cloud-cache",
+                        OwnedStorageObject.key == str(cache_path),
+                    )
+                ).first()
+                is None
+            )
+
+    def test_startup_cache_cleanup_retires_only_exact_stale_owned_cache(
+        self, backup_env: BackupEnv
+    ) -> None:
+        backend = storage_backend.LocalStorageBackend()
+        cache_root = backup_env.backup_dir / ".cloud-cache"
+        cache_root.mkdir(parents=True)
+        stale = cache_root / "stale.tar.gz"
+        live = cache_root / "live.tar.gz"
+        pinned = cache_root / "pinned.tar.gz"
+        unrelated = backup_env.backup_dir / "unrelated" / "cache.tar.gz"
+        root_archive = backup_env.backup_dir / "root.tar.gz"
+        live_bytes = b"live-cache"
+        pinned_bytes = b"pinned-cache"
+        with backup_env.new_session() as session:
+            store_owned_bytes(
+                session,
+                backend,
+                str(stale),
+                b"stale-cache",
+                object_kind="backup-cloud-cache",
+            )
+            stale_row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == str(stale))
+            ).one()
+            stale_row.created_at = stale_row.created_at - timedelta(days=2)
+            session.add(stale_row)
+            store_owned_bytes(
+                session,
+                backend,
+                str(live),
+                live_bytes,
+                object_kind="backup-cloud-cache",
+            )
+            store_owned_bytes(
+                session,
+                backend,
+                str(pinned),
+                pinned_bytes,
+                object_kind="backup-cloud-cache",
+            )
+            build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=backend.namespace_for(str(unrelated)),
+                key=str(unrelated),
+                object_kind="backup-cloud-cache",
+                size_bytes=1,
+                sha256=hashlib.sha256(b"x").hexdigest(),
+            )
+            store_owned_bytes(
+                session, backend, str(root_archive), b"root", object_kind="backup"
+            )
+        pinned_journal = backup_env.backup_dir / ".restore-pinned.journal"
+        pinned_journal.write_text(
+            "\n".join(
+                json.dumps(event, sort_keys=True)
+                for event in (
+                    {
+                        "event": "started",
+                        "version": 2,
+                        "backup_id": "pinned",
+                        "archive_sha256": "a" * 64,
+                        "operation_nonce": "b" * 64,
+                        "backend": "local",
+                        "namespaces": [],
+                    },
+                    {
+                        "event": "cache_pinned",
+                        "cache_path": str(pinned),
+                        "backup_id": "pinned",
+                        "operation_nonce": "b" * 64,
+                        "archive_sha256": "a" * 64,
+                    },
+                )
+            )
+            + "\n"
+        )
+
+        assert backup.reconcile_backup_caches() == 2
+
+        assert not stale.exists()
+        assert live.read_bytes() == live_bytes
+        assert pinned.read_bytes() == pinned_bytes
+        assert not unrelated.exists()
+        assert root_archive.read_bytes() == b"root"
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(stale)
+                    )
+                ).first()
+                is None
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(live)
+                    )
+                )
+                .one()
+                .state
+                is StorageObjectState.COMMITTED
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(pinned)
+                    )
+                )
+                .one()
+                .state
+                is StorageObjectState.COMMITTED
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(unrelated)
+                    )
+                )
+                .one()
+                .state
+                is StorageObjectState.BLOCKED
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.key == str(root_archive)
+                    )
+                )
+                .one()
+                .object_kind
+                == "backup"
+            )
+
+    def test_unresolved_restore_pins_cache_with_both_receipts(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Pinned cache", content=b"pinned-cache"
+        )
+        local_meta = backup.create_backup()
+        payload = Path(local_meta.path).read_bytes()
+        Path(key).unlink()
+        remote_key = "printstash-backups/pinned-cache.tar.gz"
+        source_ref = "pinned-source"
+        digest = hashlib.sha256(payload).hexdigest()
+        remote = OwnedStorageObject(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key=remote_key,
+            provider_ref="remote-provider",
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            token="cache-token",
+            size_bytes=len(payload),
+            sha256=digest,
+            etag='"archive-etag"',
+            version_id="version-pinned",
+        )
+        meta = backup.BackupMeta(
+            id=local_meta.id,
+            created_at=local_meta.created_at,
+            size_bytes=len(payload),
+            storage_backend="s3",
+            file_count=local_meta.file_count,
+            app_version=local_meta.app_version,
+            path=remote_key,
+            location="s3",
+            archive_sha256=digest,
+            source_ref=source_ref,
+            namespace=remote.namespace,
+        )
+        store = _BackupObjectStore(payload, "cache-token")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: meta)
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setattr(
+            backup, "_require_backup_archive_owned", lambda *_args, **_kwargs: remote
+        )
+        real_append = backup._append_restore_journal
+
+        def interrupt_after_active(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "database_active":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_append_restore_journal", interrupt_after_active)
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                backup.restore_backup(meta.id)
+        finally:
+            backup._end_restore_maintenance()
+
+        cache_identity = hashlib.sha256(
+            f"{source_ref}\x1f{remote.version_id}".encode("utf-8")
+        ).hexdigest()
+        cache_path = (
+            backup_env.backup_dir
+            / ".cloud-cache"
+            / f"{cache_identity}-pinned-cache.tar.gz"
+        )
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        assert cache_path.exists()
+        journal_events = [json.loads(line) for line in journal.read_text().splitlines()]
+        assert any(
+            event.get("event") == "cache_pinned"
+            and event.get("cache_path") == str(cache_path)
+            for event in journal_events
+        )
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.backend == "backup-s3",
+                        OwnedStorageObject.key == remote_key,
+                    )
+                )
+                .one()
+                .version_id
+                == "version-pinned"
+            )
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.object_kind == "backup-cloud-cache",
+                        OwnedStorageObject.key == str(cache_path),
+                    )
+                )
+                .one()
+                .sha256
+                == digest
+            )
+
+    def test_cache_path_binds_source_digest_version_and_safe_basename(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = b"cache-identity"
+        digest = hashlib.sha256(payload).hexdigest()
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        paths: list[Path] = []
+        for source_ref, version_id in (
+            ("source/one", "version-1"),
+            ("source/two", "version-2"),
+        ):
+            store = _BackupObjectStore(payload, "identity-token")
+            real_head = store.head_object
+            real_get = store.get_object
+
+            def head_with_version(
+                _head=real_head, _version=version_id, **kwargs: object
+            ) -> dict[str, object]:
+                response = _head(**kwargs)
+                response["VersionId"] = _version
+                return response
+
+            def get_with_version(
+                _get=real_get, _version=version_id, **kwargs: object
+            ) -> dict[str, object]:
+                response = _get(**kwargs)
+                response["VersionId"] = _version
+                return response
+
+            store.head_object = head_with_version  # type: ignore[method-assign]
+            store.get_object = get_with_version  # type: ignore[method-assign]
+            monkeypatch.setattr(backup, "_get_backup_s3", lambda s=store: s)
+            remote = OwnedStorageObject(
+                backend="backup-s3",
+                namespace="archive-bucket/printstash-backups/",
+                key="printstash-backups/../unsafe.tar.gz",
+                provider_ref="remote-provider",
+                object_kind="backup",
+                state=StorageObjectState.COMMITTED,
+                token="identity-token",
+                size_bytes=len(payload),
+                sha256=digest,
+                etag='"archive-etag"',
+                version_id=version_id,
+            )
+            meta = backup.BackupMeta(
+                id=f"identity-{version_id}",
+                created_at="2026-01-01T00:00:00+00:00",
+                size_bytes=len(payload),
+                storage_backend="s3",
+                file_count=0,
+                app_version="0.13.0",
+                path=remote.key,
+                location="s3",
+                archive_sha256=digest,
+                source_ref=source_ref,
+                namespace=remote.namespace,
+            )
+            monkeypatch.setattr(
+                backup,
+                "_require_backup_archive_owned",
+                lambda *_args, r=remote, **_kwargs: r,
+            )
+            paths.append(backup._download_backup_to_local(meta))
+        assert paths[0] != paths[1]
+        assert all(
+            path.parent == backup_env.backup_dir / ".cloud-cache" for path in paths
+        )
+        assert all(path.name.endswith("-unsafe.tar.gz") for path in paths)
+
+    def test_matching_unowned_cache_collision_is_preserved(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = b"unowned-cache"
+        digest = hashlib.sha256(payload).hexdigest()
+        source_ref = "collision-source"
+        version_id = "collision-version"
+        identity = hashlib.sha256(
+            f"{source_ref}\x1f{version_id}".encode("utf-8")
+        ).hexdigest()
+        cache_path = (
+            backup_env.backup_dir / ".cloud-cache" / f"{identity}-collision.tar.gz"
+        )
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_bytes(payload)
+        remote = OwnedStorageObject(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key="printstash-backups/collision.tar.gz",
+            provider_ref="remote-provider",
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            token="collision-token",
+            size_bytes=len(payload),
+            sha256=digest,
+            etag='"archive-etag"',
+            version_id=version_id,
+        )
+        meta = backup.BackupMeta(
+            id="collision",
+            created_at="2026-01-01T00:00:00+00:00",
+            size_bytes=len(payload),
+            storage_backend="s3",
+            file_count=0,
+            app_version="0.13.0",
+            path=remote.key,
+            location="s3",
+            archive_sha256=digest,
+            source_ref=source_ref,
+            namespace=remote.namespace,
+        )
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(
+            backup,
+            "_get_backup_s3",
+            lambda: _BackupObjectStore(payload, "collision-token"),
+        )
+        monkeypatch.setattr(
+            backup, "_require_backup_archive_owned", lambda *_args, **_kwargs: remote
+        )
+
+        with pytest.raises(
+            backup.BackupOwnershipError, match="backup_cache_ownership_unverified"
+        ):
+            backup._download_backup_to_local(meta)
+
+        assert cache_path.read_bytes() == payload
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.object_kind == "backup-cloud-cache",
+                        OwnedStorageObject.key == str(cache_path),
+                    )
+                ).first()
+                is None
+            )
+
+
+class TestDownloadBackupEndpoints:
     def test_download_backup_archive_endpoint(
         self, client: TestClient, backup_env: BackupEnv
     ):
@@ -1498,8 +2236,9 @@ class TestDownloadBackupToLocal:
         assert result["backup_id"] == meta.id
         assert _read_model_names(backup_s3_env) == ["Widget"]
         assert Path(key).read_bytes() == b"solid widget\n"
-        # _download_backup_to_local must have pulled a fresh local copy.
-        assert Path(meta.path).exists()
+        # The source-specific cache is a rebuildable derivative and is cleaned
+        # after a successful restore.
+        assert not list((backup_s3_env.backup_dir / ".cloud-cache").glob("*.tar.gz"))
 
 
 class TestHasMember:
@@ -1843,6 +2582,314 @@ class TestStageRestoreArchive:
 
 
 class TestRestoreDatabase:
+    def test_sync_restored_ownership_keeps_provider_siblings_and_archive_ref(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Provider siblings", content=b"restored"
+        )
+        backend = get_backend()
+        namespace = backend.namespace_for(key)
+        current_provider = backup.provider_ref_for_backend(backend, namespace=namespace)
+        old_provider = "f" * 64
+        receipt = storage_backend.CreationReceipt(
+            key=key,
+            size=len(b"restored"),
+            token="restore-token",
+            backend=backend.backend_name,
+            namespace=namespace,
+            device=1,
+            inode=2,
+            ctime_ns=3,
+        )
+        applied = [
+            backup._AppliedBlob(
+                key=key,
+                receipt=receipt,
+                sha256=hashlib.sha256(b"restored").hexdigest(),
+                generation=1,
+            )
+        ]
+        archive = OwnedStorageObject(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key="printstash-backups/provider-siblings.tar.gz",
+            provider_ref="a" * 64,
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            token="archive-token",
+            size_bytes=10,
+            sha256="b" * 64,
+        )
+        with backup_env.new_session() as session:
+            build_owned_storage_object(
+                session,
+                backend=backend.backend_name,
+                namespace=namespace,
+                key=key,
+                provider_ref=old_provider,
+                object_kind="old-provider",
+                size_bytes=8,
+                sha256="c" * 64,
+            )
+            build_owned_storage_object(
+                session,
+                backend=backend.backend_name,
+                namespace=namespace,
+                key=key,
+                provider_ref=current_provider,
+                object_kind="current-provider",
+                size_bytes=7,
+                sha256="d" * 64,
+            )
+
+        backup._sync_restored_ownership(
+            backup_env.db_file,
+            applied,
+            archive_ownership=archive,
+        )
+
+        with backup_env.new_session() as session:
+            rows = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key.in_([key, archive.key])  # type: ignore[attr-defined]
+                )
+            ).all()
+            siblings = [row for row in rows if row.key == key]
+            assert {row.provider_ref for row in siblings} == {
+                old_provider,
+                current_provider,
+            }
+            restored = next(
+                row for row in siblings if row.provider_ref == current_provider
+            )
+            assert restored.token == "restore-token"
+            assert restored.inode == 2
+            archive_row = next(row for row in rows if row.key == archive.key)
+            assert archive_row.provider_ref == archive.provider_ref
+            assert archive_row.object_kind == "backup"
+
+    def test_start_only_journal_does_not_promote_a_matching_stale_marker(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A marker alone cannot turn a pre-swap journal into active recovery."""
+        backup_id = "start-only"
+        archive_sha256 = "a" * 64
+        operation_nonce = "b" * 64
+        journal = backup_env.backup_dir / f".restore-{backup_id}.journal"
+        journal.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 2,
+                    "backup_id": backup_id,
+                    "archive_sha256": archive_sha256,
+                    "operation_nonce": operation_nonce,
+                    "backend": "local",
+                    "namespaces": [],
+                }
+            )
+            + "\n"
+        )
+        with backup_env.new_session() as session:
+            session.add(
+                RestoreMarker(
+                    backup_id=backup_id,
+                    operation_nonce=operation_nonce,
+                    archive_sha256=archive_sha256,
+                    state="database_active",
+                )
+            )
+            session.commit()
+
+        monkeypatch.setattr(
+            backup,
+            "_active_restore_marker",
+            lambda *_args, **_kwargs: pytest.fail("start-only journal promoted"),
+        )
+        assert backup.inspect_restore_recovery() is True
+        assert backup.restore_in_progress() is True
+        state = backup._load_restore_journal(journal)
+        assert state.database_swap_intent is False
+        assert state.database_active is False
+
+    def test_existing_swap_intent_with_inactive_marker_is_not_duplicated(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Inactive marker", content=b"inactive-marker"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+        events: list[dict[str, object]] = []
+
+        def interrupt_at_swap(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            events.append(dict(event))
+            if event.get("event") == "database_swap_intent":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_append_restore_journal", interrupt_at_swap)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+        backup.restore_backup(meta.id)
+
+        assert [event["event"] for event in events].count("database_swap_intent") == 1
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        assert not journal.exists()
+        assert Path(key).read_bytes() == b"inactive-marker"
+
+    def test_active_marker_ack_is_durable_before_terminal_completion(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Active marker", content=b"active-marker"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def interrupt_at_swap(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "database_swap_intent":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_append_restore_journal", interrupt_at_swap)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        started = json.loads(journal.read_text().splitlines()[0])
+        with backup_env.new_session() as session:
+            session.add(
+                RestoreMarker(
+                    backup_id=meta.id,
+                    operation_nonce=started["operation_nonce"],
+                    archive_sha256=started["archive_sha256"],
+                    state="database_active",
+                )
+            )
+            session.commit()
+
+        resumed_events: list[dict[str, object]] = []
+
+        def record_append(path: Path, event: dict[str, object]) -> None:
+            resumed_events.append(dict(event))
+            real_append(path, event)
+
+        monkeypatch.setattr(backup, "_append_restore_journal", record_append)
+        backup.restore_backup(meta.id)
+
+        names = [event["event"] for event in resumed_events]
+        assert names == ["database_active", "complete"]
+        assert not journal.exists()
+        assert Path(key).read_bytes() == b"active-marker"
+
+    @pytest.mark.parametrize(
+        "proof",
+        [
+            pytest.param("false", id="inactive-marker"),
+            pytest.param("unknown", id="unknown-marker"),
+        ],
+    )
+    def test_terminal_journal_requires_matching_active_marker(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        proof: str,
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Terminal marker", content=b"terminal-marker"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_remove = backup._remove_restore_journal
+
+        def leave_terminal_journal(path: Path) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_remove_restore_journal", leave_terminal_journal)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_remove_restore_journal", real_remove)
+
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        assert journal.exists()
+        if proof == "false":
+            with backup_env.new_session() as session:
+                marker = session.exec(select(RestoreMarker)).one()
+                marker.state = "database_inactive"
+                session.add(marker)
+                session.commit()
+        else:
+            monkeypatch.setattr(
+                backup, "_active_restore_marker", lambda *_args, **_kwargs: None
+            )
+
+        monkeypatch.setattr(
+            get_backend(),
+            "create_stream",
+            lambda *_args, **_kwargs: pytest.fail("terminal restore replayed bytes"),
+        )
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_database_state_unknown"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert journal.exists()
+        assert Path(key).read_bytes() == b"terminal-marker"
+
+    @pytest.mark.parametrize(
+        "mutation",
+        [
+            pytest.param("missing", id="missing-published-blob"),
+            pytest.param("changed", id="changed-published-blob"),
+        ],
+    )
+    def test_active_swap_journal_rejects_mutated_published_blob(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        mutation: str,
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Active blob", content=b"active-blob"
+        )
+        meta = backup.create_backup()
+        Path(key).unlink()
+        real_append = backup._append_restore_journal
+
+        def interrupt_at_active(path: Path, event: dict[str, object]) -> None:
+            real_append(path, event)
+            if event.get("event") == "database_active":
+                raise KeyboardInterrupt
+
+        monkeypatch.setattr(backup, "_append_restore_journal", interrupt_at_active)
+        with pytest.raises(KeyboardInterrupt):
+            backup.restore_backup(meta.id)
+        monkeypatch.setattr(backup, "_append_restore_journal", real_append)
+
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+        before_journal = journal.read_bytes()
+        if mutation == "missing":
+            Path(key).unlink()
+        else:
+            Path(key).write_bytes(b"foreign-active-blob")
+        before_bytes = Path(key).read_bytes() if Path(key).exists() else None
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_destination_changed"
+        ):
+            backup.restore_backup(meta.id)
+
+        assert journal.read_bytes() == before_journal
+        assert (Path(key).read_bytes() if Path(key).exists() else None) == before_bytes
+        backup._end_restore_maintenance()
+
     def test_backup_round_trips_a_source_cover(self, backup_env: BackupEnv) -> None:
         content = b"private-source-cover"
         with backup_env.new_session() as session:
@@ -3086,6 +4133,51 @@ class TestPurgeOldBackups:
         assert old.id not in remaining
         assert fresh.id in remaining
 
+    def test_purge_continues_after_one_source_cannot_be_verified(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sources = [
+            backup.BackupMeta(
+                id="unverifiable",
+                created_at="2020-01-01T00:00:00+00:00",
+                size_bytes=1,
+                storage_backend="s3",
+                file_count=0,
+                app_version="0.13.0",
+                path="printstash-backups/unverifiable.tar.gz",
+                location="s3",
+                source_ref="first-source",
+            ),
+            backup.BackupMeta(
+                id="deletable",
+                created_at="2020-01-01T00:00:00+00:00",
+                size_bytes=1,
+                storage_backend="local",
+                file_count=0,
+                app_version="0.13.0",
+                path="/tmp/deletable.tar.gz",
+                source_ref="second-source",
+            ),
+        ]
+        attempted: list[tuple[str, str | None]] = []
+
+        def delete(source_id: str, *, source_ref: str | None = None) -> bool:
+            attempted.append((source_id, source_ref))
+            if source_id == "unverifiable":
+                raise backup.BackupOwnershipError("provider credentials leaked")
+            return True
+
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: sources)
+        monkeypatch.setattr(backup, "delete_backup", delete)
+
+        removed = backup.purge_old_backups(retain_days=30)
+
+        assert removed == 1
+        assert attempted == [
+            ("unverifiable", "first-source"),
+            ("deletable", "second-source"),
+        ]
+
 
 class TestDocument:
     def test_backup_includes_document_blobs(self, backup_env: BackupEnv):
@@ -3262,21 +4354,28 @@ class _BackupObjectStore:
         self.local_archive_dir: Path | None = None
         self.upload_observations: list[tuple[str, bool]] = []
 
-    def head_object(self, **_kwargs: object) -> dict[str, object]:
+    def head_object(self, **kwargs: object) -> dict[str, object]:
         response: dict[str, object] = {
             "ContentLength": len(self.payload),
             "Metadata": {"printstash-create-token": self.token},
             "ETag": '"archive-etag"',
         }
         if self.include_version:
-            response["VersionId"] = "version-1"
+            response["VersionId"] = str(kwargs.get("VersionId", "version-1"))
         return response
 
     def get_object(self, **kwargs: object) -> dict[str, object]:
         self.get_kwargs = kwargs
         if self.fail_get is not None:
             raise self.fail_get
-        return {"Body": io.BytesIO(self.payload)}
+        response: dict[str, object] = {
+            "Body": io.BytesIO(self.payload),
+            "ContentLength": len(self.payload),
+            "ETag": '"archive-etag"',
+        }
+        if self.include_version:
+            response["VersionId"] = str(kwargs.get("VersionId", "version-1"))
+        return response
 
     def put_object(self, **kwargs: object) -> dict[str, str]:
         if self.fail_put is not None:
@@ -3284,6 +4383,10 @@ class _BackupObjectStore:
         body = kwargs["Body"]
         assert hasattr(body, "read")
         self.uploaded = body.read()
+        self.payload = self.uploaded
+        metadata = kwargs.get("Metadata")
+        if isinstance(metadata, dict) and metadata.get("printstash-create-token"):
+            self.token = str(metadata["printstash-create-token"])
         if self.local_archive_dir is not None:
             key = str(kwargs["Key"])
             archive = self.local_archive_dir / key.rsplit("/", 1)[-1]
@@ -3298,7 +4401,381 @@ class _BackupObjectStore:
         return []
 
 
+class TestDiscoverUnownedS3Backups:
+    def test_discovers_an_unowned_s3_archive_with_exact_identity(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 discovery", content=b"discovery")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._LEGACY_BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+
+        def pages(**kwargs: object) -> list[dict[str, object]]:
+            if kwargs["Prefix"] == backup._LEGACY_BACKUP_S3_PREFIX:
+                return [{"Contents": [{"Key": key, "Size": len(payload)}]}]
+            return [{"Contents": []}]
+
+        store.paginate = pages  # type: ignore[method-assign]
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        candidates = backup.discover_unowned_s3_backups()
+
+        assert len(candidates) == 1
+        candidate = candidates[0]
+        assert candidate["key"] == key
+        assert candidate["backup_id"] == meta.id
+        assert candidate["size_bytes"] == len(payload)
+        assert candidate["namespace"] == (
+            f"archive-bucket/{backup._LEGACY_BACKUP_S3_PREFIX}"
+        )
+        assert candidate["archive_sha256"] == hashlib.sha256(payload).hexdigest()
+        assert candidate["source_ref"] == backup._source_ref(
+            location="s3",
+            namespace=f"archive-bucket/{backup._LEGACY_BACKUP_S3_PREFIX}",
+            path=key,
+            provider_ref=backup._backup_provider_ref(backup._backup_s3_config()),
+        )
+        assert store.get_kwargs is not None
+        assert store.get_kwargs["VersionId"] == "version-1"
+
+    def test_current_provider_candidate_is_not_hidden_by_foreign_provider_receipt(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="S3 provider collision", content=b"collision"
+        )
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+
+        def pages(**kwargs: object) -> list[dict[str, object]]:
+            if kwargs["Prefix"] == backup._BACKUP_S3_PREFIX:
+                return [{"Contents": [{"Key": key, "Size": len(payload)}]}]
+            return [{"Contents": []}]
+
+        store.paginate = pages  # type: ignore[method-assign]
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        namespace = f"archive-bucket/{backup._BACKUP_S3_PREFIX}"
+        with backup_env.new_session() as session:
+            session.add(
+                OwnedStorageObject(
+                    backend="backup-s3",
+                    namespace=namespace,
+                    key=key,
+                    object_kind="backup",
+                    state=StorageObjectState.COMMITTED,
+                    token="foreign-token",
+                    size_bytes=len(payload),
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    provider_ref="foreign-provider",
+                    version_id="version-1",
+                )
+            )
+            session.commit()
+
+        candidates = backup.discover_unowned_s3_backups()
+
+        assert [candidate["key"] for candidate in candidates] == [key]
+
+
+class TestAdoptS3Backup:
+    def _assert_no_remote_ledger_row(self, backup_env: BackupEnv, key: str) -> None:
+        with backup_env.new_session() as session:
+            assert (
+                session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.backend == "backup-s3",
+                        OwnedStorageObject.key == key,
+                    )
+                ).first()
+                is None
+            )
+
+    def test_rejects_s3_adoption_when_source_ref_does_not_match_exact_locator(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 ref mismatch", content=b"adoption")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._LEGACY_BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(
+            backup, "_get_backup_s3", lambda: _BackupObjectStore(payload, "unused")
+        )
+
+        with pytest.raises(ValueError, match="backup_source_ref_mismatch"):
+            backup.adopt_s3_backup(
+                key,
+                source_ref="wrong-source-ref",
+                expected_archive_sha256=hashlib.sha256(payload).hexdigest(),
+            )
+
+        self._assert_no_remote_ledger_row(backup_env, key)
+
+    def test_rejects_s3_adoption_when_expected_digest_does_not_match(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 digest mismatch", content=b"adoption")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        source_ref = backup._source_ref(
+            location="s3",
+            namespace=f"archive-bucket/{backup._BACKUP_S3_PREFIX}",
+            path=key,
+            provider_ref=target.provider_ref,
+        )
+
+        with pytest.raises(RuntimeError, match="backup_archive_digest_mismatch"):
+            backup.adopt_s3_backup(
+                key,
+                source_ref=source_ref,
+                expected_archive_sha256="0" * 64,
+            )
+
+        self._assert_no_remote_ledger_row(backup_env, key)
+
+    def test_rejects_s3_adoption_when_object_changes_between_proofs(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 replacement", content=b"adoption")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+
+        class ReplacedObjectStore(_BackupObjectStore):
+            def get_object(self, **kwargs: object) -> dict[str, object]:
+                response = super().get_object(**kwargs)
+                response["VersionId"] = "version-replaced"
+                return response
+
+        store = ReplacedObjectStore(payload, "unused")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        source_ref = backup._source_ref(
+            location="s3",
+            namespace=f"archive-bucket/{backup._BACKUP_S3_PREFIX}",
+            path=key,
+            provider_ref=target.provider_ref,
+        )
+
+        with pytest.raises(RuntimeError, match="backup_remote_version_changed"):
+            backup.adopt_s3_backup(
+                key,
+                source_ref=source_ref,
+                expected_archive_sha256=hashlib.sha256(payload).hexdigest(),
+            )
+
+        self._assert_no_remote_ledger_row(backup_env, key)
+
+    @pytest.mark.parametrize(
+        "validation_error",
+        [
+            "backup_manifest_invalid",
+            "backup_member_size_mismatch",
+            "backup_member_hash_mismatch",
+            "backup_manifest_invalid:db.sqlite3",
+        ],
+    )
+    def test_invalid_archive_validation_never_creates_remote_ledger_row(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+        validation_error: str,
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 invalid archive", content=b"adoption")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setattr(
+            backup,
+            "_validate_archive_for_adoption",
+            lambda _path: (_ for _ in ()).throw(RuntimeError(validation_error)),
+        )
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        source_ref = backup._source_ref(
+            location="s3",
+            namespace=f"archive-bucket/{backup._BACKUP_S3_PREFIX}",
+            path=key,
+            provider_ref=target.provider_ref,
+        )
+
+        with pytest.raises(RuntimeError, match=validation_error.split(":", 1)[0]):
+            backup.adopt_s3_backup(
+                key,
+                source_ref=source_ref,
+                expected_archive_sha256=hashlib.sha256(payload).hexdigest(),
+            )
+
+        self._assert_no_remote_ledger_row(backup_env, key)
+
+    def test_adopts_an_unowned_s3_archive_with_ledger_identity(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="S3 adoption", content=b"adoption")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        source_ref = backup._source_ref(
+            location="s3",
+            namespace=f"archive-bucket/{backup._BACKUP_S3_PREFIX}",
+            path=key,
+            provider_ref=target.provider_ref,
+        )
+        digest = hashlib.sha256(payload).hexdigest()
+
+        adopted = backup.adopt_s3_backup(
+            key, source_ref=source_ref, expected_archive_sha256=digest
+        )
+
+        assert adopted.id == meta.id
+        assert adopted.location == "s3"
+        assert adopted.path == key
+        assert adopted.archive_sha256 == digest
+        assert adopted.source_ref == source_ref
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.backend == "backup-s3",
+                    OwnedStorageObject.key == key,
+                )
+            ).one()
+            assert row.state is StorageObjectState.COMMITTED
+            assert row.namespace == f"archive-bucket/{backup._BACKUP_S3_PREFIX}"
+            assert row.size_bytes == len(payload)
+            assert row.sha256 == digest
+            assert row.etag == '"archive-etag"'
+            assert row.version_id == "version-1"
+        assert store.get_kwargs is not None
+        assert store.get_kwargs["VersionId"] == "version-1"
+
+    def test_adopts_current_provider_without_rebinding_foreign_receipt(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="S3 provider sibling", content=b"provider sibling"
+        )
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        namespace = f"archive-bucket/{backup._BACKUP_S3_PREFIX}"
+        with backup_env.new_session() as session:
+            session.add(
+                OwnedStorageObject(
+                    backend="backup-s3",
+                    namespace=namespace,
+                    key=key,
+                    object_kind="backup",
+                    state=StorageObjectState.COMMITTED,
+                    token="foreign-token",
+                    size_bytes=len(payload),
+                    sha256=hashlib.sha256(payload).hexdigest(),
+                    provider_ref="foreign-provider",
+                    version_id="foreign-version",
+                )
+            )
+            session.commit()
+        source_ref = backup._source_ref(
+            location="s3",
+            namespace=namespace,
+            path=key,
+            provider_ref=target.provider_ref,
+        )
+        digest = hashlib.sha256(payload).hexdigest()
+
+        adopted = backup.adopt_s3_backup(
+            key, source_ref=source_ref, expected_archive_sha256=digest
+        )
+
+        assert adopted.provider_ref == target.provider_ref
+        with backup_env.new_session() as session:
+            rows = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.backend == "backup-s3",
+                    OwnedStorageObject.namespace == namespace,
+                    OwnedStorageObject.key == key,
+                )
+            ).all()
+            assert {row.provider_ref for row in rows} == {
+                "foreign-provider",
+                target.provider_ref,
+            }
+            current = next(
+                row for row in rows if row.provider_ref == target.provider_ref
+            )
+            assert current.sha256 == digest
+            assert current.etag == '"archive-etag"'
+            assert current.version_id == "version-1"
+            foreign = next(
+                row for row in rows if row.provider_ref == "foreign-provider"
+            )
+            assert foreign.token == "foreign-token"
+            assert foreign.version_id == "foreign-version"
+
+
 class TestReconcileBackupPublications:
+    def test_does_not_probe_a_pending_row_in_a_different_configured_bucket(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile old bucket", content=b"old")
+        meta = backup.create_backup()
+        calls: list[dict[str, object]] = []
+
+        class RecordingStore(_BackupObjectStore):
+            def head_object(self, **kwargs: object) -> dict[str, object]:
+                calls.append(kwargs)
+                return super().head_object(**kwargs)
+
+        store = RecordingStore(Path(meta.path).read_bytes(), "old-token")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setattr(backup, "_backup_s3_target", None)
+        monkeypatch.setattr(backup, "_backup_s3_last_signature", None)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "new-bucket")
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "old-bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-old-bucket.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "old-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+        assert calls == []
+
     def test_reconciles_a_local_archive_published_before_its_receipt(
         self, backup_env: BackupEnv
     ) -> None:
@@ -3359,7 +4836,7 @@ class TestReconcileBackupPublications:
             assert row.state is StorageObjectState.BLOCKED
             assert row.last_error == "RuntimeError"
 
-    def test_blocks_a_cloud_archive_when_the_provider_is_unavailable(
+    def test_keeps_a_cloud_archive_pending_when_the_provider_is_unavailable(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(backup, "_get_backup_s3", lambda: None)
@@ -3392,8 +4869,8 @@ class TestReconcileBackupPublications:
                     == "printstash-backups/reconcile-cloud.tar.gz",
                 )
             ).one()
-            assert row.state is StorageObjectState.BLOCKED
-            assert row.last_error == "RuntimeError"
+            assert row.state is StorageObjectState.PENDING
+            assert row.last_error == "retryable:backup_provider_unavailable"
 
     def test_reconciles_a_cloud_archive_with_matching_object_proof(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
@@ -3414,6 +4891,9 @@ class TestReconcileBackupPublications:
             row.backend = "backup-s3"
             row.namespace = "bucket/printstash-backups"
             row.key = "printstash-backups/reconcile-remote.tar.gz"
+            target = backup._get_backup_s3_target()
+            assert target is not None
+            row.provider_ref = target.provider_ref
             row.state = StorageObjectState.PENDING
             row.token = "reconcile-token"
             row.committed_at = None
@@ -3454,6 +4934,9 @@ class TestReconcileBackupPublications:
             row.backend = "backup-s3"
             row.namespace = "bucket/printstash-backups"
             row.key = "printstash-backups/reconcile-mismatch.tar.gz"
+            target = backup._get_backup_s3_target()
+            assert target is not None
+            row.provider_ref = target.provider_ref
             row.state = StorageObjectState.PENDING
             row.token = "expected-token"
             row.committed_at = None
@@ -3493,6 +4976,9 @@ class TestReconcileBackupPublications:
             row.backend = "backup-s3"
             row.namespace = "bucket/printstash-backups"
             row.key = "printstash-backups/reconcile-digest.tar.gz"
+            target = backup._get_backup_s3_target()
+            assert target is not None
+            row.provider_ref = target.provider_ref
             row.state = StorageObjectState.PENDING
             row.token = "digest-token"
             row.committed_at = None
@@ -3532,6 +5018,9 @@ class TestReconcileBackupPublications:
             row.backend = "backup-s3"
             row.namespace = "bucket/printstash-backups"
             row.key = "printstash-backups/reconcile-retry.tar.gz"
+            target = backup._get_backup_s3_target()
+            assert target is not None
+            row.provider_ref = target.provider_ref
             row.state = StorageObjectState.PENDING
             row.token = "retry-token"
             row.committed_at = None
@@ -3551,51 +5040,8 @@ class TestReconcileBackupPublications:
             assert row.state is StorageObjectState.PENDING
             assert row.last_error == "retryable:OSError"
 
-    def test_creates_a_local_archive_before_uploading_its_cloud_copy(
-        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        store = _BackupObjectStore(b"", "unused")
-        store.local_archive_dir = backup_env.backup_dir
-        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
 
-        seed_model_with_blob(backup_env, name="Cloud upload", content=b"upload")
-        meta = backup.create_backup()
-
-        assert store.uploaded == Path(meta.path).read_bytes()
-        assert store.upload_observations == [
-            (f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}", True)
-        ]
-        with backup_env.new_session() as session:
-            rows = session.exec(
-                select(OwnedStorageObject).where(
-                    OwnedStorageObject.object_kind == "backup",
-                    OwnedStorageObject.backend == "backup-s3",
-                )
-            ).all()
-            assert len(rows) == 1
-            assert rows[0].state is StorageObjectState.COMMITTED
-
-    def test_keeps_the_local_archive_when_cloud_upload_fails(
-        self,
-        backup_env: BackupEnv,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        store = _BackupObjectStore(b"", "unused", fail_put=OSError("offline"))
-        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
-
-        seed_model_with_blob(backup_env, name="Cloud failure", content=b"upload")
-        meta = backup.create_backup()
-
-        assert Path(meta.path).is_file()
-        with backup_env.new_session() as session:
-            row = session.exec(
-                select(OwnedStorageObject).where(
-                    OwnedStorageObject.object_kind == "backup",
-                    OwnedStorageObject.backend == "backup-s3",
-                )
-            ).one()
-            assert row.state is StorageObjectState.PENDING
-
+class TestListS3Backups:
     def test_lists_a_committed_cloud_archive_from_both_prefixes(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -3623,6 +5069,7 @@ class TestReconcileBackupPublications:
 
         store.paginate = pages  # type: ignore[method-assign]
         monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
         with backup_env.new_session() as session:
             row = session.exec(
                 select(OwnedStorageObject).where(
@@ -3635,6 +5082,12 @@ class TestReconcileBackupPublications:
                 f"{backup.settings.backup_s3_bucket}/{backup._BACKUP_S3_PREFIX}"
             )
             row.key = key
+            target = backup._get_backup_s3_target()
+            assert target is not None
+            row.provider_ref = target.provider_ref
+            store.token = str(row.token)
+            row.etag = '"archive-etag"'
+            row.version_id = "version-1"
             session.add(row)
             session.commit()
 
@@ -3642,7 +5095,139 @@ class TestReconcileBackupPublications:
 
         assert [item.id for item in listed] == [meta.id]
         assert listed[0].location == "s3"
+        assert listed[0].size_bytes == len(payload)
         assert set(store.prefixes_seen) == {
             backup._BACKUP_S3_PREFIX,
             backup._LEGACY_BACKUP_S3_PREFIX,
         }
+
+    def test_foreign_receipt_does_not_hide_current_provider_archive(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(
+            backup_env, name="Cloud provider siblings", content=b"siblings"
+        )
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "current-token")
+
+        def pages(**kwargs: object) -> list[dict[str, object]]:
+            if kwargs["Prefix"] == backup._BACKUP_S3_PREFIX:
+                return [{"Contents": [{"Key": key, "Size": len(payload)}]}]
+            return [{"Contents": []}]
+
+        store.paginate = pages  # type: ignore[method-assign]
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        target = backup._get_backup_s3_target()
+        assert target is not None
+        namespace = f"archive-bucket/{backup._BACKUP_S3_PREFIX}"
+        digest = hashlib.sha256(payload).hexdigest()
+        with backup_env.new_session() as session:
+            foreign = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            foreign.backend = "backup-s3"
+            foreign.namespace = namespace
+            foreign.key = key
+            foreign.provider_ref = "foreign-provider"
+            foreign.token = "foreign-token"
+            foreign.etag = '"foreign-etag"'
+            foreign.version_id = "foreign-version"
+            session.add(foreign)
+            session.add(
+                OwnedStorageObject(
+                    backend="backup-s3",
+                    namespace=namespace,
+                    key=key,
+                    object_kind="backup",
+                    state=StorageObjectState.COMMITTED,
+                    token="current-token",
+                    size_bytes=len(payload),
+                    sha256=digest,
+                    provider_ref=target.provider_ref,
+                    etag='"archive-etag"',
+                    version_id="version-1",
+                )
+            )
+            session.commit()
+
+        listed = backup._list_s3_backups()
+
+        assert [item.id for item in listed] == [meta.id]
+        assert listed[0].provider_ref == target.provider_ref
+        assert store.get_kwargs is not None
+        assert store.get_kwargs["VersionId"] == "version-1"
+
+    def test_listing_reads_only_first_manifest_and_closes_cloud_body(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(
+            backup_env,
+            name="Cloud stream listing",
+            content=os.urandom(2 * 1024 * 1024),
+        )
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+
+        class TrackingBody(io.BytesIO):
+            bytes_read = 0
+            closed_by_consumer = False
+
+            def read(self, size: int = -1) -> bytes:
+                data = super().read(size)
+                self.bytes_read += len(data)
+                return data
+
+            def close(self) -> None:
+                self.closed_by_consumer = True
+                super().close()
+
+        class TrackingStore(_BackupObjectStore):
+            body: TrackingBody | None = None
+
+            def get_object(self, **kwargs: object) -> dict[str, object]:
+                response = super().get_object(**kwargs)
+                self.body = TrackingBody(self.payload)
+                response["Body"] = self.body
+                return response
+
+        store = TrackingStore(payload, "listing-token")
+
+        def pages(**kwargs: object) -> list[dict[str, object]]:
+            if kwargs["Prefix"] == backup._BACKUP_S3_PREFIX:
+                return [{"Contents": [{"Key": key, "Size": len(payload)}]}]
+            return [{"Contents": []}]
+
+        store.paginate = pages  # type: ignore[method-assign]
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "archive-bucket")
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = f"archive-bucket/{backup._BACKUP_S3_PREFIX}"
+            row.key = key
+            row.token = "listing-token"
+            row.etag = '"archive-etag"'
+            row.version_id = "version-1"
+            row.provider_ref = backup._backup_provider_ref(backup._backup_s3_config())
+            store.token = row.token
+            session.add(row)
+            session.commit()
+
+        listed = backup._list_s3_backups()
+
+        assert [item.id for item in listed] == [meta.id]
+        assert store.body is not None
+        assert store.body.closed_by_consumer is True
+        assert store.body.bytes_read < len(payload)

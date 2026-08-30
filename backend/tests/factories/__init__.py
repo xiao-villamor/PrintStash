@@ -122,6 +122,7 @@ from tests.factories.scenarios import (
     a_printer_with_a_queue,
 )
 from tests.factories.storage import (
+    build_owned_storage_object,
     build_storage_delete_intent,
     build_stored_file,
     build_unowned_file,
@@ -152,6 +153,7 @@ __all__ = [
     "build_material_slot",
     "build_metadata",
     "build_model",
+    "build_owned_storage_object",
     "build_notification_channel",
     "build_restore_marker",
     "build_print_job",

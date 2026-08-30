@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 from sqlmodel import select
 
-from app.db.models import OwnedStorageObject
-from app.services.storage_backend import CreationReceipt
+from app.core.time import utcnow
+from app.db.models import OwnedStorageObject, StorageObjectState
+from app.services.storage_backend import CreationReceipt, LocalStorageBackend
 from app.services.storage_ownership import (
     UnsafeStorageDeleteError,
     delete_owned_key,
@@ -17,6 +19,7 @@ from app.services.storage_ownership import (
     replace_owned_bytes,
     require_or_adopt_legacy_artifact,
     require_owned_key,
+    sweep_orphaned_publications,
 )
 
 
@@ -31,6 +34,9 @@ def _receipt(key: str = "files/model.stl") -> CreationReceipt:
         device=1,
         inode=2,
         ctime_ns=3,
+        provider_ref=hashlib.sha256(
+            '{"backend":"local","namespace":"data:/tmp/vault"}'.encode()
+        ).hexdigest(),
     )
 
 
@@ -115,6 +121,98 @@ class TestRecordCreation:
         assert refreshed.device == refreshed_receipt.device
         assert refreshed.inode == refreshed_receipt.inode
         assert refreshed.ctime_ns == refreshed_receipt.ctime_ns
+
+    def test_receipt_upgrade_reuses_exact_quarantined_row_without_overwrite(
+        self, db_session, make_owned_storage_object
+    ) -> None:
+        digest = hashlib.sha256(b"legacy backup").hexdigest()
+        row = make_owned_storage_object(
+            backend="backup-s3",
+            namespace="archive-bucket/nexus3d-backups/",
+            key="nexus3d-backups/nexus3d-backup-20260101-legacy.tar.gz",
+            object_kind="backup-legacy",
+            state=StorageObjectState.BLOCKED,
+            token="legacy-digest-token",
+            size_bytes=len(b"legacy backup"),
+            sha256=None,
+            provider_ref=None,
+            etag=None,
+            version_id=None,
+            last_error="backup_s3_adoption_required",
+        )
+        db_session.commit()
+        row_id = row.id
+        receipt = CreationReceipt(
+            key=row.key,
+            size=row.size_bytes or 0,
+            token="immutable-digest-token",
+            backend=row.backend,
+            namespace=row.namespace,
+            etag='"legacy-etag"',
+            version_id="legacy-version",
+        )
+
+        upgraded = record_creation(
+            db_session,
+            receipt,
+            object_kind="backup-legacy",
+            sha256=digest,
+            provider_ref="p" * 64,
+            upgrade_provider_ref=True,
+        )
+        db_session.commit()
+        db_session.refresh(upgraded)
+
+        assert upgraded.id == row_id
+        assert upgraded.state is StorageObjectState.COMMITTED
+        assert upgraded.key == row.key
+        assert upgraded.namespace == row.namespace
+        assert upgraded.sha256 == digest
+        assert upgraded.provider_ref == "p" * 64
+        assert upgraded.etag == '"legacy-etag"'
+        assert upgraded.version_id == "legacy-version"
+
+    def test_receipt_recording_does_not_overwrite_a_locator_from_another_provider(
+        self, db_session, make_owned_storage_object
+    ) -> None:
+        row = make_owned_storage_object(
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key="printstash-backups/exact.tar.gz",
+            object_kind="backup",
+            provider_ref="a" * 64,
+            sha256="a" * 64,
+            etag='"a"',
+            version_id="version-a",
+        )
+        db_session.commit()
+        replacement = CreationReceipt(
+            key=row.key,
+            size=1,
+            token="replacement",
+            backend=row.backend,
+            namespace=row.namespace,
+            etag='"b"',
+            version_id="version-b",
+        )
+
+        with pytest.raises(
+            UnsafeStorageDeleteError, match="provider_identity_mismatch"
+        ):
+            record_creation(
+                db_session,
+                replacement,
+                object_kind="backup",
+                sha256="b" * 64,
+                provider_ref="b" * 64,
+            )
+
+        db_session.rollback()
+        untouched = db_session.get(OwnedStorageObject, row.id)
+        assert untouched is not None
+        assert untouched.provider_ref == "a" * 64
+        assert untouched.sha256 == "a" * 64
+        assert untouched.version_id == "version-a"
 
 
 class TestRequireOwnedKey:
@@ -317,3 +415,38 @@ class TestDeleteOwnedKey:
         with pytest.raises(UnsafeStorageDeleteError, match="no_longer_matches_receipt"):
             delete_owned_key(db_session, backend, stored.key, required_proof=True)
         assert backend.rollback_calls[-1] == stored
+
+
+class TestSweepOrphanedPublications:
+    @pytest.mark.parametrize(
+        "object_kind",
+        [
+            pytest.param("backup", id="backup"),
+            pytest.param("backup-legacy", id="backup-legacy"),
+            pytest.param("backup-cloud-cache", id="backup-cloud-cache"),
+        ],
+    )
+    def test_sweep_leaves_backup_publications_for_their_owner(
+        self, db_session, make_owned_storage_object, object_kind: str
+    ) -> None:
+        row = make_owned_storage_object(
+            backend="local",
+            namespace="local/test",
+            key=f"backups/{object_kind}.tar.gz",
+            object_kind=object_kind,
+            state=StorageObjectState.PENDING,
+            created_at=utcnow() - timedelta(days=2),
+        )
+        db_session.commit()
+
+        result = sweep_orphaned_publications(
+            db_session,
+            LocalStorageBackend(),
+            now=utcnow(),
+        )
+
+        assert result.examined == 1
+        assert result.pending == 1
+        assert result.reclaimed == 0
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.PENDING

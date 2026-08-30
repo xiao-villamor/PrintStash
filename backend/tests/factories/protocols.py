@@ -37,6 +37,7 @@ from app.db.models import (
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
+    OwnedStorageObject,
     Printer,
     PrinterFile,
     PrinterProvider,
@@ -250,6 +251,25 @@ class MakeDocument(Protocol):
     ) -> Document: ...
 
 
+class MakeOwnedStorageObject(Protocol):
+    def __call__(
+        self,
+        *,
+        backend: str = "local",
+        namespace: str = "local/test",
+        key: str = "files/test.stl",
+        object_kind: str = "artifact",
+        state: Any = ...,
+        token: str | None = "test-token",
+        size_bytes: int | None = 1,
+        sha256: str | None = None,
+        provider_ref: str | None = None,
+        etag: str | None = None,
+        version_id: str | None = None,
+        **overrides: Any,
+    ) -> OwnedStorageObject: ...
+
+
 class MakeShareLink(Protocol):
     def __call__(
         self,
@@ -289,6 +309,7 @@ __all__ = [
     "MakeFile",
     "MakeInboxItem",
     "MakeModel",
+    "MakeOwnedStorageObject",
     "MakePrintJob",
     "MakePrinter",
     "MakePrinterFile",

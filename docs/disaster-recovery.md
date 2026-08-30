@@ -42,16 +42,31 @@ upgrading.
    allows.
 4. Start only the API container with the same storage settings used by the
    backup.
-5. Restore the backup:
+5. If more than one backup location has the same backup id, first list exact
+   sources and choose the intended opaque `source_ref` after checking its
+   namespace, key, size, digest, and provider identity:
+
+```bash
+curl \
+  -H "Authorization: Bearer <admin-token>" \
+  http://localhost:8000/api/v1/backups/sources
+```
+
+   Older validated local or S3 archives that are not yet owned remain untouched
+   until an administrator explicitly adopts the exact candidate in Settings.
+   Never infer a source from backup id alone.
+
+6. Restore the chosen backup. Pass `source_ref` when the id is present in more
+   than one location:
 
 ```bash
 curl -X POST \
   -H "Authorization: Bearer <admin-token>" \
-  http://localhost:8000/api/v1/backups/<backup-id>/restore
+  "http://localhost:8000/api/v1/backups/<backup-id>/restore?source_ref=<opaque-source-ref>"
 ```
 
-6. Restart the full stack.
-7. Run the smoke checks from [UPGRADE.md](../UPGRADE.md).
+7. Restart the full stack.
+8. Run the smoke checks from [UPGRADE.md](../UPGRADE.md).
 
 ## If The UI/API Cannot Start
 

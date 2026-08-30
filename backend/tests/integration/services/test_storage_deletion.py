@@ -24,8 +24,9 @@ import hashlib
 import pytest
 from sqlmodel import Session, select
 
-from app.db.models import StorageDeleteIntent
+from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
 from app.services import audit
+from app.services import storage_deletion as storage_deletion_service
 from app.services.storage_backend import get_backend
 from app.services.storage_deletion import (
     DeleteIntentResult,
@@ -35,7 +36,11 @@ from app.services.storage_deletion import (
     process_storage_delete_intents,
     record_legacy_blocked_intent,
 )
-from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
+from app.services.storage_ownership import (
+    UnsafeStorageDeleteError,
+    provider_ref_for_backend,
+    record_creation,
+)
 
 
 @pytest.fixture
@@ -50,7 +55,13 @@ def owned(db_session: Session):
         backend = get_backend()
         key = backend.blob_key("deletion", made["n"], "object.bin")
         receipt = backend.create_bytes(data, key)
-        record_creation(db_session, receipt, object_kind="artifact", sha256=sha256)
+        record_creation(
+            db_session,
+            receipt,
+            object_kind="artifact",
+            sha256=sha256,
+            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+        )
         db_session.commit()
         return key, receipt
 
@@ -63,6 +74,38 @@ def _intents(session: Session) -> list[StorageDeleteIntent]:
 
 
 class TestEnqueueOwnedKey:
+    def test_same_key_from_another_provider_is_not_authorized(
+        self, db_session: Session, owned
+    ) -> None:
+        key, receipt = owned()
+        db_session.delete(
+            db_session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+        )
+        db_session.commit()
+        db_session.add(
+            OwnedStorageObject(
+                backend=receipt.backend,
+                namespace=receipt.namespace,
+                key=key,
+                object_kind="artifact",
+                state=StorageObjectState.COMMITTED,
+                token=receipt.token,
+                size_bytes=receipt.size,
+                provider_ref="foreign-provider",
+            )
+        )
+        db_session.commit()
+
+        assert enqueue_owned_key(db_session, get_backend(), key) is False
+        assert db_session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.key == key,
+                OwnedStorageObject.provider_ref == "foreign-provider",
+            )
+        ).one()
+
     def test_authorizes_the_deletion_of_a_key_it_owns(
         self, db_session: Session, owned
     ) -> None:
@@ -258,7 +301,63 @@ class TestEnqueueCreationReceipt:
             enqueue_creation_receipt(db_session, get_backend(), receipt)
 
 
+class TestRecordLegacyBlockedIntent:
+    def test_same_receipt_tuple_remains_distinct_across_providers(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        refs = iter(("a" * 64, "b" * 64))
+        monkeypatch.setattr(
+            storage_deletion_service,
+            "provider_ref_for_backend",
+            lambda *_args, **_kwargs: next(refs),
+        )
+        backend = get_backend()
+        key = backend.blob_key("legacy-provider-sibling", 1, "object.stl")
+
+        first = record_legacy_blocked_intent(
+            db_session,
+            backend,
+            key=key,
+            size_bytes=12,
+            sha256="c" * 64,
+            object_kind="legacy_artifact",
+        )
+        second = record_legacy_blocked_intent(
+            db_session,
+            backend,
+            key=key,
+            size_bytes=12,
+            sha256="c" * 64,
+            object_kind="legacy_artifact",
+        )
+        db_session.commit()
+
+        assert first.id != second.id
+        assert {intent.provider_ref for intent in _intents(db_session)} == {
+            "a" * 64,
+            "b" * 64,
+        }
+
+
 class TestProcessStorageDeleteIntents:
+    def test_restart_blocks_intent_when_provider_destination_changed(
+        self, db_session: Session, owned
+    ) -> None:
+        key, _receipt = owned()
+        enqueue_owned_key(db_session, get_backend(), key)
+        db_session.commit()
+        intent = _intents(db_session)[0]
+        assert intent.provider_ref is not None
+        intent.provider_ref = "foreign-provider"
+        db_session.add(intent)
+        db_session.commit()
+
+        result = process_storage_delete_intents()
+
+        assert result.blocked == 1
+        assert get_backend().exists(key)
+        assert _intents(db_session)[0].last_error == "storage_provider_mismatch"
+
     def test_records_legacy_bytes_as_a_durable_blocked_intent(
         self, db_session: Session
     ) -> None:
@@ -388,9 +487,7 @@ class TestProcessStorageDeleteIntents:
 
         assert result.blocked == 1
         assert get_backend().exists(key)
-        assert (
-            _intents(db_session)[0].last_error == "storage_guarded_delete_unsupported"
-        )
+        assert _intents(db_session)[0].last_error == "storage_provider_identity_missing"
 
     def test_guarded_authorization_survives_restart(
         self, db_session: Session, owned

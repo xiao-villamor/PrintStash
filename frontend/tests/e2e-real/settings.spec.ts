@@ -84,6 +84,28 @@ test.describe("settings", () => {
     await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
   });
 
+  test("uses the exact source reference for a backup download", async ({ page }) => {
+    await page.goto("/settings?section=storage");
+
+    const created = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/backups") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Backup now" }).click();
+    const metadata = await (await created).json();
+    expect(metadata.source_ref).toBeTruthy();
+
+    const download = page.waitForRequest(
+      (request) =>
+        request.method() === "GET" &&
+        request.url().includes("/api/v1/backups/") &&
+        request.url().includes("/download?") &&
+        new URL(request.url()).searchParams.get("source_ref") === metadata.source_ref,
+    );
+    await page.getByRole("button", { name: "Download" }).first().click();
+    await download;
+  });
+
   test("export library metadata as CSV", async ({ page }) => {
     await page.goto("/settings"); // Overview is the default section.
     const [download] = await Promise.all([

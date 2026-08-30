@@ -30,9 +30,13 @@ export function ignoreAuditFinding(id: number): Promise<VaultAuditFinding> {
   return sendJson<VaultAuditFinding>(`/api/v1/maintenance/findings/${id}/ignore`, "POST", {});
 }
 
-export function verifyBackup(backupId: string): Promise<BackupVerification> {
+export function verifyBackup(
+  backupId: string,
+  sourceRef?: string | null,
+): Promise<BackupVerification> {
+  const query = sourceRef ? `?source_ref=${encodeURIComponent(sourceRef)}` : "";
   return sendJson<BackupVerification>(
-    `/api/v1/backups/${encodeURIComponent(backupId)}/verify`,
+    `/api/v1/backups/${encodeURIComponent(backupId)}/verify${query}`,
     "POST",
     {},
   );

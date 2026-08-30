@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import OwnedStorageObject, StorageObjectState
@@ -56,10 +59,170 @@ def _backend_name(backend: StorageBackend) -> str:
 
 
 def _namespace_for(backend: StorageBackend, key: str) -> str:
-    value = backend.namespace_for(key)
+    namespace_for = getattr(backend, "namespace_for", None)
+    value = (
+        namespace_for(key)
+        if callable(namespace_for)
+        else getattr(backend, "namespace", None)
+    )
     if isinstance(value, str) and value:
         return value
     return _backend_name(backend)
+
+
+def _locator_rows(
+    session: Session,
+    backend: StorageBackend,
+    key: str,
+    *,
+    states: tuple[StorageObjectState, ...] | None = None,
+    include_legacy: bool = True,
+) -> list[OwnedStorageObject]:
+    """Load receipts for one exact backend namespace, never key globally.
+
+    A key is only meaningful inside its backend namespace.  Looking it up by
+    key alone made a provider switch capable of finding a receipt from a
+    different destination and silently rebinding it to the new target.
+    """
+    backend_name = _backend_name(backend)
+    clauses = [OwnedStorageObject.key == key]
+    if backend_name != "unknown":
+        clauses.append(OwnedStorageObject.backend == backend_name)
+    # Third-party/test adapters predating the namespace seam do not expose a
+    # namespace.  Keep their compatibility path key-scoped; every production
+    # StorageBackend supplies namespace_for and therefore receives exact
+    # backend+namespace scoping.
+    if backend_name != "unknown" and (
+        callable(getattr(backend, "namespace_for", None))
+        or hasattr(backend, "namespace")
+    ):
+        namespace = _namespace_for(backend, key)
+        clauses.append(OwnedStorageObject.namespace == namespace)
+        expected_ref = provider_ref_for_backend(backend, namespace=namespace)
+        if _backend_name(backend) == "local" and include_legacy:
+            clauses.append(
+                (OwnedStorageObject.provider_ref == expected_ref)
+                | OwnedStorageObject.provider_ref.is_(None)  # type: ignore[union-attr]
+            )
+        else:
+            clauses.append(OwnedStorageObject.provider_ref == expected_ref)
+    statement = select(OwnedStorageObject).where(*clauses)
+    if states is not None:
+        statement = statement.where(OwnedStorageObject.state.in_(states))  # type: ignore[attr-defined]
+    return list(session.exec(statement).all())
+
+
+def _normalized_endpoint(value: object) -> str:
+    """Normalize an endpoint without retaining userinfo or query secrets."""
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urlsplit(raw)
+    except ValueError:
+        raise ValueError("storage_provider_endpoint_invalid") from None
+    if not parsed.scheme or not parsed.hostname:
+        raise ValueError("storage_provider_endpoint_invalid")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("storage_provider_endpoint_invalid")
+    host = parsed.hostname.lower().rstrip(".")
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("storage_provider_endpoint_invalid") from None
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    if port in {80, 443} and (
+        (port == 80 and parsed.scheme.lower() == "http")
+        or (port == 443 and parsed.scheme.lower() == "https")
+    ):
+        netloc = host
+    else:
+        netloc = host if port is None else f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return urlunsplit((parsed.scheme.lower(), netloc, path, "", ""))
+
+
+def provider_ref_for_backend(
+    backend: StorageBackend, *, namespace: str | None = None
+) -> str:
+    """Return a stable, credential-free provider destination identity.
+
+    The identity intentionally excludes access/secret keys so credential
+    rotation does not relabel existing receipts.  Adapter-specific fields are
+    read when available; local/legacy fakes still receive a deterministic
+    backend+namespace identity.
+    """
+    name = _backend_name(backend)
+    resolved_namespace = namespace or getattr(backend, "namespace", None)
+    if not resolved_namespace:
+        resolved_namespace = name
+    endpoint = getattr(backend, "_endpoint_url", None)
+    if endpoint is None:
+        endpoint = getattr(backend, "endpoint_url", None)
+    if endpoint is None and name == "s3":
+        endpoint = settings.s3_endpoint_url
+    if endpoint is None and name == "backup-s3":
+        endpoint = settings.backup_s3_endpoint_url
+    region = getattr(backend, "_region", None) or getattr(backend, "region", None)
+    if region is None and name == "s3":
+        region = settings.s3_region
+    if region is None and name == "backup-s3":
+        region = settings.backup_s3_region
+    payload: dict[str, object] = {
+        "backend": name,
+        "provider": str(getattr(backend, "provider_id", name)),
+        "transport": str(getattr(backend, "transport", name)),
+        "endpoint": _normalized_endpoint(endpoint),
+        "region": str(region or "").strip().lower(),
+        "addressing_style": str(
+            getattr(backend, "_addressing_style", None)
+            or getattr(backend, "addressing_style", None)
+            or "path"
+        )
+        .strip()
+        .lower(),
+    }
+    transport = str(getattr(backend, "transport", name)).lower()
+    spec = getattr(backend, "_spec", None)
+    options = getattr(spec, "options", {})
+    if not isinstance(options, dict):
+        options = {}
+    if transport == "webdav" or name in {"webdav", "nextcloud"}:
+        # OpenDAL's namespace is only the managed root. The endpoint is the
+        # actual destination and must be included, while credentials remain
+        # deliberately absent from the identity.
+        webdav_endpoint = getattr(backend, "_webdav_endpoint", None)
+        if webdav_endpoint is None:
+            webdav_endpoint = options.get("endpoint_url")
+        payload["endpoint"] = _normalized_endpoint(webdav_endpoint)
+        payload["root"] = (
+            str(
+                getattr(backend, "_webdav_root", None)
+                or options.get("root")
+                or resolved_namespace
+            )
+            .strip()
+            .strip("/")
+        )
+    elif transport == "sftp" or name == "sftp":
+        # SFTP has no URL endpoint. Pin the network destination and managed
+        # root, excluding password/private-key/passphrase material (and any
+        # future option whose name advertises it is secret).
+        host = str(options.get("host", getattr(backend, "_host", ""))).strip()
+        payload["sftp"] = {
+            "host": host.lower().rstrip("."),
+            "port": int(options.get("port", getattr(backend, "_port", 22)) or 22),
+            "username": str(
+                options.get("username", getattr(backend, "_username", ""))
+            ).strip(),
+            "root": str(options.get("root") or resolved_namespace).strip().strip("/"),
+        }
+    elif name not in {"s3", "backup-s3"}:
+        payload["namespace"] = str(resolved_namespace)
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 @contextmanager
@@ -109,18 +272,27 @@ def reserve_creation(
     object_kind: str,
     expected_size: int | None = None,
     sha256: str | None = None,
+    provider_ref: str | None = None,
 ) -> int:
     """Durably reserve one locator before publishing bytes to storage."""
     backend_name = _backend_name(backend)
     namespace = _namespace_for(backend, key)
+    provider_ref = provider_ref or provider_ref_for_backend(
+        backend, namespace=namespace
+    )
     with _publication_session(session) as (reservation_session, independent):
-        existing = reservation_session.exec(
-            select(OwnedStorageObject).where(
-                OwnedStorageObject.backend == backend_name,
-                OwnedStorageObject.namespace == namespace,
-                OwnedStorageObject.key == key,
-            )
-        ).first()
+        existing_rows = _locator_rows(reservation_session, backend, key)
+        # A row without provider identity is an old receipt and cannot be
+        # silently enrolled into a newly configured provider.  The only safe
+        # path is an explicit adoption/upgrade after the exact remote object
+        # has been proved by the caller.
+        if any(
+            row.provider_ref != provider_ref
+            and (row.provider_ref is not None or backend_name in {"s3", "backup-s3"})
+            for row in existing_rows
+        ):
+            raise StorageCollisionError(key)
+        existing = next(iter(existing_rows), None)
         if existing is not None:
             if existing.state is not StorageObjectState.COMMITTED or backend.exists(
                 key
@@ -131,6 +303,7 @@ def reserve_creation(
             existing.token = None
             existing.size_bytes = expected_size
             existing.sha256 = sha256
+            existing.provider_ref = provider_ref
             existing.etag = None
             existing.version_id = None
             existing.device = None
@@ -151,6 +324,7 @@ def reserve_creation(
             state=StorageObjectState.PENDING,
             size_bytes=expected_size,
             sha256=sha256,
+            provider_ref=provider_ref,
         )
         reservation_session.add(row)
         try:
@@ -180,14 +354,25 @@ def complete_publication(
     *,
     object_kind: str,
     sha256: str | None,
+    provider_ref: str | None = None,
 ) -> None:
     with _publication_session(session) as (reservation_session, independent):
         row = reservation_session.get(OwnedStorageObject, reservation_id)
         if row is None or row.state is not StorageObjectState.PENDING:
             raise RuntimeError("storage_reservation_lost")
+        incoming_provider_ref = provider_ref or receipt.provider_ref
+        if (
+            row.backend != receipt.backend
+            or row.namespace != receipt.namespace
+            or row.key != receipt.key
+        ):
+            raise StorageCollisionError("storage_locator_mismatch")
+        if row.provider_ref not in (None, incoming_provider_ref):
+            raise StorageCollisionError("storage_provider_mismatch")
         row.token = receipt.token
         row.size_bytes = receipt.size
         row.sha256 = sha256 or row.sha256
+        row.provider_ref = incoming_provider_ref or row.provider_ref
         row.etag = receipt.etag
         row.version_id = receipt.version_id
         row.device = receipt.device
@@ -207,6 +392,7 @@ def complete_publication(
             object_kind=object_kind,
             sha256=sha256,
             reservation_id=reservation_id,
+            provider_ref=provider_ref,
         )
 
 
@@ -222,6 +408,9 @@ def publish_bytes(
     """Reserve, create, then join ownership to the caller's transaction."""
     _require_publication_before_sqlite_dml(session)
     digest = sha256 or hashlib.sha256(data).hexdigest()
+    provider_ref = provider_ref_for_backend(
+        backend, namespace=_namespace_for(backend, key)
+    )
     reservation_id = reserve_creation(
         session,
         backend,
@@ -229,18 +418,21 @@ def publish_bytes(
         object_kind=object_kind,
         expected_size=len(data),
         sha256=digest,
+        provider_ref=provider_ref,
     )
     try:
         receipt = backend.create_bytes(data, key)
     except Exception as exc:
         fail_publication(session, reservation_id, exc)
         raise
+    receipt = replace(receipt, provider_ref=provider_ref)
     complete_publication(
         session,
         reservation_id,
         receipt,
         object_kind=object_kind,
         sha256=digest,
+        provider_ref=provider_ref,
     )
     return receipt
 
@@ -257,6 +449,9 @@ def publish_stream(
 ) -> CreationReceipt:
     """Publish a caller-owned stream without buffering it in memory."""
     _require_publication_before_sqlite_dml(session)
+    provider_ref = provider_ref_for_backend(
+        backend, namespace=_namespace_for(backend, key)
+    )
     reservation_id = reserve_creation(
         session,
         backend,
@@ -264,18 +459,21 @@ def publish_stream(
         object_kind=object_kind,
         expected_size=expected_size,
         sha256=sha256,
+        provider_ref=provider_ref,
     )
     try:
         receipt = backend.create_stream(source, key)
     except Exception as exc:
         fail_publication(session, reservation_id, exc)
         raise
+    receipt = replace(receipt, provider_ref=provider_ref)
     complete_publication(
         session,
         reservation_id,
         receipt,
         object_kind=object_kind,
         sha256=sha256,
+        provider_ref=provider_ref,
     )
     return receipt
 
@@ -292,6 +490,9 @@ def publish_file(
 ) -> CreationReceipt:
     """Publish a staged file with evidence known before storage mutation."""
     _require_publication_before_sqlite_dml(session)
+    provider_ref = provider_ref_for_backend(
+        backend, namespace=_namespace_for(backend, key)
+    )
     digest = sha256
     if digest is None:
         hasher = hashlib.sha256()
@@ -307,6 +508,7 @@ def publish_file(
         object_kind=object_kind,
         expected_size=size,
         sha256=digest,
+        provider_ref=provider_ref,
     )
     try:
         if move:
@@ -317,12 +519,14 @@ def publish_file(
     except Exception as exc:
         fail_publication(session, reservation_id, exc)
         raise
+    receipt = replace(receipt, provider_ref=provider_ref)
     complete_publication(
         session,
         reservation_id,
         receipt,
         object_kind=object_kind,
         sha256=digest,
+        provider_ref=provider_ref,
     )
     return receipt
 
@@ -348,9 +552,44 @@ def sweep_orphaned_publications(
     ).all()
     cleared = reclaimed = blocked = pending = 0
     for row in rows:
+        if row.object_kind in {
+            "backup",
+            "backup-legacy",
+            "backup-cache",
+            "backup-cloud-cache",
+        }:
+            # Backup publications have a provider-aware reconciler and cache
+            # objects have an exact per-source cleanup path. The generic sweep
+            # must never reclaim either class as a normal vault blob.
+            pending += 1
+            continue
         if row.backend != backend.backend_name:
             row.state = StorageObjectState.BLOCKED
             row.last_error = "storage_backend_mismatch"
+            session.add(row)
+            blocked += 1
+            continue
+        expected_provider_ref = provider_ref_for_backend(
+            backend, namespace=row.namespace
+        )
+        transport = str(getattr(backend, "transport", "")).lower()
+        provider_bound = backend.backend_name in {
+            "s3",
+            "backup-s3",
+            "opendal",
+            "webdav",
+            "nextcloud",
+            "sftp",
+        } or transport in {"s3", "webdav", "sftp"}
+        if row.provider_ref != expected_provider_ref and not (
+            row.provider_ref is None and not provider_bound
+        ):
+            row.state = StorageObjectState.BLOCKED
+            row.last_error = (
+                "storage_provider_identity_missing"
+                if row.provider_ref is None
+                else "storage_provider_mismatch"
+            )
             session.add(row)
             blocked += 1
             continue
@@ -454,7 +693,15 @@ def record_creation(
     object_kind: str,
     sha256: str | None = None,
     reservation_id: int | None = None,
+    provider_ref: str | None = None,
+    upgrade_provider_ref: bool = False,
 ) -> OwnedStorageObject:
+    if provider_ref is None:
+        # Receipts serialized before provider identity was introduced have no
+        # trustworthy destination fingerprint. Preserve that NULL marker:
+        # local reads may use the legacy row, while remote destructive paths
+        # must fail closed until exact-content adoption upgrades it.
+        provider_ref = receipt.provider_ref
     existing = (
         session.get(OwnedStorageObject, reservation_id)
         if reservation_id is not None
@@ -463,6 +710,9 @@ def record_creation(
                 OwnedStorageObject.backend == receipt.backend,
                 OwnedStorageObject.namespace == receipt.namespace,
                 OwnedStorageObject.key == receipt.key,
+                # A receipt is scoped to its persisted provider destination;
+                # do not select a same-key row from another provider.
+                OwnedStorageObject.provider_ref == provider_ref,
             )
         ).first()
     )
@@ -470,6 +720,20 @@ def record_creation(
         # Atomic create-only publication proved the prior object is absent.
         # Refresh the stale receipt instead of violating the locator uniqueness
         # constraint (e.g. repair after an out-of-band thumbnail loss).
+        if (
+            existing.backend != receipt.backend
+            or existing.namespace != receipt.namespace
+            or existing.key != receipt.key
+        ):
+            raise UnsafeStorageDeleteError("storage_locator_mismatch")
+        if (
+            existing.provider_ref is not None
+            and provider_ref is not None
+            and existing.provider_ref != provider_ref
+        ):
+            raise UnsafeStorageDeleteError("storage_provider_identity_mismatch")
+        if upgrade_provider_ref and existing.provider_ref is None:
+            existing.provider_ref = provider_ref
         existing.object_kind = object_kind
         existing.state = StorageObjectState.COMMITTED
         existing.token = receipt.token
@@ -484,6 +748,40 @@ def record_creation(
         existing.last_error = None
         session.add(existing)
         return existing
+    if reservation_id is None:
+        legacy_statement = select(OwnedStorageObject).where(
+            OwnedStorageObject.backend == receipt.backend,
+            OwnedStorageObject.namespace == receipt.namespace,
+            OwnedStorageObject.key == receipt.key,
+        )
+        if upgrade_provider_ref:
+            # Explicit adoption may coexist with a same-locator receipt from a
+            # different provider. Only a genuinely pre-provider row is eligible
+            # for in-place upgrade; foreign provider rows remain untouched and
+            # the validated current-provider receipt is inserted as a sibling.
+            legacy_statement = legacy_statement.where(
+                OwnedStorageObject.provider_ref.is_(None)  # type: ignore[union-attr]
+            )
+        legacy = session.exec(legacy_statement).first()
+        if legacy is not None:
+            if not (upgrade_provider_ref and legacy.provider_ref is None):
+                raise UnsafeStorageDeleteError("storage_provider_identity_mismatch")
+            legacy.provider_ref = provider_ref
+            existing = legacy
+            existing.object_kind = object_kind
+            existing.state = StorageObjectState.COMMITTED
+            existing.token = receipt.token
+            existing.size_bytes = receipt.size
+            existing.sha256 = sha256 or existing.sha256
+            existing.etag = receipt.etag
+            existing.version_id = receipt.version_id
+            existing.device = receipt.device
+            existing.inode = receipt.inode
+            existing.ctime_ns = receipt.ctime_ns
+            existing.committed_at = utcnow()
+            existing.last_error = None
+            session.add(existing)
+            return existing
     row = OwnedStorageObject(
         backend=receipt.backend,
         namespace=receipt.namespace,
@@ -493,6 +791,7 @@ def record_creation(
         token=receipt.token,
         size_bytes=receipt.size,
         sha256=sha256,
+        provider_ref=provider_ref,
         etag=receipt.etag,
         version_id=receipt.version_id,
         device=receipt.device,
@@ -518,16 +817,14 @@ def _receipt(row: OwnedStorageObject) -> CreationReceipt:
         device=row.device,
         inode=row.inode,
         ctime_ns=row.ctime_ns,
+        provider_ref=row.provider_ref,
     )
 
 
 def require_owned_key(session: Session, backend: StorageBackend, key: str) -> None:
-    candidates = session.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.key == key,
-            OwnedStorageObject.state == StorageObjectState.COMMITTED,
-        )
-    ).all()
+    candidates = _locator_rows(
+        session, backend, key, states=(StorageObjectState.COMMITTED,)
+    )
     if not candidates:
         raise UnsafeStorageDeleteError("storage_ownership_unverified")
     for row in candidates:
@@ -553,14 +850,47 @@ def require_or_adopt_legacy_artifact(
     only when the ledger has no claim at all, and the backend must independently
     prove both the historical content hash and a stable deletable identity.
     """
-    candidates = session.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.key == key,
-            OwnedStorageObject.state == StorageObjectState.COMMITTED,
-        )
-    ).all()
+    candidates = _locator_rows(
+        session,
+        backend,
+        key,
+        states=(StorageObjectState.COMMITTED,),
+        include_legacy=False,
+    )
     if candidates:
         require_owned_key(session, backend, key)
+        return
+    namespace = _namespace_for(backend, key)
+    current_provider_ref = provider_ref_for_backend(backend, namespace=namespace)
+    # A pre-provider receipt is still usable for reads, but cannot be inferred
+    # as belonging to this adapter. Adoption must prove exact bytes and then
+    # upgrade that one row to the current destination identity.
+    legacy = session.exec(
+        select(OwnedStorageObject).where(
+            OwnedStorageObject.backend == _backend_name(backend),
+            OwnedStorageObject.namespace == namespace,
+            OwnedStorageObject.key == key,
+            OwnedStorageObject.provider_ref.is_(None),  # type: ignore[union-attr]
+            OwnedStorageObject.state == StorageObjectState.COMMITTED,
+        )
+    ).first()
+    if legacy is not None:
+        try:
+            receipt = backend.adopt_existing(
+                key,
+                expected_size=expected_size,
+                expected_sha256=expected_sha256,
+            )
+        except Exception as exc:
+            raise UnsafeStorageDeleteError("storage_ownership_unverified") from exc
+        record_creation(
+            session,
+            receipt,
+            object_kind="legacy_artifact",
+            sha256=expected_sha256,
+            provider_ref=current_provider_ref,
+            upgrade_provider_ref=True,
+        )
         return
     try:
         receipt = backend.adopt_existing(
@@ -570,7 +900,13 @@ def require_or_adopt_legacy_artifact(
         )
     except Exception as exc:
         raise UnsafeStorageDeleteError("storage_ownership_unverified") from exc
-    record_creation(session, receipt, object_kind="legacy_artifact")
+    record_creation(
+        session,
+        receipt,
+        object_kind="legacy_artifact",
+        sha256=expected_sha256,
+        provider_ref=current_provider_ref,
+    )
 
 
 def replace_owned_bytes(
@@ -581,17 +917,28 @@ def replace_owned_bytes(
     *,
     object_kind: str,
 ) -> CreationReceipt:
-    candidates = session.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.key == key,
-            OwnedStorageObject.state == StorageObjectState.COMMITTED,
-        )
-    ).all()
+    candidates = _locator_rows(
+        session, backend, key, states=(StorageObjectState.COMMITTED,)
+    )
     for row in candidates:
         current = _receipt(row)
         if not backend.creation_matches(current):
             continue
         replacement = backend.replace_bytes(data, current)
+        backend_name = _backend_name(backend)
+        namespace = _namespace_for(backend, key)
+        expected_ref = provider_ref_for_backend(backend, namespace=namespace)
+        if (
+            (backend_name != "unknown" and replacement.backend != backend_name)
+            or (namespace != "unknown" and replacement.namespace != namespace)
+            or replacement.key != key
+            or (
+                backend_name != "unknown"
+                and replacement.provider_ref is not None
+                and replacement.provider_ref != expected_ref
+            )
+        ):
+            raise UnsafeStorageDeleteError("storage_locator_mismatch")
         row.backend = replacement.backend
         row.namespace = replacement.namespace
         row.token = replacement.token
@@ -603,6 +950,7 @@ def replace_owned_bytes(
         row.ctime_ns = replacement.ctime_ns
         row.object_kind = object_kind
         row.sha256 = hashlib.sha256(data).hexdigest()
+        row.provider_ref = expected_ref
         session.add(row)
         return replacement
     raise UnsafeStorageDeleteError("storage_ownership_unverified")
@@ -616,12 +964,9 @@ def delete_owned_key(
     required_proof: bool = False,
 ) -> bool:
     """Delete *key* only if a persisted creation receipt still matches it."""
-    candidates = session.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.key == key,
-            OwnedStorageObject.state == StorageObjectState.COMMITTED,
-        )
-    ).all()
+    candidates = _locator_rows(
+        session, backend, key, states=(StorageObjectState.COMMITTED,)
+    )
     for row in candidates:
         try:
             removed = backend.rollback_create(_receipt(row))

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
 from app.core.logging import get_logger
@@ -44,6 +46,10 @@ def create_backup(
         "storage_backend": meta.storage_backend,
         "app_version": meta.app_version,
         "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
     }
 
 
@@ -64,6 +70,44 @@ def list_backups() -> list[dict]:
             "storage_backend": m.storage_backend,
             "app_version": m.app_version,
             "location": m.location,
+            "archive_sha256": m.archive_sha256,
+            "source_ref": m.source_ref,
+            "provider_ref": m.provider_ref,
+            "namespace": m.namespace,
+            "key": m.path,
+            "prefix": backup._s3_prefix_for_key(m.path),  # noqa: SLF001
+            "canonical": m.canonical,
+            "precedence": m.precedence,
+        }
+        for m in metas
+    ]
+
+
+@router.get(
+    "/sources",
+    dependencies=[Depends(require_superuser)],
+    summary="List every exact backup source",
+)
+def list_backup_sources() -> list[dict]:
+    """Expose replicas and collision candidates without collapsing locators."""
+    metas = backup.list_backup_sources()
+    return [
+        {
+            "backup_id": m.id,
+            "created_at": m.created_at,
+            "size_bytes": m.size_bytes,
+            "file_count": m.file_count,
+            "storage_backend": m.storage_backend,
+            "app_version": m.app_version,
+            "location": m.location,
+            "archive_sha256": m.archive_sha256,
+            "source_ref": m.source_ref,
+            "provider_ref": m.provider_ref,
+            "namespace": m.namespace,
+            "key": m.path,
+            "prefix": backup._s3_prefix_for_key(m.path),  # noqa: SLF001
+            "canonical": m.canonical,
+            "precedence": m.precedence,
         }
         for m in metas
     ]
@@ -94,6 +138,10 @@ def adopt_local_backup(filename: str) -> dict:
         "storage_backend": meta.storage_backend,
         "app_version": meta.app_version,
         "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
     }
 
 
@@ -104,6 +152,48 @@ def adopt_local_backup(filename: str) -> dict:
 )
 def discover_unowned_local_backups() -> list[dict[str, object]]:
     return backup.discover_unowned_local_backups()
+
+
+@router.get(
+    "/unowned-s3",
+    dependencies=[Depends(require_superuser)],
+    summary="Discover valid unowned legacy S3 backups",
+)
+def discover_unowned_s3_backups() -> list[dict[str, object]]:
+    return backup.discover_unowned_s3_backups()
+
+
+@router.post(
+    "/adopt-s3",
+    dependencies=[Depends(require_superuser)],
+    summary="Adopt one legacy S3 backup",
+)
+def adopt_s3_backup(
+    key: str = Query(..., min_length=1),
+    source_ref: str = Query(..., min_length=1),
+    expected_archive_sha256: str = Query(..., min_length=64, max_length=64),
+) -> dict:
+    try:
+        meta = backup.adopt_s3_backup(
+            key,
+            source_ref=source_ref,
+            expected_archive_sha256=expected_archive_sha256,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "backup_id": meta.id,
+        "created_at": meta.created_at,
+        "size_bytes": meta.size_bytes,
+        "file_count": meta.file_count,
+        "storage_backend": meta.storage_backend,
+        "app_version": meta.app_version,
+        "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
+    }
 
 
 @router.get(
@@ -125,8 +215,11 @@ def get_database_backup_capabilities() -> dict[str, str | bool]:
     dependencies=[Depends(require_superuser)],
     summary="Get backup metadata",
 )
-def get_backup(backup_id: str) -> dict:
-    meta = backup.get_backup(backup_id)
+def get_backup(backup_id: str, source_ref: str | None = None) -> dict:
+    try:
+        meta = backup.get_backup(backup_id, source_ref=source_ref)
+    except backup.BackupIdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if meta is None:
         raise HTTPException(status_code=404, detail="backup_not_found")
     return {
@@ -137,6 +230,10 @@ def get_backup(backup_id: str) -> dict:
         "storage_backend": meta.storage_backend,
         "app_version": meta.app_version,
         "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
     }
 
 
@@ -145,11 +242,17 @@ def get_backup(backup_id: str) -> dict:
     dependencies=[Depends(require_superuser)],
     summary="Verify a backup archive",
 )
-def verify_backup(backup_id: str) -> dict:
+def verify_backup(backup_id: str, source_ref: str | None = None) -> dict:
     try:
-        result = backup.verify_backup(backup_id)
+        result = (
+            backup.verify_backup(backup_id)
+            if source_ref is None
+            else backup.verify_backup(backup_id, source_ref=source_ref)
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="backup_not_found") from exc
+    except backup.BackupIdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "backup_id": result.backup_id,
         "valid": result.valid,
@@ -165,18 +268,39 @@ def verify_backup(backup_id: str) -> dict:
     dependencies=[Depends(require_superuser)],
     summary="Download a backup archive",
 )
-def download_backup(backup_id: str) -> FileResponse:
+def download_backup(
+    background_tasks: BackgroundTasks,
+    backup_id: str,
+    source_ref: str | None = None,
+) -> FileResponse:
     try:
-        archive_path = backup.get_backup_archive_path(backup_id)
+        # Preserve the operator-facing archive name before resolving a
+        # cloud-only source to its hashed, per-source cache path. Identity
+        # conflicts can be raised by either lookup and must map to the same 409.
+        meta = backup.get_backup(
+            backup_id,
+            **({"source_ref": source_ref} if source_ref is not None else {}),
+        )
+        if meta is None:
+            raise FileNotFoundError(backup_id)
+        archive_filename = Path(meta.path).name
+        archive_path = (
+            backup.get_backup_archive_path(backup_id)
+            if source_ref is None
+            else backup.get_backup_archive_path(backup_id, source_ref=source_ref)
+        )
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail="backup_not_found") from exc
+    except backup.BackupIdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("backup %s download failed", backup_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    background_tasks.add_task(backup.cleanup_backup_cache, archive_path)
     return FileResponse(
         archive_path,
         media_type="application/gzip",
-        filename=archive_path.name,
+        filename=archive_filename,
     )
 
 
@@ -186,14 +310,20 @@ def download_backup(backup_id: str) -> FileResponse:
     dependencies=[Depends(require_superuser)],
     summary="Delete a backup",
 )
-def delete_backup(backup_id: str) -> dict:
+def delete_backup(backup_id: str, source_ref: str | None = None) -> dict:
     try:
-        deleted = backup.delete_backup(backup_id)
+        deleted = (
+            backup.delete_backup(backup_id)
+            if source_ref is None
+            else backup.delete_backup(backup_id, source_ref=source_ref)
+        )
     except backup.BackupOwnershipError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="backup_storage_ownership_unverified",
         ) from exc
+    except backup.BackupIdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not deleted:
         raise HTTPException(status_code=404, detail="backup_not_found")
     return {"backup_id": backup_id, "deleted": True}
@@ -210,9 +340,13 @@ def delete_backup(backup_id: str) -> dict:
         "files. It is strongly recommended to create a fresh backup first."
     ),
 )
-def restore_backup(backup_id: str) -> dict:
+def restore_backup(backup_id: str, source_ref: str | None = None) -> dict:
     try:
-        result = backup.restore_backup(backup_id)
+        result = (
+            backup.restore_backup(backup_id)
+            if source_ref is None
+            else backup.restore_backup(backup_id, source_ref=source_ref)
+        )
     except backup.DatabaseBackupNotSupportedError as exc:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
@@ -227,6 +361,8 @@ def restore_backup(backup_id: str) -> dict:
             status_code=status.HTTP_409_CONFLICT,
             detail="backup_storage_ownership_unverified",
         ) from exc
+    except backup.BackupIdentityConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("restore %s failed", backup_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc

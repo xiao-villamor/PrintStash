@@ -4,6 +4,30 @@ This guide covers supported self-hosted upgrades. SQLite plus local filesystem
 storage remains the default. Always upgrade from a fresh backup and retain the
 previous application image until validation is complete.
 
+## 0.13.0 notes
+
+- Before starting 0.13.0, record and mount the exact local data, thumbnail, and
+  external-library roots used by the old installation. For S3-compatible
+  storage, preserve the existing bucket, endpoint, credentials, and data-root
+  namespace. Do not point the upgraded application at an empty replacement.
+- PrintStash now binds managed roots to durable installation identities. A
+  missing or mismatched root enters read-only recovery: startup does not create
+  the absent mount, scan it as empty, mark indexed files missing, or delete
+  storage bytes. An administrator must verify the exact mount and explicitly
+  enroll or re-enroll an eligible legacy root in Settings before writes resume.
+- Existing local backup archives and backup-S3 objects are left in place.
+  Validated archives without an ownership record require explicit adoption in
+  Settings before restore or deletion. S3 discovery checks both the historical
+  `nexus3d-backups/` prefix and the current `printstash-backups/` prefix; new
+  archives are written only to `printstash-backups/`.
+- When multiple locations contain the same backup id, Settings identifies each
+  exact source independently. Review its bucket/namespace, prefix, key, size,
+  digest, and provider identity before adoption, restore, or deletion.
+- Keep the previous image, database, secrets key, and complete storage snapshot
+  for the rollback window. After upgrade, verify a new upload and scan, Artifact
+  download, trash/restore/permanent-purge behavior, and backup
+  create/verify/download/restore against the configured storage provider.
+
 ## 0.12.1 notes
 
 This patch has no database migrations or configuration changes. API images now

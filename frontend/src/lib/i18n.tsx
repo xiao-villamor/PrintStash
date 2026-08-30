@@ -274,6 +274,25 @@ const messages = {
       "Register {filename} as an owned backup. This has been validated as a PrintStash archive ({files} files, {size}). Confirm only if this is the exact archive you intend to manage.",
     "settings.backupLegacyAdoptAction": "Adopt backup",
     "settings.backupLegacyAdopted": "Legacy backup {filename} is now registered.",
+    "settings.backupS3Title": "Validated legacy cloud backups need adoption",
+    "settings.backupS3Description":
+      "These S3 archives passed validation but are not owned by this installation. Review the exact bucket prefix, key, and checksum before registering one.",
+    "settings.backupS3ConfirmTitle": "Adopt legacy cloud backup?",
+    "settings.backupS3ConfirmDescription":
+      "Register {key} from namespace {namespace} as an owned backup using its exact cloud source. The validated SHA-256 begins {hash}. Confirm only if this is the exact archive you intend to manage.",
+    "settings.backupS3Namespace": "Namespace: {namespace}",
+    "settings.backupLegacySourceUnavailable":
+      "This backup has no exact source identity. Refresh the list before adopting or operating on it.",
+    "settings.backupSourceLocator": "Locator: {source}",
+    "settings.backupSha256": "SHA-256 {digest}",
+    "settings.backupProviderRef": "Provider: {provider}",
+    "settings.backupExactKey": "Exact key: {key}",
+    "settings.backupPrefix": "Prefix: {prefix}",
+    "settings.backupCandidateKind": "Candidate: {kind}",
+    "settings.backupSourceUnavailable": "Exact source reference unavailable",
+    "settings.backupRestoreWarning":
+      "This replaces the current database and stored files with the selected backup.",
+    "settings.backupExactSource": "Exact source: {source}",
     "settings.trashCleanupCompleted": "Storage cleanup completed.",
     "settings.trashCleanupPending":
       "Catalog purge completed; {count} storage object(s) remain pending cleanup.",
@@ -557,6 +576,25 @@ const messages = {
       "Registra {filename} como copia propia. Se ha validado como archivo de PrintStash ({files} archivos, {size}). Confirma solo si es exactamente el archivo que quieres administrar.",
     "settings.backupLegacyAdoptAction": "Registrar copia",
     "settings.backupLegacyAdopted": "La copia antigua {filename} ya está registrada.",
+    "settings.backupS3Title": "Las copias antiguas en la nube validadas necesitan registro",
+    "settings.backupS3Description":
+      "Estos archivos S3 han pasado la validación, pero esta instalación no los posee. Revisa el prefijo exacto del bucket, la clave y la suma de comprobación antes de registrar uno.",
+    "settings.backupS3ConfirmTitle": "¿Registrar copia antigua en la nube?",
+    "settings.backupS3ConfirmDescription":
+      "Registra {key} del espacio de nombres {namespace} como copia propia usando su origen exacto en la nube. El SHA-256 validado comienza por {hash}. Confirma solo si es exactamente el archivo que quieres administrar.",
+    "settings.backupS3Namespace": "Espacio de nombres: {namespace}",
+    "settings.backupLegacySourceUnavailable":
+      "Esta copia no tiene una identidad de origen exacta. Actualiza la lista antes de registrarla u operarla.",
+    "settings.backupSourceLocator": "Localizador: {source}",
+    "settings.backupSha256": "SHA-256 {digest}",
+    "settings.backupProviderRef": "Proveedor: {provider}",
+    "settings.backupExactKey": "Clave exacta: {key}",
+    "settings.backupPrefix": "Prefijo: {prefix}",
+    "settings.backupCandidateKind": "Candidato: {kind}",
+    "settings.backupSourceUnavailable": "Referencia de origen exacta no disponible",
+    "settings.backupRestoreWarning":
+      "Esto reemplaza la base de datos actual y los archivos almacenados con la copia seleccionada.",
+    "settings.backupExactSource": "Origen exacto: {source}",
     "settings.trashCleanupCompleted": "Limpieza de almacenamiento completada.",
     "settings.trashCleanupPending":
       "La purga del catálogo terminó; quedan {count} objeto(s) de almacenamiento pendientes de limpieza.",

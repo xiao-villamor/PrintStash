@@ -31,6 +31,34 @@ test.describe("settings route", () => {
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
   });
 
+  test("discovers an exact legacy S3 source for adoption", async ({ page }) => {
+    await page.goto("/settings?section=storage");
+
+    await expect(page.getByText("nexus3d-backups/legacy-2025.tar.gz")).toBeVisible();
+    await expect(page.getByText(/SHA-256 a{16}/)).toBeVisible();
+
+    await page.getByRole("button", { name: "Adopt backup" }).click();
+    const dialog = page.getByRole("dialog", { name: "Adopt legacy cloud backup?" });
+    await expect(dialog).toContainText("nexus3d-backups/legacy-2025.tar.gz");
+    await expect(dialog).toContainText("a".repeat(16));
+
+    const request = page.waitForRequest((candidate) => {
+      const url = new URL(candidate.url());
+      return (
+        candidate.method() === "POST" &&
+        url.pathname === "/api/v1/backups/adopt-s3" &&
+        url.searchParams.get("key") === "nexus3d-backups/legacy-2025.tar.gz" &&
+        url.searchParams.get("source_ref") === "s3-legacy-source" &&
+        url.searchParams.get("expected_archive_sha256") === "a".repeat(64)
+      );
+    });
+    await dialog.getByRole("button", { name: "Adopt backup" }).click();
+    await request;
+    await expect(page.getByRole("button", { name: "Adopt backup" })).toHaveCount(0);
+    await expect(page.getByText("Provider: provider-legacy-…")).toBeVisible();
+    await expect(page.getByText("Exact key: nexus3d-backups/legacy-2025.tar.gz")).toBeVisible();
+  });
+
   test("non-Verified trash purge sends a one-shot storage-risk acknowledgement", async ({
     page,
   }) => {

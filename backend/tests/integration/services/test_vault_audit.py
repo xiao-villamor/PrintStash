@@ -40,6 +40,7 @@ from app.services.storage_utils import (
 from tests.factories import (
     build_collection,
     build_model,
+    build_owned_storage_object,
     build_user,
     detached_collection,
     detached_file,
@@ -331,32 +332,36 @@ class TestExecuteRun:
         user = _make_user(db_session, "exec-owner5")
         run = _make_run(db_session, user, VaultAuditMode.FULL)
 
+        _row = build_owned_storage_object(
+            db_session,
+            backend="local",
+            namespace="local/backup",
+            key="b1.tar.gz",
+            object_kind="backup",
+            sha256="a" * 64,
+        )
+        db_session.commit()
         monkeypatch.setattr(
             backup,
-            "list_backups",
-            lambda: [
-                backup.BackupMeta(
-                    id="b1",
-                    created_at="now",
-                    size_bytes=1,
-                    storage_backend="local",
-                    file_count=1,
-                    app_version="0.0.0",
-                    path="b1.tar.gz",
-                )
-            ],
+            "verify_backup_ownership",
+            lambda ownership_id: backup.BackupOwnershipVerification(
+                ownership_id=ownership_id,
+                status="corrupt",
+                verification=backup.BackupVerification(
+                    backup_id="b1",
+                    valid=False,
+                    app_compatible=True,
+                    manifest_version="1",
+                    checked_members=1,
+                    findings=[{"code": "unexpected_code", "member": "a/b.stl"}],
+                ),
+            ),
         )
         monkeypatch.setattr(
-            backup,
-            "verify_backup",
-            lambda _id: backup.BackupVerification(
-                backup_id="b1",
-                valid=False,
-                app_compatible=True,
-                manifest_version="1",
-                checked_members=1,
-                findings=[{"code": "unexpected_code", "member": "a/b.stl"}],
-            ),
+            backup, "list_backup_sources", lambda: pytest.fail("discovery API called")
+        )
+        monkeypatch.setattr(
+            backup, "list_backups", lambda: pytest.fail("list API called")
         )
 
         vault_audit.execute_run(run.id)
@@ -1069,43 +1074,108 @@ class TestCheckBackgroundJobs:
 
 
 class TestCheckBackups:
-    def test_check_backups_stops_when_cancelled(
+    def test_check_backups_audits_every_authoritative_source(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.services import backup
 
+        user = _make_user(db_session, "backup-census-owner")
+        run = _make_run(db_session, user, VaultAuditMode.FULL)
+        specs = [
+            ("same-id-local.tar.gz", "local", "valid"),
+            ("same-id-remote.tar.gz", "backup-s3", "valid"),
+            ("missing.tar.gz", "local", "missing"),
+            ("inaccessible.tar.gz", "backup-s3", "inaccessible"),
+            ("identity.tar.gz", "backup-s3", "identity"),
+            ("corrupt.tar.gz", "local", "corrupt"),
+        ]
+        rows = [
+            build_owned_storage_object(
+                db_session,
+                backend=backend_name,
+                namespace=f"{backend_name}/backup",
+                key=filename,
+                object_kind="backup",
+                sha256="a" * 64,
+                etag='"etag"' if backend_name == "backup-s3" else None,
+                version_id="version" if backend_name == "backup-s3" else None,
+            )
+            for filename, backend_name, _status in specs
+        ]
+        db_session.commit()
+        verified: list[int] = []
+        outcomes = {
+            row.id: status
+            for row, (_filename, _backend, status) in zip(rows, specs, strict=True)
+        }
+
+        def verify(ownership_id: int) -> backup.BackupOwnershipVerification:
+            verified.append(ownership_id)
+            status = outcomes[ownership_id]
+            if status == "corrupt":
+                return backup.BackupOwnershipVerification(
+                    ownership_id=ownership_id,
+                    status="corrupt",
+                    verification=backup.BackupVerification(
+                        backup_id="corrupt",
+                        valid=False,
+                        app_compatible=False,
+                        manifest_version=None,
+                        checked_members=1,
+                        findings=[
+                            {"code": "backup_member_hash_mismatch", "member": "archive"}
+                        ],
+                    ),
+                )
+            return backup.BackupOwnershipVerification(
+                ownership_id=ownership_id,
+                status=status,
+                error=f"{status} error" if status != "valid" else None,
+            )
+
+        monkeypatch.setattr(backup, "verify_backup_ownership", verify)
+        monkeypatch.setattr(
+            backup, "list_backup_sources", lambda: pytest.fail("discovery API called")
+        )
+        monkeypatch.setattr(
+            backup, "list_backups", lambda: pytest.fail("list API called")
+        )
+
+        vault_audit._check_backups(db_session, run)
+
+        assert verified == [row.id for row in rows]
+        findings = db_session.exec(
+            __import__("sqlmodel")
+            .select(VaultAuditFinding)
+            .where(VaultAuditFinding.run_id == run.id)
+        ).all()
+        assert len(findings) == 4
+        assert {
+            backup._source_ref(
+                location="local" if row.backend == "local" else "s3",
+                namespace=row.namespace,
+                path=row.key,
+                provider_ref=row.provider_ref,
+            )
+            for row in rows[2:]
+        } == {item.resource_identifier for item in findings}
+        assert {item.code for item in findings} == {
+            "backup_storage_inaccessible",
+            "backup_identity_unavailable",
+            "backup_corrupt",
+        }
+
+    def test_check_backups_stops_when_cancelled(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         user = _make_user(db_session, "backup-owner")
         run = _make_run(db_session, user, VaultAuditMode.FULL)
         run.cancel_requested = True
         db_session.add(run)
         db_session.commit()
 
-        called = {"verify": False}
-        monkeypatch.setattr(
-            backup,
-            "list_backups",
-            lambda: [
-                backup.BackupMeta(
-                    id="b1",
-                    created_at="now",
-                    size_bytes=1,
-                    storage_backend="local",
-                    file_count=1,
-                    app_version="0.0.0",
-                    path="b1.tar.gz",
-                )
-            ],
-        )
-
-        def fake_verify(_id):
-            called["verify"] = True
-            raise AssertionError("verify_backup must not run once cancelled")
-
-        monkeypatch.setattr(backup, "verify_backup", fake_verify)
-
         vault_audit._check_backups(db_session, run)
 
-        assert called["verify"] is False
         db_session.refresh(run)
         assert run.state == VaultAuditRunState.CANCELLED
 
