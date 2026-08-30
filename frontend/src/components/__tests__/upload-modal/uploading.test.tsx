@@ -31,7 +31,7 @@ import { queryKeys } from "@/lib/query-client";
 import { setIngestJobSource } from "@/lib/task-center";
 import { aCollection, aTag } from "@/test-support/factories";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
-import type { IngestJobStatus, ModelRead } from "@/types";
+import type { ExternalLibrary, IngestJobStatus, ModelRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
@@ -74,6 +74,29 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    ...over,
+  };
+}
+
+function aLibrary(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
+  return {
+    id: 4,
+    name: "NAS models",
+    root_path: "/mnt/nas/models",
+    enabled: true,
+    scan_interval_minutes: 60,
+    scan_schedule: "0 * * * *",
+    watch_mode: "auto",
+    fs_kind: "network",
+    watch_active: false,
+    binding_state: "bound",
+    binding_reason: null,
+    root_enrollable: false,
+    collection_mode: "mirror",
+    target_collection_id: null,
+    last_scanned_at: null,
+    last_scan_status: null,
+    last_scan_summary: null,
     ...over,
   };
 }
@@ -134,6 +157,100 @@ afterEach(() => {
 });
 
 describe("UploadModal ingestion", () => {
+  describe("shared-volume destinations", () => {
+    it("offers only enabled roots with a bound identity", async () => {
+      const safe = aLibrary({ id: 4, name: "Safe NAS" });
+      const disabled = aLibrary({ id: 5, name: "Paused NAS", enabled: false });
+      const unbound = aLibrary({ id: 6, name: "Legacy NAS", binding_state: "unbound" });
+      renderUpload({
+        routes: {
+          "GET /api/v1/config": json({ external_libraries_enabled: true }),
+          "GET /api/v1/libraries": json([safe, disabled, unbound]),
+        },
+      });
+
+      expect(
+        await screen.findByRole("option", { name: "Safe NAS (shared volume)" }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "Paused NAS (shared volume)" })).toBeNull();
+      expect(screen.queryByRole("option", { name: "Legacy NAS (shared volume)" })).toBeNull();
+    });
+
+    it.each([
+      {
+        label: "deletes it",
+        refreshedLibraries: [],
+      },
+      {
+        label: "unbinds it",
+        refreshedLibraries: [
+          aLibrary({
+            id: 4,
+            name: "Safe NAS",
+            binding_state: "unbound",
+            watch_active: false,
+          }),
+        ],
+      },
+    ])("resets a selected target when a refresh $label", async ({ refreshedLibraries }) => {
+      const safe = aLibrary({ id: 4, name: "Safe NAS" });
+      let listCalls = 0;
+      const result = renderUpload({
+        routes: {
+          "GET /api/v1/config": json({ external_libraries_enabled: true }),
+          "GET /api/v1/libraries": () =>
+            json(listCalls++ === 0 ? [safe] : listCalls === 2 ? refreshedLibraries : [safe]),
+        },
+      });
+
+      const vaultOption = await screen.findByRole("option", { name: "Vault storage" });
+      const destination = vaultOption.closest("select");
+      if (!destination) throw new Error("destination select missing");
+      await userEvent.setup().selectOptions(destination, "4");
+      expect(destination).toHaveValue("4");
+
+      result.rerender(
+        <UploadModal
+          open={false}
+          onClose={vi.fn<() => void>()}
+          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
+          defaultCollection={null}
+        />,
+      );
+      result.rerender(
+        <UploadModal
+          open
+          onClose={vi.fn<() => void>()}
+          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
+          defaultCollection={null}
+        />,
+      );
+
+      await waitFor(() => expect(screen.queryByRole("option", { name: /Safe NAS/ })).toBeNull());
+
+      result.rerender(
+        <UploadModal
+          open={false}
+          onClose={vi.fn<() => void>()}
+          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
+          defaultCollection={null}
+        />,
+      );
+      result.rerender(
+        <UploadModal
+          open
+          onClose={vi.fn<() => void>()}
+          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
+          defaultCollection={null}
+        />,
+      );
+      const restoredVaultOption = await screen.findByRole("option", { name: "Vault storage" });
+      const restoredDestination = restoredVaultOption.closest("select");
+      if (!restoredDestination) throw new Error("destination select missing after refresh");
+      expect(restoredDestination).toHaveValue("");
+    });
+  });
+
   describe("a mesh on its own", () => {
     it("uploads the file the user chose", async () => {
       const user = userEvent.setup();

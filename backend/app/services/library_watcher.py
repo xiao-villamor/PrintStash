@@ -120,6 +120,12 @@ class LibraryWatcher:
             for lib in libs:
                 if lib.id is None:
                     continue
+                # Watching an unbound, missing, or replacement root would
+                # observe a namespace that is not proven to belong to this
+                # library.  Scan itself repeats the check before mutation.
+                binding_state, _ = external_library.root_binding_state(lib)
+                if binding_state != "bound":
+                    continue
                 fs_kind = external_library.detect_fs_kind(lib.root_path)
                 if lib.fs_kind != fs_kind:
                     lib.fs_kind = fs_kind

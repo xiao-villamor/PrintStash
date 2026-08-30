@@ -208,6 +208,14 @@ export type ExternalLibraryWatchMode = "auto" | "events" | "off";
 // Detected filesystem class backing the root path.
 export type ExternalLibraryFsKind = "local" | "network" | "unknown";
 
+export type ExternalLibraryBindingState =
+  | "bound"
+  | "unbound"
+  | "missing"
+  | "unreadable"
+  | "invalid"
+  | "mismatch";
+
 export interface ExternalLibraryScanSummary {
   added: number;
   updated: number;
@@ -228,6 +236,9 @@ export interface ExternalLibrary {
   watch_mode: ExternalLibraryWatchMode;
   fs_kind: ExternalLibraryFsKind | null;
   watch_active: boolean;
+  binding_state: ExternalLibraryBindingState;
+  binding_reason: string | null;
+  root_enrollable: boolean;
   collection_mode: ExternalLibraryCollectionMode;
   target_collection_id: number | null;
   last_scanned_at: string | null;
@@ -235,6 +246,10 @@ export interface ExternalLibrary {
   // like "ok"); the backend uses it so a green status never hides a per-file error.
   last_scan_status: "ok" | "error" | "running" | "partial" | null;
   last_scan_summary: ExternalLibraryScanSummary | null;
+}
+
+export interface ExternalLibraryRootEnrollment {
+  confirm_root_path: string;
 }
 
 export interface ExternalLibraryCreate {

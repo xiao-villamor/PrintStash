@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createExternalLibrary,
   deleteExternalLibrary,
+  enrollExternalLibraryRoot,
   listExternalLibraries,
   scanExternalLibrary,
   updateExternalLibrary,
@@ -65,6 +66,13 @@ const library = {
   enabled: true,
   scan_interval_minutes: 60,
   collection_mode: "mirror",
+  scan_schedule: "0 * * * *",
+  watch_mode: "auto",
+  fs_kind: "local",
+  watch_active: true,
+  binding_state: "bound",
+  binding_reason: null,
+  root_enrollable: false,
   target_collection_id: null,
   last_scanned_at: null,
   last_scan_status: null,
@@ -140,6 +148,22 @@ describe("updateExternalLibrary", () => {
     expect(url).toBe("/api/v1/libraries/7");
     expect(init).toMatchObject({ method: "PATCH" });
     expect(init.body).toBe(JSON.stringify({ enabled: false }));
+  });
+});
+
+describe("enrollExternalLibraryRoot", () => {
+  it("POSTs the exact root confirmation", async () => {
+    respondWith(library);
+
+    const result = await enrollExternalLibraryRoot(7, {
+      confirm_root_path: "/mnt/nas/models",
+    });
+
+    expect(result).toEqual(library);
+    const { url, init } = lastCall();
+    expect(url).toBe("/api/v1/libraries/7/root/enroll");
+    expect(init).toMatchObject({ method: "POST" });
+    expect(init.body).toBe(JSON.stringify({ confirm_root_path: "/mnt/nas/models" }));
   });
 });
 

@@ -38,7 +38,11 @@ from app.db.models import (
 from app.services import storage_backend
 from app.services.auth import create_access_token
 from app.services.realtime import InProcessBus
-from app.services.storage_backend import ObjectIdentity, StorageCapabilities
+from app.services.storage_backend import (
+    ObjectIdentity,
+    StorageCapabilities,
+    StorageConfigurationError,
+)
 from tests.factories import build_model, build_printer, build_user
 
 
@@ -75,6 +79,47 @@ def _local_storage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestStorageComposition:
+    def test_provider_probe_failure_binds_unavailable_recovery_backend(
+        self, _local_storage: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing remote root leaves health/config reachable and mutations closed."""
+        from app.services import storage_opendal
+
+        _overlay["storage_backend"] = "sftp"
+        _overlay["storage_provider_config"] = (
+            '{"provider":"sftp","root":"vault-data",'
+            '"host":"sftp.example","port":22,"username":"user",'
+            '"host_key":"sftp.example ssh-ed25519 AAAA",'
+            '"password":"secret"}'
+        )
+
+        class _ProbeFailureBackend:
+            backend_name = "sftp"
+            capabilities = StorageCapabilities(
+                conditional_create=True,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=True,
+                direct_path=False,
+            )
+
+            def ensure_setup(self) -> None:
+                raise ConnectionError("remote root is unavailable")
+
+        monkeypatch.setattr(
+            storage_opendal,
+            "OpenDALStorageBackend",
+            lambda _spec: _ProbeFailureBackend(),
+        )
+
+        backend = app_main._prepare_storage_for_startup(recover_publications=True)
+
+        assert backend.backend_name == "unavailable"
+        assert backend.health_probe()["ok"] is False
+        with pytest.raises(StorageConfigurationError, match="storage_unavailable"):
+            backend.create_stream(BytesIO(b"payload"), "ignored")
+
     def test_recovery_composition_skips_setup_probes(
         self, _local_storage: None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -397,6 +442,96 @@ class TestSafeDbUrl:
 
 
 class TestLifespan:
+    def test_lifespan_keeps_admin_surface_when_sftp_probe_fails(
+        self, _local_storage: None, db_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A lost SFTP root leaves diagnostics reachable and storage fail-closed."""
+        from app.services import inbox, runtime_config, storage_opendal
+        from app.services.storage_backend import get_backend
+
+        _overlay["storage_backend"] = "sftp"
+        _overlay["storage_provider_config"] = (
+            '{"provider":"sftp","root":"vault-data",'
+            '"host":"sftp.example","port":22,"username":"user",'
+            '"host_key":"sftp.example ssh-ed25519 AAAA",'
+            '"password":"secret"}'
+        )
+
+        class _ProbeFailureBackend:
+            backend_name = "sftp"
+            capabilities = StorageCapabilities(
+                conditional_create=True,
+                object_identity=ObjectIdentity.NONE,
+                verified_delete=False,
+                conditional_replace=False,
+                namespace_ownership=True,
+                direct_path=False,
+            )
+
+            def ensure_setup(self) -> None:
+                raise OSError("configured SFTP root is unavailable")
+
+        monkeypatch.setattr(
+            storage_opendal,
+            "OpenDALStorageBackend",
+            lambda _spec: _ProbeFailureBackend(),
+        )
+
+        def _unexpected_recovery() -> int:
+            raise AssertionError("storage recovery must wait for provider recovery")
+
+        monkeypatch.setattr(
+            inbox, "reconcile_storage_publications", _unexpected_recovery
+        )
+        monkeypatch.setattr(inbox, "reconcile_interrupted_items", _unexpected_recovery)
+        _silence_fleet_scheduler(monkeypatch)
+
+        runtime_config.update_storage_provider(
+            db_session,
+            provider="sftp",
+            raw_config={
+                "provider": "sftp",
+                "root": "vault-data",
+                "host": "sftp.example",
+                "port": 22,
+                "username": "user",
+                "host_key": "sftp.example ssh-ed25519 AAAA",
+                "password": "secret",
+            },
+        )
+
+        user = build_user(
+            db_session,
+            username="sftp-recovery-admin",
+            password="Password123",
+            active=True,
+            superuser=True,
+        )
+        token = create_access_token(user.id, user.username, scope="admin")
+        headers = {"Authorization": f"Bearer {token}"}
+        db_session.close()
+
+        from app.main import app
+
+        with TestClient(app) as client:
+            liveness = client.get("/api/v1/health")
+            details = client.get("/api/v1/health/details", headers=headers)
+            config = client.get("/api/v1/config", headers=headers)
+
+            assert liveness.status_code == 200
+            assert liveness.json()["storage"]["provider"] == "sftp"
+            assert liveness.json()["storage"]["diagnostics"]["available"] is False
+            assert details.status_code == 200
+            assert details.json()["components"]["storage"]["backend"] == "unavailable"
+            assert details.json()["components"]["storage"]["error"] == "OSError"
+            assert config.status_code == 200
+            assert config.json()["storage_provider"] == "sftp"
+            assert config.json()["storage_probe_diagnostics"]["available"] is False
+
+            assert get_backend().backend_name == "unavailable"
+            with pytest.raises(StorageConfigurationError, match="storage_unavailable"):
+                get_backend().create_stream(BytesIO(b"must not publish"), "ignored")
+
     def test_lifespan_wires_every_background_task_then_cancels_them_on_shutdown(
         self, _local_storage: None, db_session, monkeypatch: pytest.MonkeyPatch
     ) -> None:

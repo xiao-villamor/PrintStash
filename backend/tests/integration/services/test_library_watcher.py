@@ -19,6 +19,7 @@ from sqlmodel import Session
 from app.db.models import ExternalLibrary, ExternalLibraryWatchMode
 from app.services import library_watcher as lw
 from app.services import runtime_config
+from tests.factories import build_external_library
 
 
 @pytest.fixture(autouse=True)
@@ -73,14 +74,12 @@ class TestRefresh:
         self, db_session: Session, tmp_path: Path
     ) -> None:
         _enable_external_libraries(db_session)
-        lib = ExternalLibrary(
+        lib = build_external_library(
+            db_session,
+            tmp_path,
             name="Lib",
-            root_path=str(tmp_path),
             watch_mode=ExternalLibraryWatchMode.EVENTS,
         )
-        db_session.add(lib)
-        db_session.commit()
-        db_session.refresh(lib)
 
         watcher = lw.LibraryWatcher()
 
@@ -110,14 +109,12 @@ class TestRefresh:
         root_b = tmp_path / "b"
         root_a.mkdir()
         root_b.mkdir()
-        lib = ExternalLibrary(
+        lib = build_external_library(
+            db_session,
+            root_a,
             name="Lib",
-            root_path=str(root_a),
             watch_mode=ExternalLibraryWatchMode.EVENTS,
         )
-        db_session.add(lib)
-        db_session.commit()
-        db_session.refresh(lib)
 
         watcher = lw.LibraryWatcher()
 
@@ -128,8 +125,12 @@ class TestRefresh:
             with lw.get_session_factory().session() as s:
                 row = s.get(ExternalLibrary, lib.id)
                 row.root_path = str(root_b)
+                row.root_identity = None
                 s.add(row)
                 s.commit()
+                from app.services.external_library import enroll_external_root
+
+                enroll_external_root(s, row)
 
             await watcher.refresh()
             assert watcher.watched_roots[lib.id] == str(root_b)
@@ -209,14 +210,12 @@ class TestComputeDesired:
         self, db_session: Session, tmp_path: Path
     ) -> None:
         _enable_external_libraries(db_session)
-        lib = ExternalLibrary(
+        lib = build_external_library(
+            db_session,
+            tmp_path,
             name="Lib",
-            root_path=str(tmp_path),
             watch_mode=ExternalLibraryWatchMode.EVENTS,
         )
-        db_session.add(lib)
-        db_session.commit()
-        db_session.refresh(lib)
 
         watcher = lw.LibraryWatcher()
         desired = watcher._compute_desired()  # noqa: SLF001
@@ -247,14 +246,12 @@ class TestComputeDesired:
         self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _enable_external_libraries(db_session)
-        lib = ExternalLibrary(
+        lib = build_external_library(
+            db_session,
+            tmp_path,
             name="Lib",
-            root_path=str(tmp_path),
             watch_mode=ExternalLibraryWatchMode.EVENTS,
         )
-        db_session.add(lib)
-        db_session.commit()
-        db_session.refresh(lib)
 
         monkeypatch.setattr(
             "app.services.external_library.detect_fs_kind", lambda _path: "network"

@@ -228,7 +228,15 @@ export function UploadModal({
           return;
         }
         return listExternalLibraries().then((libs) => {
-          if (!cancelled) setLibraries(libs.filter((l) => l.enabled));
+          if (cancelled) return;
+          const writableLibraries = libs.filter(
+            (library) => library.enabled && library.binding_state === "bound",
+          );
+          setLibraries(writableLibraries);
+          setTargetLibraryId((selectedId) => {
+            if (selectedId === "") return selectedId;
+            return writableLibraries.some((library) => library.id === selectedId) ? selectedId : "";
+          });
         });
       })
       .catch(() => {

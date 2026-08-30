@@ -65,6 +65,9 @@ function aVolume(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
     watch_mode: "auto",
     fs_kind: "local",
     watch_active: true,
+    binding_state: "bound",
+    binding_reason: null,
+    root_enrollable: false,
     collection_mode: "mirror",
     target_collection_id: null,
     last_scanned_at: FROZEN_NOW,
@@ -96,6 +99,9 @@ function stubApi(over: Partial<ExternalLibrariesApi> = {}): ExternalLibrariesApi
     isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
     setFeatureEnabled: vi.fn<(enabled: boolean) => Promise<void>>().mockResolvedValue(undefined),
     list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([aVolume()]),
+    enroll: vi
+      .fn<(id: number, body: { confirm_root_path: string }) => Promise<ExternalLibrary>>()
+      .mockResolvedValue(aVolume()),
     create: vi
       .fn<(body: ExternalLibraryCreate) => Promise<ExternalLibrary>>()
       .mockResolvedValue(aVolume()),
@@ -214,6 +220,131 @@ describe("ExternalLibrariesPanel", () => {
       });
 
       expect(await screen.findByText("Paused")).toBeInTheDocument();
+    });
+
+    it("explains that a legacy root needs proof before recovery", async () => {
+      renderPanel({
+        list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([
+          aVolume({
+            binding_state: "unbound",
+            binding_reason: "legacy_library_requires_explicit_enrollment",
+            root_enrollable: true,
+            watch_active: false,
+          }),
+        ]),
+      });
+
+      expect(await screen.findByText("Needs enrollment")).toBeInTheDocument();
+      expect(
+        await screen.findByText(/Scans, watching, and writeback stay paused/),
+      ).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Review and enroll" })).toBeVisible();
+    });
+
+    it("shows a missing root as recovery without offering unsafe controls", async () => {
+      renderPanel({
+        list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([
+          aVolume({
+            binding_state: "missing",
+            binding_reason: "root_path_missing",
+            root_enrollable: true,
+            watch_active: false,
+          }),
+        ]),
+      });
+
+      expect(await screen.findByText("Root proof unavailable")).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: /Scan now/ })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: "Review and enroll" })).toBeVisible();
+    });
+
+    it("does not offer enrollment for a conflicting root marker", async () => {
+      renderPanel({
+        list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([
+          aVolume({
+            binding_state: "mismatch",
+            binding_reason: "root_marker_conflict",
+            root_enrollable: false,
+            watch_active: false,
+          }),
+        ]),
+      });
+
+      expect(await screen.findByText("Root binding blocked")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Review and enroll" })).toBeNull();
+      expect(await screen.findByRole("button", { name: /Scan now/ })).toBeDisabled();
+    });
+
+    it("disables the watcher switch until the root is proven", async () => {
+      renderPanel({
+        list: vi
+          .fn<() => Promise<ExternalLibrary[]>>()
+          .mockResolvedValue([
+            aVolume({ binding_state: "unreadable", root_enrollable: false, watch_active: false }),
+          ]),
+      });
+
+      expect(await screen.findByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
+    });
+  });
+
+  describe("root enrollment", () => {
+    it("confirms the exact displayed root path before enrolling", async () => {
+      const user = userEvent.setup();
+      const { api } = renderPanel({
+        list: vi
+          .fn<() => Promise<ExternalLibrary[]>>()
+          .mockResolvedValue([
+            aVolume({ binding_state: "unbound", root_enrollable: true, watch_active: false }),
+          ]),
+      });
+      await screen.findByText("NAS models");
+
+      await user.click(screen.getByRole("button", { name: "Review and enroll" }));
+
+      expect(
+        await screen.findByText(/exact mounted path belongs to this PrintStash installation/),
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Enroll root" }));
+
+      await waitFor(() =>
+        expect(api.enroll).toHaveBeenCalledWith(7, { confirm_root_path: "/mnt/nas/3d" }),
+      );
+    });
+
+    it("reports successful enrollment with rescan guidance", async () => {
+      const user = userEvent.setup();
+      const { api } = renderPanel({
+        list: vi
+          .fn<() => Promise<ExternalLibrary[]>>()
+          .mockResolvedValue([aVolume({ binding_state: "unbound", root_enrollable: true })]),
+      });
+      await screen.findByRole("button", { name: "Review and enroll" });
+
+      await user.click(screen.getByRole("button", { name: "Review and enroll" }));
+      await user.click(await screen.findByRole("button", { name: "Enroll root" }));
+
+      expect(await screen.findByText("Root verified. Rescan to resume indexing.")).toBeVisible();
+      await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+    });
+
+    it("surfaces an enrollment refusal", async () => {
+      const user = userEvent.setup();
+      const { api } = renderPanel({
+        list: vi
+          .fn<() => Promise<ExternalLibrary[]>>()
+          .mockResolvedValue([aVolume({ binding_state: "missing", root_enrollable: true })]),
+        enroll: vi
+          .fn<(id: number, body: { confirm_root_path: string }) => Promise<ExternalLibrary>>()
+          .mockRejectedValue(new Error("root_marker_conflict")),
+      });
+      await screen.findByRole("button", { name: "Review and enroll" });
+
+      await user.click(screen.getByRole("button", { name: "Review and enroll" }));
+      await user.click(await screen.findByRole("button", { name: "Enroll root" }));
+
+      expect(await screen.findByText("Root marker conflict.")).toBeVisible();
+      expect(api.list).toHaveBeenCalledTimes(1);
     });
   });
 

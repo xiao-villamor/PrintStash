@@ -622,6 +622,42 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Restore backup?", "¿Restaurar copia?"],
   ["Shared volumes", "Volúmenes compartidos"],
   ["Add a folder", "Añadir carpeta"],
+  ["Bound", "Vinculado"],
+  ["Needs enrollment", "Necesita inscripción"],
+  ["Root proof unavailable", "Prueba de raíz no disponible"],
+  ["Root binding blocked", "Vinculación de raíz bloqueada"],
+  [
+    "This root is verified for this PrintStash installation.",
+    "Esta raíz está verificada para esta instalación de PrintStash.",
+  ],
+  [
+    "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
+    "Esta biblioteca existente no tiene una prueba de raíz. Los escaneos, la supervisión y la escritura permanecen pausados hasta que verifiques e inscribas esta ruta exacta.",
+  ],
+  [
+    "The root or its proof is unavailable. Scans, watching, and writeback stay paused until you verify the intended mount and enroll it again.",
+    "La raíz o su prueba no están disponibles. Los escaneos, la supervisión y la escritura permanecen pausados hasta que verifiques el montaje previsto y lo inscribas de nuevo.",
+  ],
+  [
+    "This root cannot be used safely. Scans, watching, and writeback stay paused; verify the intended mount and resolve the binding problem before continuing.",
+    "Esta raíz no se puede usar de forma segura. Los escaneos, la supervisión y la escritura permanecen pausados; verifica el montaje previsto y resuelve el problema de vinculación antes de continuar.",
+  ],
+  ["Review and enroll", "Revisar e inscribir"],
+  ["Enroll shared volume root?", "¿Inscribir la raíz del volumen compartido?"],
+  [
+    "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ",
+    "Verifica que esta ruta montada exacta pertenece a esta instalación de PrintStash antes de inscribirla: ",
+  ],
+  [
+    ". This re-enables safe scans, watching, and writeback.",
+    ". Esto vuelve a activar los escaneos, la supervisión y la escritura de forma segura.",
+  ],
+  ["Enroll root", "Inscribir raíz"],
+  [
+    "Root verified. Rescan to resume indexing.",
+    "Raíz verificada. Vuelve a escanear para reanudar la indexación.",
+  ],
+  ["Verify the root before scanning.", "Verifica la raíz antes de escanear."],
   ["Remove external library?", "¿Quitar biblioteca externa?"],
   ["Remove library", "Quitar biblioteca"],
   ["Mirror subfolders as collections", "Reflejar subcarpetas como colecciones"],

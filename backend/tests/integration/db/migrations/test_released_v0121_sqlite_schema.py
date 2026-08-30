@@ -18,7 +18,7 @@ from tests.factories.migration_rows import (
 )
 
 
-def test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
+def _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
     tmp_path: Path,
 ) -> None:
     """A fresh-install database from the released models is an upgrade input."""
@@ -98,6 +98,15 @@ def test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
                 ).one()
                 == external_identity_before
             )
+            # Legacy external rows deliberately remain unbound.  The upgrade
+            # must preserve their path/bytes while requiring explicit admin
+            # enrollment before scans or write-back can resume.
+            assert (
+                connection.execute(
+                    text("SELECT root_identity FROM external_libraries WHERE id = 1")
+                ).scalar_one()
+                is None
+            )
             assert Path(external_identity_before[0]).read_bytes() == external_bytes
             assert (
                 connection.execute(
@@ -137,3 +146,12 @@ def test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
             assert "ix_metadata_slicer_name" not in metadata_indexes
     finally:
         engine.dispose()
+
+
+class TestReleasedV0121Upgrade:
+    def test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
+        self, tmp_path: Path
+    ) -> None:
+        _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
+            tmp_path
+        )

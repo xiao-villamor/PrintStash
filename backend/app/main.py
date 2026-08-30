@@ -152,7 +152,15 @@ def _compose_storage_backend(
         logger.exception("selected storage provider unavailable")
         storage_backend = UnavailableStorageBackend(exc.__class__.__name__)
     if not recovery_only:
-        storage_backend.ensure_setup()
+        try:
+            storage_backend.ensure_setup()
+        except Exception as exc:
+            # Provider reachability and root probes are runtime health, not
+            # process-start prerequisites. Keep the API/admin health surface
+            # available with a backend that rejects every storage mutation;
+            # silently falling back to local storage would split the vault.
+            logger.exception("selected storage provider unavailable during setup")
+            storage_backend = UnavailableStorageBackend(exc.__class__.__name__)
     if (
         not recovery_only
         and storage_backend.backend_name != "unavailable"
@@ -175,7 +183,7 @@ def _compose_storage_backend(
     for warning in storage_backend.capabilities.warnings:
         logger.warning("storage capability warning: %s", warning)
     bound = bind_backend(storage_backend)
-    if recover_publications:
+    if recover_publications and storage_backend.backend_name != "unavailable":
         from app.services.inbox import reconcile_storage_publications
 
         recovered = reconcile_storage_publications()
@@ -193,7 +201,7 @@ def _prepare_storage_for_startup(
     )
     from app.services.inbox import reconcile_interrupted_items
 
-    if recover_publications:
+    if recover_publications and backend.backend_name != "unavailable":
         interrupted_imports = reconcile_interrupted_items()
         if interrupted_imports:
             logger.warning(

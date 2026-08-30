@@ -603,7 +603,12 @@ class LocalStorageBackend(StorageBackend):
     _BINDING_FILENAME = ".printstash-storage-root.json"
     _BINDING_FORMAT = 1
 
-    def __init__(self, *, external_roots: tuple[Path, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        external_roots: tuple[Path, ...] = (),
+        external_root_bindings: dict[Path, dict[str, object]] | None = None,
+    ) -> None:
         self._capabilities = StorageCapabilities(
             conditional_create=True,
             object_identity=ObjectIdentity.INODE,
@@ -616,6 +621,10 @@ class LocalStorageBackend(StorageBackend):
         self._external_roots = tuple(
             Path(root).expanduser().resolve(strict=False) for root in external_roots
         )
+        self._external_root_bindings = {
+            Path(root).expanduser().resolve(strict=False): payload
+            for root, payload in (external_root_bindings or {}).items()
+        }
         self._roots_ready = True
         self.recovery_mode = False
         self._startup_checked = False
@@ -771,17 +780,28 @@ class LocalStorageBackend(StorageBackend):
         root identity again before reporting success.
         """
         lexical = path.expanduser().absolute()
-        for role, configured_root in (
+        roots = [
             ("data", Path(settings.data_dir)),
             ("thumb", Path(settings.thumb_dir)),
-        ):
+            *(("external", root) for root in self._external_roots),
+        ]
+        for role, configured_root in roots:
             root = configured_root.expanduser().absolute()
             if lexical == root or not lexical.is_relative_to(root):
                 continue
             # This check must precede opening/creating any descendant.  The
             # descriptor below then pins the validated root for the rest of
             # the publication, even if the pathname is concurrently remounted.
-            self._assert_root_binding_for(lexical)
+            if role == "external":
+                if not root.is_dir():
+                    raise StorageConfigurationError("storage_root_unavailable")
+                resolved = lexical.resolve(strict=False)
+                if resolved != root.resolve(
+                    strict=False
+                ) and not resolved.is_relative_to(root.resolve(strict=False)):
+                    raise StorageCollisionError("managed_storage_symlink_escape")
+            else:
+                self._assert_root_binding_for(lexical)
             root_path_stat = os.stat(root, follow_symlinks=False)
             root_fd = os.open(
                 root,
@@ -791,12 +811,18 @@ class LocalStorageBackend(StorageBackend):
             )
             parent_fd = os.dup(root_fd)
             try:
+                if role == "external":
+                    self._assert_external_binding_pinned(root_fd, root)
                 relative = lexical.relative_to(root)
                 parts = relative.parts
                 if not parts:
                     raise StorageConfigurationError("storage_destination_invalid")
                 for part in parts[:-1]:
-                    self._assert_root_binding_for(lexical)
+                    if role == "external":
+                        if not root.is_dir():
+                            raise StorageConfigurationError("storage_root_unavailable")
+                    else:
+                        self._assert_root_binding_for(lexical)
                     try:
                         os.mkdir(part, mode=0o755, dir_fd=parent_fd)
                     except FileExistsError:
@@ -817,15 +843,33 @@ class LocalStorageBackend(StorageBackend):
                     or root_path_stat.st_ino != root_stat.st_ino
                     or root_stat.st_dev != current_root.st_dev
                     or root_stat.st_ino != current_root.st_ino
-                    or not self._bind_root(role, root)
+                    or (role != "external" and not self._bind_root(role, root))
                 ):
                     raise StorageConfigurationError("storage_root_changed")
+                if role == "external":
+                    self._assert_external_binding_pinned(root_fd, root)
                 return root_fd, parent_fd, parts[-1], root, role
             except Exception:
                 os.close(parent_fd)
                 os.close(root_fd)
                 raise
         return None
+
+    def _assert_external_binding_pinned(self, root_fd: int, root: Path) -> None:
+        """Verify an external marker through the already-pinned root fd."""
+        expected = self._external_root_bindings.get(root)
+        if expected is None:
+            return
+        try:
+            # Keep one strict parser for API state, enrollment, and the
+            # descriptor-pinned publication seam.
+            from app.services.external_library import read_root_marker_fd
+
+            actual = read_root_marker_fd(root_fd)
+        except (FileNotFoundError, OSError, UnicodeError, ValueError, TypeError) as exc:
+            raise StorageConfigurationError("external_root_binding_changed") from exc
+        if actual != expected:
+            raise StorageConfigurationError("external_root_binding_changed")
 
     @staticmethod
     def _assert_pinned_root_current(root_fd: int, root: Path) -> None:
@@ -1131,6 +1175,8 @@ class LocalStorageBackend(StorageBackend):
             # marker replacement that occurs during the publication syscall.
             self._assert_root_binding_for(dest)
             self._assert_pinned_root_current(root_fd, root)
+            if role == "external":
+                self._assert_external_binding_pinned(root_fd, root)
             verified_identity = True
             try:
                 os.link(
@@ -1184,7 +1230,9 @@ class LocalStorageBackend(StorageBackend):
             temp_created = False
             os.fsync(parent_fd)
             self._assert_pinned_root_current(root_fd, root)
-            if not self._bind_root(role, root):
+            if role == "external":
+                self._assert_external_binding_pinned(root_fd, root)
+            if role != "external" and not self._bind_root(role, root):
                 raise StorageConfigurationError("storage_root_changed")
             stat_result = os.stat(dest_name, dir_fd=parent_fd, follow_symlinks=False)
             return CreationReceipt(

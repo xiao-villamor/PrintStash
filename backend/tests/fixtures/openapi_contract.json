@@ -3877,6 +3877,21 @@
       },
       "LibraryRead": {
         "properties": {
+          "binding_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding Reason"
+          },
+          "binding_state": {
+            "title": "Binding State",
+            "type": "string"
+          },
           "collection_mode": {
             "$ref": "#/components/schemas/ExternalLibraryCollectionMode"
           },
@@ -3937,6 +3952,10 @@
             "title": "Name",
             "type": "string"
           },
+          "root_enrollable": {
+            "title": "Root Enrollable",
+            "type": "boolean"
+          },
           "root_path": {
             "title": "Root Path",
             "type": "string"
@@ -3978,6 +3997,9 @@
           "watch_mode",
           "fs_kind",
           "watch_active",
+          "binding_state",
+          "binding_reason",
+          "root_enrollable",
           "collection_mode",
           "target_collection_id",
           "last_scanned_at",
@@ -3985,6 +4007,22 @@
           "last_scan_summary"
         ],
         "title": "LibraryRead",
+        "type": "object"
+      },
+      "LibraryRootEnrollment": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_root_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Confirm Root Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_root_path"
+        ],
+        "title": "LibraryRootEnrollment",
         "type": "object"
       },
       "LibraryUpdate": {
@@ -18548,6 +18586,63 @@
           }
         ],
         "summary": "Update an external library",
+        "tags": [
+          "external-libraries"
+        ]
+      }
+    },
+    "/api/v1/libraries/{library_id}/root/enroll": {
+      "post": {
+        "operationId": "enroll_root_api_v1_libraries__library_id__root_enroll_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryRootEnrollment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Explicitly enroll or re-enroll an external root",
         "tags": [
           "external-libraries"
         ]

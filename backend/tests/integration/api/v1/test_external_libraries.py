@@ -15,6 +15,7 @@ overwrite it. A scan path is confined to the root for the same reason.
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from pathlib import Path
 
@@ -126,6 +127,9 @@ class TestCreateLibrary:
         assert created.json()["collection_mode"] == "mirror"
         assert created.json()["scan_schedule"] == "0 */6 * * *"
         assert created.json()["watch_mode"] == "off"
+        assert created.json()["binding_state"] == "bound"
+        assert created.json()["binding_reason"] is None
+        assert created.json()["root_enrollable"] is False
         # fs_kind is detected on create; watching is off so it's inactive.
         assert created.json()["fs_kind"] in {"local", "network", "unknown"}
         assert created.json()["watch_active"] is False
@@ -250,6 +254,74 @@ class TestUpdateLibrary:
         assert body["watch_mode"] == "events"
         assert body["collection_mode"] == "single"
         assert body["target_collection_id"] == target.id
+        assert body["binding_state"] == "unbound"
+        assert body["root_enrollable"] is True
+
+
+class TestRootEnrollment:
+    def test_orphan_marker_remains_explicitly_enrollable(
+        self, tmp_path: Path, client, db_session: Session, auth_headers: dict
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        lib = build_external_library(db_session, root, root_identity=None, name="nas")
+        (root / external_library.ROOT_MARKER_FILENAME).write_text(
+            json.dumps(
+                {
+                    "format": 1,
+                    "installation": "a" * 64,
+                    "role": "external-library",
+                    "library_id": lib.id,
+                    "root_identity": "b" * 64,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        response = client.get("/api/v1/libraries", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()[0]["binding_state"] == "unbound"
+        assert response.json()[0]["root_enrollable"] is True
+
+    def test_legacy_root_can_be_enrolled_with_exact_path_confirmation(
+        self, tmp_path: Path, client, db_session: Session, auth_headers: dict
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        lib = build_external_library(db_session, root, root_identity=None, name="nas")
+
+        response = client.post(
+            f"/api/v1/libraries/{lib.id}/root/enroll",
+            headers=auth_headers,
+            json={"confirm_root_path": str(root)},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["binding_state"] == "bound"
+        assert response.json()["root_enrollable"] is False
+        assert (root / external_library.ROOT_MARKER_FILENAME).exists()
+
+    def test_enrollment_rejects_a_different_confirmed_path(
+        self, tmp_path: Path, client, db_session: Session, auth_headers: dict
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        other = tmp_path / "other"
+        root.mkdir()
+        other.mkdir()
+        lib = build_external_library(db_session, root, root_identity=None, name="nas")
+
+        response = client.post(
+            f"/api/v1/libraries/{lib.id}/root/enroll",
+            headers=auth_headers,
+            json={"confirm_root_path": str(other)},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "root_path_confirmation_mismatch"
 
     def test_update_library_rejects_invalid_schedule(
         self, tmp_path: Path, client, db_session: Session, auth_headers: dict

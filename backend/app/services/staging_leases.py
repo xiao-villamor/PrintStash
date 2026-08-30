@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import errno
 import json
+import logging
 import os
 import stat
 import uuid
@@ -34,6 +35,7 @@ from app.services.storage_backend import CreationReceipt, StorageBackend
 
 _LEASE_TABLE = getattr(StagingLease, "__table__")  # noqa: B009
 _CAPTURE_MARKER = b"user.printstash.capture-slot"
+_logger = logging.getLogger(__name__)
 
 
 def capture_slot_staging_path(slot_id: str) -> Path:
@@ -44,6 +46,30 @@ def capture_slot_staging_path(slot_id: str) -> Path:
     cleanup must not inspect or branch on the backend implementation.
     """
     return settings.incoming_dir / "capture-slots" / f"{slot_id}.upload"
+
+
+def _quarantine_entry_path(path: Path, receipt_id: str) -> Path | None:
+    """Return the deterministic private receipt path, if its id is safe."""
+    if not receipt_id or any(
+        character
+        not in "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ-_"
+        for character in receipt_id
+    ):
+        return None
+    return path.parent / ".printstash-staging-quarantine" / f"{receipt_id}.entry"
+
+
+def _entry_present(path: Path | None) -> bool:
+    """Return whether a directory entry exists, including a symlink or error."""
+    if path is None:
+        return False
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 class StagingLeaseError(RuntimeError):
@@ -131,6 +157,232 @@ def _matching_capture_staging_path(lease: StagingLease) -> Path | None:
     return path
 
 
+def _quarantine_owned_file(
+    path: Path,
+    *,
+    receipt_id: str,
+    device: int,
+    inode: int,
+    ctime_ns: int | None = None,
+    size_bytes: int | None = None,
+    marker: bytes | None = None,
+) -> bool:
+    """Atomically quarantine and remove one receipt-owned regular file.
+
+    A path check followed by ``unlink`` can delete a replacement written in
+    the check-to-unlink window.  Rename selects the directory entry atomically,
+    so a writer that wins that race is moved into quarantine and then fails the
+    second identity proof.  Such bytes are restored when the original name is
+    vacant, or retained under the private name when another writer occupied it.
+    ``False`` always means the caller must retain its lease/accounting row.
+    """
+
+    def matches(
+        info: os.stat_result, candidate: Path, *, check_ctime: bool = True
+    ) -> bool:
+        if not stat.S_ISREG(info.st_mode):
+            return False
+        if info.st_dev != device or info.st_ino != inode:
+            return False
+        if check_ctime and ctime_ns is not None and info.st_ctime_ns != ctime_ns:
+            return False
+        if size_bytes is not None and info.st_size != size_bytes:
+            return False
+        if marker is not None:
+            try:
+                actual = os.getxattr(candidate, _CAPTURE_MARKER)
+            except AttributeError:
+                actual = marker
+            except OSError as exc:
+                if exc.errno in {
+                    getattr(errno, "ENOTSUP", 95),
+                    getattr(errno, "EOPNOTSUPP", 95),
+                    getattr(errno, "ENOSYS", 38),
+                }:
+                    actual = marker
+                else:
+                    return False
+            if actual != marker:
+                return False
+        return True
+
+    quarantine = _quarantine_entry_path(path, receipt_id)
+    if quarantine is None:
+        return False
+    parent_fd: int | None = None
+    quarantine_fd: int | None = None
+    quarantine_created = False
+    moved = False
+    quarantine_dir_name = ".printstash-staging-quarantine"
+    quarantine_name = quarantine.name
+    quarantine_dir = quarantine.parent
+
+    def remove_empty_quarantine_dir() -> None:
+        """Drop only our now-empty quarantine directory via its parent FD."""
+        try:
+            os.rmdir(quarantine_dir_name, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except OSError:
+            # A retained/foreign entry or a transient filesystem failure keeps
+            # the private directory for a later reconciliation pass.
+            pass
+
+    try:
+        parent_fd = os.open(
+            path.parent,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            os.mkdir(quarantine_dir_name, 0o700, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except FileExistsError:
+            pass
+        except OSError:
+            return False
+        try:
+            quarantine_dir_info = os.stat(
+                quarantine_dir_name, dir_fd=parent_fd, follow_symlinks=False
+            )
+        except OSError:
+            return False
+        if (
+            not stat.S_ISDIR(quarantine_dir_info.st_mode)
+            or stat.S_IMODE(quarantine_dir_info.st_mode) != 0o700
+        ):
+            return False
+        try:
+            quarantine_fd = os.open(
+                quarantine_dir_name,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
+            )
+        except OSError:
+            return False
+        quarantine = quarantine_dir / quarantine_name
+
+        # A previous unlink/fsync failure leaves a durable, rediscoverable
+        # entry. Re-prove and retry that entry before considering the original
+        # path, which may now be absent or occupied by a replacement.
+        try:
+            retained = os.stat(
+                quarantine_name, dir_fd=quarantine_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            retained = None
+        except OSError:
+            return False
+        if retained is not None:
+            if not matches(retained, quarantine, check_ctime=False):
+                return False
+            try:
+                retained_final = os.stat(
+                    quarantine_name, dir_fd=quarantine_fd, follow_symlinks=False
+                )
+                if not matches(retained_final, quarantine, check_ctime=False):
+                    return False
+                # If directory durability cannot be confirmed, retain the
+                # entry so the next cleanup can rediscover it safely.
+                os.fsync(quarantine_fd)
+                os.unlink(quarantine_name, dir_fd=quarantine_fd)
+                os.fsync(quarantine_fd)
+                remove_empty_quarantine_dir()
+            except OSError:
+                return False
+            return True
+
+        try:
+            before = path.lstat()
+        except OSError:
+            return False
+        if not matches(before, path):
+            return False
+
+        # The private name is reserved before the cross-directory rename so a
+        # concurrent operation can never overwrite an existing receipt.
+        try:
+            fd = os.open(
+                quarantine_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=quarantine_fd,
+            )
+            os.close(fd)
+            quarantine_created = True
+            os.rename(
+                path.name,
+                quarantine_name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=quarantine_fd,
+            )
+            moved = True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return False
+
+        moved_info = os.stat(
+            quarantine_name, dir_fd=quarantine_fd, follow_symlinks=False
+        )
+        # POSIX rename updates ctime on some filesystems. Device/inode/size
+        # still prove that the quarantined entry is the originally selected
+        # regular file.
+        if not matches(moved_info, quarantine, check_ctime=False):
+            # Restore through a no-replace hard link. If a writer filled the
+            # original name, leave both entries intact for reconciliation.
+            try:
+                os.link(
+                    quarantine_name,
+                    path.name,
+                    src_dir_fd=quarantine_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                pass
+            except OSError:
+                pass
+            else:
+                try:
+                    os.unlink(quarantine_name, dir_fd=quarantine_fd)
+                    quarantine_created = False
+                except OSError:
+                    pass
+            return False
+
+        # Re-proof the private entry immediately before deletion. The original
+        # path is no longer used, so a replacement there cannot be unlinked.
+        final = os.stat(quarantine_name, dir_fd=quarantine_fd, follow_symlinks=False)
+        if not matches(final, quarantine, check_ctime=False):
+            return False
+        os.fsync(quarantine_fd)
+        os.unlink(quarantine_name, dir_fd=quarantine_fd)
+        quarantine_created = False
+        os.fsync(quarantine_fd)
+        remove_empty_quarantine_dir()
+        return True
+    except OSError:
+        return False
+    finally:
+        if parent_fd is not None:
+            if quarantine_created and not moved:
+                try:
+                    if quarantine_fd is not None:
+                        os.unlink(quarantine_name, dir_fd=quarantine_fd)
+                    quarantine_created = False
+                except OSError:
+                    pass
+            if quarantine_created:
+                _logger.warning(
+                    "staging quarantine retained for reconciliation",
+                    extra={"path": str(path), "quarantine": quarantine_name},
+                )
+            if quarantine_fd is not None:
+                os.close(quarantine_fd)
+            os.close(parent_fd)
+
+
 def _capture_slot_lease(session: Session, slot_id: str) -> StagingLease:
     return _one_owner_lease(session, capture_upload_slot_id=slot_id)
 
@@ -148,15 +400,25 @@ def prepare_capture_slot_staging(session: Session, *, slot_id: str) -> Path:
         raise StagingLeaseError("capture_upload_staging_path_invalid")
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    if path.exists():
-        owned = _matching_capture_staging_path(lease)
-        if owned is None:
+    lease_slot_id = lease.capture_upload_slot_id or lease.capture_upload_slot_origin_id
+    quarantine = _quarantine_entry_path(path, lease.id)
+    if _entry_present(path) or _entry_present(quarantine):
+        if (
+            lease.device is None
+            or lease.inode is None
+            or lease_slot_id is None
+            or not _quarantine_owned_file(
+                path,
+                receipt_id=lease.id,
+                device=lease.device,
+                inode=lease.inode,
+                marker=lease_slot_id.encode("ascii"),
+            )
+        ):
             raise StagingLeaseError("capture_upload_staging_collision")
-        try:
-            owned.unlink()
-            _fsync_directory(path.parent)
-        except OSError as exc:
-            raise StagingLeaseError("capture_upload_staging_unavailable") from exc
+        lease.device = lease.inode = lease.ctime_ns = None
+        session.add(lease)
+        session.flush()
 
     try:
         fd = os.open(
@@ -289,41 +551,40 @@ def remove_capture_slot_staging(
         if slot_id is None:
             raise ValueError("slot_id or lease is required")
         lease = _capture_slot_lease(session, slot_id)
-    owned = _matching_capture_staging_path(lease)
-    if owned is None:
-        path = (
-            capture_slot_staging_path(
-                lease.capture_upload_slot_id or lease.capture_upload_slot_origin_id
-            )
-            if lease.capture_upload_slot_id or lease.capture_upload_slot_origin_id
-            else None
-        )
-        if path is not None and path.exists():
-            return False
-        lease.device = lease.inode = lease.ctime_ns = None
-        session.add(lease)
-        session.flush()
-        if path is not None:
+    slot_id = (
+        slot_id or lease.capture_upload_slot_id or lease.capture_upload_slot_origin_id
+    )
+    path = capture_slot_staging_path(slot_id) if slot_id is not None else None
+    quarantine = _quarantine_entry_path(path, lease.id) if path is not None else None
+    if lease.device is not None and lease.inode is not None and path is not None:
+        if _quarantine_owned_file(
+            path,
+            receipt_id=lease.id,
+            device=lease.device,
+            inode=lease.inode,
+            marker=slot_id.encode("ascii") if slot_id is not None else None,
+        ):
+            lease.device = lease.inode = lease.ctime_ns = None
+            session.add(lease)
+            session.flush()
             try:
-                path.parent.rmdir()
+                lease.path and Path(lease.path).parent.rmdir()
             except OSError:
                 pass
-        return True
-    try:
-        owned.unlink()
-        _fsync_directory(owned.parent)
-    except OSError:
+            return True
+        if _entry_present(quarantine) or _entry_present(path):
+            return False
         return False
-    lease.device = lease.inode = lease.ctime_ns = None
-    session.add(lease)
-    session.flush()
-    try:
-        lease.path and Path(lease.path).parent.rmdir()
-    except OSError:
-        # The deterministic parent may contain another owned spool or a
-        # foreign file. Never recursively inspect or delete either.
-        pass
-    return True
+    if lease.device is None and lease.inode is None:
+        # A previously successful cleanup clears the receipt identity before
+        # its owner row is removed. Treat that exact, already-empty state as an
+        # idempotent success, but never release an identity-bearing lease just
+        # because its path is absent or inaccessible.
+        if path is None:
+            return True
+        if not _entry_present(path) and not _entry_present(quarantine):
+            return True
+    return False
 
 
 def reconcile_capture_staging(session: Session) -> int:
@@ -815,35 +1076,37 @@ def renew_job_lease(
 def dismiss_review_lease(session: Session, *, inbox_item_id: int) -> bool:
     """Forget a review lease, unlinking only an exact identity match.
 
-    An already-missing path is treated as successfully cleaned: the lease is
-    stale accounting state, and retaining it would make dismissal impossible.
+    An already-missing path releases stale accounting idempotently. A replaced
+    or otherwise uncertain path remains leased because it is not safe to unlink.
     """
     lease = _one_owner_lease(session, inbox_item_id=inbox_item_id)
+    path = Path(lease.path)
+    quarantine = _quarantine_entry_path(path, lease.id)
+    if lease.device is not None and lease.inode is not None:
+        if _quarantine_owned_file(
+            path,
+            receipt_id=lease.id,
+            device=lease.device,
+            inode=lease.inode,
+            ctime_ns=lease.ctime_ns,
+            size_bytes=lease.size_bytes,
+        ):
+            session.delete(lease)
+            session.flush()
+            return True
+        if _entry_present(quarantine) or _entry_present(path):
+            return False
     try:
-        Path(lease.path).lstat()
+        path.lstat()
     except FileNotFoundError:
-        # The bytes may already have been removed by expiry/reconciliation.
-        # There is no remaining object to protect, so release the stale
-        # accounting lease and let dismissal complete idempotently.
+        # There is no reachable object left at the exact recorded name and no
+        # retained quarantine entry, so releasing stale accounting is safe.
         session.delete(lease)
         session.flush()
         return True
     except OSError:
-        # An inaccessible path is not proof that the staged object is gone.
-        # Keep the lease so capacity accounting and a later retry remain safe.
         return False
-    path = _matching_path(lease)
-    unlinked = False
-    if path is not None:
-        try:
-            path.unlink()
-            unlinked = True
-        except OSError:
-            # The lease remains so capacity accounting stays conservative.
-            return False
-    session.delete(lease)
-    session.flush()
-    return unlinked
+    return False
 
 
 def dismiss_capture_slot_leases(session: Session, *, inbox_item_id: int) -> bool:
@@ -899,16 +1162,33 @@ def prune_expired(
             ):
                 removed += 1
             continue
-        path = _matching_path(lease)
-        if path is not None:
-            try:
-                path.unlink()
+        path = Path(lease.path)
+        quarantine = _quarantine_entry_path(path, lease.id)
+        if lease.device is not None and lease.inode is not None:
+            if _quarantine_owned_file(
+                path,
+                receipt_id=lease.id,
+                device=lease.device,
+                inode=lease.inode,
+                ctime_ns=lease.ctime_ns,
+                size_bytes=lease.size_bytes,
+            ):
                 unlinked += 1
-            except OSError:
-                # Keep the row (and its capacity charge) if unlink could not be
-                # proven successful.
+                session.delete(lease)
+                removed += 1
                 continue
-        session.delete(lease)
-        removed += 1
+            if _entry_present(quarantine) or _entry_present(path):
+                continue
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            session.delete(lease)
+            removed += 1
+            continue
+        except OSError:
+            pass
+        # Keep uncertain rows charged. A replaced or inaccessible pathname is
+        # not evidence that this lease's bytes were safely reclaimed.
+        continue
     session.flush()
     return removed, unlinked

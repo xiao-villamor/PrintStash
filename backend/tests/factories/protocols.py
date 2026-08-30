@@ -222,6 +222,7 @@ class MakeExternalLibrary(Protocol):
         *,
         name: str | None = None,
         scanning: bool = False,
+        root_identity: str | None = None,
         **overrides: Any,
     ) -> ExternalLibrary: ...
 

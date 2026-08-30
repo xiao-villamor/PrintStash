@@ -86,7 +86,7 @@ def build_external_library(
         overrides.setdefault("scan_claim_token", f"claim-{nth('scan_claim')}")
         overrides.setdefault("scan_claim_expires_at", utcnow() + timedelta(minutes=30))
         overrides.setdefault("scan_job_id", f"scan-job-{nth('scan_job')}")
-    return save(
+    library = save(
         session,
         ExternalLibrary(
             name=name or f"nas-{nth('library')}",
@@ -94,6 +94,15 @@ def build_external_library(
             **overrides,
         ),
     )
+    # Factory rows model an already configured library.  Production creation
+    # performs this enrollment explicitly through the API; keeping the marker
+    # here prevents every existing scan test from accidentally exercising the
+    # legacy-unbound state.
+    if "root_identity" not in overrides and Path(root).is_dir():
+        from app.services.external_library import enroll_external_root
+
+        enroll_external_root(session, library)
+    return library
 
 
 def build_document(

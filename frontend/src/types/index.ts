@@ -156,7 +156,9 @@ export type {
   ExternalLibraryCollectionMode,
   ExternalLibraryWatchMode,
   ExternalLibraryFsKind,
+  ExternalLibraryBindingState,
   ExternalLibraryScanSummary,
+  ExternalLibraryRootEnrollment,
 } from "./config";
 
 export type {

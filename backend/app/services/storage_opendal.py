@@ -696,11 +696,8 @@ class _AsyncSSHSFTPOperator:
         async def operation(client) -> None:
             # Never recreate an enrolled root after a mount disappears.  Only
             # the explicit first-run ``provision_root`` seam may create it.
-            await client.stat(self._root)
             path = self._path(relative)
-            parent = posixpath.dirname(path)
-            if parent:
-                await client.makedirs(parent, exist_ok=True)
+            await self._ensure_parent(client, path)
             writer = await client.open(path, "wb")
             try:
                 while chunk := source.read(1024 * 1024):
@@ -718,11 +715,8 @@ class _AsyncSSHSFTPOperator:
             # See ``write_stream``: a runtime write must fail closed when the
             # enrolled root is no longer mounted, rather than recreating a
             # new empty directory in the wrong filesystem.
-            await client.stat(self._root)
             path = self._path(relative)
-            parent = posixpath.dirname(path)
-            if parent:
-                await client.makedirs(parent, exist_ok=True)
+            await self._ensure_parent(client, path)
             try:
                 writer = await client.open(path, "xb")
             except asyncssh.SFTPFailure as exc:
@@ -751,13 +745,40 @@ class _AsyncSSHSFTPOperator:
 
         self.write_stream(relative, BytesIO(data))
 
+    async def _ensure_parent(self, client, path: str) -> None:
+        """Create descendants without recursively creating the configured root.
+
+        SFTP ``makedirs(root/child, exist_ok=True)`` is recursive. If the
+        configured root is a mount that disappears after a preflight ``stat``,
+        that call can silently recreate the root on the server's parent
+        filesystem. Walk each component instead: the root is checked first,
+        and each missing child is created with a single-level ``mkdir``. A
+        root loss between those operations therefore makes the child mkdir fail
+        closed rather than reconstructing the root.
+        """
+        import asyncssh
+
+        await client.stat(self._root)
+        parent = posixpath.dirname(path)
+        if not parent or parent == self._root:
+            return
+        relative_parent = posixpath.relpath(parent, self._root)
+        if relative_parent in {"", "."}:
+            return
+        current = self._root
+        for component in relative_parent.split("/"):
+            if component in {"", ".", ".."}:
+                raise StorageConfigurationError("sftp_path_outside_root")
+            current = posixpath.join(current, component)
+            try:
+                await client.stat(current)
+            except asyncssh.SFTPNoSuchFile:
+                await client.mkdir(current)
+
     def rename(self, source: str, destination: str) -> None:
         async def operation(client) -> None:
-            await client.stat(self._root)
             target = self._path(destination)
-            parent = posixpath.dirname(target)
-            if parent:
-                await client.makedirs(parent, exist_ok=True)
+            await self._ensure_parent(client, target)
             await client.rename(self._path(source), target)
 
         self._run(operation)

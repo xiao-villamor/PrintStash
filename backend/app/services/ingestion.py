@@ -390,6 +390,24 @@ def persist_artifact(
     assert model.id is not None
     backend = get_backend()
 
+    if is_external:
+        # External roots are independently owned from the active vault
+        # backend. Revalidate the durable marker before reserving a version or
+        # publishing bytes so a remount/replacement cannot receive a write.
+        from app.services.external_library import (
+            ExternalRootBindingError,
+            assert_root_binding,
+        )
+
+        library = (
+            session.get(ExternalLibrary, external_library_id)
+            if external_library_id is not None
+            else None
+        )
+        if library is None:
+            raise ExternalRootBindingError("unbound", "external_library_missing")
+        assert_root_binding(library)
+
     if ingestion_key is not None:
         existing_ingestion = session.exec(
             select(File).where(File.ingestion_key == ingestion_key)
@@ -436,7 +454,14 @@ def persist_artifact(
                     if library is not None
                     else Path(dest_key).parent
                 )
-                external_backend = LocalStorageBackend(external_roots=(library_root,))
+                from app.services.external_library import expected_root_marker
+
+                external_backend = LocalStorageBackend(
+                    external_roots=(library_root,),
+                    external_root_bindings={library_root: expected_root_marker(library)}
+                    if library is not None
+                    else None,
+                )
                 # Linked NAS bytes remain user-owned: publish add-only and do
                 # not create a vault ownership-ledger row or delete intent.
                 blob_receipt = external_backend.move_in(staged_path, dest_key)
@@ -665,9 +690,16 @@ def resolve_write_target(
     brand-new model uses the upload's chosen ``target_library_id``; otherwise the
     blob goes to vault storage. When the feature is disabled everything is vault.
     """
+    from app.services.external_library import (
+        ExternalRootBindingError,
+        assert_root_binding,
+    )
     from app.services.runtime_config import external_libraries_enabled
 
     vault = WriteTarget(None, False, None, None)
+    # The external-library toggle is a deployment-wide policy switch.  Keep
+    # the historical vault behavior while it is off, including when callers
+    # still send a stale/explicit target_library_id from an older client.
     if not external_libraries_enabled(session):
         return vault
 
@@ -689,7 +721,12 @@ def resolve_write_target(
 
     library = session.get(ExternalLibrary, library_id)
     if library is None:
-        return vault
+        raise ExternalRootBindingError("missing", "external_library_missing")
+
+    # An explicitly selected library, or a model already linked to one, must
+    # fail closed. Falling back to vault storage would make the UI appear to
+    # succeed while silently breaking the external mirror contract.
+    assert_root_binding(library)
     # Store and derive destinations from one canonical root.  This keeps scan
     # paths, collection mapping, and write-back keys identical even when an
     # operator configured the library through a symlink or relative path.
@@ -714,7 +751,10 @@ def resolve_write_target(
         # boundary. The final create remains atomic/no-replace for collision
         # safety after this topology check.
         raise StorageCollisionError("external_library_symlink_escape") from exc
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    # Directory creation is deliberately deferred to LocalStorageBackend's
+    # descriptor-pinned publication primitive.  Calling Path.mkdir here would
+    # recreate a missing mount (or create descendants through a replacement
+    # pathname) after the binding check above.
     return WriteTarget(str(canonical_target), True, library_id, None)
 
 

@@ -118,7 +118,23 @@ def _render_semaphore() -> "threading.BoundedSemaphore":
         return _RENDER_SEMAPHORE[1]
 
 
-def _estimate_triangle_count(path: Path) -> Optional[int]:
+def _canonical_suffix(path: Path, file_type: str | None = None) -> str:
+    """Return the source suffix even when *path* is an FD-backed alias.
+
+    External-library scans deliberately read through ``/proc/self/fd`` so a
+    mount replacement cannot change the bytes being processed.  Those aliases
+    have no filename suffix, so callers that know the catalogued type pass it
+    explicitly here.
+    """
+    if file_type is None:
+        return path.suffix.lower()
+    suffix = str(file_type).lower()
+    return suffix if suffix.startswith(".") else f".{suffix}"
+
+
+def _estimate_triangle_count(
+    path: Path, *, file_type: str | None = None
+) -> Optional[int]:
     """Best-effort triangle count *without* loading the mesh into memory.
 
     Loading is itself the memory blow-up (trimesh.load_mesh of a 5M-triangle mesh
@@ -135,7 +151,7 @@ def _estimate_triangle_count(path: Path) -> Optional[int]:
     without optional CAD deps anyway) — the caller then relies on the post-load
     cap, which still skips the render.
     """
-    suffix = path.suffix.lower()
+    suffix = _canonical_suffix(path, file_type)
     try:
         if suffix == ".stl":
             size = path.stat().st_size
@@ -289,7 +305,7 @@ def _ram_triangle_cap(suffix: str) -> Optional[int]:
     return max(int(budget / per_tri), 1)
 
 
-def _exceeds_cap(path: Path) -> bool:
+def _exceeds_cap(path: Path, *, file_type: str | None = None) -> bool:
     """True when *path* is too expensive to hand to trimesh (#24, #29).
 
     Centralises the "bail out before loading" guard so every entry point
@@ -323,13 +339,17 @@ def _exceeds_cap(path: Path) -> bool:
             )
             return True
 
-    estimate = _estimate_triangle_count(path)
+    suffix = _canonical_suffix(path, file_type)
+    if file_type is None:
+        estimate = _estimate_triangle_count(path)
+    else:
+        estimate = _estimate_triangle_count(path, file_type=suffix)
     if estimate is None:
         return False
     # Effective cap = the smaller of the static ceiling and the RAM-derived cap,
     # so a small host auto-skips meshes a large host would render (#29).
     cap = settings.mesh_max_render_triangles
-    ram_cap = _ram_triangle_cap(path.suffix.lower())
+    ram_cap = _ram_triangle_cap(suffix)
     if ram_cap is not None and ram_cap < cap:
         cap = ram_cap
         limiter = "RAM budget"
@@ -444,11 +464,12 @@ def _load_step_mesh_isolated(path: Path):
         return None
 
 
-def _load_mesh(path: Path):
+def _load_mesh(path: Path, *, file_type: str | None = None):
     """Return a single `trimesh.Trimesh` for *path*, or None on failure."""
     import trimesh
 
-    if path.suffix.lower() in (".step", ".stp"):
+    suffix = _canonical_suffix(path, file_type)
+    if suffix in (".step", ".stp"):
         return _load_step_mesh_isolated(path)
 
     try:
@@ -459,7 +480,12 @@ def _load_mesh(path: Path):
         # trimesh releases, and flattening ``Scene.geometry`` directly drops
         # those instance transforms. Keep the scene until ``dump`` explicitly
         # bakes every graph path into each mesh instance.
-        loaded = trimesh.load_scene(str(path), process=False)
+        if file_type is None:
+            loaded = trimesh.load_scene(str(path), process=False)
+        else:
+            loaded = trimesh.load_scene(
+                str(path), file_type=suffix.lstrip(".") or None, process=False
+            )
     except Exception:
         logger.warning(
             "mesh_processing: trimesh.load_scene failed for %s",
@@ -540,7 +566,7 @@ def _geometry_from_mesh(mesh) -> Dict[str, Optional[float]]:
 
 
 def extract_embedded_3mf_thumbnail(
-    path: Path, *, validate_image: bool = False
+    path: Path, *, validate_image: bool = False, file_type: str | None = None
 ) -> Optional[bytes]:
     """Return the largest PNG preview embedded in a 3MF archive, or None.
 
@@ -551,7 +577,7 @@ def extract_embedded_3mf_thumbnail(
     the default remains permissive for callers that only need a bounded raw
     archive read, while persistence still validates through ``thumbnail.to_webp``.
     """
-    if path.suffix.lower() != ".3mf":
+    if _canonical_suffix(path, file_type) != ".3mf":
         return None
     try:
         with zipfile.ZipFile(path) as zf:
@@ -651,6 +677,7 @@ def analyze_mesh(
     width: int | None = None,
     height: int | None = None,
     report: Callable[[str], None] | None = None,
+    file_type: str | None = None,
 ) -> Tuple[Dict[str, Optional[float]], Optional[bytes]]:
     """Extract geometry and render a thumbnail with a single mesh load.
 
@@ -660,6 +687,7 @@ def analyze_mesh(
 
     width = int(width or settings.model_thumbnail_width)
     height = int(height or round(width * 3 / 4))
+    suffix = _canonical_suffix(path, file_type)
 
     def _report(label: str) -> None:
         if report is not None:
@@ -669,18 +697,33 @@ def analyze_mesh(
     cap = settings.mesh_max_render_triangles
     # Too dense to load safely — skip it rather than risk an OOM kill (#24).
     # The file is still indexed; a large 3MF still gets its embedded preview below.
-    over_cap = _exceeds_cap(path)
+    if file_type is None:
+        over_cap = _exceeds_cap(path)
+    else:
+        over_cap = _exceeds_cap(path, file_type=suffix)
     # One concurrency gate around the whole load+render so a bulk upload's
     # background tasks don't collectively OOM the box (#29). The body is cheap
     # when the mesh is skipped (over cap), so holding the gate then is harmless.
     with _render_semaphore():
-        embedded_preview = (
-            extract_embedded_3mf_thumbnail(path, validate_image=True)
-            if path.suffix.lower() == ".3mf"
-            and (not over_cap or settings.use_embedded_3mf_preview_for_large_files)
-            else None
-        )
-        mesh = None if over_cap else _load_mesh(path)
+        if suffix == ".3mf" and (
+            not over_cap or settings.use_embedded_3mf_preview_for_large_files
+        ):
+            if file_type is None:
+                embedded_preview = extract_embedded_3mf_thumbnail(
+                    path, validate_image=True
+                )
+            else:
+                embedded_preview = extract_embedded_3mf_thumbnail(
+                    path, validate_image=True, file_type=suffix
+                )
+        else:
+            embedded_preview = None
+        if over_cap:
+            mesh = None
+        elif file_type is None:
+            mesh = _load_mesh(path)
+        else:
+            mesh = _load_mesh(path, file_type=suffix)
 
         _report("extracting_geometry")
         geometry = _geometry_from_mesh(mesh)
@@ -718,16 +761,17 @@ def analyze_mesh(
             # before loading because it's too large, this preview is the only
             # source — and for a large 3MF it lets us avoid trimesh's costly XML
             # parse entirely — so that path is gated on the large-3MF flag.
-            thumb = extract_embedded_3mf_thumbnail(path, validate_image=True)
+            if file_type is None:
+                thumb = extract_embedded_3mf_thumbnail(path, validate_image=True)
+            else:
+                thumb = extract_embedded_3mf_thumbnail(
+                    path, validate_image=True, file_type=suffix
+                )
         # Streaming is the oversized path. If a tiny/unknown file cannot be
         # loaded, retain the existing sampled fallback (including its explicit
         # incomplete metadata semantics); a failed small-file load is not a
         # reason to pay for a second full source pass.
-        if (
-            thumb is None
-            and path.suffix.lower() == ".stl"
-            and (over_cap or mesh is not None)
-        ):
+        if thumb is None and suffix == ".stl" and (over_cap or mesh is not None):
             # Geometry has already been copied into plain metadata. Release a
             # loaded mesh before starting the isolated worker so a failed normal
             # render cannot make the API hold the full mesh and the worker's
@@ -756,7 +800,7 @@ def analyze_mesh(
                             "triangle_count": streamed.triangle_count,
                         }
                     )
-        if thumb is None and path.suffix.lower() == ".stl":
+        if thumb is None and suffix == ".stl":
             fallback = stl_fallback.render_stl_thumbnail(
                 path, width=width, height=height
             )

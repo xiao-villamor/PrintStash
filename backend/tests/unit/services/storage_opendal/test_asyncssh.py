@@ -77,8 +77,13 @@ class _AsyncClient:
         del exist_ok
         self.created_dirs.append(path)
 
+    async def mkdir(self, path: str) -> None:
+        if not self.root_exists:
+            raise asyncssh.SFTPNoSuchFile(path)
+        self.created_dirs.append(path)
+
     async def stat(self, path: str) -> SimpleNamespace:
-        if not self.root_exists and path == "vault":
+        if not self.root_exists and path.startswith("vault"):
             raise asyncssh.SFTPNoSuchFile("vault")
         return SimpleNamespace(size=None)
 
@@ -260,6 +265,29 @@ class TestAsyncSSHSFTPOperator:
             operator.write_exclusive("nested/file", BytesIO(b"payload"))
 
         assert client.created_dirs == []
+
+    def test_rejects_root_loss_between_preflight_descendant_creation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _async_operator()
+
+        class _RootLossClient(_AsyncClient):
+            async def stat(self, path: str) -> SimpleNamespace:
+                result = await super().stat(path)
+                if path == "vault":
+                    self.root_exists = False
+                return result
+
+        client = _RootLossClient()
+        monkeypatch.setattr(
+            operator, "_run", lambda operation: asyncio.run(operation(client))
+        )
+
+        with pytest.raises(asyncssh.SFTPNoSuchFile):
+            operator.write_exclusive("nested/file", BytesIO(b"payload"))
+
+        assert client.created_dirs == []
+        assert client.opened_modes == []
 
     def test_maps_generic_exclusive_failure_only_when_destination_exists(
         self, monkeypatch: pytest.MonkeyPatch

@@ -1,0 +1,337 @@
+"""Durable external-root identity and fail-closed mutation tests."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from sqlmodel import Session, select
+
+from app.db.models import File
+from app.db.scopes import live
+from app.services import external_library, runtime_config
+from app.services.ingestion import resolve_write_target
+from tests.factories import build_external_library, build_file, build_model
+from tests.integration.services.external_library._helpers import drop_gcode
+
+
+def _enable_feature(session: Session) -> None:
+    runtime_config.set_external_libraries_enabled(session, True)
+
+
+class TestExternalRootBinding:
+    def test_legacy_library_is_unbound_without_scan_mutation(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        drop_gcode(root, "new.gcode")
+        library = build_external_library(
+            db_session, root, root_identity=None, name="legacy"
+        )
+
+        result = external_library.scan_library(library.id)
+
+        assert result["aborted"] is True
+        assert result["error"] == "legacy_library_requires_explicit_enrollment"
+        assert (
+            db_session.exec(
+                select(File).where(File.external_library_id == library.id, live(File))
+            ).all()
+            == []
+        )
+
+    def test_wrong_marker_aborts_without_reindex_or_trash(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        source = drop_gcode(root, "known.gcode")
+        library = build_external_library(db_session, root, name="nas")
+        first = external_library.scan_library(library.id)
+        assert first["added"] == 1
+        indexed = db_session.exec(
+            select(File).where(File.external_library_id == library.id, live(File))
+        ).all()
+
+        marker = root / external_library.ROOT_MARKER_FILENAME
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        payload["root_identity"] = "b" * 64
+        marker.write_text(json.dumps(payload), encoding="utf-8")
+
+        result = external_library.scan_library(library.id)
+
+        assert result["aborted"] is True
+        assert result["removed"] == 0
+        assert (
+            db_session.exec(
+                select(File).where(File.external_library_id == library.id, live(File))
+            ).all()
+            == indexed
+        )
+        assert source.exists()
+
+    def test_nonhex_marker_token_is_not_enrollable(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="nas")
+        marker = root / external_library.ROOT_MARKER_FILENAME
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        payload["root_identity"] = "z" * 64
+        marker.write_text(json.dumps(payload), encoding="utf-8")
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "root_marker_invalid",
+        )
+
+    def test_symlink_marker_is_not_enrollable(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="nas")
+        marker = root / external_library.ROOT_MARKER_FILENAME
+        target = tmp_path / "foreign-marker"
+        target.write_bytes(marker.read_bytes())
+        marker.unlink()
+        marker.symlink_to(target)
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "root_marker_invalid",
+        )
+
+    def test_root_swap_during_walk_aborts_before_catalog_mutation(
+        self, tmp_path: Path, db_session: Session, monkeypatch
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        drop_gcode(root, "new.gcode")
+        library = build_external_library(db_session, root, name="nas")
+        original_walk = external_library._walk
+
+        def swap_then_walk(scan_root):  # type: ignore[no-untyped-def]
+            marker = root / external_library.ROOT_MARKER_FILENAME
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+            payload["root_identity"] = "d" * 64
+            marker.write_text(json.dumps(payload), encoding="utf-8")
+            return original_walk(scan_root)
+
+        monkeypatch.setattr(external_library, "_walk", swap_then_walk)
+
+        result = external_library.scan_library(library.id)
+
+        assert result["aborted"] is True
+        assert result["removed"] == 0
+        assert (
+            db_session.exec(
+                select(File).where(File.external_library_id == library.id, live(File))
+            ).all()
+            == []
+        )
+
+    def test_markerless_root_can_be_explicitly_enrolled(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="legacy"
+        )
+
+        external_library.enroll_external_root(db_session, library)
+
+        assert library.root_identity is not None
+        assert len(library.root_identity) == 64
+        state, reason = external_library.root_binding_state(library)
+        assert (state, reason) == ("bound", None)
+        marker = json.loads(
+            (root / external_library.ROOT_MARKER_FILENAME).read_text(encoding="utf-8")
+        )
+        assert marker["library_id"] == library.id
+        assert marker["root_identity"] == library.root_identity
+
+    def test_markerless_replacement_requires_token_rotation(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="nas")
+        old_identity = library.root_identity
+        (root / external_library.ROOT_MARKER_FILENAME).unlink()
+
+        external_library.enroll_external_root(db_session, library)
+
+        assert library.root_identity != old_identity
+        assert external_library.root_binding_state(library) == ("bound", None)
+
+    def test_remount_with_original_marker_recovers_without_reenrollment(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        drop_gcode(root, "stable.gcode")
+        library = build_external_library(db_session, root, name="nas")
+        assert external_library.scan_library(library.id)["added"] == 1
+        original = tmp_path / "original-mount"
+        root.rename(original)
+        root.mkdir()
+
+        unavailable = external_library.scan_library(library.id)
+        assert unavailable["aborted"] is True
+        replacement = tmp_path / "replacement"
+        root.rename(replacement)
+        original.rename(root)
+
+        assert external_library.root_binding_state(library) == ("bound", None)
+        recovered = external_library.scan_library(library.id)
+        assert recovered["aborted"] is False
+        assert recovered["skipped"] == 1
+
+    def test_conflicting_marker_is_never_overwritten(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        marker = root / external_library.ROOT_MARKER_FILENAME
+        original = {
+            "format": 1,
+            "installation": "a" * 64,
+            "role": "external-library",
+            "library_id": 999,
+            "root_identity": "c" * 64,
+        }
+        marker.write_text(json.dumps(original), encoding="utf-8")
+        library = build_external_library(
+            db_session, root, root_identity=None, name="adopt"
+        )
+
+        try:
+            external_library.enroll_external_root(db_session, library)
+        except external_library.ExternalRootBindingError as exc:
+            assert exc.state == "mismatch"
+        else:  # pragma: no cover - assertion keeps the behavior explicit
+            raise AssertionError("conflicting marker was adopted")
+
+        assert json.loads(marker.read_text(encoding="utf-8")) == original
+        db_session.refresh(library)
+        assert library.root_identity is None
+
+    def test_external_write_target_rejects_unbound_root(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="legacy"
+        )
+        model = build_model(db_session, name="new")
+
+        try:
+            resolve_write_target(
+                db_session,
+                model=model,
+                original_filename="new.gcode",
+                collection=None,
+                target_library_id=library.id,
+            )
+        except external_library.ExternalRootBindingError as exc:
+            assert exc.state == "unbound"
+        else:  # pragma: no cover - assertion keeps the behavior explicit
+            raise AssertionError("unbound root was used for write-back")
+
+        assert not (root / "new.gcode").exists()
+
+    def test_external_write_target_rejects_missing_explicit_library(
+        self, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        model = build_model(db_session, name="new")
+
+        try:
+            resolve_write_target(
+                db_session,
+                model=model,
+                original_filename="new.gcode",
+                collection=None,
+                target_library_id=999999,
+            )
+        except external_library.ExternalRootBindingError as exc:
+            assert exc.state == "missing"
+        else:  # pragma: no cover - assertion keeps the behavior explicit
+            raise AssertionError("missing explicit library was silently ignored")
+
+    def test_external_write_target_rejects_missing_linked_library(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        model = build_model(db_session, name="linked")
+        library = build_external_library(db_session, tmp_path / "linked", name="linked")
+        build_file(
+            db_session,
+            model,
+            filename="linked.gcode",
+            external=True,
+            external_library_id=library.id,
+        )
+        # A stale external reference can exist after an operator removes the
+        # library row outside PrintStash (or during a legacy repair).  Keep the
+        # file row so this exercises the linked-library lookup rather than the
+        # database's FK validation on an impossible insert.
+        db_session.commit()
+        connection = db_session.connection()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.exec_driver_sql(
+            "DELETE FROM external_libraries WHERE id = :id", {"id": library.id}
+        )
+        db_session.commit()
+        db_session.connection().exec_driver_sql("PRAGMA foreign_keys=ON")
+
+        try:
+            resolve_write_target(
+                db_session,
+                model=model,
+                original_filename="revision.gcode",
+                collection=None,
+                target_library_id=None,
+            )
+        except external_library.ExternalRootBindingError as exc:
+            assert exc.state == "missing"
+        else:  # pragma: no cover - assertion keeps the behavior explicit
+            raise AssertionError("missing linked library was silently ignored")
+
+    def test_enrollment_commit_failure_preserves_untrusted_marker(
+        self, tmp_path: Path, db_session: Session, monkeypatch
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="legacy"
+        )
+
+        def fail_commit() -> None:
+            raise RuntimeError("commit outcome unknown")
+
+        monkeypatch.setattr(db_session, "commit", fail_commit)
+        try:
+            external_library.enroll_external_root(db_session, library)
+        except RuntimeError as exc:
+            assert str(exc) == "commit outcome unknown"
+        else:  # pragma: no cover - assertion keeps the behavior explicit
+            raise AssertionError("enrollment unexpectedly committed")
+
+        # The marker is retained because a commit exception has an unknown
+        # outcome; without a matching durable DB row it is never trusted.
+        assert (root / external_library.ROOT_MARKER_FILENAME).exists()
+        assert library.root_identity is None

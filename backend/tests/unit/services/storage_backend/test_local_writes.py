@@ -6,6 +6,7 @@ rollback preserve bytes when a destination changes during the operation.
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from threading import Barrier, Thread
@@ -167,6 +168,86 @@ class TestCreateOnlyWrites:
 
 
 class TestCreateStream:
+    def test_external_root_descendants_publish_through_pinned_parent(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        backend = LocalStorageBackend(external_roots=(root,))
+
+        backend.create_bytes(b"external", str(root / "collections" / "part.stl"))
+
+        assert (root / "collections" / "part.stl").read_bytes() == b"external"
+
+    def test_external_mount_loss_before_pin_never_recreates_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        backend = LocalStorageBackend(external_roots=(root,))
+        real_open = storage_backend.os.open
+
+        def drop_root_before_open(path, *args, **kwargs):
+            if isinstance(path, (str, bytes, Path)) and Path(path) == root:
+                root.rmdir()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(storage_backend.os, "open", drop_root_before_open)
+
+        with pytest.raises(FileNotFoundError):
+            backend.create_bytes(b"must-not-recreate", str(root / "part.stl"))
+
+        assert not root.exists()
+
+    def test_external_replacement_after_path_check_is_rejected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        expected = {
+            "format": 1,
+            "installation": "a" * 64,
+            "role": "external-library",
+            "library_id": 7,
+            "root_identity": "b" * 64,
+        }
+        (root / ".printstash-external-root.json").write_text(
+            json.dumps(expected), encoding="utf-8"
+        )
+        replacement = tmp_path / "replacement"
+        replacement.mkdir()
+        foreign = {**expected, "library_id": 8, "root_identity": "c" * 64}
+        (replacement / ".printstash-external-root.json").write_text(
+            json.dumps(foreign), encoding="utf-8"
+        )
+        backend = LocalStorageBackend(
+            external_roots=(root,), external_root_bindings={root: expected}
+        )
+        real_open = storage_backend.os.open
+        swapped = False
+
+        def swap_before_root_open(path, *args, **kwargs):
+            nonlocal swapped
+            if (
+                not swapped
+                and isinstance(path, (str, bytes, Path))
+                and Path(path) == root
+            ):
+                swapped = True
+                old = tmp_path / "old-mount"
+                root.rename(old)
+                replacement.rename(root)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(storage_backend.os, "open", swap_before_root_open)
+
+        with pytest.raises(
+            StorageConfigurationError, match="external_root_binding_changed"
+        ):
+            backend.create_bytes(b"must-not-publish", str(root / "part.stl"))
+
+        assert not (root / "part.stl").exists()
+
     def test_mount_marker_swap_during_publication_fails_closed(
         self,
         configured_backend: LocalStorageBackend,

@@ -158,6 +158,112 @@ class TestPruneExpired:
         assert not staged.exists()
         assert db_session.get(StagingLease, lease.id) is None
 
+    def test_prune_preserves_replacement_with_expired_lease(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+    ) -> None:
+        user = build_user(db_session, "lease-prune-replacement")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "replacement.gcode"
+        staged.write_bytes(b"original")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=8,
+            sha256="b" * 64,
+        )
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.commit()
+        staged.unlink()
+        staged.write_bytes(b"replacement")
+
+        assert staging_leases.prune_expired(db_session) == (0, 0)
+        assert staged.read_bytes() == b"replacement"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_prune_preserves_both_objects_when_path_changes_during_quarantine(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-prune-quarantine-race")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "race.gcode"
+        staged.write_bytes(b"original")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=8,
+            sha256="b" * 64,
+        )
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.commit()
+        moved_elsewhere = tmp_path / "prune-moved.gcode"
+        real_rename = staging_leases.os.rename
+
+        def race_rename(source, destination, *, src_dir_fd=None, dst_dir_fd=None):
+            real_rename(staged, moved_elsewhere)
+            staged.write_bytes(b"replacement")
+            return real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(staging_leases.os, "rename", race_rename)
+
+        assert staging_leases.prune_expired(db_session) == (0, 0)
+        assert staged.read_bytes() == b"replacement"
+        assert moved_elsewhere.read_bytes() == b"original"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_prune_retries_a_retained_quarantine_after_unlink_failure(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-prune-retry")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "retry.gcode"
+        staged.write_bytes(b"original")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=8,
+            sha256="b" * 64,
+        )
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.commit()
+        real_unlink = staging_leases.os.unlink
+        failures = 0
+
+        def fail_once(path, *args, **kwargs):
+            nonlocal failures
+            if str(path).endswith(".entry") and failures == 0:
+                failures += 1
+                raise OSError("quarantine unlink failure")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(staging_leases.os, "unlink", fail_once)
+        assert staging_leases.prune_expired(db_session) == (0, 0)
+        assert db_session.get(StagingLease, lease.id) is not None
+        assert list(tmp_path.rglob("*.entry"))
+
+        monkeypatch.setattr(staging_leases.os, "unlink", real_unlink)
+        assert staging_leases.prune_expired(db_session) == (1, 1)
+        assert db_session.get(StagingLease, lease.id) is None
+        assert not list(tmp_path.rglob("*.entry"))
+
 
 class TestUnlink:
     def test_review_lease_rejects_replaced_path_without_unlink(
@@ -183,20 +289,252 @@ class TestUnlink:
             is False
         )
         assert staged.read_bytes() == b"replacement"
-        # The receipt is stale, so it no longer owns the replacement and releases
-        # only its DB accounting; critically, the replacement remains untouched.
+        # The receipt is stale, so it no longer owns the replacement. Keep the
+        # lease charged until an operator/retry can prove the original is gone.
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_dismiss_preserves_both_objects_when_path_changes_during_quarantine(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-quarantine-race")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "race.3mf"
+        staged.write_bytes(b"original")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=8,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        moved_elsewhere = tmp_path / "moved-by-writer.3mf"
+        real_rename = staging_leases.os.rename
+
+        def race_rename(source, destination, *, src_dir_fd=None, dst_dir_fd=None):
+            real_rename(staged, moved_elsewhere)
+            staged.write_bytes(b"replacement")
+            return real_rename(
+                source,
+                destination,
+                src_dir_fd=src_dir_fd,
+                dst_dir_fd=dst_dir_fd,
+            )
+
+        monkeypatch.setattr(staging_leases.os, "rename", race_rename)
+
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert staged.read_bytes() == b"replacement"
+        assert moved_elsewhere.read_bytes() == b"original"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_dismiss_keeps_lease_when_quarantine_removal_fails(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-quarantine-failure")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "failure.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        real_unlink = staging_leases.os.unlink
+
+        def fail_quarantine_unlink(path, *args, **kwargs):
+            if str(path).endswith(".entry"):
+                raise OSError("quarantine filesystem failure")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(staging_leases.os, "unlink", fail_quarantine_unlink)
+
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert db_session.get(StagingLease, lease.id) is not None
+        assert not staged.exists()
+        assert list(tmp_path.rglob("*.entry"))
+
+    def test_dismiss_retries_a_retained_quarantine_after_unlink_failure(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-dismiss-retry")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "retry.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        real_unlink = staging_leases.os.unlink
+        failures = 0
+
+        def fail_once(path, *args, **kwargs):
+            nonlocal failures
+            if str(path).endswith(".entry") and failures == 0:
+                failures += 1
+                raise OSError("quarantine unlink failure")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(staging_leases.os, "unlink", fail_once)
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert db_session.get(StagingLease, lease.id) is not None
+        assert list(tmp_path.rglob("*.entry"))
+
+        monkeypatch.setattr(staging_leases.os, "unlink", real_unlink)
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is True
+        )
+        assert db_session.get(StagingLease, lease.id) is None
+        assert not list(tmp_path.rglob("*.entry"))
+
+    def test_dismiss_retries_after_quarantine_fsync_failure(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-dismiss-fsync-retry")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "fsync-retry.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        (tmp_path / ".printstash-staging-quarantine").mkdir(mode=0o700)
+        real_fsync = staging_leases.os.fsync
+        failures = 0
+
+        def fail_once(fd):
+            nonlocal failures
+            if failures == 0:
+                failures += 1
+                raise OSError("quarantine fsync failure")
+            return real_fsync(fd)
+
+        monkeypatch.setattr(staging_leases.os, "fsync", fail_once)
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert db_session.get(StagingLease, lease.id) is not None
+        assert list(tmp_path.rglob("*.entry"))
+
+        monkeypatch.setattr(staging_leases.os, "fsync", real_fsync)
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is True
+        )
+        assert db_session.get(StagingLease, lease.id) is None
+        assert not list(tmp_path.rglob("*.entry"))
+
+    def test_dismiss_preserves_replacement_after_final_proof(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user = build_user(db_session, "lease-final-proof-race")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "final-proof.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        real_stat = staging_leases.os.stat
+        q_stats = 0
+
+        def race_stat(path, *args, **kwargs):
+            nonlocal q_stats
+            info = real_stat(path, *args, **kwargs)
+            if str(path).endswith(".entry") and kwargs.get("dir_fd") is not None:
+                q_stats += 1
+                if q_stats == 2:
+                    staged.write_bytes(b"replacement")
+            return info
+
+        monkeypatch.setattr(staging_leases.os, "stat", race_stat)
+
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is True
+        )
+        assert staged.read_bytes() == b"replacement"
         assert db_session.get(StagingLease, lease.id) is None
 
-    def test_review_lease_releases_a_path_that_is_already_gone(
+    def test_dismiss_preserves_a_symlink_replacement(
         self, db_session: Session, tmp_path: Path
     ) -> None:
-        """A file somebody else already removed still has to release its receipt.
+        user = build_user(db_session, "lease-symlink-replacement")
+        inbox = _inbox(db_session, user)
+        staged = tmp_path / "symlink.3mf"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+        )
+        db_session.commit()
+        target = tmp_path / "outside.3mf"
+        target.write_bytes(b"outside")
+        staged.unlink()
+        staged.symlink_to(target)
 
-        The bytes are what the lease exists to clean up, so once they are gone the
-        lease has nothing left to own. Keeping the row would leave the Inbox item
-        undismissable — a capture the user cannot get rid of, over a file that no
-        longer exists.
-        """
+        assert (
+            staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+            is False
+        )
+        assert staged.is_symlink()
+        assert target.read_bytes() == b"outside"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_review_lease_releases_accounting_when_path_is_already_gone(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        """A missing exact path releases stale accounting idempotently."""
         user = build_user(db_session, "lease-user")
         inbox = _inbox(db_session, user)
         staged = tmp_path / "missing.3mf"
@@ -212,7 +550,9 @@ class TestUnlink:
         db_session.commit()
         staged.unlink()
 
-        released = staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+        released = staging_leases.dismiss_review_lease(
+            db_session, inbox_item_id=inbox.id
+        )
 
         assert released is True
         assert db_session.get(StagingLease, lease.id) is None
@@ -220,7 +560,7 @@ class TestUnlink:
     def test_review_lease_survives_a_staging_directory_it_cannot_read(
         self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """"Cannot tell" is not "gone", and only one of them may drop the receipt.
+        """ "Cannot tell" is not "gone", and only one of them may drop the receipt.
 
         An unreadable staging path — a permission change, an unmounted volume — is
         the one case where the matcher genuinely does not know whether the file is
@@ -246,7 +586,9 @@ class TestUnlink:
 
         monkeypatch.setattr(Path, "lstat", deny_lstat)
 
-        released = staging_leases.dismiss_review_lease(db_session, inbox_item_id=inbox.id)
+        released = staging_leases.dismiss_review_lease(
+            db_session, inbox_item_id=inbox.id
+        )
 
         assert released is False
         assert db_session.get(StagingLease, lease.id) is not None

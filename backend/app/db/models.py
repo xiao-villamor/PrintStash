@@ -1535,6 +1535,10 @@ class ExternalLibrary(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)
     root_path: str = Field(max_length=1024)
+    # Random, durable identity for the exact external root.  Legacy rows are
+    # intentionally NULL and remain read-only until an administrator explicitly
+    # enrolls the mounted directory.
+    root_identity: Optional[str] = Field(default=None, max_length=64, index=True)
     enabled: bool = Field(default=True, index=True)
     # Legacy fixed-interval scheduling. Retained for back-compat / migration
     # source; ``scan_schedule`` (cron) is now the source of truth.

@@ -57,6 +57,9 @@ class LibraryRead(BaseModel):
     watch_mode: ExternalLibraryWatchMode
     fs_kind: Optional[str]
     watch_active: bool
+    binding_state: str
+    binding_reason: Optional[str]
+    root_enrollable: bool
     collection_mode: ExternalLibraryCollectionMode
     target_collection_id: Optional[int]
     last_scanned_at: Optional[str]
@@ -94,6 +97,11 @@ class LibraryUpdate(BaseModel):
 class LibraryPathScan(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str = Field(default="", max_length=1024)
+
+
+class LibraryRootEnrollment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_root_path: str = Field(min_length=1, max_length=1024)
 
 
 def _validate_root_path(
@@ -154,9 +162,14 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
             summary = json.loads(lib.last_scan_summary)
         except (ValueError, TypeError):
             summary = None
-    watch_active = lib.fs_kind is not None and external_library.should_watch(
-        lib,
-        lib.fs_kind,  # type: ignore[arg-type]
+    binding_state, binding_reason = external_library.root_binding_state(lib)
+    watch_active = (
+        binding_state == "bound"
+        and lib.fs_kind is not None
+        and external_library.should_watch(
+            lib,
+            lib.fs_kind,  # type: ignore[arg-type]
+        )
     )
     return LibraryRead(
         id=lib.id,  # type: ignore[arg-type]
@@ -168,6 +181,10 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
         watch_mode=lib.watch_mode,
         fs_kind=lib.fs_kind,
         watch_active=watch_active,
+        binding_state=binding_state,
+        binding_reason=binding_reason,
+        root_enrollable=binding_state in {"unbound", "missing"}
+        and Path(lib.root_path).expanduser().resolve(strict=False).is_dir(),
         collection_mode=lib.collection_mode,
         target_collection_id=lib.target_collection_id,
         last_scanned_at=lib.last_scanned_at.isoformat()
@@ -229,9 +246,12 @@ def create_library(
         collection_mode=body.collection_mode,
         target_collection_id=body.target_collection_id,
     )
-    session.add(lib)
-    session.commit()
-    session.refresh(lib)
+    try:
+        # Creation is itself an explicit enrollment: the authenticated caller
+        # supplied the exact existing directory, so bind it before returning.
+        external_library.enroll_external_root(session, lib)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _schedule_watcher_refresh(request, background_tasks)
     return _to_read(lib)
 
@@ -249,13 +269,14 @@ def update_library(
     session: Session = Depends(get_session),
 ) -> LibraryRead:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
-    if body.root_path is not None and body.root_path != lib.root_path:
-        canonical_root = str(
-            Path(body.root_path).expanduser().resolve(strict=False)
-        )
-        _validate_root_path(canonical_root, session, exclude_library_id=lib.id)
-        lib.root_path = canonical_root
-        lib.fs_kind = external_library.detect_fs_kind(canonical_root)
+    if body.root_path is not None:
+        canonical_root = str(Path(body.root_path).expanduser().resolve(strict=False))
+        if canonical_root != lib.root_path:
+            _validate_root_path(canonical_root, session, exclude_library_id=lib.id)
+            lib.root_path = canonical_root
+            # A root-path change must require a fresh, explicit enrollment.
+            lib.root_identity = None
+            lib.fs_kind = external_library.detect_fs_kind(canonical_root)
     if body.name is not None:
         lib.name = body.name.strip()
     if body.enabled is not None:
@@ -274,6 +295,30 @@ def update_library(
     session.add(lib)
     session.commit()
     session.refresh(lib)
+    _schedule_watcher_refresh(request, background_tasks)
+    return _to_read(lib)
+
+
+@router.post(
+    "/{library_id}/root/enroll",
+    dependencies=[Depends(require_superuser), Depends(require_feature)],
+    summary="Explicitly enroll or re-enroll an external root",
+)
+def enroll_root(
+    library_id: int,
+    body: LibraryRootEnrollment,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> LibraryRead:
+    lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    canonical = str(Path(body.confirm_root_path).expanduser().resolve(strict=False))
+    if canonical != lib.root_path:
+        raise HTTPException(status_code=400, detail="root_path_confirmation_mismatch")
+    try:
+        external_library.enroll_external_root(session, lib)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _schedule_watcher_refresh(request, background_tasks)
     return _to_read(lib)
 
@@ -317,6 +362,10 @@ def scan_now(
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     library = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    try:
+        external_library.assert_root_binding(library)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if (
         library.scan_claim_token
         and library.scan_claim_expires_at
@@ -358,6 +407,10 @@ def scan_path(
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    try:
+        external_library.assert_root_binding(lib)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     root = Path(lib.root_path).resolve()
     candidate = (root / body.path).resolve()
     if candidate != root and root not in candidate.parents:

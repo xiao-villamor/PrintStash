@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { FolderSync, Plus, RefreshCw, Trash2, HardDrive, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FolderSync,
+  HardDrive,
+  Plus,
+  RefreshCw,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   createExternalLibrary,
   deleteExternalLibrary,
   getJobStatus,
   getVaultConfig,
+  enrollExternalLibraryRoot,
   listExternalLibraries,
   scanExternalLibrary,
   updateExternalLibrary,
@@ -79,6 +89,44 @@ function watchStatus(lib: ExternalLibrary): string {
   return "Scheduled scans only";
 }
 
+interface ExternalLibraryBindingStatus {
+  label: string;
+  description: string;
+  tone: "bound" | "recovery";
+}
+
+function bindingStatus(lib: ExternalLibrary): ExternalLibraryBindingStatus {
+  if (lib.binding_state === "bound") {
+    return {
+      label: "Bound",
+      description: "This root is verified for this PrintStash installation.",
+      tone: "bound",
+    };
+  }
+  if (lib.binding_state === "unbound") {
+    return {
+      label: "Needs enrollment",
+      description:
+        "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
+      tone: "recovery",
+    };
+  }
+  if (lib.binding_state === "missing") {
+    return {
+      label: "Root proof unavailable",
+      description:
+        "The root or its proof is unavailable. Scans, watching, and writeback stay paused until you verify the intended mount and enroll it again.",
+      tone: "recovery",
+    };
+  }
+  return {
+    label: "Root binding blocked",
+    description:
+      "This root cannot be used safely. Scans, watching, and writeback stay paused; verify the intended mount and resolve the binding problem before continuing.",
+    tone: "recovery",
+  };
+}
+
 function ScheduleControl({
   value,
   onChange,
@@ -144,6 +192,7 @@ export interface ExternalLibrariesApi {
   isFeatureEnabled: () => Promise<boolean>;
   setFeatureEnabled: (enabled: boolean) => Promise<void>;
   list: typeof listExternalLibraries;
+  enroll: typeof enrollExternalLibraryRoot;
   create: typeof createExternalLibrary;
   update: typeof updateExternalLibrary;
   remove: typeof deleteExternalLibrary;
@@ -157,6 +206,7 @@ const VAULT_API: ExternalLibrariesApi = {
     await updateVaultConfig({ external_libraries_enabled: enabled });
   },
   list: listExternalLibraries,
+  enroll: enrollExternalLibraryRoot,
   create: createExternalLibrary,
   update: updateExternalLibrary,
   remove: deleteExternalLibrary,
@@ -195,6 +245,7 @@ export function ExternalLibrariesPanel({
   const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExternalLibrary | null>(null);
+  const [enrollTarget, setEnrollTarget] = useState<ExternalLibrary | null>(null);
 
   // Add-library draft.
   const [name, setName] = useState("");
@@ -298,6 +349,20 @@ export function ExternalLibrariesPanel({
     }
   }
 
+  async function handleEnroll(lib: ExternalLibrary) {
+    setBusyId(lib.id);
+    try {
+      await api.enroll(lib.id, { confirm_root_path: lib.root_path });
+      toast.success("Root verified. Rescan to resume indexing.");
+      setEnrollTarget(null);
+      await refresh();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function handleUpdate(
     lib: ExternalLibrary,
     patch: { scan_schedule?: string; watch_mode?: ExternalLibraryWatchMode },
@@ -380,6 +445,8 @@ export function ExternalLibrariesPanel({
                 {libraries.map((lib) => {
                   const busy = busyId === lib.id;
                   const s = lib.last_scan_summary;
+                  const binding = bindingStatus(lib);
+                  const rootBound = lib.binding_state === "bound";
                   return (
                     <li
                       key={lib.id}
@@ -401,6 +468,49 @@ export function ExternalLibrariesPanel({
                           <p className="text-xs text-muted-foreground font-mono mt-1 truncate">
                             {lib.root_path}
                           </p>
+                          <div
+                            className={`mt-2 flex items-start gap-2 rounded border p-2 ${
+                              binding.tone === "bound"
+                                ? "border-success/30 bg-success/10"
+                                : "border-warning/30 bg-warning/10"
+                            }`}
+                            role={rootBound ? undefined : "alert"}
+                          >
+                            {rootBound ? (
+                              <CheckCircle2
+                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
+                                aria-hidden
+                              />
+                            ) : (
+                              <ShieldAlert
+                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                                aria-hidden
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-2xs font-semibold text-foreground">
+                                {binding.label}
+                              </p>
+                              <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
+                                {binding.description}
+                              </p>
+                              {lib.binding_reason && !rootBound && (
+                                <p className="mt-0.5 font-mono text-3xs text-muted-foreground">
+                                  {lib.binding_reason}
+                                </p>
+                              )}
+                              {lib.root_enrollable && canEdit && (
+                                <button
+                                  type="button"
+                                  className={`${BTN_SECONDARY} mt-2`}
+                                  disabled={busy}
+                                  onClick={() => setEnrollTarget(lib)}
+                                >
+                                  Review and enroll
+                                </button>
+                              )}
+                            </div>
+                          </div>
                           <p className="text-2xs text-muted-foreground mt-1">
                             {lib.collection_mode === "mirror"
                               ? "Mirrors subfolders → collections"
@@ -460,8 +570,9 @@ export function ExternalLibrariesPanel({
                         <div className="flex flex-shrink-0 items-center gap-1.5">
                           <button
                             type="button"
-                            disabled={!canEdit || busy}
+                            disabled={!canEdit || busy || !rootBound}
                             onClick={() => handleScan(lib)}
+                            title={rootBound ? undefined : "Verify the root before scanning."}
                             className={BTN_SECONDARY}
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
@@ -472,7 +583,7 @@ export function ExternalLibrariesPanel({
                             role="switch"
                             aria-checked={lib.enabled}
                             aria-label="Auto-scan enabled"
-                            disabled={!canEdit || busy}
+                            disabled={!canEdit || busy || !rootBound}
                             onClick={() => handleToggleEnabled(lib)}
                             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                               lib.enabled ? "bg-primary" : "bg-outline-variant"
@@ -586,6 +697,21 @@ export function ExternalLibrariesPanel({
           confirmLabel="Remove"
           busy={deleteTarget !== null && busyId === deleteTarget.id}
           onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        />
+        <ConfirmModal
+          open={enrollTarget !== null}
+          onClose={() => {
+            if (busyId === null) setEnrollTarget(null);
+          }}
+          title="Enroll shared volume root?"
+          description={
+            enrollTarget
+              ? `Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ${enrollTarget.root_path}. This re-enables safe scans, watching, and writeback.`
+              : ""
+          }
+          confirmLabel="Enroll root"
+          busy={enrollTarget !== null && busyId === enrollTarget.id}
+          onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
         />
       </div>
     </Localized>
