@@ -102,7 +102,7 @@ class TestCaptureUploadSlotKey:
 
 class TestExists:
     def test_exists_false_on_missing_key(self, s3_backend: S3StorageBackend):
-        assert not s3_backend.exists("models/never-written.txt")
+        assert not s3_backend.exists("vault-data/models/never-written.txt")
 
     def test_exists_raises_on_non_404_client_error(self, s3_backend: S3StorageBackend):
         """A credential/permission failure must surface, not be swallowed as 'missing'."""
@@ -118,7 +118,7 @@ class TestExists:
         s3_backend._client.head_object = _forbidden
         try:
             with pytest.raises(botocore.exceptions.ClientError):
-                s3_backend.exists("models/anything.txt")
+                s3_backend.exists("vault-data/models/anything.txt")
         finally:
             s3_backend._client.head_object = original_head_object
 
@@ -133,7 +133,7 @@ class TestWriteStream:
             payload = os.urandom(2 * 1024 * 1024)
             src = tmp_path / "big.bin"
             src.write_bytes(payload)
-            key = "models/multipart.bin"
+            key = "vault-data/models/multipart.bin"
 
             with src.open("rb") as f:
                 size = s3_backend.write_stream(f, key)
@@ -145,7 +145,7 @@ class TestWriteStream:
             _overlay.pop("s3_multipart_threshold_mb", None)
 
     def test_round_trips_bytes(self, s3_backend: S3StorageBackend):
-        key = "models/round-trip.txt"
+        key = "vault-data/models/round-trip.txt"
         assert not s3_backend.exists(key)
 
         s3_backend.write_bytes(b"hello s3", key)
@@ -163,21 +163,25 @@ class TestMove:
     def test_an_unchecked_move_is_refused_with_the_source_intact(
         self, s3_backend: S3StorageBackend
     ):
-        s3_backend.write_bytes(b"move me", "models/move-src.txt")
+        s3_backend.write_bytes(b"move me", "vault-data/models/move-src.txt")
 
         with pytest.raises(RuntimeError, match="unchecked_storage_move_disabled"):
-            s3_backend.move("models/move-src.txt", "models/move-dest.txt")
+            s3_backend.move(
+                "vault-data/models/move-src.txt", "vault-data/models/move-dest.txt"
+            )
 
-        assert s3_backend.read_bytes("models/move-src.txt") == b"move me"
-        assert not s3_backend.exists("models/move-dest.txt")
+        assert s3_backend.read_bytes("vault-data/models/move-src.txt") == b"move me"
+        assert not s3_backend.exists("vault-data/models/move-dest.txt")
 
 
 class TestStreamChunks:
     def test_stream_chunks_reassembles_full_content(self, s3_backend: S3StorageBackend):
         payload = b"x" * 5000
-        s3_backend.write_bytes(payload, "models/chunked.bin")
+        s3_backend.write_bytes(payload, "vault-data/models/chunked.bin")
 
-        chunks = list(s3_backend.stream_chunks("models/chunked.bin", chunk_size=1024))
+        chunks = list(
+            s3_backend.stream_chunks("vault-data/models/chunked.bin", chunk_size=1024)
+        )
 
         assert len(chunks) == 5  # 4 full 1024-byte chunks + one 904-byte remainder
         assert b"".join(chunks) == payload
@@ -189,7 +193,7 @@ class TestDownloadToPath:
     ):
         src = tmp_path / "source.bin"
         src.write_bytes(b"payload bytes")
-        key = "models/uploaded.bin"
+        key = "vault-data/models/uploaded.bin"
 
         s3_backend.upload_file(src, key)
         assert s3_backend.exists(key)
@@ -208,7 +212,7 @@ class TestUploadFile:
             payload = os.urandom(2 * 1024 * 1024)
             src = tmp_path / "big-upload.bin"
             src.write_bytes(payload)
-            key = "models/multipart-upload.bin"
+            key = "vault-data/models/multipart-upload.bin"
 
             s3_backend.upload_file(src, key)
 
@@ -259,7 +263,7 @@ class TestEnsureSetup:
 
 class TestDelete:
     def test_delete_removes_object(self, s3_backend: S3StorageBackend):
-        key = "models/to-delete.txt"
+        key = "vault-data/models/to-delete.txt"
         receipt = s3_backend.create_bytes(b"gone soon", key)
         assert s3_backend.exists(key)
 
@@ -274,7 +278,7 @@ class TestDelete:
 
     def test_unchecked_delete_is_disabled(self, s3_backend: S3StorageBackend):
         with pytest.raises(RuntimeError, match="unchecked_storage_delete_disabled"):
-            s3_backend.delete("models/never-existed.txt")
+            s3_backend.delete("vault-data/models/never-existed.txt")
 
 
 def _seed_two_objects(backend: S3StorageBackend) -> None:
@@ -283,25 +287,34 @@ def _seed_two_objects(backend: S3StorageBackend) -> None:
     Different sizes so a `total_size_bytes` that summed the wrong thing — a count,
     or one object twice — could not accidentally match.
     """
-    backend.write_bytes(b"a", "models/list-1.txt")
-    backend.write_bytes(b"bb", "models/list-2.txt")
+    backend.write_bytes(b"a", "vault-data/models/list-1.txt")
+    backend.write_bytes(b"bb", "vault-data/models/list-2.txt")
+
+
+def _managed_key(backend: S3StorageBackend, suffix: str) -> str:
+    """Build an arbitrary test key inside the backend's captured root."""
+    return f"{backend._prefix()}{suffix}"
 
 
 class TestListKeys:
     def test_list_keys_agrees_with_walk_keys(self, s3_backend: S3StorageBackend):
         _seed_two_objects(s3_backend)
 
-        listed = s3_backend.list_keys(prefix="models/")
-        walked = list(s3_backend.walk_keys(prefix="models/"))
+        listed = s3_backend.list_keys(prefix="vault-data/models/")
+        walked = list(s3_backend.walk_keys(prefix="vault-data/models/"))
 
-        assert set(listed) == set(walked) == {"models/list-1.txt", "models/list-2.txt"}
+        assert (
+            set(listed)
+            == set(walked)
+            == {"vault-data/models/list-1.txt", "vault-data/models/list-2.txt"}
+        )
 
     def test_usage_reports_the_object_count_with_its_total_size(
         self, s3_backend: S3StorageBackend
     ):
         _seed_two_objects(s3_backend)
 
-        usage = s3_backend.usage(prefix="models/")
+        usage = s3_backend.usage(prefix="vault-data/models/")
 
         assert usage["backend"] == "s3"
         assert usage["object_count"] == 2
@@ -312,9 +325,11 @@ class TestPresignedDownloadUrl:
     def test_presigned_download_url_is_fetchable(self, s3_backend: S3StorageBackend):
         import httpx
 
-        s3_backend.write_bytes(b"presigned content", "models/presigned.txt")
+        s3_backend.write_bytes(b"presigned content", "vault-data/models/presigned.txt")
 
-        url = s3_backend.presigned_download_url("models/presigned.txt", "download.txt")
+        url = s3_backend.presigned_download_url(
+            "vault-data/models/presigned.txt", "download.txt"
+        )
 
         assert url is not None
         resp = httpx.get(url)
@@ -358,7 +373,7 @@ class TestMoveIn:
     ):
         staged = tmp_path / "staged.bin"
         staged.write_bytes(b"staged content")
-        key = "models/moved.bin"
+        key = "vault-data/models/moved.bin"
 
         s3_backend.move_in(staged, key)
 
@@ -457,7 +472,10 @@ class TestKeyDerivation:
         assert all(item.startswith("vault-data/") for item in legacy.list_keys())
 
     def test_isolates_two_typed_roots_in_one_s3_bucket(
-        self, s3_backend: S3StorageBackend
+        self,
+        s3_backend: S3StorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Two installations sharing a bucket cannot list or read each other."""
         bucket = s3_backend._bucket
@@ -470,19 +488,79 @@ class TestKeyDerivation:
             "s3_secret_key": S3_SECRET_KEY,
         }
         try:
+            s3_backend._client.put_bucket_versioning(
+                Bucket=bucket,
+                VersioningConfiguration={"Status": "Enabled"},
+            )
             _overlay.update({**base, "s3_root": "installation-a"})
             first = S3StorageBackend()
             _overlay["s3_root"] = "installation-b"
             second = S3StorageBackend()
             first_key = first.blob_key("shared", 1, "a.stl")
             second_key = second.blob_key("shared", 1, "b.stl")
-            first.create_bytes(b"a", first_key)
-            second.create_bytes(b"b", second_key)
+            first_receipt = first.create_bytes(b"a", first_key)
+            second_receipt = second.create_bytes(b"b", second_key)
 
             assert first_key in first.list_keys()
             assert second_key not in first.list_keys()
             assert second_key in second.list_keys()
             assert first_key not in second.list_keys()
+            assert first.read_bytes(first_key) == b"a"
+            assert second.read_bytes(second_key) == b"b"
+            assert first.stat_size(first_key) == 1
+            assert second.stat_size(second_key) == 1
+            own_key = first.blob_key("own", 1, "owned.stl")
+            first.create_bytes(b"own", own_key)
+            assert first.read_bytes(own_key) == b"own"
+
+            with pytest.raises(StorageCollisionError):
+                first.read_bytes(second_key)
+            with pytest.raises(StorageCollisionError):
+                first.object_info(second_key)
+            with pytest.raises(StorageCollisionError):
+                first.stat_size(second_key)
+            with pytest.raises(StorageCollisionError):
+                first.create_bytes(b"intrusion", second_key)
+            with pytest.raises(StorageCollisionError):
+                first.reclaim_unverified(
+                    second_key,
+                    expected_size=1,
+                    expected_etag=None,
+                )
+            with pytest.raises(StorageCollisionError):
+                first.presigned_download_url(second_key, "foreign.stl")
+            with pytest.raises(StorageCollisionError):
+                list(first.walk_keys(second._prefix()))
+            with pytest.raises(StorageCollisionError):
+                first.usage(second._prefix())
+            with pytest.raises(StorageCollisionError):
+                list(first.stream_chunks(second_key))
+            with pytest.raises(StorageCollisionError):
+                first.download_to_path(second_key, tmp_path / "foreign.bin")
+            with pytest.raises(StorageCollisionError):
+                first.adopt_existing(
+                    second_key,
+                    expected_size=1,
+                    expected_sha256=hashlib.sha256(b"b").hexdigest(),
+                )
+            with pytest.raises(StorageCollisionError):
+                first.replace_stream(BytesIO(b"intrusion"), second_receipt)
+
+            original_head = first._client.head_object
+
+            def _unexpected_head(**_kwargs: object) -> object:
+                pytest.fail("foreign rollback inspected the remote object")
+
+            monkeypatch.setattr(first._client, "head_object", _unexpected_head)
+            with pytest.raises(StorageCollisionError):
+                first.rollback_create(second_receipt)
+            assert second.read_bytes(second_key) == b"b"
+
+            # Own-root versioned operations remain fully usable after the
+            # cross-root rejection checks.
+            monkeypatch.setattr(first._client, "head_object", original_head)
+            assert first.rollback_create(first_receipt) is True
+            assert first.object_info(first_key) is None
         finally:
             _overlay.pop("s3_root", None)
 
@@ -518,7 +596,9 @@ class TestRollbackCreate:
     def test_removes_the_exact_version_the_receipt_names(
         self, versioned_s3_backend: S3StorageBackend
     ) -> None:
-        receipt = versioned_s3_backend.create_bytes(b"mine", "rollback-happy.bin")
+        receipt = versioned_s3_backend.create_bytes(
+            b"mine", _managed_key(versioned_s3_backend, "rollback-happy.bin")
+        )
 
         assert versioned_s3_backend.rollback_create(receipt) is True
         assert versioned_s3_backend.object_info(receipt.key) is None
@@ -526,7 +606,9 @@ class TestRollbackCreate:
     def test_treats_an_object_that_is_already_gone_as_rolled_back(
         self, versioned_s3_backend: S3StorageBackend
     ) -> None:
-        receipt = versioned_s3_backend.create_bytes(b"gone", "rollback-absent.bin")
+        receipt = versioned_s3_backend.create_bytes(
+            b"gone", _managed_key(versioned_s3_backend, "rollback-absent.bin")
+        )
         versioned_s3_backend.rollback_create(receipt)
 
         # Idempotent on purpose: a rollback that ran, crashed before recording,
@@ -537,7 +619,9 @@ class TestRollbackCreate:
     def test_removes_only_its_own_version_when_another_writer_added_one(
         self, versioned_s3_backend: S3StorageBackend
     ) -> None:
-        receipt = versioned_s3_backend.create_bytes(b"mine", "rollback-replaced.bin")
+        receipt = versioned_s3_backend.create_bytes(
+            b"mine", _managed_key(versioned_s3_backend, "rollback-replaced.bin")
+        )
         versioned_s3_backend._client.put_object(
             Bucket=versioned_s3_backend._bucket,
             Key=receipt.key,
@@ -572,14 +656,18 @@ class TestUnversionedBucket:
     def test_writes_a_receipt_with_no_version_identity(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"payload", "unversioned.bin")
+        receipt = s3_backend.create_bytes(
+            b"payload", _managed_key(s3_backend, "unversioned.bin")
+        )
 
         assert receipt.version_id is None
 
     def test_refuses_to_delete_an_object_it_cannot_name_immutably(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"payload", "unversioned-rollback.bin")
+        receipt = s3_backend.create_bytes(
+            b"payload", _managed_key(s3_backend, "unversioned-rollback.bin")
+        )
 
         # Fails closed. Deleting by key alone would remove whatever is at that key
         # now, which after a concurrent write is somebody else's object.
@@ -589,7 +677,9 @@ class TestUnversionedBucket:
     def test_blocks_a_purge_from_starting_at_all(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"real", "unversioned-target.bin")
+        receipt = s3_backend.create_bytes(
+            b"real", _managed_key(s3_backend, "unversioned-target.bin")
+        )
 
         # The probe cannot clean itself up, so the purge refuses to proceed. An
         # installation on a non-versioned bucket therefore never reclaims storage —
@@ -603,7 +693,9 @@ class TestAdoptExisting:
         self, s3_backend: S3StorageBackend
     ) -> None:
         data = b"published-but-unrecorded"
-        original = s3_backend.create_bytes(data, "adopt-me.bin")
+        original = s3_backend.create_bytes(
+            data, _managed_key(s3_backend, "adopt-me.bin")
+        )
 
         adopted = s3_backend.adopt_existing(
             original.key,
@@ -622,13 +714,17 @@ class TestAdoptExisting:
     ) -> None:
         with pytest.raises(FileNotFoundError):
             s3_backend.adopt_existing(
-                "adopt-missing.bin", expected_size=1, expected_sha256="0" * 64
+                _managed_key(s3_backend, "adopt-missing.bin"),
+                expected_size=1,
+                expected_sha256="0" * 64,
             )
 
     def test_refuses_an_object_whose_size_disagrees(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"four", "adopt-size.bin")
+        receipt = s3_backend.create_bytes(
+            b"four", _managed_key(s3_backend, "adopt-size.bin")
+        )
 
         # Adopting on key alone would claim ownership of whatever happens to sit
         # there, which on a shared bucket is somebody else's object.
@@ -641,7 +737,9 @@ class TestAdoptExisting:
         self, s3_backend: S3StorageBackend
     ) -> None:
         data = b"actual-content"
-        receipt = s3_backend.create_bytes(data, "adopt-digest.bin")
+        receipt = s3_backend.create_bytes(
+            data, _managed_key(s3_backend, "adopt-digest.bin")
+        )
 
         # Same length, different content — the case a size check alone accepts.
         with pytest.raises(StorageCollisionError):
@@ -656,7 +754,9 @@ class TestReplaceStream:
     def test_replaces_the_bytes_behind_a_current_receipt(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"first", "replace-me.bin")
+        receipt = s3_backend.create_bytes(
+            b"first", _managed_key(s3_backend, "replace-me.bin")
+        )
 
         replaced = s3_backend.replace_stream(BytesIO(b"second"), receipt)
 
@@ -666,7 +766,9 @@ class TestReplaceStream:
     def test_refuses_to_replace_through_a_receipt_that_is_no_longer_current(
         self, s3_backend: S3StorageBackend
     ) -> None:
-        receipt = s3_backend.create_bytes(b"first", "replace-stale.bin")
+        receipt = s3_backend.create_bytes(
+            b"first", _managed_key(s3_backend, "replace-stale.bin")
+        )
         s3_backend.replace_stream(BytesIO(b"second"), receipt)
 
         # The stale receipt still names the right key. Honouring it would let a
@@ -687,7 +789,9 @@ class TestVerifyDestructiveAccess:
     def test_proves_it_can_delete_before_deleting_anything(
         self, versioned_s3_backend: S3StorageBackend
     ) -> None:
-        receipt = versioned_s3_backend.create_bytes(b"real", "probe-target.bin")
+        receipt = versioned_s3_backend.create_bytes(
+            b"real", _managed_key(versioned_s3_backend, "probe-target.bin")
+        )
 
         versioned_s3_backend.verify_destructive_access([receipt.key])
 

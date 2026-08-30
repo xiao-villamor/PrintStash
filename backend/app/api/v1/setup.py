@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 
 from app.core.config import FrozenSettings, ensure_dirs, settings
 from app.core.logging import get_logger
-from app.db.models import User
+from app.db.models import SystemConfig, User
 from app.db.session import get_session
 from app.schemas.setup import SetupRequest, SetupResponse, SetupStatus
 from app.services import runtime_config
@@ -220,7 +220,10 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
     if body.storage_provider is not None and body.storage_provider_config is not None:
         try:
             requested_provider = runtime_config.resolve_requested_storage_provider(
-                runtime_config.get_config(session),
+                # Validate and provision the remote root before creating the
+                # singleton config row. A failed first-run provision must not
+                # leave durable setup state behind.
+                session.get(SystemConfig, 1) or SystemConfig(),
                 provider=body.storage_provider,
                 raw_config=body.storage_provider_config,
             )
@@ -230,6 +233,22 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail=str(exc),
             ) from exc
+
+        # A remote SFTP root may be absent on a new NAS share.  Provision it
+        # only inside this authenticated-by-setup-token first-run flow; normal
+        # startup and health checks remain read-only and fail closed when an
+        # enrolled root disappears.
+        if transport is not None and transport.kind is TransportKind.SFTP:
+            try:
+                from app.services.storage_opendal import OpenDALStorageBackend
+
+                OpenDALStorageBackend(transport).provision_root()
+            except Exception as exc:
+                logger.warning("setup: unable to provision SFTP root", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="sftp_root_not_provisionable",
+                ) from exc
     storage_backend = (
         "local"
         if transport is not None and transport.kind is TransportKind.LOCAL

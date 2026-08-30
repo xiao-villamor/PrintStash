@@ -33,6 +33,7 @@ check only fires for markers a *selected* test carries.
 from __future__ import annotations
 
 import subprocess
+import time
 from typing import Any, Callable, NoReturn
 
 import pytest
@@ -232,18 +233,35 @@ def _start_openssh() -> tuple[str, int, str]:
     _started.append(container)
     host = container.get_container_host_ip()
     port = int(container.get_exposed_port(2222))
-    try:
-        known_hosts = subprocess.check_output(
-            ["ssh-keyscan", "-p", str(port), host],
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            text=True,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("ssh-keyscan is required for pinned SFTP contracts") from exc
-    if not known_hosts.strip():
-        raise RuntimeError("OpenSSH did not publish a host key")
-    return host, port, known_hosts
+    last_diagnostic = "no response"
+    for attempt in range(20):
+        try:
+            result = subprocess.run(
+                ["ssh-keyscan", "-p", str(port), host],
+                capture_output=True,
+                timeout=2,
+                text=True,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            last_diagnostic = f"{exc.__class__.__name__}: {exc}"
+        else:
+            known_hosts = result.stdout
+            if result.returncode == 0 and known_hosts.strip():
+                return host, port, known_hosts
+            stderr = result.stderr.strip()
+            last_diagnostic = (
+                f"exit={result.returncode}, {stderr or 'empty host-key response'}"
+            )
+        if attempt < 19:
+            # PortWaitStrategy only proves that sshd bound its socket; the
+            # daemon may still be generating host keys. Keep this retry bounded
+            # and retain the last useful diagnostic for a real failure.
+            time.sleep(0.25)
+    raise RuntimeError(
+        "ssh-keyscan is required for pinned SFTP contracts; "
+        f"host-key readiness failed after 20 attempts ({last_diagnostic})"
+    )
 
 
 def nextcloud_endpoint() -> str:

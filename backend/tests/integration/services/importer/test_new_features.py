@@ -20,6 +20,7 @@ from app.db.models import (
     PrintJobState,
     ShareLink,
 )
+from tests._env import use_local_storage
 from tests.factories import build_file, build_model, build_print_job, build_printer
 
 # ---------------------------------------------------------------------------
@@ -410,10 +411,9 @@ class TestStlResponse:
         from starlette.responses import FileResponse, Response
 
         from app.api.v1 import files as files_api
-        from app.core.config import _overlay
         from app.services.storage_backend import get_backend
 
-        _overlay["data_dir"] = tmp_path / "files"
+        use_local_storage(tmp_path)
         backend = get_backend()
         blob = tmp_path / "files" / "raw.stl"
         data = b"solid raw\n" + b"x" * 4096 + b"\nendsolid raw\n"
@@ -445,10 +445,9 @@ class TestStlResponse:
 
     def test_stl_response_honours_if_none_match(self, db_session, tmp_path):
         from app.api.v1 import files as files_api
-        from app.core.config import _overlay
         from app.services.storage_backend import get_backend
 
-        _overlay["data_dir"] = tmp_path / "files"
+        use_local_storage(tmp_path)
         blob = tmp_path / "files" / "etag.stl"
         get_backend().write_bytes(b"solid etag\nendsolid etag\n", str(blob))
 

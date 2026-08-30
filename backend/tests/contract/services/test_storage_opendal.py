@@ -283,7 +283,7 @@ class TestOpenDALStorageBackend:
         spec.options["password"] = "not-the-contract-password"
         backend = OpenDALStorageBackend(spec)
 
-        with pytest.raises(opendal.exceptions.Error):
+        with pytest.raises(opendal.exceptions.Unexpected):
             backend.ensure_setup()
 
     def test_webdav_stream_round_trip_preserves_evidence(
@@ -328,6 +328,7 @@ class TestOpenDALStorageBackend:
     def test_sftp_mounted_key_stream_round_trip(self, sftp_endpoint) -> None:
         port, private_key, known_hosts = sftp_endpoint
         backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        backend.provision_root()
         backend.ensure_setup()
         key = backend.blob_key("sftp-widget", 1, "widget.3mf")
         payload = b"sftp-model" * (1024 * 1024)
@@ -338,6 +339,32 @@ class TestOpenDALStorageBackend:
         assert receipt.size == len(payload)
         assert backend.object_info(key).size == len(payload)  # type: ignore[union-attr]
         assert backend.capabilities.tier.value == "guarded"
+
+    def test_sftp_requires_explicit_provision_before_first_setup(
+        self, sftp_endpoint
+    ) -> None:
+        port, private_key, known_hosts = sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+
+        with pytest.raises(asyncssh.SFTPNoSuchFile):
+            backend.ensure_setup()
+
+    def test_sftp_health_fails_closed_after_an_enrolled_root_disappears(
+        self, sftp_endpoint, tmp_path
+    ) -> None:
+        port, private_key, known_hosts = sftp_endpoint
+        backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        backend.provision_root()
+        backend.ensure_setup()
+
+        shutil.rmtree(tmp_path / "server" / "vault-data")
+
+        assert backend.health_probe()["ok"] is False
+        with pytest.raises(asyncssh.SFTPNoSuchFile):
+            backend.create_bytes(
+                b"must not recreate", backend.blob_key("lost", 1, "x.stl")
+            )
+        assert not (tmp_path / "server" / "vault-data").exists()
 
     def test_sftp_password_stream_round_trip(self, sftp_password_endpoint) -> None:
         port, known_hosts = sftp_password_endpoint
@@ -355,6 +382,7 @@ class TestOpenDALStorageBackend:
             },
         )
         backend = OpenDALStorageBackend(spec)
+        backend.provision_root()
         backend.ensure_setup()
         key = backend.blob_key("password-widget", 1, "widget.3mf")
         payload = b"password-sftp-model" * (1024 * 1024)
@@ -369,6 +397,7 @@ class TestOpenDALStorageBackend:
         spec = _sftp_spec(port, private_key, known_hosts)
         spec.options["host_key"] = known_hosts.read_text(encoding="utf-8")
         backend = OpenDALStorageBackend(spec)
+        backend.provision_root()
 
         backend.ensure_setup()
 
@@ -379,6 +408,7 @@ class TestOpenDALStorageBackend:
     ) -> None:
         port, private_key, known_hosts = sftp_endpoint
         backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        backend.provision_root()
         key = backend.blob_key("race", 1, "part.stl")
 
         def publish(index: int) -> tuple[int, str]:
@@ -419,6 +449,7 @@ class TestOpenDALStorageBackend:
     ) -> None:
         port, private_key, known_hosts, rotate = changed_sftp_endpoint
         backend = OpenDALStorageBackend(_sftp_spec(port, private_key, known_hosts))
+        backend.provision_root()
         backend.ensure_setup()
         rotate()
         changed_backend = OpenDALStorageBackend(

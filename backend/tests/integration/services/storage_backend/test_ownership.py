@@ -31,14 +31,15 @@ from app.services.storage_backend import (
     LocalStorageBackend,
     StorageCollisionError,
 )
+from tests._env import use_local_storage
 
 
 @pytest.fixture
 def backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalStorageBackend:
-    from app.core.config import _overlay
-
-    monkeypatch.setitem(_overlay, "data_dir", tmp_path / "files")
-    (tmp_path / "files").mkdir(parents=True, exist_ok=True)
+    # The local adapter intentionally refuses markerless roots.  Use the shared
+    # environment helper so these direct ownership tests model an enrolled vault
+    # rather than bypassing the same durable binding required in production.
+    use_local_storage(tmp_path)
     return LocalStorageBackend()
 
 

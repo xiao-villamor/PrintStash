@@ -11042,6 +11042,15 @@
           "selectable": {
             "title": "Selectable",
             "type": "boolean"
+          },
+          "support_level": {
+            "default": "stable",
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "title": "Support Level",
+            "type": "string"
           }
         },
         "required": [
@@ -11058,6 +11067,30 @@
           "fields"
         ],
         "title": "StorageProvider",
+        "type": "object"
+      },
+      "StorageRootEnrollment": {
+        "additionalProperties": false,
+        "description": "Explicit acknowledgement for enrolling an unprovable local root.",
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "data",
+              "thumb"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "StorageRootEnrollment",
         "type": "object"
       },
       "StorageUsageRead": {
@@ -11263,6 +11296,17 @@
             "default": 0,
             "title": "Storage Blocked",
             "type": "integer"
+          },
+          "storage_cleanup_status": {
+            "default": "completed",
+            "enum": [
+              "completed",
+              "pending",
+              "blocked",
+              "partial"
+            ],
+            "title": "Storage Cleanup Status",
+            "type": "string"
           },
           "storage_completed": {
             "default": 0,
@@ -13481,6 +13525,56 @@
         ]
       }
     },
+    "/api/v1/backups/adopt-local": {
+      "post": {
+        "description": "Validate and register one unowned legacy archive. Archives are not auto-adopted during listing; the filename must be in the configured backup directory.",
+        "operationId": "adopt_local_backup_api_v1_backups_adopt_local_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adopt Local Backup Api V1 Backups Adopt Local Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Adopt a legacy local backup",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
     "/api/v1/backups/capabilities/database": {
       "get": {
         "operationId": "get_database_backup_capabilities_api_v1_backups_capabilities_database_get",
@@ -13513,6 +13607,37 @@
           }
         ],
         "summary": "Get database backup capabilities",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/unowned-local": {
+      "get": {
+        "operationId": "discover_unowned_local_backups_api_v1_backups_unowned_local_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Discover Unowned Local Backups Api V1 Backups Unowned Local Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover valid unowned legacy local backups",
         "tags": [
           "backups"
         ]
@@ -14761,6 +14886,54 @@
           }
         ],
         "summary": "Legacy MakerWorld verification endpoint",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/storage-roots/enroll": {
+      "post": {
+        "operationId": "enroll_storage_root_api_v1_config_storage_roots_enroll_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageRootEnrollment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Enroll Storage Root Api V1 Config Storage Roots Enroll Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Enroll a local storage root after an explicit confirmation",
         "tags": [
           "config"
         ]

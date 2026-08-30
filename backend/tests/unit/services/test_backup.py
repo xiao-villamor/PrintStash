@@ -241,6 +241,113 @@ class TestVerifyBackup:
 
 
 class TestRestoreJournalV2:
+    def test_reports_no_recovery_when_journal_directory_is_unreadable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_glob(_path: Path, _pattern: str):
+            raise OSError("directory unavailable")
+
+        monkeypatch.setattr(Path, "glob", fail_glob)
+
+        try:
+            assert backup.inspect_restore_recovery() is True
+            assert backup.restore_in_progress() is True
+        finally:
+            backup._restore_gate.clear()
+
+    def test_gates_recovery_when_database_swap_is_journaled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        started = {
+            "event": "started",
+            "version": 2,
+            "backup_id": "swap",
+            "archive_sha256": "a" * 64,
+            "operation_nonce": "b" * 64,
+            "backend": "local",
+            "namespaces": [],
+        }
+        swap = {
+            "event": "database_swap_intent",
+            "backup_id": "swap",
+            "archive_sha256": "a" * 64,
+            "operation_nonce": "b" * 64,
+        }
+        (tmp_path / ".restore-swap.journal").write_text(
+            json.dumps(started) + "\n" + json.dumps(swap) + "\n"
+        )
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+        marker_calls: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            backup,
+            "_active_restore_marker",
+            lambda *args, **kwargs: marker_calls.append((args, kwargs)) or True,
+        )
+        backup._restore_gate.clear()
+
+        assert backup.inspect_restore_recovery() is True
+        assert backup.restore_in_progress() is True
+        assert marker_calls
+        backup._restore_gate.clear()
+
+    def test_returns_none_when_journal_discovery_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_glob(_path: Path, _pattern: str):
+            raise OSError("directory unavailable")
+
+        monkeypatch.setattr(Path, "glob", fail_glob)
+
+        assert backup.unresolved_restore_backup_id() is None
+
+    def test_returns_none_when_multiple_journals_are_present(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".restore-one.journal").write_text("{}")
+        (tmp_path / ".restore-two.journal").write_text("{}")
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+
+        assert backup.unresolved_restore_backup_id() is None
+
+    def test_returns_none_for_a_journal_with_an_invalid_filename(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Path, "glob", lambda *_args: [Path("invalid")])
+
+        assert backup.unresolved_restore_backup_id() is None
+
+    def test_returns_none_for_a_journal_without_a_backup_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(Path, "glob", lambda *_args: [Path(".restore-.journal")])
+
+        assert backup.unresolved_restore_backup_id() is None
+
+    def test_routes_a_readable_journal_to_its_filename_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        journal = tmp_path / ".restore-routed.journal"
+        journal.write_text('{"event":"started","backup_id":"tampered"}\n')
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+
+        assert backup.unresolved_restore_backup_id() == "routed"
+
+    def test_rejects_a_non_object_journal_header(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".restore-list.journal").write_text("[]\n")
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+
+        assert backup.unresolved_restore_backup_id() is None
+
+    def test_rejects_an_empty_journal_header(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".restore-empty.journal").write_bytes(b"")
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+
+        assert backup.unresolved_restore_backup_id() is None
+
     def test_upgrades_a_matching_v1_journal_forward_only(self, tmp_path: Path) -> None:
         path = tmp_path / ".restore-abc.journal"
         path.write_text(
@@ -310,7 +417,271 @@ class TestRestoreJournalV2:
         backup._restore_gate.clear()
         try:
             assert backup.inspect_restore_recovery() is True
+            # A malformed journal has no resumable identity.  The maintenance
+            # gate remains set, so no other backup can bypass the unresolved
+            # operation.
             assert backup.unresolved_restore_backup_id() is None
         finally:
             backup._restore_gate.clear()
             _overlay.pop("backup_dir", None)
+
+    def test_no_journal_leaves_restore_maintenance_clear(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+        backup._restore_gate.clear()
+
+        assert backup.inspect_restore_recovery() is False
+        assert backup.restore_in_progress() is False
+
+    def test_unreadable_journal_directory_keeps_pending_state(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_glob(_path: Path, _pattern: str):
+            raise OSError("directory unavailable")
+
+        monkeypatch.setattr(Path, "glob", fail_glob)
+
+        assert backup._restore_journal_pending() is True
+
+    def test_rejects_an_unbalanced_mutating_operation(self) -> None:
+        backup._active_mutations = 0
+
+        with pytest.raises(RuntimeError, match="unbalanced_mutating_operation"):
+            backup.end_mutating_operation()
+
+    def test_drains_a_balanced_mutating_operation(self) -> None:
+        backup._restore_gate.clear()
+        assert backup.begin_mutating_operation() is True
+        backup.end_mutating_operation()
+
+    def test_times_out_when_a_mutation_never_drains(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backup._restore_gate.clear()
+        backup._active_mutations = 1
+        monkeypatch.setattr(backup, "_RESTORE_DRAIN_TIMEOUT_S", 0)
+        try:
+            with pytest.raises(backup.RestoreConflictError, match="still active"):
+                backup._begin_restore_maintenance()
+            assert backup.restore_in_progress() is False
+        finally:
+            backup._active_mutations = 0
+
+    def test_rejects_mutation_while_restore_maintenance_is_active(self) -> None:
+        backup._restore_gate.set()
+        try:
+            assert backup.begin_mutating_operation() is False
+        finally:
+            backup._restore_gate.clear()
+
+
+class TestBackupStorageHelpers:
+    def test_rejects_a_non_sqlite_database_backup(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "db_url", "postgresql://db.example/vault")
+
+        with pytest.raises(
+            backup.DatabaseBackupNotSupportedError,
+            match="database_backup_not_supported",
+        ):
+            backup._require_database_backup_support()
+
+    def test_returns_none_when_cloud_backups_are_not_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(backup, "_backup_s3", None)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", None)
+
+        assert backup._get_backup_s3() is None
+
+    def test_returns_none_when_cloud_client_initialization_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(backup, "_backup_s3", None)
+        monkeypatch.setitem(_overlay, "backup_s3_bucket", "backup-bucket")
+        monkeypatch.setattr(
+            "boto3.client", lambda **_kwargs: (_ for _ in ()).throw(OSError("offline"))
+        )
+
+        assert backup._get_backup_s3() is None
+        assert backup._backup_s3 is False
+
+    def test_rejects_a_missing_sqlite_database_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(backup, "_db_path", lambda: tmp_path / "missing.sqlite")
+
+        with pytest.raises(FileNotFoundError):
+            with backup._sqlite_snapshot_file():
+                pass
+
+    def test_rejects_a_snapshot_with_a_failed_integrity_check(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _Connection:
+            def __enter__(self) -> "_Connection":
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def execute(self, _statement: str) -> "_Connection":
+                return self
+
+            def fetchone(self) -> tuple[str]:
+                return ("corrupt",)
+
+        monkeypatch.setattr(backup.sqlite3, "connect", lambda _path: _Connection())
+
+        with pytest.raises(RuntimeError, match="integrity_check_failed"):
+            backup._validate_sqlite_snapshot(tmp_path / "snapshot.sqlite")
+
+    def test_restores_database_bytes_through_a_temporary_snapshot(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+        target = tmp_path / "vault.sqlite"
+        observed: list[Path] = []
+
+        monkeypatch.setattr(backup, "_db_path", lambda: target)
+
+        def capture_snapshot(path: Path) -> None:
+            observed.append(path)
+            assert path.read_bytes() == b"snapshot-bytes"
+
+        monkeypatch.setattr(backup, "_restore_database_from_path", capture_snapshot)
+
+        backup._restore_database(b"snapshot-bytes")
+
+        assert len(observed) == 1
+        assert not observed[0].exists()
+
+    def test_uses_engine_fallback_when_factory_has_no_dispose(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class _Engine:
+            disposed = False
+
+            def dispose(self) -> None:
+                self.disposed = True
+
+        engine = _Engine()
+        monkeypatch.setattr(backup, "get_session_factory", lambda: object())
+        monkeypatch.setattr(backup, "get_engine", lambda: engine)
+
+        backup._dispose_session_engine()
+
+        assert engine.disposed is True
+
+    def test_returns_unknown_when_active_marker_read_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_factory():
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(backup, "get_session_factory", fail_factory)
+
+        assert backup._active_restore_marker("backup-id") is None
+
+    def test_rejects_a_journal_with_an_unknown_version(self, tmp_path: Path) -> None:
+        path = tmp_path / ".restore-unknown.journal"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 99,
+                    "backup_id": "unknown",
+                    "archive_sha256": "a" * 64,
+                    "operation_nonce": "b" * 64,
+                }
+            )
+            + "\n"
+        )
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_journal_invalid"
+        ):
+            backup._load_restore_journal(path)
+
+    def test_rejects_a_v2_journal_with_an_invalid_nonce(self, tmp_path: Path) -> None:
+        path = tmp_path / ".restore-invalid-nonce.journal"
+        path.write_text(
+            json.dumps(
+                {
+                    "event": "started",
+                    "version": 2,
+                    "backup_id": "invalid-nonce",
+                    "archive_sha256": "a" * 64,
+                    "operation_nonce": "z" * 64,
+                }
+            )
+            + "\n"
+        )
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_journal_invalid"
+        ):
+            backup._load_restore_journal(path)
+
+    def test_rejects_a_duplicate_database_swap_event(self, tmp_path: Path) -> None:
+        path = tmp_path / ".restore-duplicate-swap.journal"
+        started = {
+            "event": "started",
+            "version": 2,
+            "backup_id": "duplicate-swap",
+            "archive_sha256": "a" * 64,
+            "operation_nonce": "b" * 64,
+        }
+        swap = {
+            "event": "database_swap_intent",
+            "backup_id": "duplicate-swap",
+            "archive_sha256": "a" * 64,
+            "operation_nonce": "b" * 64,
+        }
+        path.write_text("\n".join(json.dumps(event) for event in (started, swap, swap)))
+
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_journal_invalid"
+        ):
+            backup._load_restore_journal(path)
+
+    def test_accepts_a_terminal_complete_journal_event(self, tmp_path: Path) -> None:
+        path = tmp_path / ".restore-complete.journal"
+        started = {
+            "event": "started",
+            "version": 2,
+            "backup_id": "complete",
+            "archive_sha256": "a" * 64,
+            "operation_nonce": "b" * 64,
+        }
+        path.write_text(
+            json.dumps(started) + "\n" + json.dumps({"event": "complete"}) + "\n"
+        )
+
+        state = backup._load_restore_journal(path)
+
+        assert state.started["backup_id"] == "complete"
+
+    def test_rejects_a_journal_event_without_a_generation(self) -> None:
+        with pytest.raises(
+            backup.RestoreConflictError, match="restore_journal_invalid"
+        ):
+            backup._journal_generation({})
+
+    def test_skips_a_backup_with_an_invalid_creation_timestamp(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        candidate = backup.BackupMeta(
+            id="invalid-date",
+            created_at="not-a-timestamp",
+            size_bytes=1,
+            storage_backend="local",
+            file_count=0,
+            app_version="0.13.0",
+            path="invalid-date.tar.gz",
+        )
+        monkeypatch.setattr(backup, "list_backups", lambda: [candidate])
+
+        assert backup.purge_old_backups(retain_days=1) == 0

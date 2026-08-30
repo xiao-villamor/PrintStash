@@ -11,7 +11,7 @@ the service call succeeded.
 from __future__ import annotations
 
 import asyncio
-import shutil
+from pathlib import Path
 
 import pytest
 from sqlmodel import delete
@@ -89,12 +89,20 @@ class TestBackupRestore:
 
         # Simulate real data loss: drop the DB rows and delete the blob from disk,
         # bypassing the app entirely (a disk/DB disaster, not a soft delete).
+        artifact = e2e_db.get(File, file_id)
+        assert artifact is not None
+        blob_path = Path(artifact.path)
+        assert blob_path.is_file()
         e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
         e2e_db.exec(delete(File).where(File.id == file_id))
         e2e_db.exec(delete(Model).where(Model.id == model_id))
         e2e_db.commit()
-        shutil.rmtree(tmp_path / "files", ignore_errors=True)
-        (tmp_path / "files").mkdir(parents=True, exist_ok=True)
+        # Remove only the artifact. The enrolled root binding is durable
+        # installation identity and must survive a blob loss; deleting the
+        # whole directory would turn a disaster simulation into a root-rebind
+        # test and could poison the next E2E case.
+        blob_path.unlink()
+        assert not blob_path.exists()
 
         gone = await api.get(f"/api/v1/models/{model_id}", headers=headers)
         assert gone.status_code == 404

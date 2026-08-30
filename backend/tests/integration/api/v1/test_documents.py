@@ -28,6 +28,7 @@ from app.core.config import _overlay
 from app.db.models import CollectionRole, Document, User
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
+from tests._env import use_local_storage
 from tests.factories import bearer, build_user, grant_collection_role
 
 _PNG = bytes.fromhex(
@@ -41,9 +42,7 @@ PDF_BYTES = b"%PDF-1.4 hi"
 @pytest.fixture(autouse=True)
 def document_storage(tmp_path: Path) -> Path:
     """Every document write touches storage; keep it inside the test's tmp dir."""
-    _overlay["thumb_dir"] = tmp_path / "thumbs"
-    _overlay["data_dir"] = tmp_path / "files"
-    return tmp_path
+    return use_local_storage(tmp_path)
 
 
 def _grant(

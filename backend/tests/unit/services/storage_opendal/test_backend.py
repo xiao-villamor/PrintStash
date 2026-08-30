@@ -13,7 +13,9 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import BinaryIO
+from unittest.mock import Mock
 
+import httpx
 import pytest
 
 from app.services import storage_opendal
@@ -518,3 +520,432 @@ class TestOpenDALStorageBackend:
             is False
         )
         assert operator.exists("thumbs/26.webp")
+
+    def test_builds_an_escaped_webdav_url(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(
+                options={
+                    "endpoint_url": "https://dav.example/base/",
+                    "root": "remote root",
+                }
+            ),
+            operator=_MemoryOperator(),
+        )
+
+        assert backend._webdav_url("nested/file name") == (
+            "https://dav.example/base/remote%20root/nested/file%20name"
+        )
+
+    def test_rejects_a_missing_webdav_endpoint(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="endpoint_required"):
+            backend._webdav_url("file")
+
+    def test_maps_a_webdav_move_collision(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=_MemoryOperator(),
+        )
+        monkeypatch.setattr(
+            httpx, "request", lambda *_args, **_kwargs: httpx.Response(412)
+        )
+
+        with pytest.raises(StorageCollisionError):
+            backend._webdav_move_create_only("tmp", "destination")
+
+    def test_rejects_a_webdav_move_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=_MemoryOperator(),
+        )
+        monkeypatch.setattr(
+            httpx, "request", lambda *_args, **_kwargs: httpx.Response(500)
+        )
+
+        with pytest.raises(StorageConfigurationError, match="webdav_move_failed"):
+            backend._webdav_move_create_only("tmp", "destination")
+
+    def test_accepts_a_confirmed_webdav_collection_race(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        operator.objects["a"] = b"collection"
+        operator.objects["a/b"] = b"collection"
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(
+            httpx, "request", lambda *_args, **_kwargs: httpx.Response(500)
+        )
+
+        backend._webdav_ensure_parent("a/b/file")
+
+    def test_rejects_an_unconfirmed_webdav_collection_race(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=_MemoryOperator(),
+        )
+        monkeypatch.setattr(
+            httpx, "request", lambda *_args, **_kwargs: httpx.Response(500)
+        )
+
+        with pytest.raises(StorageConfigurationError, match="webdav_mkcol_failed"):
+            backend._webdav_ensure_parent("a/file")
+
+    def test_creates_a_nonempty_webdav_http_object(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(backend, "_webdav_ensure_parent", lambda _relative: None)
+
+        def request(_method: str, *_args, **_kwargs) -> httpx.Response:
+            temporary = next(
+                key for key in operator.objects if key.startswith(".printstash-tmp-")
+            )
+            operator.objects["thumbs/30.webp"] = operator.objects.pop(temporary)
+            return httpx.Response(201)
+
+        monkeypatch.setattr(httpx, "request", request)
+        receipt = backend.create_bytes(b"http", backend.thumbnail_key(30))
+
+        assert receipt.size == 4
+        assert operator.objects["thumbs/30.webp"] == b"http"
+
+    def test_creates_an_empty_webdav_http_object(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(backend, "_webdav_ensure_parent", lambda _relative: None)
+
+        def request(_method: str, *_args, **_kwargs) -> httpx.Response:
+            temporary = next(
+                key for key in operator.objects if key.startswith(".printstash-tmp-")
+            )
+            operator.objects["thumbs/31.webp"] = operator.objects.pop(temporary)
+            return httpx.Response(204)
+
+        monkeypatch.setattr(httpx, "request", request)
+        receipt = backend.create_stream(BytesIO(), backend.thumbnail_key(31))
+
+        assert receipt.size == 0
+        assert operator.objects["thumbs/31.webp"] == b""
+
+    def test_preserves_http_publication_failure_when_cleanup_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(backend, "_webdav_ensure_parent", lambda _relative: None)
+
+        def request(_method: str, *_args, **_kwargs) -> httpx.Response:
+            return httpx.Response(500)
+
+        def fail_delete(_key: str) -> None:
+            raise OSError("cleanup failed")
+
+        monkeypatch.setattr(httpx, "request", request)
+        monkeypatch.setattr(operator, "delete", fail_delete)
+
+        with pytest.raises(StorageConfigurationError, match="webdav_move_failed"):
+            backend.create_bytes(b"payload", backend.thumbnail_key(32))
+
+    def test_rejects_webdav_without_a_protocol_endpoint(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=SimpleNamespace()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="protocol_endpoint"):
+            backend.create_bytes(b"payload", backend.thumbnail_key(33))
+
+    def test_moves_a_webdav_object_through_http(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        operator.objects["thumbs/source.webp"] = b"data"
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(backend, "_webdav_ensure_parent", lambda _relative: None)
+
+        def request(_method: str, *_args, **_kwargs) -> httpx.Response:
+            operator.objects["thumbs/dest.webp"] = operator.objects.pop(
+                "thumbs/source.webp"
+            )
+            return httpx.Response(204)
+
+        monkeypatch.setattr(httpx, "request", request)
+        backend.move(backend.thumbnail_key(34), backend.thumbnail_key(35))
+
+        assert operator.objects["thumbs/dest.webp"] == b"data"
+
+    def test_rejects_sftp_atomic_move(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP), operator=_MemoryOperator()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="atomic_move"):
+            backend.move(backend.thumbnail_key(36), backend.thumbnail_key(37))
+
+    def test_rejects_sftp_without_exclusive_creation(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP), operator=SimpleNamespace()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="exclusive_create"):
+            backend.create_bytes(b"payload", backend.thumbnail_key(38))
+
+    def test_marks_setup_failed_when_the_first_probe_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=OSError("create failed")),
+        )
+
+        with pytest.raises(OSError, match="create failed"):
+            backend.ensure_setup()
+        assert backend.probe_diagnostics["conditional_create"] is False
+
+    def test_marks_setup_failed_when_the_second_probe_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), OSError("second failed")]),
+        )
+
+        with pytest.raises(OSError, match="second failed"):
+            backend.ensure_setup()
+        assert backend.probe_diagnostics["conditional_create"] is False
+
+    def test_marks_setup_failed_when_probe_read_fails(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), SimpleNamespace()]),
+        )
+        monkeypatch.setattr(
+            backend, "read_bytes", Mock(side_effect=OSError("read failed"))
+        )
+
+        with pytest.raises(OSError, match="read failed"):
+            backend.ensure_setup()
+        assert backend.probe_diagnostics["conditional_create"] is False
+
+    def test_rejects_an_unlisted_setup_probe(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        probe_key: list[str] = []
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), StorageCollisionError("collision")]),
+        )
+        monkeypatch.setattr(
+            backend, "read_bytes", lambda key: (probe_key.append(key), b"first")[1]
+        )
+        monkeypatch.setattr(backend, "stat_size", lambda _key: 5)
+        monkeypatch.setattr(backend, "walk_keys", lambda: iter(()))
+
+        with pytest.raises(StorageConfigurationError, match="unproven"):
+            backend.ensure_setup()
+
+    def test_rejects_a_size_mismatch_after_a_probe_collision(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        probe_key: list[str] = []
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), StorageCollisionError("collision")]),
+        )
+        monkeypatch.setattr(
+            backend, "read_bytes", lambda key: (probe_key.append(key), b"first")[1]
+        )
+        monkeypatch.setattr(backend, "stat_size", lambda _key: 1)
+        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+
+        with pytest.raises(StorageConfigurationError, match="unproven"):
+            backend.ensure_setup()
+
+    def test_enters_read_only_mode_when_probe_bytes_change(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        first = b"printstash-conditional-create-proof"
+        probe_key: list[str] = []
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), SimpleNamespace()]),
+        )
+        monkeypatch.setattr(
+            backend,
+            "read_bytes",
+            lambda key: (probe_key.append(key), b"x" * len(first))[1],
+        )
+        monkeypatch.setattr(backend, "stat_size", lambda _key: len(first))
+        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+
+        backend.ensure_setup()
+
+        assert backend._read_only is True
+        assert backend.probe_diagnostics["read_only"] is True
+
+    def test_enters_read_only_mode_when_probe_size_changes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+        probe_key: list[str] = []
+        monkeypatch.setattr(
+            backend,
+            "create_stream",
+            Mock(side_effect=[SimpleNamespace(), SimpleNamespace()]),
+        )
+        monkeypatch.setattr(
+            backend, "read_bytes", lambda key: (probe_key.append(key), b"x")[1]
+        )
+        monkeypatch.setattr(backend, "stat_size", lambda _key: 1)
+        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+
+        backend.ensure_setup()
+
+        assert backend._read_only is True
+
+    def test_accepts_a_conditional_setup_probe(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+
+        backend.ensure_setup()
+
+        assert backend.capabilities.conditional_create is True
+        assert backend.probe_diagnostics["destructive_access"] is True
+
+    def test_provisioning_requires_sftp(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="provisioning_unsupported"):
+            backend.provision_root()
+
+    def test_provisioning_requires_operator_support(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP), operator=SimpleNamespace()
+        )
+
+        with pytest.raises(StorageConfigurationError, match="provisioning_unavailable"):
+            backend.provision_root()
+
+    def test_provisions_an_sftp_root(self) -> None:
+        provision = Mock()
+        check = Mock()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP),
+            operator=SimpleNamespace(provision_root=provision, check=check),
+        )
+
+        backend.provision_root()
+
+        provision.assert_called_once_with()
+        check.assert_called_once_with()
+
+    def test_verifies_destructive_access_for_sftp(self) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP), operator=operator
+        )
+
+        backend.verify_destructive_access([])
+
+        assert operator.objects == {}
+
+    def test_verifies_destructive_access_for_webdav(self) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+
+        backend.verify_destructive_access([])
+
+        assert operator.objects == {}
+
+    def test_wraps_destructive_access_failure(self) -> None:
+        def fail(*_args: object) -> None:
+            raise OSError("remote unavailable")
+
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.SFTP),
+            operator=SimpleNamespace(write_exclusive=fail, delete=fail),
+        )
+
+        with pytest.raises(StorageConfigurationError, match="destructive_access"):
+            backend.verify_destructive_access([])
+
+    def test_lists_only_the_requested_prefix(self) -> None:
+        operator = _MemoryOperator()
+        operator.objects["folder/object"] = b"data"
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+
+        assert backend.list_prefix("vault/data/folder") == ["vault/data/folder/object"]
+
+    def test_usage_ignores_a_missing_scanned_object(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        operator.objects["folder/object"] = b"data"
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+        monkeypatch.setattr(
+            operator,
+            "scan",
+            lambda _prefix: [
+                SimpleNamespace(path="folder/object"),
+                SimpleNamespace(path="folder/ghost"),
+            ],
+        )
+
+        assert backend.usage("vault/data/folder") == {"bytes": 4, "objects": 1}

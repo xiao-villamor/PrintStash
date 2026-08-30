@@ -395,6 +395,10 @@ class StorageBackend(ABC):
     @abstractmethod
     def list_keys(self, prefix: str = "") -> list[str]: ...
 
+    def list_prefix(self, prefix: str = "") -> list[str]:
+        """List the objects below *prefix* through the canonical list seam."""
+        return self.list_keys(prefix)
+
     @abstractmethod
     def walk_keys(self, prefix: str = "") -> Iterator[str]: ...
 
@@ -1850,6 +1854,13 @@ class S3StorageBackend(StorageBackend):
         if not settings.s3_bucket:
             raise RuntimeError("VAULT_S3_BUCKET is required when storage_backend=s3")
 
+        # The root is part of this adapter's identity.  Capture it once so a
+        # second runtime overlay/backend cannot make an already-live adapter
+        # read, list, or reclaim the other installation's namespace.
+        self._s3_root = self._normalized_root(
+            str(getattr(settings, "s3_root", "vault-data") or "vault-data")
+        )
+
         client_kwargs: dict = {
             "service_name": "s3",
             "region_name": settings.s3_region or "auto",
@@ -1975,6 +1986,18 @@ class S3StorageBackend(StorageBackend):
             raise StorageCollisionError("storage_key_outside_managed_root")
         return f"{self._bucket}/{prefix}"
 
+    def _validate_managed_key(self, key: str) -> str:
+        """Require every S3 object operation to stay in this typed root."""
+        self.namespace_for(key)
+        return key
+
+    def _validate_managed_prefix(self, prefix: str) -> str:
+        managed = self._prefix()
+        full_prefix = prefix or managed
+        if not full_prefix.startswith(managed):
+            raise StorageCollisionError("storage_key_outside_managed_root")
+        return full_prefix
+
     def reclaim_unverified(
         self,
         key: str,
@@ -2084,7 +2107,15 @@ class S3StorageBackend(StorageBackend):
             ) from exc
 
     def _prefix(self) -> str:
-        value = str(getattr(settings, "s3_root", "vault-data") or "vault-data")
+        value = getattr(self, "_s3_root", None)
+        if value is None:
+            # Test doubles built with ``object.__new__`` predate the captured
+            # identity. Real instances always take the immutable branch above.
+            value = str(getattr(settings, "s3_root", "vault-data") or "vault-data")
+        return f"{value}/"
+
+    @staticmethod
+    def _normalized_root(value: str) -> str:
         value = value.strip().strip("/")
         if (
             not value
@@ -2092,7 +2123,7 @@ class S3StorageBackend(StorageBackend):
             or any(part in {"", ".", ".."} for part in Path(value).parts)
         ):
             raise StorageConfigurationError("s3_root_invalid")
-        return f"{value}/"
+        return value
 
     def direct_path(self, key: str) -> Path | None:
         return None
@@ -2130,6 +2161,7 @@ class S3StorageBackend(StorageBackend):
     def object_info(self, key: str) -> StorageObjectInfo | None:
         import botocore.exceptions
 
+        self._validate_managed_key(key)
         try:
             response = self._client.head_object(Bucket=self._bucket, Key=key)
         except botocore.exceptions.ClientError as exc:
@@ -2160,6 +2192,7 @@ class S3StorageBackend(StorageBackend):
     def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
         import botocore.exceptions
 
+        self._validate_managed_key(key)
         if getattr(self, "_read_only", False):
             raise StorageConfigurationError("remote_storage_read_only")
 
@@ -2262,6 +2295,10 @@ class S3StorageBackend(StorageBackend):
             raise
 
     def rollback_create(self, receipt: CreationReceipt) -> bool:
+        # Validate the opaque key before inspecting receipt metadata or making
+        # any remote request.  A forged receipt from another typed root must
+        # never be able to probe or delete that root's version.
+        self._validate_managed_key(receipt.key)
         if not receipt.version_id:
             if self.object_info(receipt.key) is None:
                 return True
@@ -2348,6 +2385,7 @@ class S3StorageBackend(StorageBackend):
             or receipt.namespace != f"{self._bucket}/{self._prefix()}"
         ):
             return False
+        self._validate_managed_key(receipt.key)
         try:
             kwargs = {"Bucket": self._bucket, "Key": receipt.key}
             if receipt.version_id:
@@ -2374,6 +2412,7 @@ class S3StorageBackend(StorageBackend):
         """Recover a pending S3 publication with content and token proof."""
         import botocore.exceptions
 
+        self._validate_managed_key(key)
         try:
             head = self._client.head_object(Bucket=self._bucket, Key=key)
         except botocore.exceptions.ClientError as exc:
@@ -2425,6 +2464,7 @@ class S3StorageBackend(StorageBackend):
     def stat_size(self, key: str) -> int:
         import botocore.exceptions
 
+        self._validate_managed_key(key)
         try:
             resp = self._client.head_object(Bucket=self._bucket, Key=key)
         except botocore.exceptions.ClientError as exc:
@@ -2432,12 +2472,14 @@ class S3StorageBackend(StorageBackend):
         return resp.get("ContentLength", 0)
 
     def read_bytes(self, key: str) -> bytes:
+        self._validate_managed_key(key)
         resp = self._client.get_object(Bucket=self._bucket, Key=key)
         return resp["Body"].read()
 
     def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         import botocore.exceptions
 
+        self._validate_managed_key(key)
         try:
             resp = self._client.get_object(Bucket=self._bucket, Key=key)
         except botocore.exceptions.ClientError as exc:
@@ -2453,6 +2495,7 @@ class S3StorageBackend(StorageBackend):
             body.close()
 
     def download_to_path(self, key: str, dest: Path) -> Path:
+        self._validate_managed_key(key)
         response = self._client.get_object(Bucket=self._bucket, Key=key)
         return _copy_stream_create_only(response["Body"], dest)
 
@@ -2469,7 +2512,7 @@ class S3StorageBackend(StorageBackend):
         raise RuntimeError("unchecked_storage_delete_disabled")
 
     def list_keys(self, prefix: str = "") -> list[str]:
-        full_prefix = prefix or self._prefix()
+        full_prefix = self._validate_managed_prefix(prefix)
         keys: list[str] = []
         paginator = self._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self._bucket, Prefix=full_prefix):
@@ -2478,14 +2521,14 @@ class S3StorageBackend(StorageBackend):
         return keys
 
     def walk_keys(self, prefix: str = "") -> Iterator[str]:
-        full_prefix = prefix or self._prefix()
+        full_prefix = self._validate_managed_prefix(prefix)
         paginator = self._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self._bucket, Prefix=full_prefix):
             for obj in page.get("Contents", []):
                 yield obj["Key"]
 
     def usage(self, prefix: str = "") -> dict:
-        full_prefix = prefix or self._prefix()
+        full_prefix = self._validate_managed_prefix(prefix)
         total_size = 0
         object_count = 0
         paginator = self._client.get_paginator("list_objects_v2")
@@ -2502,6 +2545,7 @@ class S3StorageBackend(StorageBackend):
         }
 
     def presigned_download_url(self, key: str, filename: str) -> str | None:
+        self._validate_managed_key(key)
         return self._client.generate_presigned_url(
             "get_object",
             Params={

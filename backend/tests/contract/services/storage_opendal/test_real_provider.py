@@ -66,6 +66,7 @@ class TestOpenDALStorageBackend:
                 },
             )
         )
+        backend.provision_root()
         backend.ensure_setup()
         key = "contract-sftp/nested/unicode-✓.stl"
         first = b"first sftp bytes"

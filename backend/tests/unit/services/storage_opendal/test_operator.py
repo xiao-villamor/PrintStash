@@ -171,3 +171,7 @@ class TestOperatorFor:
                     },
                 )
             )
+
+    def test_rejects_an_unknown_transport(self) -> None:
+        with pytest.raises(StorageConfigurationError, match="unsupported remote"):
+            storage_opendal._operator_for(_spec(TransportKind.LOCAL))

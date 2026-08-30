@@ -57,6 +57,25 @@ def _complete(client: TestClient, **overrides: Any):
     return client.post("/api/v1/setup", json=_payload(**overrides))
 
 
+def _sftp_payload(**overrides: Any) -> dict[str, Any]:
+    body = _payload()
+    body.pop("storage_backend")
+    body.update(
+        storage_provider="sftp",
+        storage_provider_config={
+            "provider": "sftp",
+            "host": "nas.example",
+            "port": 22,
+            "username": "printstash",
+            "password": "contract-secret",
+            "host_key": "[nas.example]:22 ssh-ed25519 AAAA",
+            "root": "vault-data",
+        },
+    )
+    body.update(overrides)
+    return body
+
+
 def _hostile_path(failing_call: str):
     """A ``Path`` stand-in whose *one* named call fails the way a bad mount does.
 
@@ -167,6 +186,88 @@ class TestSetupStatus:
 
 
 class TestCompleteSetup:
+    def test_provisions_an_initial_sftp_root_before_persisting_config(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+
+        class _Backend:
+            def __init__(self, _transport: object) -> None:
+                pass
+
+            def provision_root(self) -> None:
+                calls.append("provision")
+
+        monkeypatch.setattr(
+            "app.services.storage_opendal.OpenDALStorageBackend", _Backend
+        )
+
+        response = client.post("/api/v1/setup", json=_sftp_payload())
+
+        assert response.status_code == 201, response.text
+        assert calls == ["provision"]
+
+    def test_sftp_provision_failure_leaves_setup_unmodified(
+        self,
+        client: TestClient,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = db_session.get(SystemConfig, 1)
+        before_state = before.model_dump() if before is not None else None
+
+        class _Backend:
+            def __init__(self, _transport: object) -> None:
+                pass
+
+            def provision_root(self) -> None:
+                raise OSError("remote root is not writable")
+
+        monkeypatch.setattr(
+            "app.services.storage_opendal.OpenDALStorageBackend", _Backend
+        )
+
+        response = client.post("/api/v1/setup", json=_sftp_payload())
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "sftp_root_not_provisionable"
+        assert db_session.exec(select(User)).first() is None
+        after = db_session.get(SystemConfig, 1)
+        assert (after.model_dump() if after is not None else None) == before_state
+
+    def test_invalid_setup_token_never_provisions_sftp_root(
+        self,
+        client: TestClient,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+        before = db_session.get(SystemConfig, 1)
+        before_state = before.model_dump() if before is not None else None
+
+        class _Backend:
+            def __init__(self, _transport: object) -> None:
+                calls.append("construct")
+
+            def provision_root(self) -> None:
+                calls.append("provision")
+
+        monkeypatch.setattr(
+            "app.services.storage_opendal.OpenDALStorageBackend", _Backend
+        )
+
+        response = client.post(
+            "/api/v1/setup",
+            json=_sftp_payload(setup_token="attacker-controlled-token"),
+        )
+
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "invalid_setup_token"
+        assert calls == []
+        assert db_session.exec(select(User)).first() is None
+        after = db_session.get(SystemConfig, 1)
+        assert (after.model_dump() if after is not None else None) == before_state
+
     def test_creates_the_first_superuser(
         self, client: TestClient, db_session: Session
     ) -> None:

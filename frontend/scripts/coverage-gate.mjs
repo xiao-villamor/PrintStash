@@ -67,7 +67,7 @@ const SUITES = [
       { prefix: "src/pages/", statements: 84.5, branches: 74.4 },
       // Root-level wiring: the router shell and the layout. Rendered by every
       // Playwright spec, unit-tested by nothing.
-      { prefix: "src/", statements: 0, branches: 0 },
+      { prefix: "src/", statements: 27.5, branches: 89.2 },
     ],
   },
   {

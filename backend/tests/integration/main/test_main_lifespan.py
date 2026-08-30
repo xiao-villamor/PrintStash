@@ -402,6 +402,18 @@ class TestLifespan:
     ) -> None:
         from app.main import app
 
+        # This test deliberately runs the real lifespan against the shared
+        # in-memory fixture DB.  Keep its generated installation identity
+        # stable so the already-enrolled fixture roots remain bound, while
+        # leaving production's persisted-identity path untouched.
+        from app.services import runtime_config
+
+        def fixed_identity(_session) -> str:
+            _overlay["storage_identity"] = "a" * 64
+            return "a" * 64
+
+        monkeypatch.setattr(runtime_config, "ensure_storage_identity", fixed_identity)
+
         user = build_user(
             db_session,
             username="lifespan-admin",

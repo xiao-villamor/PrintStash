@@ -40,6 +40,7 @@ from app.db.models import (
     OwnedStorageObject,
     PrintJobState,
     RestoreMarker,
+    StorageObjectState,
 )
 from app.services.auth import create_access_token
 from app.services.storage_backend import get_backend
@@ -562,6 +563,15 @@ class TestBackupS3Key:
 
 
 class TestBackupSqliteCopy:
+    def test_backup_sqlite_copy_contains_committed_model(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Snapshot", content=b"snapshot")
+
+        snapshot = backup._backup_sqlite_copy()
+
+        assert b"Snapshot" in snapshot
+
     def test_backup_sqlite_copy_raises_for_non_file_db(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ):
@@ -2952,6 +2962,9 @@ class TestRestoreDatabase:
             if backup.restore_in_progress():
                 backup._end_restore_maintenance()
 
+        assert backup._active_mutations == 0
+        assert backup.restore_in_progress() is False
+
     def test_mutating_request_is_rejected_during_restore(
         self, client: TestClient, backup_env: BackupEnv
     ):
@@ -3008,8 +3021,12 @@ class TestPurgeOldBackups:
         self,
         backup_env: BackupEnv,
     ):
-        """A backup whose manifest has a non-ISO ``created_at`` (hand-crafted or
-        from some future format change) must be skipped, not crash the purge."""
+        """An unowned archive is never listable or eligible for purge.
+
+        The malformed timestamp is intentionally secondary: normal listing is
+        ownership-only, so a hand-crafted archive must remain invisible until
+        explicit adoption proves it safe.
+        """
         import gzip
         import io
         import json
@@ -3040,12 +3057,12 @@ class TestPurgeOldBackups:
                 tar.addfile(db_info, io.BytesIO(db_data))
 
         listed = {m.id for m in backup.list_backups()}
-        assert "badc0ffeeb00" in listed
+        assert "badc0ffeeb00" not in listed
 
         removed = backup.purge_old_backups(retain_days=30)
 
         assert removed == 0
-        assert "badc0ffeeb00" in {m.id for m in backup.list_backups()}
+        assert "badc0ffeeb00" not in {m.id for m in backup.list_backups()}
 
     def test_purge_keeps_fresh_removes_old(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
@@ -3222,3 +3239,410 @@ class TestFirst:
             with tarfile.open(fileobj=gz, mode="r|") as tar:
                 first = next(iter(tar))
         assert first.name == "manifest.json"
+
+
+class _BackupObjectStore:
+    def __init__(
+        self,
+        payload: bytes,
+        token: str,
+        *,
+        fail_get: Exception | None = None,
+        fail_put: Exception | None = None,
+        include_version: bool = True,
+    ) -> None:
+        self.payload = payload
+        self.token = token
+        self.fail_get = fail_get
+        self.fail_put = fail_put
+        self.include_version = include_version
+        self.get_kwargs: dict[str, object] | None = None
+        self.uploaded: bytes | None = None
+        self.prefixes_seen: list[str] = []
+        self.local_archive_dir: Path | None = None
+        self.upload_observations: list[tuple[str, bool]] = []
+
+    def head_object(self, **_kwargs: object) -> dict[str, object]:
+        response: dict[str, object] = {
+            "ContentLength": len(self.payload),
+            "Metadata": {"printstash-create-token": self.token},
+            "ETag": '"archive-etag"',
+        }
+        if self.include_version:
+            response["VersionId"] = "version-1"
+        return response
+
+    def get_object(self, **kwargs: object) -> dict[str, object]:
+        self.get_kwargs = kwargs
+        if self.fail_get is not None:
+            raise self.fail_get
+        return {"Body": io.BytesIO(self.payload)}
+
+    def put_object(self, **kwargs: object) -> dict[str, str]:
+        if self.fail_put is not None:
+            raise self.fail_put
+        body = kwargs["Body"]
+        assert hasattr(body, "read")
+        self.uploaded = body.read()
+        if self.local_archive_dir is not None:
+            key = str(kwargs["Key"])
+            archive = self.local_archive_dir / key.rsplit("/", 1)[-1]
+            self.upload_observations.append((key, archive.is_file()))
+        return {"ETag": '"uploaded-etag"'}
+
+    def get_paginator(self, _name: str) -> "_BackupObjectStore":
+        return self
+
+    def paginate(self, **kwargs: object) -> list[dict[str, object]]:
+        self.prefixes_seen.append(str(kwargs["Prefix"]))
+        return []
+
+
+class TestReconcileBackupPublications:
+    def test_reconciles_a_local_archive_published_before_its_receipt(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile local", content=b"local")
+        meta = backup.create_backup()
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.state = StorageObjectState.PENDING
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 1
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            assert row.state is StorageObjectState.COMMITTED
+            assert row.last_error is None
+
+    def test_blocks_a_local_archive_without_publication_evidence(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile missing", content=b"missing")
+        meta = backup.create_backup()
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.state = StorageObjectState.PENDING
+            row.size_bytes = None
+            row.sha256 = None
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
+
+    def test_blocks_a_cloud_archive_when_the_provider_is_unavailable(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: None)
+        seed_model_with_blob(backup_env, name="Reconcile cloud", content=b"cloud")
+        meta = backup.create_backup()
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "missing-bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-cloud.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key
+                    == "printstash-backups/reconcile-cloud.tar.gz",
+                )
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
+
+    def test_reconciles_a_cloud_archive_with_matching_object_proof(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile remote", content=b"remote")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        store = _BackupObjectStore(payload, "reconcile-token")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-remote.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "reconcile-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 1
+        assert store.get_kwargs is not None
+        assert store.get_kwargs["VersionId"] == "version-1"
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key
+                    == "printstash-backups/reconcile-remote.tar.gz",
+                )
+            ).one()
+            assert row.state is StorageObjectState.COMMITTED
+            assert row.version_id == "version-1"
+            assert row.etag == '"archive-etag"'
+
+    def test_blocks_a_cloud_archive_with_mismatched_object_proof(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile mismatch", content=b"mismatch")
+        meta = backup.create_backup()
+        store = _BackupObjectStore(Path(meta.path).read_bytes(), "wrong-token")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-mismatch.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "expected-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key
+                    == "printstash-backups/reconcile-mismatch.tar.gz",
+                )
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
+
+    def test_blocks_a_cloud_archive_with_a_digest_mismatch(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile digest", content=b"digest")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        changed = bytes([payload[0] ^ 1]) + payload[1:]
+        store = _BackupObjectStore(changed, "digest-token")
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-digest.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "digest-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key
+                    == "printstash-backups/reconcile-digest.tar.gz",
+                )
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
+
+    def test_retries_a_cloud_archive_when_download_fails(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile retry", content=b"retry")
+        meta = backup.create_backup()
+        store = _BackupObjectStore(
+            Path(meta.path).read_bytes(), "retry-token", fail_get=OSError("offline")
+        )
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = "bucket/printstash-backups"
+            row.key = "printstash-backups/reconcile-retry.tar.gz"
+            row.state = StorageObjectState.PENDING
+            row.token = "retry-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key
+                    == "printstash-backups/reconcile-retry.tar.gz",
+                )
+            ).one()
+            assert row.state is StorageObjectState.PENDING
+            assert row.last_error == "retryable:OSError"
+
+    def test_creates_a_local_archive_before_uploading_its_cloud_copy(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = _BackupObjectStore(b"", "unused")
+        store.local_archive_dir = backup_env.backup_dir
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        seed_model_with_blob(backup_env, name="Cloud upload", content=b"upload")
+        meta = backup.create_backup()
+
+        assert store.uploaded == Path(meta.path).read_bytes()
+        assert store.upload_observations == [
+            (f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}", True)
+        ]
+        with backup_env.new_session() as session:
+            rows = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.backend == "backup-s3",
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].state is StorageObjectState.COMMITTED
+
+    def test_keeps_the_local_archive_when_cloud_upload_fails(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        store = _BackupObjectStore(b"", "unused", fail_put=OSError("offline"))
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+
+        seed_model_with_blob(backup_env, name="Cloud failure", content=b"upload")
+        meta = backup.create_backup()
+
+        assert Path(meta.path).is_file()
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.backend == "backup-s3",
+                )
+            ).one()
+            assert row.state is StorageObjectState.PENDING
+
+    def test_lists_a_committed_cloud_archive_from_both_prefixes(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Cloud listing", content=b"listing")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        key = f"{backup._BACKUP_S3_PREFIX}{Path(meta.path).name}"
+        store = _BackupObjectStore(payload, "unused")
+
+        def pages(**kwargs: object) -> list[dict[str, object]]:
+            store.prefixes_seen.append(str(kwargs["Prefix"]))
+            if kwargs["Prefix"] == backup._BACKUP_S3_PREFIX:
+                return [
+                    {
+                        "Contents": [
+                            {"Key": key, "Size": len(payload)},
+                            {
+                                "Key": f"{backup._BACKUP_S3_PREFIX}unowned.tar.gz",
+                                "Size": 1,
+                            },
+                        ]
+                    }
+                ]
+            return [{"Contents": []}]
+
+        store.paginate = pages  # type: ignore[method-assign]
+        monkeypatch.setattr(backup, "_get_backup_s3", lambda: store)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-s3"
+            row.namespace = (
+                f"{backup.settings.backup_s3_bucket}/{backup._BACKUP_S3_PREFIX}"
+            )
+            row.key = key
+            session.add(row)
+            session.commit()
+
+        listed = backup._list_s3_backups()
+
+        assert [item.id for item in listed] == [meta.id]
+        assert listed[0].location == "s3"
+        assert set(store.prefixes_seen) == {
+            backup._BACKUP_S3_PREFIX,
+            backup._LEGACY_BACKUP_S3_PREFIX,
+        }

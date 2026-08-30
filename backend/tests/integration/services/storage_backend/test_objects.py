@@ -4,6 +4,7 @@ move_in) and the live/trashed query scopes."""
 from __future__ import annotations
 
 import hashlib
+import json
 from io import BytesIO
 from pathlib import Path
 
@@ -75,6 +76,7 @@ def _s3_backend_raising(error_code: str) -> S3StorageBackend:
     backend = object.__new__(S3StorageBackend)
     backend._client = _Client()  # type: ignore[attr-defined]
     backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+    backend._s3_root = "vault-data"  # type: ignore[attr-defined]
     return backend
 
 
@@ -147,6 +149,7 @@ def _bare_s3_backend(client) -> S3StorageBackend:
     backend = object.__new__(S3StorageBackend)
     backend._client = client  # type: ignore[attr-defined]
     backend._bucket = "vault"  # type: ignore[attr-defined]
+    backend._s3_root = "vault-data"  # type: ignore[attr-defined]
     return backend
 
 
@@ -179,9 +182,10 @@ class TestS3GetObject:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
 
         with pytest.raises(botocore.exceptions.ClientError):
-            list(backend.stream_chunks("some/key"))
+            list(backend.stream_chunks("vault-data/some/key"))
 
 
 class TestS3CreateStream:
@@ -234,6 +238,7 @@ class TestS3RollbackCreate:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "vault"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
         receipt = CreationReceipt(
             key="vault-data/files/part.stl",
             size=5,
@@ -257,7 +262,7 @@ class TestS3RollbackCreate:
 class TestExists:
     @pytest.mark.parametrize("code", ["404", "NoSuchKey", "NotFound"])
     def test_s3_exists_false_on_missing_key(self, code: str) -> None:
-        assert _s3_backend_raising(code).exists("some/key") is False
+        assert _s3_backend_raising(code).exists("vault-data/some/key") is False
 
     @pytest.mark.parametrize("code", ["403", "AccessDenied", "InvalidAccessKeyId"])
     def test_s3_exists_raises_on_auth_error(self, code: str) -> None:
@@ -265,7 +270,7 @@ class TestExists:
         import botocore.exceptions
 
         with pytest.raises(botocore.exceptions.ClientError):
-            _s3_backend_raising(code).exists("some/key")
+            _s3_backend_raising(code).exists("vault-data/some/key")
 
     def test_s3_get_object_missing_after_exists_maps_to_file_not_found(self) -> None:
         import botocore.exceptions
@@ -283,13 +288,14 @@ class TestExists:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
 
         # This models the endpoint's exists() check succeeding immediately before
         # the object is deleted by another actor.
-        assert backend.exists("some/key") is True
-        assert backend.stat_size("some/key") == 12
+        assert backend.exists("vault-data/some/key") is True
+        assert backend.stat_size("vault-data/some/key") == 12
         with pytest.raises(FileNotFoundError):
-            list(backend.stream_chunks("some/key"))
+            list(backend.stream_chunks("vault-data/some/key"))
 
 
 class TestAdoptExisting:
@@ -347,13 +353,13 @@ class TestStatSize:
         backend = _s3_backend_raising(code)
 
         with pytest.raises(FileNotFoundError):
-            backend.stat_size("some/key")
+            backend.stat_size("vault-data/some/key")
 
     def test_s3_stat_size_preserves_non_missing_client_error(self) -> None:
         import botocore.exceptions
 
         with pytest.raises(botocore.exceptions.ClientError):
-            _s3_backend_raising("AccessDenied").stat_size("some/key")
+            _s3_backend_raising("AccessDenied").stat_size("vault-data/some/key")
 
 
 class TestObjectInfo:
@@ -365,8 +371,9 @@ class TestObjectInfo:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
 
-        info = backend.object_info("thumb.webp")
+        info = backend.object_info("vault-data/thumb.webp")
 
         assert info is not None
         assert info.size == 42
@@ -446,6 +453,23 @@ class TestMoveIn:
         monkeypatch.setitem(_overlay, "data_dir", tmp_path / "vault")
         monkeypatch.setitem(_overlay, "thumb_dir", tmp_path / "thumbs")
         monkeypatch.setitem(_overlay, "backup_dir", tmp_path / "backups")
+        for role, root in (
+            ("data", tmp_path / "vault"),
+            ("thumb", tmp_path / "thumbs"),
+        ):
+            root.mkdir(parents=True, exist_ok=True)
+            (root / ".printstash-storage-root.json").write_text(
+                json.dumps(
+                    {
+                        "format": 1,
+                        "installation": str(
+                            _overlay.get("storage_identity") or "a" * 64
+                        ),
+                        "role": role,
+                    }
+                ),
+                encoding="utf-8",
+            )
         backend = LocalStorageBackend()
         staged = tmp_path / "staged.bin"
         staged.write_bytes(b"data")
@@ -488,6 +512,7 @@ class TestEnsureBucket:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
         with pytest.raises(StorageConfigurationError, match="does not exist"):
             backend._ensure_bucket()  # type: ignore[attr-defined]
 
@@ -508,6 +533,7 @@ class TestEnsureBucket:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
 
         with pytest.raises(StorageConfigurationError, match="not accessible"):
             backend._ensure_bucket()  # type: ignore[attr-defined]
@@ -539,6 +565,7 @@ class TestPrefix:
         backend = object.__new__(S3StorageBackend)
         backend._client = _Client()  # type: ignore[attr-defined]
         backend._bucket = "test-bucket"  # type: ignore[attr-defined]
+        backend._s3_root = "vault-data"  # type: ignore[attr-defined]
 
         assert backend.destructive_lifecycle_findings() == [
             {

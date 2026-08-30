@@ -130,7 +130,13 @@ def inspect_restore_recovery() -> bool:
     try:
         journals = sorted(settings.backup_dir.glob(".restore-*.journal"))
     except OSError:
-        journals = []
+        # An unreadable backup directory cannot prove that no restore journal
+        # exists. Keep maintenance active until an operator can inspect or
+        # repair the directory; clearing the gate here would allow writes to
+        # race an unresolved restore.
+        with _mutation_condition:
+            _restore_gate.set()
+        return True
     if not journals:
         return False
 
@@ -163,9 +169,9 @@ def inspect_restore_recovery() -> bool:
 def unresolved_restore_backup_id() -> str | None:
     """Return the only journaled backup allowed to resume recovery.
 
-    ``None`` is also returned for an invalid/ambiguous journal.  Callers must
-    fail closed in that case rather than allowing a new restore to bypass the
-    unresolved operation.
+    ``None`` is returned when the journal is unreadable, malformed, or
+    ambiguous.  Callers must fail closed in that case rather than allowing a
+    new restore to bypass the unresolved operation.
     """
     try:
         journals = sorted(settings.backup_dir.glob(".restore-*.journal"))
@@ -183,7 +189,20 @@ def unresolved_restore_backup_id() -> str | None:
     if not name.startswith(prefix) or not name.endswith(suffix):
         return None
     backup_id = name[len(prefix) : -len(suffix)]
-    return backup_id or None
+    if not backup_id:
+        return None
+    # Route journals whose first record is still readable to the restore parser
+    # so sequence corruption reports the precise ``restore_journal_invalid``
+    # reason.  A completely unreadable first record has no trustworthy routing
+    # identity and must remain fail-closed (no restore may bypass maintenance).
+    try:
+        first_line = path.read_bytes().splitlines()[0]
+        started = json.loads(first_line.decode("utf-8"))
+    except (IndexError, OSError, ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(started, dict):
+        return None
+    return backup_id
 
 
 def _restore_journal_pending() -> bool:
@@ -1288,7 +1307,8 @@ def verify_backup(backup_id: str) -> BackupVerification:
                             or (
                                 str(manifest.get("version")) == MANIFEST_VERSION
                                 and (
-                                    not isinstance(entry.get("provider_id"), str)
+                                    not isinstance(entry.get("provider"), str)
+                                    or not isinstance(entry.get("provider_id"), str)
                                     or not isinstance(entry.get("transport"), str)
                                 )
                             )

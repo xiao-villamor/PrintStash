@@ -170,6 +170,9 @@ def is_configured(session: Session) -> bool:
     Both checks matter: if the DB is wiped but a stale ``system_config`` row
     survives somehow, we still surface the wizard.
     """
+    # This is a read-only predicate. In particular, first-run setup calls it
+    # before validating/provisioning a remote root; creating the singleton here
+    # would leave durable config behind when provisioning fails.
     config = session.get(SystemConfig, 1)
     if config is None or config.configured_at is None:
         return False
@@ -236,9 +239,19 @@ def apply_overlay(session: Session) -> None:
     config = session.get(SystemConfig, 1)
     if config is None:
         return
+    # Secret-key material is intentionally environment/process supplied, never
+    # persisted in SystemConfig. Keep an explicit runtime value across the
+    # replacement so credentials encrypted before applying the DB overlay stay
+    # decryptable (and test workers can use an isolated deterministic key).
+    secret_overrides = {
+        key: _overlay[key]
+        for key in ("secrets_key", "secrets_key_file")
+        if key in _overlay
+    }
     _overlay.clear()
     _merge_config_overlay(config)
     apply_environment_storage_provider(session)
+    _overlay.update(secret_overrides)
 
 
 def apply_environment_storage_provider(session: Session) -> None:

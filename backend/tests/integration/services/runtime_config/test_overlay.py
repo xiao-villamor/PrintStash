@@ -57,6 +57,16 @@ class TestApplyOverlay:
 
         assert _overlay.get("storage_backend") == "leftover"
 
+    def test_apply_overlay_preserves_external_secrets_key(
+        self, db_session: Session
+    ) -> None:
+        runtime_config.get_or_create(db_session)
+        _overlay["secrets_key"] = "worker-isolated-key"
+
+        runtime_config.apply_overlay(db_session)
+
+        assert _overlay["secrets_key"] == "worker-isolated-key"
+
     def test_apply_overlay_copies_all_persisted_fields(
         self, db_session: Session
     ) -> None:

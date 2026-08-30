@@ -444,6 +444,22 @@ class OpenDALStorageBackend(StorageBackend):
         self._probe_diagnostics["destructive_access"] = True
         self._probe_diagnostics["conditional_create"] = True
 
+    def provision_root(self) -> None:
+        """Create the configured SFTP root during an explicitly authorized setup.
+
+        Startup and health checks intentionally call only ``check``.  A missing
+        enrolled root therefore remains a fail-closed condition instead of being
+        silently replaced by an empty directory.  The first-run setup wizard is
+        the sole caller of this mutating seam.
+        """
+        if self._spec.kind is not TransportKind.SFTP:
+            raise StorageConfigurationError("remote_root_provisioning_unsupported")
+        provision = getattr(self._operator, "provision_root", None)
+        if provision is None:
+            raise StorageConfigurationError("sftp_root_provisioning_unavailable")
+        provision()
+        self._operator.check()
+
     def verify_destructive_access(self, keys: list[str]) -> None:
         """Probe create/delete on a fresh key, never on a caller's object."""
         del keys
@@ -475,6 +491,10 @@ class OpenDALStorageBackend(StorageBackend):
 
     def list_keys(self, prefix: str = "") -> list[str]:
         return list(self.walk_keys(prefix))
+
+    def list_prefix(self, prefix: str = "") -> list[str]:
+        """Return full storage keys below a namespace-relative prefix."""
+        return self.list_keys(prefix)
 
     def walk_keys(self, prefix: str = "") -> Iterator[str]:
         relative = self._relative(prefix) if prefix else ""
@@ -658,6 +678,14 @@ class _AsyncSSHSFTPOperator:
 
         self._run(operation)
 
+    def provision_root(self) -> None:
+        async def operation(client) -> None:
+            # This method is intentionally separate from ``check``.  Only an
+            # explicit setup flow may create a missing enrolled root.
+            await client.makedirs(self._root, exist_ok=True)
+
+        self._run(operation)
+
     def exists(self, relative: str) -> bool:
         async def operation(client) -> bool:
             return bool(await client.exists(self._path(relative)))
@@ -666,6 +694,9 @@ class _AsyncSSHSFTPOperator:
 
     def write_stream(self, relative: str, source: BinaryIO) -> None:
         async def operation(client) -> None:
+            # Never recreate an enrolled root after a mount disappears.  Only
+            # the explicit first-run ``provision_root`` seam may create it.
+            await client.stat(self._root)
             path = self._path(relative)
             parent = posixpath.dirname(path)
             if parent:
@@ -681,13 +712,32 @@ class _AsyncSSHSFTPOperator:
 
     def write_exclusive(self, relative: str, source: BinaryIO) -> None:
         """Write using SFTP's server-side O_EXCL (AsyncSSH ``x`` mode)."""
+        import asyncssh
 
         async def operation(client) -> None:
+            # See ``write_stream``: a runtime write must fail closed when the
+            # enrolled root is no longer mounted, rather than recreating a
+            # new empty directory in the wrong filesystem.
+            await client.stat(self._root)
             path = self._path(relative)
             parent = posixpath.dirname(path)
             if parent:
                 await client.makedirs(parent, exist_ok=True)
-            writer = await client.open(path, "xb")
+            try:
+                writer = await client.open(path, "xb")
+            except asyncssh.SFTPFailure as exc:
+                # Some OpenSSH/SFTP servers report O_EXCL collisions as the
+                # generic SFTP_FAILURE status. Confirm the destination after
+                # that failure before translating it; an unrelated server or
+                # transport error must remain visible and no overwrite is
+                # ever attempted.
+                try:
+                    destination_exists = await client.exists(path)
+                except Exception:
+                    raise
+                if destination_exists:
+                    raise StorageCollisionError(relative) from exc
+                raise
             try:
                 while chunk := source.read(1024 * 1024):
                     await writer.write(chunk)
@@ -703,6 +753,7 @@ class _AsyncSSHSFTPOperator:
 
     def rename(self, source: str, destination: str) -> None:
         async def operation(client) -> None:
+            await client.stat(self._root)
             target = self._path(destination)
             parent = posixpath.dirname(target)
             if parent:
@@ -761,14 +812,23 @@ class _AsyncSSHSFTPOperator:
 
         async def operation(client) -> list[SimpleNamespace]:
             found: list[SimpleNamespace] = []
+            visited: set[str] = set()
 
             async def walk(directory: str) -> None:
+                normalized = directory.strip("/")
+                if normalized in visited:
+                    return
+                visited.add(normalized)
                 path = self._path(directory)
                 if not await client.exists(path):
                     return
                 async for entry in client.scandir(path):
                     name = str(entry.filename)
+                    if name in {"", ".", ".."}:
+                        continue
                     child = posixpath.join(directory.strip("/"), name).strip("/")
+                    if child == normalized:
+                        continue
                     if entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY:
                         await walk(child)
                     else:

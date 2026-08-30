@@ -178,9 +178,13 @@ class TestEnqueueOwnedKey:
         intent = _intents(db_session)[0]
         assert intent.sha256 == digest
 
-    def test_persists_authorization_actor(self, db_session: Session, owned) -> None:
+    def test_persists_authorization_actor(
+        self, db_session: Session, owned, make_user
+    ) -> None:
         key, _receipt = owned()
-        audit.set_audit_context(actor_id=912, ip="127.0.0.1")
+        actor = make_user("deletion-authorizer")
+        assert actor.id is not None
+        audit.set_audit_context(actor_id=actor.id, ip="127.0.0.1")
         try:
             assert enqueue_owned_key(db_session, get_backend(), key)
             db_session.commit()
@@ -188,7 +192,7 @@ class TestEnqueueOwnedKey:
             audit.clear_audit_context()
 
         intent = _intents(db_session)[0]
-        assert intent.authorized_actor_id == 912
+        assert intent.authorized_actor_id == actor.id
         assert intent.authorized_at is not None
 
     def test_guarded_deletion_rejects_mismatched_hash(
