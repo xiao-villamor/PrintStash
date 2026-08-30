@@ -101,7 +101,7 @@ def _drop_unique_constraint_if_present(
 ) -> None:
     """Drop a chain-only unique constraint without breaking create-all installs."""
     bind = op.get_bind()
-    if isinstance(bind, sa.engine.Connection) and bind.dialect.name == "postgresql":
+    if isinstance(bind, sa.engine.Connection):
         names = {
             item["name"] for item in sa.inspect(bind).get_unique_constraints(table_name)
         }
@@ -111,9 +111,9 @@ def _drop_unique_constraint_if_present(
 
 
 def _drop_index_if_present(batch_op, table_name: str, index_name: str) -> None:
-    """Skip create-all-only index gaps on online PostgreSQL upgrades."""
+    """Skip indexes absent from a released create-all schema on online upgrades."""
     bind = op.get_bind()
-    if isinstance(bind, sa.engine.Connection) and bind.dialect.name == "postgresql":
+    if isinstance(bind, sa.engine.Connection):
         names = {item["name"] for item in sa.inspect(bind).get_indexes(table_name)}
         if index_name not in names:
             return
@@ -135,8 +135,6 @@ def _replace_postgres_named_constraint(
 ) -> None:
     """Converge a released PostgreSQL constraint while keeping offline SQL useful."""
     bind = op.get_bind()
-    if bind.dialect.name != "postgresql":
-        return
 
     existing_names: set[str] | None = None
     existing: list[dict] | None = None
@@ -165,10 +163,11 @@ def _replace_postgres_named_constraint(
         ):
             return
         for item in matching:
-            batch_op.drop_constraint(
-                batch_op.f(item["name"]),
-                type_="foreignkey",
-            )
+            if item.get("name"):
+                batch_op.drop_constraint(
+                    batch_op.f(item["name"]),
+                    type_="foreignkey",
+                )
         batch_op.create_foreign_key(
             batch_op.f(target_name),
             referred_table,
@@ -200,6 +199,64 @@ def _replace_postgres_named_constraint(
             list(referred_columns),
             ondelete=ondelete,
         )
+
+
+def _sqlite_fk_copy_from(
+    table_name: str,
+    *,
+    columns: tuple[str, ...],
+    referred_table: str,
+    referred_columns: tuple[str, ...],
+    target_name: str,
+    ondelete: str | None,
+) -> sa.Table | None:
+    """Prepare a SQLite batch copy when the legacy FK is unnamed.
+
+    SQLite's inspector reports ``create_all`` foreign keys without names, while
+    Alembic requires a name to drop a constraint. Removing the legacy constraint
+    from a reflected ``copy_from`` table lets the batch rebuild replace it without
+    creating duplicate semantic foreign keys.
+    """
+    bind = op.get_bind()
+    if (
+        op.get_context().as_sql
+        or bind.dialect.name != "sqlite"
+        or not isinstance(bind, sa.engine.Connection)
+    ):
+        return None
+    inspector = sa.inspect(bind)
+    matching = [
+        item
+        for item in inspector.get_foreign_keys(table_name)
+        if tuple(item.get("constrained_columns") or ()) == columns
+        and item.get("referred_table") == referred_table
+        and tuple(item.get("referred_columns") or ()) == referred_columns
+    ]
+    if not matching or any(
+        (item.get("options") or {}).get("ondelete") == ondelete for item in matching
+    ):
+        return None
+    if not any(item.get("name") is None for item in matching):
+        return None
+
+    copied = sa.Table(table_name, sa.MetaData(), autoload_with=bind)
+    for constraint in list(copied.foreign_key_constraints):
+        if (
+            tuple(element.parent.name for element in constraint.elements) == columns
+            and constraint.referred_table.name == referred_table
+            and tuple(element.column.name for element in constraint.elements)
+            == referred_columns
+        ):
+            copied.constraints.remove(constraint)
+    copied.append_constraint(
+        sa.ForeignKeyConstraint(
+            list(columns),
+            [f"{referred_table}.{column}" for column in referred_columns],
+            name=target_name,
+            ondelete=ondelete,
+        )
+    )
+    return copied
 
 
 def upgrade() -> None:
@@ -864,7 +921,18 @@ def upgrade() -> None:
             existing_nullable=False,
         )
 
-    with op.batch_alter_table("vault_audit_findings", schema=None) as batch_op:
+    with op.batch_alter_table(
+        "vault_audit_findings",
+        schema=None,
+        copy_from=_sqlite_fk_copy_from(
+            "vault_audit_findings",
+            columns=("run_id",),
+            referred_table="vault_audit_runs",
+            referred_columns=("id",),
+            target_name="fk_vault_audit_findings_run_id_vault_audit_runs",
+            ondelete="CASCADE",
+        ),
+    ) as batch_op:
         _replace_postgres_named_constraint(
             batch_op,
             "vault_audit_findings",

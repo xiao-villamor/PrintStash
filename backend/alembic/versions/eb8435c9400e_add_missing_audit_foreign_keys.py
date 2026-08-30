@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "eb8435c9400e"
@@ -67,6 +69,42 @@ def _assert_safe_to_rebuild() -> None:
             "the rebuild drops each table and a live constraint from another table "
             "refuses that. Alembic's engine normally leaves enforcement off."
         )
+
+
+def _has_foreign_key(table: str, column: str, referred: str) -> bool:
+    """Return whether a released schema already has this FK, named or not."""
+    bind = op.get_bind()
+    if op.get_context().as_sql or not isinstance(bind, sa.engine.Connection):
+        return False
+    return any(
+        tuple(item.get("constrained_columns") or ()) == (column,)
+        and item.get("referred_table") == referred
+        and tuple(item.get("referred_columns") or ()) == ("id",)
+        for item in sa.inspect(bind).get_foreign_keys(table)
+    )
+
+
+def _create_foreign_key_if_missing(
+    batch_op, table: str, name: str, referred: str, column: str
+) -> None:
+    """Add an audit FK only when the released create_all schema lacks it."""
+    if not _has_foreign_key(table, column, referred):
+        batch_op.create_foreign_key(name, referred, [column], ["id"])
+
+
+def _drop_foreign_key_if_present(batch_op, table: str, name: str) -> None:
+    """Downgrade only the named FK this migration added.
+
+    A released create_all SQLite database may already enforce the same relationship
+    through an unnamed FK. The upgrade leaves that constraint in place, so the
+    downgrade must not try to drop a name it never added.
+    """
+    bind = op.get_bind()
+    if isinstance(bind, sa.engine.Connection):
+        names = {item.get("name") for item in sa.inspect(bind).get_foreign_keys(table)}
+        if name not in names:
+            return
+    batch_op.drop_constraint(name, type_="foreignkey")
 
 
 # Every (table, column, referred table) this migration constrains. Also the list the
@@ -153,92 +191,143 @@ def upgrade() -> None:
     _detach_orphans()
 
     with op.batch_alter_table("collections", schema=None) as batch_op:
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "collections",
             batch_op.f("fk_collections_created_by_users"),
             "users",
-            ["created_by"],
-            ["id"],
+            "created_by",
         )
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "collections",
             batch_op.f("fk_collections_deleted_by_users"),
             "users",
-            ["deleted_by"],
-            ["id"],
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "collections",
             batch_op.f("fk_collections_updated_by_users"),
             "users",
-            ["updated_by"],
-            ["id"],
+            "updated_by",
         )
 
     with op.batch_alter_table("files", schema=None) as batch_op:
-        batch_op.create_foreign_key(
-            batch_op.f("fk_files_deleted_by_users"), "users", ["deleted_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "files",
+            batch_op.f("fk_files_deleted_by_users"),
+            "users",
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "files",
             batch_op.f("fk_files_external_library_id_external_libraries"),
             "external_libraries",
-            ["external_library_id"],
-            ["id"],
+            "external_library_id",
         )
 
     with op.batch_alter_table("models", schema=None) as batch_op:
-        batch_op.create_foreign_key(
-            batch_op.f("fk_models_created_by_users"), "users", ["created_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "models",
+            batch_op.f("fk_models_created_by_users"),
+            "users",
+            "created_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_models_deleted_by_users"), "users", ["deleted_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "models",
+            batch_op.f("fk_models_deleted_by_users"),
+            "users",
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_models_updated_by_users"), "users", ["updated_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "models",
+            batch_op.f("fk_models_updated_by_users"),
+            "users",
+            "updated_by",
         )
 
     with op.batch_alter_table("print_jobs", schema=None) as batch_op:
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "print_jobs",
             batch_op.f("fk_print_jobs_created_by_users"),
             "users",
-            ["created_by"],
-            ["id"],
+            "created_by",
         )
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "print_jobs",
             batch_op.f("fk_print_jobs_deleted_by_users"),
             "users",
-            ["deleted_by"],
-            ["id"],
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
+        _create_foreign_key_if_missing(
+            batch_op,
+            "print_jobs",
             batch_op.f("fk_print_jobs_updated_by_users"),
             "users",
-            ["updated_by"],
-            ["id"],
+            "updated_by",
         )
 
     with op.batch_alter_table("printers", schema=None) as batch_op:
-        batch_op.create_foreign_key(
-            batch_op.f("fk_printers_created_by_users"), "users", ["created_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "printers",
+            batch_op.f("fk_printers_created_by_users"),
+            "users",
+            "created_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_printers_deleted_by_users"), "users", ["deleted_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "printers",
+            batch_op.f("fk_printers_deleted_by_users"),
+            "users",
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_printers_updated_by_users"), "users", ["updated_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "printers",
+            batch_op.f("fk_printers_updated_by_users"),
+            "users",
+            "updated_by",
         )
 
     with op.batch_alter_table("tags", schema=None) as batch_op:
-        batch_op.create_foreign_key(
-            batch_op.f("fk_tags_created_by_users"), "users", ["created_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "tags",
+            batch_op.f("fk_tags_created_by_users"),
+            "users",
+            "created_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_tags_deleted_by_users"), "users", ["deleted_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "tags",
+            batch_op.f("fk_tags_deleted_by_users"),
+            "users",
+            "deleted_by",
         )
-        batch_op.create_foreign_key(
-            batch_op.f("fk_tags_updated_by_users"), "users", ["updated_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "tags",
+            batch_op.f("fk_tags_updated_by_users"),
+            "users",
+            "updated_by",
         )
 
     with op.batch_alter_table("users", schema=None) as batch_op:
-        batch_op.create_foreign_key(
-            batch_op.f("fk_users_deleted_by_users"), "users", ["deleted_by"], ["id"]
+        _create_foreign_key_if_missing(
+            batch_op,
+            "users",
+            batch_op.f("fk_users_deleted_by_users"),
+            "users",
+            "deleted_by",
         )
 
     _assert_no_orphans_in_new_constraints()
@@ -248,70 +337,71 @@ def downgrade() -> None:
     _assert_safe_to_rebuild()
 
     with op.batch_alter_table("collections", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_collections_created_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "collections", batch_op.f("fk_collections_created_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_collections_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "collections", batch_op.f("fk_collections_deleted_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_collections_updated_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "collections", batch_op.f("fk_collections_updated_by_users")
         )
 
     with op.batch_alter_table("files", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_files_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "files", batch_op.f("fk_files_deleted_by_users")
         )
-        batch_op.drop_constraint(
+        _drop_foreign_key_if_present(
+            batch_op,
+            "files",
             batch_op.f("fk_files_external_library_id_external_libraries"),
-            type_="foreignkey",
         )
 
     with op.batch_alter_table("models", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_models_created_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "models", batch_op.f("fk_models_created_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_models_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "models", batch_op.f("fk_models_deleted_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_models_updated_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "models", batch_op.f("fk_models_updated_by_users")
         )
 
     with op.batch_alter_table("print_jobs", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_print_jobs_created_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "print_jobs", batch_op.f("fk_print_jobs_created_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_print_jobs_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "print_jobs", batch_op.f("fk_print_jobs_deleted_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_print_jobs_updated_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "print_jobs", batch_op.f("fk_print_jobs_updated_by_users")
         )
 
     with op.batch_alter_table("printers", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_printers_created_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "printers", batch_op.f("fk_printers_created_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_printers_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "printers", batch_op.f("fk_printers_deleted_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_printers_updated_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "printers", batch_op.f("fk_printers_updated_by_users")
         )
 
     with op.batch_alter_table("tags", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_tags_created_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "tags", batch_op.f("fk_tags_created_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_tags_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "tags", batch_op.f("fk_tags_deleted_by_users")
         )
-        batch_op.drop_constraint(
-            batch_op.f("fk_tags_updated_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "tags", batch_op.f("fk_tags_updated_by_users")
         )
 
     with op.batch_alter_table("users", schema=None) as batch_op:
-        batch_op.drop_constraint(
-            batch_op.f("fk_users_deleted_by_users"), type_="foreignkey"
+        _drop_foreign_key_if_present(
+            batch_op, "users", batch_op.f("fk_users_deleted_by_users")
         )
