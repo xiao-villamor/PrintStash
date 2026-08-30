@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 from pathlib import Path
 
+import pytest
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
+from sqlmodel import Session
 
 from alembic import command
+from app.core.config import _overlay, settings
 from app.db import migrate as migrate_mod
+from app.services import runtime_config
+from app.services.storage_backend import S3StorageBackend
 from tests.factories.migration_rows import (
     RELEASED_V0121_REVISION,
     create_released_v0121_sqlite_schema,
@@ -33,6 +39,17 @@ def _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
         with engine.begin() as connection:
             create_released_v0121_sqlite_schema(connection)
             seed_released_v0121_rows(connection)
+            # A real legacy install stored only compatibility S3 fields; the
+            # new root column must be introduced and pinned by the upgrade.
+            seed_schema_row(
+                connection,
+                "system_config",
+                id=1,
+                storage_backend="s3",
+                s3_bucket="released-bucket",
+                s3_endpoint_url="https://s3.example.test",
+                s3_region="us-east-1",
+            )
             seed_schema_row(
                 connection,
                 "external_libraries",
@@ -117,6 +134,17 @@ def _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
                 ).get_current_head()
             )
             assert migrate_mod._orphan_schema_issues(engine) == []  # noqa: SLF001
+            config_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("system_config")
+            }
+            assert "s3_root" in config_columns
+            assert connection.execute(
+                text(
+                    "SELECT storage_backend, storage_provider, s3_root "
+                    "FROM system_config WHERE id = 1"
+                )
+            ).one() == ("s3", None, "vault-data")
 
             for table in (
                 "collections",
@@ -155,3 +183,83 @@ class TestReleasedV0121Upgrade:
         _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
             tmp_path
         )
+
+    def test_legacy_s3_key_preserves_pinned_root_across_restart(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A released S3 key remains readable through two fresh adapter instances."""
+        url = f"sqlite:///{tmp_path / 'released-v0.12.1-s3.sqlite'}"
+        engine = create_engine(url)
+        try:
+            with engine.begin() as connection:
+                create_released_v0121_sqlite_schema(connection)
+                seed_released_v0121_rows(connection)
+                seed_schema_row(
+                    connection,
+                    "system_config",
+                    id=1,
+                    storage_backend="s3",
+                    s3_bucket="released-bucket",
+                    s3_endpoint_url="https://s3.example.test",
+                    s3_region="us-east-1",
+                )
+            command.stamp(
+                migrate_mod._alembic_config(url),
+                RELEASED_V0121_REVISION,  # noqa: SLF001
+            )
+            command.upgrade(migrate_mod._alembic_config(url), "head")  # noqa: SLF001
+
+            key = "vault-data/files/released-model.stl"
+            payload = b"legacy object bytes"
+            calls: list[tuple[str, str]] = []
+
+            class FakeS3:
+                def get_object(self, *, Bucket: str, Key: str, **_kwargs):
+                    calls.append(("get", Key))
+                    assert Bucket == "released-bucket"
+                    assert Key == key
+                    return {"Body": BytesIO(payload)}
+
+                def get_paginator(self, name: str):
+                    assert name == "list_objects_v2"
+
+                    class Paginator:
+                        def paginate(self, *, Bucket: str, Prefix: str):
+                            assert Bucket == "released-bucket"
+                            assert Prefix == "vault-data/"
+                            calls.append(("list", Prefix))
+                            return [{"Contents": [{"Key": key}]}]
+
+                    return Paginator()
+
+            fake = FakeS3()
+            monkeypatch.setattr("boto3.client", lambda **_kwargs: fake)
+            monkeypatch.setattr(
+                settings._frozen,
+                "s3_root",
+                "operator-drift",  # noqa: SLF001
+            )
+
+            with Session(engine) as session:
+                runtime_config.apply_overlay(session)
+                first = S3StorageBackend(check_bucket=False)
+                assert first.read_bytes(key) == payload
+                assert first.list_keys() == [key]
+
+            # A restart clears process-local overlay state and projects the DB
+            # row again. The ambient root remains deliberately different.
+            _overlay.clear()
+            with Session(engine) as session:
+                runtime_config.apply_overlay(session)
+                second = S3StorageBackend(check_bucket=False)
+                assert second.read_bytes(key) == payload
+                assert second.list_keys() == [key]
+
+            assert calls == [
+                ("get", key),
+                ("list", "vault-data/"),
+                ("get", key),
+                ("list", "vault-data/"),
+            ]
+        finally:
+            engine.dispose()

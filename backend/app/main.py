@@ -232,11 +232,18 @@ async def lifespan(app: FastAPI):
         apply_overlay(session)
         from app.services.runtime_config import (
             enroll_legacy_local_roots,
+            ensure_legacy_s3_root,
             ensure_storage_identity,
         )
 
         if not restore_maintenance:
             ensure_storage_identity(session)
+            # Migration covers normal upgrades; this bounded repair also
+            # handles stamped/create_all legacy databases.  ``apply_overlay``
+            # above already projects the historical literal during
+            # recovery-only startup without persisting while the journal is
+            # authoritative.
+            ensure_legacy_s3_root(session)
             enroll_legacy_local_roots(session)
             apply_environment_storage_provider(session)
             # Persisted runtime configuration can differ from environment

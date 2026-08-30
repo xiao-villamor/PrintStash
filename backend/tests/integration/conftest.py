@@ -46,6 +46,7 @@ from tests.factories.protocols import (
     MakePrintJob,
     MakeProvenanceSource,
     MakeShareLink,
+    MakeSystemConfig,
     MakeUser,
     UserHeaders,
 )
@@ -281,6 +282,12 @@ def make_notification_channel(db_session: Session) -> Any:
     return _bound(factories.build_notification_channel, db_session)
 
 
+@pytest.fixture
+def make_system_config(db_session: Session) -> MakeSystemConfig:
+    """A persisted runtime configuration row for startup/overlay tests."""
+    return _bound(factories.build_system_config, db_session)
+
+
 # --------------------------------------------------------------------------- #
 # Scenarios — promoted only once three files needed the same shape.
 # See `tests/factories/scenarios.py` for the promotion rules.
@@ -332,6 +339,7 @@ __all__ = [
     "MakePrinterFile",
     "MakeProvenanceSource",
     "MakeShareLink",
+    "MakeSystemConfig",
     "MakeUser",
     "UserHeaders",
     "a_member_who_can_see_one_collection",
@@ -363,6 +371,7 @@ __all__ = [
     "make_printer_file",
     "make_provenance_source",
     "make_share_link",
+    "make_system_config",
     "make_tag",
     "make_user",
     "tag_model",

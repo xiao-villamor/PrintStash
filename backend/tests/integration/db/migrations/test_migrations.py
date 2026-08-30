@@ -83,6 +83,43 @@ def _seeded_duplicate_defaults(tmp_path: Path) -> str:
 class TestDataMigrations:
     """The migrations that rewrite rows rather than schema, on real prior data."""
 
+    def test_v0121_legacy_s3_config_pins_historical_root_on_upgrade(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A released legacy S3 row keeps its physical namespace after upgrade."""
+        db_path = tmp_path / "v0121-s3-root.sqlite"
+        cfg = _upgrade_to(db_path, "e7b4c1d9a6f2")
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                seed_schema_row(
+                    connection,
+                    "system_config",
+                    id=1,
+                    storage_backend="s3",
+                    s3_bucket="released-bucket",
+                    s3_endpoint_url="https://s3.example.test",
+                    s3_region="us-east-1",
+                )
+
+            command.upgrade(cfg, "head")
+            monkeypatch.setattr(
+                "app.core.config.settings._frozen.s3_root",  # noqa: SLF001
+                "operator-drift",
+            )
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT storage_backend, storage_provider, s3_root "
+                        "FROM system_config WHERE id = 1"
+                    )
+                ).one()
+                assert row.storage_backend == "s3"
+                assert row.storage_provider is None
+                assert row.s3_root == "vault-data"
+        finally:
+            engine.dispose()
+
     def test_v0121_external_library_upgrade_preserves_linked_file_evidence(
         self, tmp_path: Path
     ) -> None:
@@ -1100,6 +1137,7 @@ class TestUpgrade:
         assert "oidc_enabled" in config_columns
         assert "oidc_client_secret" in config_columns
         assert "oidc_admin_groups" in config_columns
+        assert "s3_root" in config_columns
 
         inbox_columns = {
             col["name"]: col for col in inspector.get_columns("inbox_items")

@@ -34,6 +34,7 @@ from app.db.models import (
     PrinterProvider,
     PrinterStatus,
     StagingLease,
+    SystemConfig,
 )
 from app.services import storage_backend
 from app.services.auth import create_access_token
@@ -442,6 +443,98 @@ class TestSafeDbUrl:
 
 
 class TestLifespan:
+    @pytest.mark.asyncio
+    async def test_normal_startup_persists_missing_legacy_s3_root_before_composition(
+        self, db_session, make_system_config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        make_system_config(storage_backend="s3", s3_bucket="legacy-bucket")
+        monkeypatch.setattr(
+            app_main.settings._frozen,
+            "s3_root",
+            "operator-drift",  # noqa: SLF001
+        )
+
+        class StopAfterComposition(Exception):
+            pass
+
+        observed: dict[str, object] = {}
+
+        def stop_after_overlay(*, recover_publications=True, recovery_only=False):
+            with app_main.get_session_factory().scoped_session() as session:
+                stored = session.get(SystemConfig, 1)
+                observed["root"] = stored.s3_root if stored else None
+                observed["overlay_root"] = _overlay.get("s3_root")
+            observed["recovery_only"] = recovery_only
+            raise StopAfterComposition
+
+        from app.services import storage_paths
+
+        monkeypatch.setattr(
+            storage_paths, "validate_runtime_storage_paths", lambda: None
+        )
+        monkeypatch.setattr(app_main, "acquire_process_lock", lambda: object())
+        monkeypatch.setattr(app_main, "init_db", lambda: None)
+        monkeypatch.setattr(app_main, "inspect_restore_recovery", lambda: False)
+        monkeypatch.setattr(
+            app_main, "_prepare_storage_for_startup", stop_after_overlay
+        )
+
+        with pytest.raises(StopAfterComposition):
+            async with app_main.lifespan(app_main.app):
+                pass
+
+        assert observed == {
+            "root": "vault-data",
+            "overlay_root": "vault-data",
+            "recovery_only": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_restore_startup_projects_legacy_s3_root_without_persisting(
+        self, db_session, make_system_config, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        make_system_config(storage_backend="s3", s3_bucket="legacy-bucket")
+        monkeypatch.setattr(
+            app_main.settings._frozen,
+            "s3_root",
+            "operator-drift",  # noqa: SLF001
+        )
+
+        class StopAfterComposition(Exception):
+            pass
+
+        observed: dict[str, object] = {}
+
+        def stop_after_overlay(*, recover_publications=True, recovery_only=False):
+            with app_main.get_session_factory().scoped_session() as session:
+                stored = session.get(SystemConfig, 1)
+                observed["root"] = stored.s3_root if stored else None
+                observed["overlay_root"] = _overlay.get("s3_root")
+            observed["recovery_only"] = recovery_only
+            raise StopAfterComposition
+
+        from app.services import storage_paths
+
+        monkeypatch.setattr(
+            storage_paths, "validate_runtime_storage_paths", lambda: None
+        )
+        monkeypatch.setattr(app_main, "acquire_process_lock", lambda: object())
+        monkeypatch.setattr(app_main, "init_db", lambda: None)
+        monkeypatch.setattr(app_main, "inspect_restore_recovery", lambda: True)
+        monkeypatch.setattr(
+            app_main, "_prepare_storage_for_startup", stop_after_overlay
+        )
+
+        with pytest.raises(StopAfterComposition):
+            async with app_main.lifespan(app_main.app):
+                pass
+
+        assert observed == {
+            "root": None,
+            "overlay_root": "vault-data",
+            "recovery_only": True,
+        }
+
     def test_lifespan_keeps_admin_surface_when_sftp_probe_fails(
         self, _local_storage: None, db_session, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -104,6 +104,20 @@ class TestApplyOverlay:
         assert _overlay["oidc_allow_insecure_http"] is True
         assert "makerworld_cookie" not in _overlay
 
+    def test_apply_overlay_projects_persisted_legacy_s3_root(
+        self, db_session: Session
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_backend = "s3"
+        config.s3_bucket = "legacy-bucket"
+        config.s3_root = "historical-vault"
+        db_session.add(config)
+        db_session.commit()
+
+        runtime_config.apply_overlay(db_session)
+
+        assert _overlay["s3_root"] == "historical-vault"
+
     def test_apply_overlay_clears_stale_keys_not_in_config(
         self, db_session: Session
     ) -> None:
@@ -175,6 +189,7 @@ class TestApplyOverlay:
         assert _overlay["s3_bucket"] == "models"
         assert _overlay["s3_endpoint_url"] == "https://s3.example.test"
         assert _overlay["s3_region"] == "us-east-1"
+        assert _overlay["s3_root"] == "vault"
         assert _overlay["s3_access_key"] == "fake-access"
         assert _overlay["s3_secret_key"] == "fake-secret"
 
@@ -243,6 +258,83 @@ class TestApplyOverlay:
         config = SystemConfig(storage_provider="local")
 
         assert runtime_config._stored_provider_config(config) is None  # noqa: SLF001
+
+
+class TestLegacyS3Root:
+    def test_recovery_overlay_uses_historical_root_without_persisting(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_backend = "s3"
+        config.s3_bucket = "legacy-bucket"
+        config.s3_root = None
+        db_session.add(config)
+        db_session.commit()
+        monkeypatch.setattr(settings._frozen, "s3_root", "operator-drift")  # noqa: SLF001
+
+        # lifespan applies the overlay before its non-maintenance repair block;
+        # this is the recovery-only behavior when that block is skipped.
+        runtime_config.apply_overlay(db_session)
+
+        assert _overlay["s3_root"] == "vault-data"
+        stored = db_session.get(SystemConfig, 1)
+        assert stored is not None
+        assert stored.s3_root is None
+
+    def test_reconciles_missing_root_to_historical_literal(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_backend = "s3"
+        config.s3_bucket = "legacy-bucket"
+        config.s3_root = None
+        db_session.add(config)
+        db_session.commit()
+        monkeypatch.setattr(settings._frozen, "s3_root", "operator-drift")  # noqa: SLF001
+
+        changed = runtime_config.ensure_legacy_s3_root(db_session)
+
+        assert changed is True
+        stored = db_session.get(SystemConfig, 1)
+        assert stored is not None
+        assert stored.s3_root == "vault-data"
+        assert runtime_config.ensure_legacy_s3_root(db_session) is False
+        runtime_config.apply_overlay(db_session)
+        assert _overlay["s3_root"] == "vault-data"
+
+    def test_reconciliation_does_not_convert_typed_provider(
+        self, db_session: Session
+    ) -> None:
+        config = runtime_config.get_or_create(db_session)
+        config.storage_backend = "s3"
+        config.storage_provider = "s3"
+        config.storage_provider_config_json = (
+            '{"provider":"s3","bucket":"typed","root":"typed-root"}'
+        )
+        config.s3_root = None
+        db_session.add(config)
+        db_session.commit()
+
+        assert runtime_config.ensure_legacy_s3_root(db_session) is False
+        stored = db_session.get(SystemConfig, 1)
+        assert stored is not None
+        assert stored.s3_root is None
+
+    def test_fresh_legacy_config_pins_explicit_environment_root(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings._frozen, "s3_root", "fresh-root")  # noqa: SLF001
+
+        runtime_config.update_config(
+            db_session,
+            storage_backend="s3",
+            s3_bucket="fresh-bucket",
+        )
+
+        config = db_session.get(SystemConfig, 1)
+        assert config is not None
+        assert config.s3_root == "fresh-root"
+        assert _overlay["s3_root"] == "fresh-root"
 
 
 class TestApplyEnvironmentStorageProvider:

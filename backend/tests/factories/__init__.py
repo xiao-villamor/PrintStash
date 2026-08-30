@@ -98,6 +98,7 @@ from tests.factories.ops import (
     build_notification_channel,
     build_restore_marker,
     build_share_link,
+    build_system_config,
 )
 from tests.factories.printers import (
     build_material_requirement,
@@ -159,6 +160,7 @@ __all__ = [
     "build_printer_tool",
     "build_provenance_source",
     "build_share_link",
+    "build_system_config",
     "build_stored_file",
     "build_storage_delete_intent",
     "build_tag",

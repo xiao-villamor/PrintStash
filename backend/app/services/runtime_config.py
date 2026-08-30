@@ -36,6 +36,11 @@ logger = get_logger(__name__)
 # while still being allowed to pass an explicit ``None`` to clear it.
 _UNSET: Any = object()
 
+# v0.12's compatibility S3 adapter used this literal namespace. Keep it
+# independent from the process environment so legacy rows are never
+# reinterpreted after an operator changes VAULT_S3_ROOT.
+LEGACY_S3_ROOT = "vault-data"
+
 
 def get_or_create(session: Session, *, commit: bool = True) -> SystemConfig:
     """Return the singleton config row, creating an empty one if missing."""
@@ -65,6 +70,30 @@ def ensure_storage_identity(session: Session) -> str:
         session.commit()
     _overlay["storage_identity"] = config.storage_identity
     return config.storage_identity
+
+
+def ensure_legacy_s3_root(session: Session) -> bool:
+    """Pin the historical S3 root for an untyped legacy configuration.
+
+    The migration normally performs this backfill. The startup repair is kept
+    as a compatibility net for databases that were stamped or created outside
+    the normal migration path. Recovery-only startup does not call this mutating
+    repair; ``_merge_config_overlay`` still projects the literal in memory.
+    """
+    config = session.get(SystemConfig, 1)
+    if (
+        config is None
+        or config.storage_provider
+        or config.storage_backend != "s3"
+        or config.s3_root
+    ):
+        return False
+    config.s3_root = LEGACY_S3_ROOT
+    config.updated_at = utcnow()
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return True
 
 
 def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
@@ -208,6 +237,10 @@ def _merge_config_overlay(config: SystemConfig) -> None:
         _set("s3_region", config.s3_region)
         _set("s3_access_key", config.s3_access_key)
         _set("s3_secret_key", config.s3_secret_key)
+        if config.storage_backend == "s3":
+            # Recovery-only startup deliberately does not persist repairs, but
+            # must still use the historical root rather than ambient env.
+            _overlay["s3_root"] = config.s3_root or LEGACY_S3_ROOT
     if config.backup_retention_days is not None:
         _overlay["backup_retention_days"] = config.backup_retention_days
     if config.trash_retention_days is not None:
@@ -778,6 +811,13 @@ def update_config(
     _apply_str("s3_region", s3_region)
     _apply_str("s3_access_key", s3_access_key)
     _apply_str("s3_secret_key", s3_secret_key)
+    # Legacy setup stores the effective root alongside its compatibility S3
+    # fields. Existing rows are already pinned by migration/startup repair;
+    # only fill a missing value from the explicit current environment during a
+    # first-time legacy setup write.
+    if storage_backend == "s3" and not config.storage_provider and not config.s3_root:
+        config.s3_root = str(settings.s3_root)
+        pending_overlay["s3_root"] = config.s3_root
     _apply_int("backup_retention_days", backup_retention_days)
     _apply_int("trash_retention_days", trash_retention_days)
     _apply_int("model_thumbnail_width", model_thumbnail_width)

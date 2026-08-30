@@ -75,6 +75,18 @@ class TestGeneratedIdentities:
         assert factories.build_model(db_session).slug == first_run
 
 
+class TestBuildSystemConfig:
+    def test_persists_the_requested_legacy_s3_root(self, db_session: Session) -> None:
+        config = factories.build_system_config(
+            db_session,
+            storage_backend="s3",
+            s3_root="vault-data",
+        )
+
+        assert config.storage_backend == "s3"
+        assert config.s3_root == "vault-data"
+
+
 class TestBuildModel:
     def test_is_visible_through_the_live_scope(self, db_session: Session) -> None:
         model = factories.build_model(db_session)

@@ -1237,6 +1237,13 @@ class SystemConfig(SQLModel, table=True):
     # Storage backend: "local" or "s3"
     storage_backend: Optional[str] = Field(default=None, max_length=64)
 
+    # Compatibility namespace for legacy S3 storage.  v0.12 installations did
+    # not persist this value and always used the literal ``vault-data`` root;
+    # the upgrade migration backfills that value so an env change cannot point
+    # existing keys at a different prefix.  Typed providers keep their root in
+    # ``storage_provider_config_json`` instead.
+    s3_root: Optional[str] = Field(default=None, max_length=1024)
+
     # Typed provider configuration. Non-secret and secret JSON are split so
     # sanitized reads never need to deserialize plaintext credentials.
     storage_provider: Optional[str] = Field(default=None, max_length=64)

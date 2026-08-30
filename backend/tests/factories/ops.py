@@ -30,6 +30,7 @@ from app.db.models import (
     NotificationTarget,
     RestoreMarker,
     ShareLink,
+    SystemConfig,
     User,
     VaultAuditFinding,
     VaultAuditFindingState,
@@ -39,6 +40,26 @@ from app.db.models import (
     VaultAuditSeverity,
 )
 from tests.factories._support import nth, reject_aliases, save, unique_hash
+
+
+def build_system_config(
+    session: Session,
+    *,
+    storage_backend: str | None = None,
+    storage_provider: str | None = None,
+    s3_root: str | None = None,
+    **overrides: Any,
+) -> SystemConfig:
+    """A persisted runtime configuration row for startup/overlay tests."""
+    return save(
+        session,
+        SystemConfig(
+            storage_backend=storage_backend,
+            storage_provider=storage_provider,
+            s3_root=s3_root,
+            **overrides,
+        ),
+    )
 
 
 def build_restore_marker(

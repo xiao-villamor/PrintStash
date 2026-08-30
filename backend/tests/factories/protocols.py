@@ -45,6 +45,7 @@ from app.db.models import (
     PrintJobState,
     ProvenanceCapture,
     ShareLink,
+    SystemConfig,
     User,
 )
 
@@ -59,6 +60,17 @@ class MakeUser(Protocol):
         password: str = ...,
         **overrides: Any,
     ) -> User: ...
+
+
+class MakeSystemConfig(Protocol):
+    def __call__(
+        self,
+        *,
+        storage_backend: str | None = None,
+        storage_provider: str | None = None,
+        s3_root: str | None = None,
+        **overrides: Any,
+    ) -> SystemConfig: ...
 
 
 class HeadersFor(Protocol):
