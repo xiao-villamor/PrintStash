@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import errno
 import json
 from pathlib import Path
 
+import pytest
 from sqlmodel import Session, select
 
 from app.db.models import File
@@ -20,6 +22,295 @@ def _enable_feature(session: Session) -> None:
 
 
 class TestExternalRootBinding:
+    def test_matching_orphan_marker_requires_explicit_reenrollment(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="orphan-marker"
+        )
+        marker = {
+            "format": external_library.ROOT_MARKER_FORMAT,
+            "installation": "a" * 64,
+            "role": external_library.ROOT_MARKER_ROLE,
+            "library_id": library.id,
+            "root_identity": "c" * 64,
+        }
+        (root / external_library.ROOT_MARKER_FILENAME).write_text(
+            json.dumps(marker), encoding="utf-8"
+        )
+
+        assert external_library.root_binding_state(library) == (
+            "unbound",
+            "orphan_marker_requires_reenrollment",
+        )
+
+    @pytest.mark.parametrize(
+        ("failure", "expected"),
+        [
+            pytest.param(
+                PermissionError("denied"),
+                ("unreadable", "root_marker_unreadable"),
+                id="permission",
+            ),
+            pytest.param(
+                OSError(errno.ELOOP, "symlink loop"),
+                ("invalid", "root_marker_invalid"),
+                id="symlink-loop",
+            ),
+            pytest.param(
+                OSError(errno.EIO, "transport error"),
+                ("unreadable", "root_marker_unreadable"),
+                id="io-error",
+            ),
+            pytest.param(
+                ValueError("invalid json"),
+                ("invalid", "root_marker_invalid"),
+                id="invalid-payload",
+            ),
+        ],
+    )
+    def test_legacy_marker_read_failure_stays_fail_closed(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+        expected: tuple[str, str],
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="unreadable-marker"
+        )
+
+        def fail(_root: Path) -> dict[str, object]:
+            raise failure
+
+        monkeypatch.setattr(external_library, "_read_root_marker", fail)
+
+        assert external_library.root_binding_state(library) == expected
+
+    def test_bound_marker_with_invalid_encoding_stays_untrusted(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="invalid-encoding")
+
+        def fail(_root: Path) -> dict[str, object]:
+            raise UnicodeError("invalid marker encoding")
+
+        monkeypatch.setattr(external_library, "_read_root_marker", fail)
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "root_marker_invalid",
+        )
+
+    @pytest.mark.parametrize(
+        ("failure", "expected"),
+        [
+            pytest.param(
+                PermissionError("denied"),
+                ("unreadable", "root_marker_unreadable"),
+                id="permission",
+            ),
+            pytest.param(
+                OSError(errno.ELOOP, "symlink loop"),
+                ("invalid", "root_marker_invalid"),
+                id="symlink-loop",
+            ),
+            pytest.param(
+                OSError(errno.EIO, "transport error"),
+                ("unreadable", "root_marker_unreadable"),
+                id="io-error",
+            ),
+            pytest.param(
+                ValueError("invalid payload"),
+                ("invalid", "root_marker_invalid"),
+                id="invalid-payload",
+            ),
+        ],
+    )
+    def test_bound_marker_read_failure_stays_fail_closed(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+        expected: tuple[str, str],
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="bound-failure")
+
+        def fail(_root: Path) -> dict[str, object]:
+            raise failure
+
+        monkeypatch.setattr(external_library, "_read_root_marker", fail)
+
+        assert external_library.root_binding_state(library) == expected
+
+    def test_invalid_durable_token_never_trusts_the_configured_root(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="invalid-token")
+        library.root_identity = "short"
+        db_session.add(library)
+        db_session.commit()
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "invalid_root_identity",
+        )
+
+    def test_unreadable_bound_root_never_reaches_its_marker(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="unreadable-root")
+        monkeypatch.setattr(external_library.os, "access", lambda *_args: False)
+
+        assert external_library.root_binding_state(library) == (
+            "unreadable",
+            "root_path_unreadable",
+        )
+
+    def test_nonobject_marker_result_never_binds_a_root(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="nonobject-marker")
+        monkeypatch.setattr(external_library, "_read_root_marker", lambda _root: [])
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "root_marker_invalid",
+        )
+
+    def test_oversized_marker_never_binds_a_root(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(db_session, root, name="oversized-marker")
+        marker = root / external_library.ROOT_MARKER_FILENAME
+        marker.write_bytes(b"x" * 4097)
+
+        assert external_library.root_binding_state(library) == (
+            "invalid",
+            "root_marker_invalid",
+        )
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_state"),
+        [
+            pytest.param(PermissionError("denied"), "unreadable", id="permission"),
+            pytest.param(OSError(errno.EIO, "transport error"), "invalid", id="io"),
+            pytest.param(UnicodeError("invalid encoding"), "invalid", id="encoding"),
+        ],
+    )
+    def test_enrollment_rejects_an_unreadable_existing_marker(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+        expected_state: str,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="enrollment-failure"
+        )
+
+        def fail(_root: Path) -> dict[str, object]:
+            raise failure
+
+        monkeypatch.setattr(external_library, "_read_root_marker", fail)
+
+        with pytest.raises(external_library.ExternalRootBindingError) as caught:
+            external_library.enroll_external_root(db_session, library)
+
+        assert caught.value.state == expected_state
+        assert library.root_identity is None
+
+    def test_enrollment_never_overwrites_a_concurrent_marker(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="concurrent-marker"
+        )
+        monkeypatch.setattr(external_library, "_create_marker", lambda *_args: False)
+
+        with pytest.raises(external_library.ExternalRootBindingError) as caught:
+            external_library.enroll_external_root(db_session, library)
+
+        assert caught.value.state == "mismatch"
+        assert library.root_identity is None
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param([], id="not-object"),
+            pytest.param(
+                {
+                    "format": 2,
+                    "installation": "a" * 64,
+                    "role": external_library.ROOT_MARKER_ROLE,
+                    "library_id": 1,
+                    "root_identity": "b" * 64,
+                },
+                id="wrong-format",
+            ),
+            pytest.param(
+                {
+                    "format": external_library.ROOT_MARKER_FORMAT,
+                    "installation": "short",
+                    "role": external_library.ROOT_MARKER_ROLE,
+                    "library_id": 1,
+                    "root_identity": "b" * 64,
+                },
+                id="invalid-identity",
+            ),
+        ],
+    )
+    def test_marker_payload_rejects_noncanonical_identity(
+        self, payload: object
+    ) -> None:
+        with pytest.raises(ValueError, match="root_marker_invalid"):
+            external_library._validate_marker_payload(payload)  # noqa: SLF001
+
     def test_legacy_library_is_unbound_without_scan_mutation(
         self, tmp_path: Path, db_session: Session
     ) -> None:

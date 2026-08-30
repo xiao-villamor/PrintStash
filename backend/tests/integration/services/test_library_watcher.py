@@ -285,6 +285,23 @@ class TestComputeDesired:
 
 
 class TestStopWatcher:
+    def test_start_watcher_is_idempotent_for_an_active_library(
+        self, tmp_path: Path
+    ) -> None:
+        watcher = lw.LibraryWatcher()
+
+        async def _run() -> None:
+            await watcher._start_watcher(1, str(tmp_path), False)  # noqa: SLF001
+            original = watcher.tasks[1]
+
+            await watcher._start_watcher(1, str(tmp_path / "other"), True)  # noqa: SLF001
+
+            assert watcher.tasks[1] is original
+            assert watcher.watched_roots[1] == str(tmp_path)
+            await watcher._stop_watcher(1)  # noqa: SLF001
+
+        asyncio.run(_run())
+
     def test_a_watchers_task_lifecycle_is_symmetrical(self, tmp_path: Path) -> None:
         watcher = lw.LibraryWatcher()
 

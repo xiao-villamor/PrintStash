@@ -62,6 +62,17 @@ def _id_from(archive: Path) -> str:
     return archive.name.removesuffix(".tar.gz").rsplit("-", 1)[-1]
 
 
+def _stream_archive(first_name: str, payload: bytes) -> io.BytesIO:
+    output = io.BytesIO()
+    with gzip.GzipFile(fileobj=output, mode="wb") as compressed:
+        with tarfile.open(fileobj=compressed, mode="w:") as archive:
+            info = tarfile.TarInfo(first_name)
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+    output.seek(0)
+    return output
+
+
 def _fresh_archive(env: BackupEnv) -> tuple[Path, dict[str, bytes], dict]:
     seed_model_with_blob(env, name="Verified", content=b"solid verified\n")
     meta = backup.create_backup()
@@ -71,7 +82,7 @@ def _fresh_archive(env: BackupEnv) -> tuple[Path, dict[str, bytes], dict]:
 
 
 class TestBackupProviderIdentity:
-    def test_opendal_webdav_provider_ref_pins_endpoint_root_and_provider(self) -> None:
+    def test_opendal_webdav_provider_ref_pins_destination_identity(self) -> None:
         from app.services.storage_opendal import OpenDALStorageBackend
         from app.services.storage_ownership import provider_ref_for_backend
         from app.services.storage_providers import TransportKind, TransportSpec
@@ -111,6 +122,35 @@ class TestBackupProviderIdentity:
             make("https://dav.example.test/base/", root="other-root")
         )
 
+
+class TestBackupManifestStream:
+    def test_nonmanifest_first_member_is_not_discovered(self) -> None:
+        body = _stream_archive("db.sqlite3", b"database")
+
+        assert backup._read_manifest_from_stream(body) is None
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param(b"not-json", id="invalid-json"),
+            pytest.param(b"[]", id="nonobject-json"),
+        ],
+    )
+    def test_malformed_manifest_is_not_discovered(self, payload: bytes) -> None:
+        body = _stream_archive("manifest.json", payload)
+
+        assert backup._read_manifest_from_stream(body) is None
+
+    def test_unreadable_journal_directory_keeps_cache_pinned(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fail_glob(_path: Path, _pattern: str):
+            raise OSError("journal directory unavailable")
+
+        monkeypatch.setattr(Path, "glob", fail_glob)
+
+        assert backup._cache_path_pinned_by_restore_journal("cache") is True
+
     def test_opendal_webdav_provider_ref_rejects_secret_endpoint_components(
         self,
     ) -> None:
@@ -139,7 +179,7 @@ class TestBackupProviderIdentity:
             with pytest.raises(ValueError, match="storage_provider_endpoint_invalid"):
                 provider_ref_for_backend(backend)
 
-    def test_opendal_sftp_provider_ref_pins_host_port_user_root_and_provider(
+    def test_opendal_sftp_provider_ref_pins_destination_identity(
         self,
     ) -> None:
         from app.services.storage_opendal import OpenDALStorageBackend
@@ -174,7 +214,7 @@ class TestBackupProviderIdentity:
         assert original != provider_ref_for_backend(make(port=2222))
         assert original != provider_ref_for_backend(make(root="other-root"))
 
-    def test_normalizes_endpoint_without_secrets_and_rejects_secret_components(
+    def test_endpoint_normalization_excludes_secret_components(
         self,
     ) -> None:
         assert backup._normalize_provider_endpoint("HTTPS://Example.COM:443/") == (
@@ -185,7 +225,7 @@ class TestBackupProviderIdentity:
         with pytest.raises(ValueError, match="backup_s3_endpoint_invalid"):
             backup._normalize_provider_endpoint("https://example.com/?token=secret")
 
-    def test_provider_ref_is_stable_for_credential_rotation_and_changes_target(
+    def test_provider_ref_depends_only_on_destination_identity(
         self,
     ) -> None:
         original = SimpleNamespace(
@@ -241,7 +281,7 @@ class TestBackupProviderIdentity:
         with pytest.raises(ValueError, match="backup_s3_endpoint_invalid"):
             backup._normalize_provider_endpoint(endpoint)
 
-    def test_normalizes_default_ports_and_ipv6_without_changing_identity(self) -> None:
+    def test_endpoint_normalization_preserves_canonical_identity(self) -> None:
         assert backup._normalize_provider_endpoint("HTTPS://Example.COM:443/") == (
             "https://example.com"
         )
@@ -309,7 +349,7 @@ class TestBackupProviderIdentity:
         )
         assert original == provider_ref_for_backend(rotated, namespace="vault-a/data")
 
-    def test_source_ref_binds_provider_namespace_and_key(self) -> None:
+    def test_source_ref_pins_complete_object_identity(self) -> None:
         first = backup._source_ref(
             location="s3", provider_ref="a" * 64, namespace="bucket/prefix", path="k"
         )
@@ -1441,6 +1481,110 @@ class TestBackupStorageHelpers:
         assert "access-key" not in rendered
         assert "secret-key" not in rendered
 
+    def test_s3_archive_download_requires_an_immutable_identity(self) -> None:
+        target = backup._BackupS3Target(
+            client=object(),
+            bucket="backup-bucket",
+            signature="fingerprint",
+        )
+
+        with pytest.raises(
+            backup.BackupOwnershipError,
+            match="backup_remote_identity_unavailable",
+        ):
+            backup._download_s3_archive(target, "printstash-backups/archive.tar.gz")
+
+    def test_s3_archive_download_pins_etag_then_closes_the_body(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, str]] = []
+        body = io.BytesIO(b"remote-archive")
+
+        class Store:
+            def get_object(self, **kwargs: str) -> dict[str, object]:
+                calls.append(kwargs)
+                return {"Body": body, "ETag": '"etag"'}
+
+        target = backup._BackupS3Target(
+            client=Store(),
+            bucket="backup-bucket",
+            signature="fingerprint",
+        )
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+
+        archive, response = backup._download_s3_archive(
+            target,
+            "printstash-backups/archive.tar.gz",
+            etag='"etag"',
+        )
+
+        assert archive.read_bytes() == b"remote-archive"
+        assert response["ETag"] == '"etag"'
+        assert body.closed is True
+        assert calls == [
+            {
+                "Bucket": "backup-bucket",
+                "Key": "printstash-backups/archive.tar.gz",
+                "IfMatch": '"etag"',
+            }
+        ]
+
+    def test_remote_identity_is_required_before_candidate_validation(self) -> None:
+        with pytest.raises(
+            RuntimeError, match="backup_remote_identity_unavailable"
+        ):
+            backup._require_remote_identity({})
+
+    def test_unconfigured_remote_provider_has_no_adoption_candidates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: None)
+
+        assert backup.discover_unowned_s3_backups() == []
+
+    def test_missing_local_backup_root_has_no_adoption_candidates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path / "missing")
+
+        assert backup.discover_unowned_local_backups() == []
+
+    def test_remote_download_refuses_an_unavailable_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = backup.BackupMeta(
+            id="remote",
+            created_at="2026-01-01T00:00:00+00:00",
+            size_bytes=1,
+            storage_backend="s3",
+            file_count=0,
+            app_version="0.13.0",
+            path="printstash-backups/remote.tar.gz",
+            location="s3",
+        )
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: None)
+
+        with pytest.raises(RuntimeError, match="no S3 client"):
+            backup._download_backup_to_local(meta)
+
+    def test_unknown_source_reference_never_falls_back_to_a_sibling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = backup.BackupMeta(
+            id="shared",
+            created_at="2026-01-01T00:00:00+00:00",
+            size_bytes=1,
+            storage_backend="local",
+            file_count=0,
+            app_version="0.13.0",
+            path="/backups/shared.tar.gz",
+            location="local",
+            source_ref="known-source",
+        )
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: [meta])
+
+        assert backup.get_backup("shared", source_ref="unknown-source") is None
+
     def test_rejects_a_non_sqlite_database_backup(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1978,7 +2122,12 @@ class TestListBackupsSafety:
 
         monkeypatch.setattr(backup, "get_session_factory", fail_factory)
 
-        assert backup._active_restore_marker("backup-id") is None
+        assert (
+            backup._active_restore_marker(
+                "backup-id", operation_nonce="b" * 64, archive_sha256="a" * 64
+            )
+            is None
+        )
 
     def test_returns_false_when_active_marker_is_absent(
         self, monkeypatch: pytest.MonkeyPatch

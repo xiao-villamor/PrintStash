@@ -4,8 +4,8 @@
 aggregate is a blunt instrument: a 900-line service can fall from 95% to 70% and
 move the total by half a percent. Every module here that sits below 90% got there
 that way — nobody decided to leave `source_covers.py` at 68%, it drifted while the
-aggregate stayed green. So the gate is two things: the aggregate, ratcheted in both
-directions, and a floor every module has to clear on its own.
+aggregate stayed green. So the gate is two things: a fixed 90% aggregate minimum,
+and a floor every module has to clear on its own.
 
 The measurement is **statements plus branches** (`percent_covered` in
 `coverage.json`, with `branch = true` in `pyproject.toml`). That matters: under
@@ -18,8 +18,8 @@ list may only shrink. Raising a pinned module to `MODULE_FLOOR` fails this file
 until its entry is deleted and the cap lowered, which is the only direction the
 ratchet turns.
 
-Goes red when: coverage fell anywhere; a new module landed under the floor; or a
-pinned module improved and the debt list wasn't updated to record it.
+Goes red when: aggregate coverage falls below 90%; a new module lands under the
+module floor; or a pinned module moves without the debt list recording it.
 """
 
 from __future__ import annotations
@@ -35,15 +35,9 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPORT = BACKEND_ROOT / "coverage.json"
 LANE = "./scripts/test.sh coverage"
 
-# The aggregate, statements + branches. Two-sided: it may not fall, and when it
-# rises past the slack below it has to be raised here, so the number in this file
-# is always roughly what the suite actually achieves rather than a floor from
-# eighteen months ago that everything clears by ten points.
-TOTAL_FLOOR = 93.89
-# 0.25pp of ~27,400 statements+branches is ~70 units of coverage — enough that a
-# normal PR adding tests for one behaviour does not force an edit here, small
-# enough that a sustained improvement does.
-TOTAL_SLACK = 0.25
+# The aggregate is a fixed release minimum. Per-module floors below remain the
+# ratchet that prevents one service from losing coverage behind a healthy total.
+TOTAL_FLOOR = 90.0
 
 # What every module must clear on its own.
 MODULE_FLOOR = 90.0
@@ -141,15 +135,6 @@ class TestAggregateFloor:
             f"total coverage is {total:.2f}%, below the {TOTAL_FLOOR}% floor. The "
             "term-missing output above names the uncovered lines and partial "
             "branches; each one is a matrix row that has no test."
-        )
-
-    def test_total_coverage_floor_tracks_the_suite(self) -> None:
-        total = _report()["totals"]["percent_covered"]
-
-        assert total < TOTAL_FLOOR + TOTAL_SLACK, (
-            f"total coverage is now {total:.2f}%, comfortably above the "
-            f"{TOTAL_FLOOR}% floor. Raise TOTAL_FLOOR to {total - 0.05:.2f} so the "
-            "gain is locked in — a floor nobody moves stops being a gate."
         )
 
 

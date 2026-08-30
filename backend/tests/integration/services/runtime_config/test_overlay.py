@@ -9,10 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, delete
 
 from app.core.config import _overlay, settings
-from app.db.models import SystemConfig
+from app.db.models import File, SystemConfig
 from app.services import runtime_config
 
 
@@ -25,6 +25,33 @@ def _clean_overlay():
 
 
 class TestApplyOverlay:
+    def test_fresh_unconfigured_roots_wait_for_setup_enrollment(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        # The shared suite fixture carries an external-print sentinel File;
+        # production Alembic databases do not. Remove it to model a genuinely
+        # empty first boot rather than a legacy library with managed rows.
+        db_session.exec(delete(File))
+        db_session.commit()
+        data_root = tmp_path / "files"
+        thumb_root = tmp_path / "thumbs"
+        data_root.mkdir()
+        thumb_root.mkdir()
+        _overlay.update(
+            {
+                "storage_backend": "local",
+                "data_dir": data_root,
+                "thumb_dir": thumb_root,
+            }
+        )
+
+        runtime_config.ensure_storage_identity(db_session)
+        result = runtime_config.enroll_legacy_local_roots(db_session)
+
+        assert result == {"data": False, "thumb": False}
+        assert list(data_root.iterdir()) == []
+        assert list(thumb_root.iterdir()) == []
+
     def test_markerless_nonempty_thumb_root_is_not_auto_enrolled(
         self, db_session: Session, tmp_path: Path
     ) -> None:

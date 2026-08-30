@@ -40,6 +40,34 @@ from tests.integration.services.external_library._helpers import (
 
 
 class TestScanLibrary:
+    @pytest.mark.parametrize(
+        ("relative_path", "expected_error"),
+        [
+            pytest.param("../outside", "path_outside_library_root", id="outside"),
+            pytest.param("missing", "path_missing_or_unreadable", id="missing"),
+        ],
+    )
+    def test_partial_scan_rejects_an_untrusted_subtree(
+        self,
+        tmp_path: Path,
+        db_session: Session,
+        relative_path: str,
+        expected_error: str,
+    ) -> None:
+        use_local_storage(tmp_path)
+        enable_feature(db_session)
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        library = build_external_library(db_session, nas, name="bounded-scan")
+
+        summary = external_library.scan_library(
+            library.id, relative_path=relative_path
+        )
+
+        assert summary["aborted"] is True
+        assert expected_error in summary["error"]
+        assert external_files(db_session, live_only=False) == []
+
     def test_unmounted_root_aborts_without_deleting(
         self, tmp_path: Path, db_session: Session
     ) -> None:

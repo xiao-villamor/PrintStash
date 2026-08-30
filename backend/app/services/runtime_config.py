@@ -100,9 +100,10 @@ def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
     """Safely bind markerless v0.12 local roots during startup.
 
     A markerless non-empty root is enrolled only when DB-referenced managed
-    files still match their recorded size and hash. Empty roots are allowed for
-    a genuinely new, unconfigured installation; all other roots remain read-only
-    until an explicit enrollment flow proves them.
+    files still match their recorded size and hash. A genuinely new,
+    unconfigured installation leaves even empty roots untouched: first-run
+    setup is the only flow allowed to claim them. All other roots remain
+    read-only until an explicit enrollment flow proves them.
     """
     from app.services.storage_backend import enroll_legacy_local_root
 
@@ -138,15 +139,11 @@ def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
         and all(char in "0123456789abcdefABCDEF" for char in file.sha256)
     ][:3]
     fresh_install = not is_configured(session) and not managed_rows_exist
-
-    def root_is_empty(root: Path) -> bool:
-        try:
-            return root.is_dir() and not any(
-                entry.name != ".printstash-storage-root.json"
-                for entry in root.iterdir()
-            )
-        except OSError:
-            return False
+    if fresh_install:
+        # Startup is unauthenticated and must not mutate a candidate mount.
+        # Besides preserving that ownership boundary, leaving the roots truly
+        # empty lets /setup validate them before it writes their binding.
+        return {"data": False, "thumb": False}
 
     data_proofs: list[tuple[Path, int, str | None]] = [
         (Path(file.path), file.size_bytes, file.sha256) for file in files if file.path
@@ -158,7 +155,6 @@ def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
         role="data",
         installation=identity,
         proofs=data_proofs,
-        allow_empty=fresh_install and root_is_empty(data_root),
     )
 
     # Thumbnail rows historically carried no content hash. A same-size file at
@@ -187,7 +183,6 @@ def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
         role="thumb",
         installation=identity,
         proofs=thumb_proofs,
-        allow_empty=fresh_install and root_is_empty(thumb_root),
         allow_size_only=thumb_is_co_located and data_enrolled,
     )
     return {"data": data_enrolled, "thumb": thumb_enrolled}

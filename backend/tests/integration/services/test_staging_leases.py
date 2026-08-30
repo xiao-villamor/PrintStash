@@ -67,6 +67,20 @@ def _job(session: Session, user: User) -> BackgroundJob:
     return row
 
 
+class TestEntryHelpers:
+    @pytest.mark.parametrize("receipt_id", ["", "unsafe/receipt"])
+    def test_unsafe_receipt_id_has_no_quarantine_destination(
+        self, tmp_path: Path, receipt_id: str
+    ) -> None:
+        assert (
+            staging_leases._quarantine_entry_path(tmp_path / "upload", receipt_id)
+            is None
+        )
+
+    def test_absent_quarantine_destination_is_not_present(self) -> None:
+        assert staging_leases._entry_present(None) is False
+
+
 class TestTransfer:
     def test_a_transfer_leaves_exactly_one_owner(
         self, db_session: Session, tmp_path: Path
@@ -844,6 +858,12 @@ class TestMatchingCaptureStagingPath:
 
         assert staging_leases._matching_capture_staging_path(lease) is None
 
+    def test_refuses_a_spool_with_a_different_recorded_inode(self, spool) -> None:
+        path = spool()
+        lease = self._lease(path, inode=path.stat().st_ino + 1)
+
+        assert staging_leases._matching_capture_staging_path(lease) is None
+
     def test_refuses_a_spool_whose_marker_names_another_slot(
         self, spool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -868,6 +888,15 @@ class TestMatchingCaptureStagingPath:
         monkeypatch.setattr(
             staging_leases.os, "getxattr", lambda _p, _n: b"slot-1", raising=False
         )
+
+        assert staging_leases._matching_capture_staging_path(lease) == path
+
+    def test_falls_back_to_inode_proof_when_xattr_api_is_absent(
+        self, spool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = spool()
+        lease = self._lease(path)
+        monkeypatch.delattr(staging_leases.os, "getxattr")
 
         assert staging_leases._matching_capture_staging_path(lease) == path
 

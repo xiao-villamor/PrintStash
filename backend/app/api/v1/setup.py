@@ -402,7 +402,11 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
     if settings.storage_backend == "local":
         # First-run setup is the sole flow allowed to provision managed roots.
         ensure_dirs(create_managed_roots=True)
-        from app.services.storage_backend import enroll_legacy_local_root
+        from app.services.storage_backend import (
+            LocalStorageBackend,
+            bind_backend,
+            enroll_legacy_local_root,
+        )
 
         identity = runtime_config.ensure_storage_identity(session)
         for role, root in (
@@ -420,6 +424,18 @@ def _complete_setup(body: SetupRequest, session: Session) -> SetupResponse:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="storage_root_enrollment_failed",
                 )
+
+        # Startup deliberately bound a recovery-mode adapter while these roots
+        # were still unowned. Replace that snapshot now so the first upload
+        # after setup works without requiring a process restart.
+        active_backend = LocalStorageBackend()
+        active_backend.ensure_setup()
+        if active_backend.recovery_mode:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="storage_root_enrollment_failed",
+            )
+        bind_backend(active_backend)
 
     logger.info(
         "first-run setup complete: user=%s data_dir=%s thumb_dir=%s",

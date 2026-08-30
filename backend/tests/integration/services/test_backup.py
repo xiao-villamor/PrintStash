@@ -1507,6 +1507,240 @@ class TestVerifyBackup:
         } in result.findings
 
 
+class TestVerifyBackupOwnership:
+    @staticmethod
+    def _verification(*, valid: bool) -> backup.BackupVerification:
+        return backup.BackupVerification(
+            backup_id="verified",
+            valid=valid,
+            app_compatible=True,
+            manifest_version="1",
+            checked_members=1,
+            findings=[] if valid else [{"code": "backup_member_hash_mismatch"}],
+        )
+
+    def test_missing_ledger_row_is_reported_without_discovery(self) -> None:
+        result = backup.verify_backup_ownership(987654)
+
+        assert result.status == "missing"
+        assert result.error == "backup_ownership_not_found"
+
+    @pytest.mark.parametrize(
+        ("state", "last_error", "expected_status", "expected_error"),
+        [
+            pytest.param(
+                StorageObjectState.BLOCKED,
+                "root_binding_mismatch",
+                "identity",
+                "root_binding_mismatch",
+                id="blocked-with-detail",
+            ),
+            pytest.param(
+                StorageObjectState.BLOCKED,
+                None,
+                "identity",
+                "backup_ownership_blocked",
+                id="blocked-without-detail",
+            ),
+            pytest.param(
+                StorageObjectState.PENDING,
+                None,
+                "missing",
+                "backup_ownership_not_committed",
+                id="pending",
+            ),
+        ],
+    )
+    def test_noncommitted_receipt_keeps_its_ledger_classification(
+        self,
+        db_session: Session,
+        state: StorageObjectState,
+        last_error: str | None,
+        expected_status: str,
+        expected_error: str,
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            object_kind="backup",
+            state=state,
+            last_error=last_error,
+        )
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == expected_status
+        assert result.error == expected_error
+
+    def test_nonbackup_receipt_is_never_treated_as_an_archive(
+        self, db_session: Session
+    ) -> None:
+        row = build_owned_storage_object(db_session, object_kind="model")
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == "missing"
+        assert result.error == "backup_ownership_not_found"
+
+    def test_unrecognized_archive_name_uses_the_ledger_identity(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        archive = tmp_path / "custom-name"
+        row = build_owned_storage_object(
+            db_session,
+            backend="local",
+            namespace="local/backups",
+            key=str(archive),
+            object_kind="backup-legacy",
+        )
+        assert row.id is not None
+        verification = self._verification(valid=True)
+        backup_ids: list[str] = []
+
+        def verify(
+            backup_id: str, *, archive_path: Path, record_audit: bool
+        ) -> backup.BackupVerification:
+            backup_ids.append(backup_id)
+            assert archive_path == archive
+            assert record_audit is False
+            return verification
+
+        monkeypatch.setattr(backup, "verify_backup", verify)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == "valid"
+        assert backup_ids == [str(row.id)]
+
+    @pytest.mark.parametrize(
+        ("valid", "expected_status"),
+        [
+            pytest.param(True, "valid", id="valid"),
+            pytest.param(False, "corrupt", id="corrupt"),
+        ],
+    )
+    def test_local_receipt_reports_archive_verification_status(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        valid: bool,
+        expected_status: str,
+    ) -> None:
+        archive = tmp_path / "printstash-verified.tar.gz"
+        row = build_owned_storage_object(
+            db_session,
+            backend="local",
+            namespace="local/backups",
+            key=str(archive),
+            object_kind="backup",
+        )
+        verification = self._verification(valid=valid)
+        calls: list[tuple[str, Path, bool]] = []
+
+        def verify(
+            backup_id: str, *, archive_path: Path, record_audit: bool
+        ) -> backup.BackupVerification:
+            calls.append((backup_id, archive_path, record_audit))
+            return verification
+
+        monkeypatch.setattr(backup, "verify_backup", verify)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == expected_status
+        assert result.verification is verification
+        assert calls == [("verified", archive, False)]
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_status", "expected_error"),
+        [
+            pytest.param(
+                FileNotFoundError("gone"),
+                "missing",
+                "FileNotFoundError",
+                id="missing",
+            ),
+            pytest.param(
+                backup.BackupOwnershipError("backup_archive_digest_mismatch"),
+                "digest",
+                "backup_archive_digest_mismatch",
+                id="digest",
+            ),
+            pytest.param(
+                backup.BackupOwnershipError("backup_provider_identity_mismatch"),
+                "identity",
+                "backup_provider_identity_mismatch",
+                id="identity",
+            ),
+            pytest.param(
+                PermissionError("denied"),
+                "inaccessible",
+                "PermissionError",
+                id="inaccessible",
+            ),
+        ],
+    )
+    def test_remote_receipt_preserves_failure_classification(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+        expected_status: str,
+        expected_error: str,
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key="printstash-backups/remote.tar.gz",
+            object_kind="backup",
+            provider_ref="remote-provider",
+        )
+
+        def fail(_meta: backup.BackupMeta) -> Path:
+            raise failure
+
+        monkeypatch.setattr(backup, "_download_backup_to_local", fail)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == expected_status
+        assert result.error == expected_error
+
+    def test_remote_verification_retires_its_downloaded_cache(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-s3",
+            namespace="archive-bucket/printstash-backups/",
+            key="printstash-backups/remote.tar.gz",
+            object_kind="backup",
+            provider_ref="remote-provider",
+        )
+        cache = tmp_path / "remote-cache.tar.gz"
+        verification = self._verification(valid=True)
+        cleaned: list[Path] = []
+        monkeypatch.setattr(
+            backup, "_download_backup_to_local", lambda _meta: cache
+        )
+        monkeypatch.setattr(
+            backup, "verify_backup", lambda *_args, **_kwargs: verification
+        )
+        monkeypatch.setattr(backup, "cleanup_backup_cache", cleaned.append)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == "valid"
+        assert cleaned == [cache]
+
+
 class TestDeleteBackup:
     def test_delete_backup_removes_archive(self, backup_env: BackupEnv):
         seed_model_with_blob(backup_env, name="Widget", content=b"x")
@@ -1714,7 +1948,7 @@ class TestDownloadBackupToLocal:
 
 
 class TestBackupCacheRecovery:
-    def test_restore_carries_remote_and_cache_receipts_then_cleans_exact_cache(
+    def test_restore_retires_only_its_owned_cloud_cache(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _, key = seed_model_with_blob(
@@ -1928,6 +2162,194 @@ class TestBackupCacheRecovery:
                 == "backup"
             )
 
+    def test_missing_cache_receipt_is_retired_without_touching_other_rows(
+        self, backup_env: BackupEnv
+    ) -> None:
+        cache_root = backup_env.backup_dir / ".cloud-cache"
+        cache_root.mkdir(parents=True)
+        missing = cache_root / "missing.tar.gz"
+        root_archive = backup_env.backup_dir / "root.tar.gz"
+        with backup_env.new_session() as session:
+            missing_row = build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=storage_backend.LocalStorageBackend().namespace_for(
+                    str(missing)
+                ),
+                key=str(missing),
+                object_kind="backup-cloud-cache",
+            )
+            root_row = build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=storage_backend.LocalStorageBackend().namespace_for(
+                    str(root_archive)
+                ),
+                key=str(root_archive),
+                object_kind="backup",
+            )
+            missing_id = missing_row.id
+            root_id = root_row.id
+
+        assert backup.reconcile_backup_caches() == 1
+
+        with backup_env.new_session() as session:
+            assert session.get(OwnedStorageObject, missing_id) is None
+            assert session.get(OwnedStorageObject, root_id) is not None
+
+    @pytest.mark.parametrize(
+        ("size_bytes", "sha256", "expected_error"),
+        [
+            pytest.param(None, None, "backup_cache_evidence_missing", id="no-proof"),
+            pytest.param(5, "0" * 64, "StorageCollisionError", id="wrong-digest"),
+        ],
+    )
+    def test_unprovable_cache_is_blocked_without_deleting_bytes(
+        self,
+        backup_env: BackupEnv,
+        size_bytes: int | None,
+        sha256: str | None,
+        expected_error: str,
+    ) -> None:
+        cache_root = backup_env.backup_dir / ".cloud-cache"
+        cache_root.mkdir(parents=True)
+        cache = cache_root / "unprovable.tar.gz"
+        cache.write_bytes(b"cache")
+        with backup_env.new_session() as session:
+            row = build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=storage_backend.LocalStorageBackend().namespace_for(
+                    str(cache)
+                ),
+                key=str(cache),
+                object_kind="backup-cloud-cache",
+                state=StorageObjectState.PENDING,
+                size_bytes=size_bytes,
+                sha256=sha256,
+            )
+            row_id = row.id
+
+        assert backup.reconcile_backup_caches() == 0
+
+        assert cache.read_bytes() == b"cache"
+        with backup_env.new_session() as session:
+            row = session.get(OwnedStorageObject, row_id)
+            assert row is not None
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == expected_error
+
+    def test_pending_cache_with_exact_proof_becomes_committed(
+        self, backup_env: BackupEnv
+    ) -> None:
+        cache_root = backup_env.backup_dir / ".cloud-cache"
+        cache_root.mkdir(parents=True)
+        cache = cache_root / "pending.tar.gz"
+        payload = b"pending-cache"
+        cache.write_bytes(payload)
+        with backup_env.new_session() as session:
+            row = build_owned_storage_object(
+                session,
+                backend="local",
+                namespace=storage_backend.LocalStorageBackend().namespace_for(
+                    str(cache)
+                ),
+                key=str(cache),
+                object_kind="backup-cloud-cache",
+                state=StorageObjectState.PENDING,
+                size_bytes=len(payload),
+                sha256=hashlib.sha256(payload).hexdigest(),
+            )
+            row_id = row.id
+
+        assert backup.reconcile_backup_caches() == 1
+
+        with backup_env.new_session() as session:
+            row = session.get(OwnedStorageObject, row_id)
+            assert row is not None
+            assert row.state is StorageObjectState.COMMITTED
+            assert row.committed_at is not None
+
+    def test_stale_cache_delete_failure_preserves_bytes_for_recovery(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        backend = storage_backend.LocalStorageBackend()
+        cache_root = backup_env.backup_dir / ".cloud-cache"
+        cache_root.mkdir(parents=True)
+        cache = cache_root / "stale-failure.tar.gz"
+        payload = b"recoverable-cache"
+        with backup_env.new_session() as session:
+            store_owned_bytes(
+                session,
+                backend,
+                str(cache),
+                payload,
+                object_kind="backup-cloud-cache",
+            )
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == str(cache))
+            ).one()
+            row.created_at = row.created_at - timedelta(days=2)
+            row_id = row.id
+            session.add(row)
+            session.commit()
+
+        def fail_delete(*_args: object, **_kwargs: object) -> bool:
+            raise OSError("storage temporarily unavailable")
+
+        monkeypatch.setattr(backup, "delete_owned_key", fail_delete)
+
+        assert backup.reconcile_backup_caches() == 0
+
+        assert cache.read_bytes() == payload
+        with backup_env.new_session() as session:
+            row = session.get(OwnedStorageObject, row_id)
+            assert row is not None
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "OSError"
+
+    def test_malformed_restore_journal_never_pins_an_unrelated_cache(
+        self, backup_env: BackupEnv
+    ) -> None:
+        journal = backup_env.backup_dir / ".restore-corrupt.journal"
+        journal.write_text("not-json\n", encoding="utf-8")
+
+        assert backup._cache_path_pinned_by_restore_journal("unrelated") is False
+
+    def test_ownership_queries_keep_provider_namespaces_separate(
+        self, backup_env: BackupEnv
+    ) -> None:
+        with backup_env.new_session() as session:
+            first = build_owned_storage_object(
+                session,
+                backend="backup-s3",
+                namespace="first/printstash-backups/",
+                key="printstash-backups/shared.tar.gz",
+                provider_ref="first-provider",
+                object_kind="backup",
+            )
+            build_owned_storage_object(
+                session,
+                backend="backup-s3",
+                namespace="second/printstash-backups/",
+                key="printstash-backups/shared.tar.gz",
+                provider_ref="second-provider",
+                object_kind="backup",
+            )
+            first_key = first.key
+
+        assert backup._committed_backup_keys(
+            "backup-s3",
+            namespace="first/printstash-backups/",
+            provider_ref="first-provider",
+        ) == {first_key}
+        rows = backup._backup_ownership_rows(
+            key="printstash-backups/shared.tar.gz", bucket="first"
+        )
+        assert [row.provider_ref for row in rows] == ["first-provider"]
+
     def test_unresolved_restore_pins_cache_with_both_receipts(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -2027,7 +2449,7 @@ class TestBackupCacheRecovery:
                 == digest
             )
 
-    def test_cache_path_binds_source_digest_version_and_safe_basename(
+    def test_cache_path_encodes_complete_safe_source_identity(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         payload = b"cache-identity"
@@ -2582,7 +3004,7 @@ class TestStageRestoreArchive:
 
 
 class TestRestoreDatabase:
-    def test_sync_restored_ownership_keeps_provider_siblings_and_archive_ref(
+    def test_sync_restored_ownership_preserves_exact_provider_identity(
         self, backup_env: BackupEnv
     ) -> None:
         _, key = seed_model_with_blob(
@@ -5163,7 +5585,7 @@ class TestListS3Backups:
         assert store.get_kwargs is not None
         assert store.get_kwargs["VersionId"] == "version-1"
 
-    def test_listing_reads_only_first_manifest_and_closes_cloud_body(
+    def test_listing_bounds_the_cloud_manifest_stream(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seed_model_with_blob(

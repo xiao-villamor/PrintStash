@@ -186,6 +186,30 @@ class TestSetupStatus:
 
 
 class TestCompleteSetup:
+    def test_local_setup_rebinds_a_writable_backend(
+        self, client: TestClient, runtime_dirs: Path
+    ) -> None:
+        from app.services.storage_backend import (
+            LocalStorageBackend,
+            bind_backend,
+            get_backend,
+        )
+
+        startup_backend = LocalStorageBackend()
+        startup_backend.ensure_setup()
+        assert startup_backend.recovery_mode is True
+        bind_backend(startup_backend)
+
+        response = _complete(client)
+
+        assert response.status_code == 201, response.text
+        active_backend = get_backend()
+        assert active_backend is not startup_backend
+        assert active_backend.recovery_mode is False
+        destination = runtime_dirs / "files" / "post-setup.bin"
+        active_backend.create_bytes(b"ready", str(destination))
+        assert destination.read_bytes() == b"ready"
+
     def test_provisions_an_initial_sftp_root_before_persisting_config(
         self, client: TestClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
