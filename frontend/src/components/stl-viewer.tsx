@@ -13,6 +13,13 @@ import {
   usePreviewPreferences,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
+import {
+  fitCameraToBounds,
+  heroCameraDirection,
+  screenshotDimensions,
+  screenshotHasForeground,
+  visibleCanvasBackground,
+} from "@/lib/thumbnail-camera";
 
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
@@ -21,12 +28,13 @@ export interface STLViewerControls {
   zoomOut: () => void;
   resetView: () => void;
   fit: () => void;
-  screenshot: () => void;
+  screenshot: () => Promise<void>;
 }
 
 export interface STLViewerProps {
   url: string;
   onControlsReady?: (api: STLViewerControls) => void;
+  onReadyChange?: (ready: boolean) => void;
   displayMode?: ViewerDisplayMode;
   showGrid?: boolean;
   screenshotName?: string;
@@ -34,8 +42,8 @@ export interface STLViewerProps {
 
 // The camera needs both shapes: R3F takes the tuple as a JSX prop, the orbit
 // maths needs a Vector3. Derive the vector from the tuple so they cannot drift.
-const DEFAULT_CAMERA_POSITION: THREE.Vector3Tuple = [12, 9, 14];
-const DEFAULT_CAMERA_VECTOR = new THREE.Vector3(...DEFAULT_CAMERA_POSITION);
+const DEFAULT_CAMERA_VECTOR = heroCameraDirection().multiplyScalar(18);
+const DEFAULT_CAMERA_POSITION: THREE.Vector3Tuple = DEFAULT_CAMERA_VECTOR.toArray();
 const ZOOM_FACTOR = 0.75;
 // Mesh is normalized so its largest dimension equals this many world units.
 const NORMALIZED_SIZE = 10;
@@ -82,12 +90,6 @@ function Mesh({
     onSized(sizeVec.clone().multiplyScalar(scale));
   }, [geometry, onSized]);
 
-  useEffect(() => {
-    return () => {
-      geometry.dispose();
-    };
-  }, [geometry]);
-
   return (
     <mesh ref={meshRef} geometry={geometry}>
       <meshStandardMaterial
@@ -111,115 +113,153 @@ function Scene({
   showGrid,
   screenshotName,
   screenshotScale,
-}: Required<Omit<STLViewerProps, "onControlsReady">> & {
+}: Required<Omit<STLViewerProps, "onControlsReady" | "onReadyChange">> & {
   onControlsReady?: (api: STLViewerControls) => void;
   onLoadedChange?: (loaded: boolean) => void;
   screenshotScale: ScreenshotScale;
 }) {
   const orbitRef = useRef<any>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
-  const { gl, scene, camera } = useThree();
-  const [size, setSize] = useState(
+  const { gl, scene, camera, invalidate, size: canvasSize } = useThree();
+  const [modelSize, setModelSize] = useState(
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
   const [loaded, setLoaded] = useState(false);
-  const fittedRef = useRef(false);
   const loadedChangeRef = useRef(onLoadedChange);
   useEffect(() => {
     loadedChangeRef.current = onLoadedChange;
   }, [onLoadedChange]);
   // Ref so fit() always reads the latest size without stale closure
-  const sizeRef = useRef(size);
+  const sizeRef = useRef(modelSize);
   useEffect(() => {
-    sizeRef.current = size;
-  }, [size]);
+    sizeRef.current = modelSize;
+  }, [modelSize]);
 
-  const handleSized = useCallback((nextSize: THREE.Vector3) => {
-    setSize((current) => (current.equals(nextSize) ? current : nextSize));
-    setLoaded(true);
-    loadedChangeRef.current?.(true);
-  }, []);
+  const handleSized = useCallback(
+    (nextSize: THREE.Vector3) => {
+      setModelSize((current) => (current.equals(nextSize) ? current : nextSize));
+      setLoaded(true);
+      loadedChangeRef.current?.(true);
+      invalidate();
+    },
+    [invalidate],
+  );
 
-  const gridSize = Math.max(size.x, size.z) * 2.6 || NORMALIZED_SIZE * 2.6;
-  const floorY = -size.y / 2;
+  const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
+  const floorY = -modelSize.y / 2;
 
   const controlsApi: STLViewerControls = {
     zoomIn: () => {
       if (cameraRef.current) {
         cameraRef.current.position.multiplyScalar(ZOOM_FACTOR);
         orbitRef.current?.update();
+        invalidate();
       }
     },
     zoomOut: () => {
       if (cameraRef.current) {
         cameraRef.current.position.multiplyScalar(1 / ZOOM_FACTOR);
         orbitRef.current?.update();
+        invalidate();
       }
     },
     resetView: () => {
-      orbitRef.current?.reset();
-      if (cameraRef.current) {
-        cameraRef.current.position.copy(DEFAULT_CAMERA_VECTOR);
-        cameraRef.current.lookAt(0, 0, 0);
-        orbitRef.current?.update();
-      }
+      controlsApi.fit();
     },
     fit: () => {
       const cam = cameraRef.current;
       if (!cam) return;
-      const s = sizeRef.current;
-      const maxDim = Math.max(s.x, s.y, s.z) || NORMALIZED_SIZE;
-      const fov = (cam.fov * Math.PI) / 180;
-      const distance = (maxDim / 2 / Math.tan(fov / 2)) * 1.7;
-      const dir = cam.position.clone().normalize();
-      if (dir.lengthSq() === 0) dir.copy(DEFAULT_CAMERA_VECTOR).normalize();
-      dir.multiplyScalar(distance);
+      const fit = fitCameraToBounds(
+        sizeRef.current,
+        canvasSize.width / Math.max(canvasSize.height, 1),
+        cam.fov,
+      );
       orbitRef.current?.target?.set(0, 0, 0);
-      cam.position.copy(dir);
+      cam.position.copy(fit.position);
       cam.lookAt(0, 0, 0);
       orbitRef.current?.update();
+      invalidate();
     },
-    screenshot: () => {
-      const previousPixelRatio = gl.getPixelRatio();
+    screenshot: async () => {
+      if (!loaded) throw new Error("preview_not_ready");
       const renderSize = gl.getSize(new THREE.Vector2());
-      const maxDimension = Math.max(renderSize.x, renderSize.y, 1);
-      const targetPixelRatio = Math.max(
-        1,
-        Math.min(screenshotScale, gl.capabilities.maxTextureSize / maxDimension),
+      const dimensions = screenshotDimensions(
+        renderSize.x,
+        renderSize.y,
+        screenshotScale,
+        gl.capabilities.maxTextureSize,
       );
-      let dataUrl: string;
+      const target = new THREE.WebGLRenderTarget(dimensions.width, dimensions.height, {
+        depthBuffer: true,
+        stencilBuffer: false,
+      });
+      target.texture.colorSpace = gl.outputColorSpace;
+      const previousTarget = gl.getRenderTarget();
+      const previousBackground = scene.background;
+      const visibleBackground = visibleCanvasBackground(gl.domElement);
+      const pixels = new Uint8Array(dimensions.width * dimensions.height * 4);
       try {
-        gl.setPixelRatio(targetPixelRatio);
-        gl.setSize(renderSize.x, renderSize.y, false);
+        if (visibleBackground) scene.background = visibleBackground;
+        gl.setRenderTarget(target);
         gl.render(scene, camera);
-        dataUrl = gl.domElement.toDataURL("image/png");
+        gl.readRenderTargetPixels(target, 0, 0, dimensions.width, dimensions.height, pixels);
       } finally {
-        gl.setPixelRatio(previousPixelRatio);
-        gl.setSize(renderSize.x, renderSize.y, false);
-        gl.render(scene, camera);
+        scene.background = previousBackground;
+        gl.setRenderTarget(previousTarget);
+        target.dispose();
+        invalidate();
       }
+      if (!screenshotHasForeground(pixels)) {
+        throw new Error("screenshot_empty");
+      }
+
+      const flipped = new Uint8ClampedArray(pixels.length);
+      const rowBytes = dimensions.width * 4;
+      for (let y = 0; y < dimensions.height; y += 1) {
+        const sourceStart = (dimensions.height - y - 1) * rowBytes;
+        flipped.set(pixels.subarray(sourceStart, sourceStart + rowBytes), y * rowBytes);
+      }
+      const output = document.createElement("canvas");
+      output.width = dimensions.width;
+      output.height = dimensions.height;
+      const context = output.getContext("2d");
+      if (!context) throw new Error("screenshot_canvas_unavailable");
+      context.putImageData(new ImageData(flipped, dimensions.width, dimensions.height), 0, 0);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        output.toBlob((value) => {
+          if (value && value.size > 0) resolve(value);
+          else reject(new Error("screenshot_encoding_failed"));
+        }, "image/png");
+      });
+      const dataUrl = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = dataUrl;
       link.download = `${screenshotName || "model"}.png`;
       document.body.appendChild(link);
       link.click();
       link.remove();
+      URL.revokeObjectURL(dataUrl);
     },
   };
 
   useEffect(() => {
     onControlsReady?.(controlsApi);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onControlsReady, size]);
+  }, [onControlsReady, modelSize, loaded, canvasSize.width, canvasSize.height]);
 
-  // Auto-fit once, after the mesh has actually loaded and reported its size.
   useEffect(() => {
-    if (loaded && !fittedRef.current) {
+    setLoaded(false);
+    loadedChangeRef.current?.(false);
+  }, [url]);
+
+  // Re-fit when the source or viewport changes so tall/narrow layouts retain
+  // the same safe framing as the generated thumbnail.
+  useEffect(() => {
+    if (loaded) {
       controlsApi.fit();
-      fittedRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded, size]);
+  }, [loaded, modelSize, canvasSize.width, canvasSize.height, url]);
 
   return (
     <>
@@ -230,12 +270,20 @@ function Scene({
       <directionalLight position={[-6, -4, -8]} intensity={0.25} />
       <directionalLight position={[0, -8, 0]} intensity={0.15} color="#8899bb" />
       <Suspense fallback={null}>
-        <Mesh url={url} displayMode={displayMode} onSized={handleSized} />
+        <Mesh key={url} url={url} displayMode={displayMode} onSized={handleSized} />
       </Suspense>
       {showGrid && (
         <gridHelper args={[gridSize, 26, "#94a3b8", "#475569"]} position={[0, floorY, 0]} />
       )}
-      <OrbitControls ref={orbitRef} enablePan enableZoom enableRotate />
+      <OrbitControls
+        ref={orbitRef}
+        enablePan
+        enableZoom
+        enableRotate
+        minPolarAngle={0.02}
+        maxPolarAngle={Math.PI / 2 - 0.02}
+        onChange={() => invalidate()}
+      />
     </>
   );
 }
@@ -277,6 +325,7 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
 export function STLViewer({
   url,
   onControlsReady,
+  onReadyChange,
   displayMode = "solid",
   showGrid = true,
   screenshotName = "model",
@@ -287,13 +336,17 @@ export function STLViewer({
   const meshLoaded = loadedUrl === url;
   const previewPreferences = usePreviewPreferences();
 
+  useEffect(() => {
+    onReadyChange?.(meshLoaded);
+  }, [meshLoaded, onReadyChange]);
+
   return (
     <div className="relative h-full w-full">
-      <MeshErrorBoundary>
+      <MeshErrorBoundary key={url}>
         <Canvas
           className="h-full w-full"
           dpr={previewPixelRatio(previewPreferences.previewQuality)}
-          gl={{ preserveDrawingBuffer: true }}
+          frameloop="demand"
         >
           <Scene
             url={url}

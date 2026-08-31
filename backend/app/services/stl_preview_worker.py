@@ -435,7 +435,9 @@ def _render(
     # The robust bounds already discard only the extreme centroid outliers and
     # the render bounds below retain a 5% safety expansion.  A 10% frame margin
     # gives small previews useful scale without clipping normal STL geometry.
-    margin = 0.10
+    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+
+    margin = PREVIEW_PROFILE.margin_fraction
     scale = min(
         coverage_width * (1.0 - 2 * margin) / extent_x,
         coverage_height * (1.0 - 2 * margin) / extent_y,

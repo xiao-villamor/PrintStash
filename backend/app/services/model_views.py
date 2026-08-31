@@ -167,7 +167,13 @@ def thumb_url(model: Model) -> Optional[str]:
     ``thumbnail_path`` for rows written before the file-id column existed.
     """
     if model.thumbnail_file_id:
-        return f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
+        url = f"/api/v1/files/{model.thumbnail_file_id}/thumbnail"
+        if model.thumbnail_path:
+            stem = Path(model.thumbnail_path).stem
+            if stem.startswith(f"{model.thumbnail_file_id}-"):
+                version = hashlib.sha256(model.thumbnail_path.encode()).hexdigest()[:12]
+                return f"{url}?v={version}"
+        return url
     if model.thumbnail_path:
         stem = Path(model.thumbnail_path).stem
         if stem.isdigit():

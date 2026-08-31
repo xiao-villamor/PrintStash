@@ -398,6 +398,9 @@ def render_stl_thumbnail(
             return None
         extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
         extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)
+        # Keep the coarse fallback's denser internal frame so sparse annular
+        # samples remain connected. The persistence normalizer then places the
+        # result on the canonical 10% profile canvas.
         margin = 0.18
         scale = min(
             width * (1 - 2 * margin) / extent_x,

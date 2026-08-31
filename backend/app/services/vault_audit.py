@@ -408,10 +408,23 @@ def _check_database(session: Session, run: VaultAuditRun) -> None:
                     repair_action="reparse_metadata",
                 )
         if model.thumbnail_file_id:
-            current = backend.thumbnail_key(model.thumbnail_file_id)
+            thumbnail_file = session.get(File, model.thumbnail_file_id)
+            current = (
+                model.thumbnail_path
+                or (
+                    thumbnail_file.thumbnail_path
+                    if thumbnail_file is not None
+                    else None
+                )
+                or backend.thumbnail_key(model.thumbnail_file_id)
+            )
             legacy = backend.legacy_thumbnail_key(model.thumbnail_file_id)
             try:
-                key = current if backend.exists(current) else legacy
+                if backend.exists(current):
+                    key = current
+                else:
+                    compatibility = backend.thumbnail_key(model.thumbnail_file_id)
+                    key = compatibility if backend.exists(compatibility) else legacy
                 present = backend.exists(key)
             except Exception:
                 present = False

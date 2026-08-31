@@ -413,7 +413,10 @@ class TestIngestModel:
         use_local_storage(tmp_path)
         monkeypatch.setattr(
             "app.services.mesh_processing.analyze_mesh",
-            lambda _path, report=None: ({"bbox_x_mm": 1.0}, None),
+            lambda _path, report=None, output_format="PNG": (
+                {"bbox_x_mm": 1.0},
+                None,
+            ),
         )
 
         payload = completed_job(
@@ -717,9 +720,30 @@ class TestIngestModel:
         Image.new("RGB", (12, 10), (220, 30, 20)).save(replacement_buffer, format="PNG")
         replacement = replacement_buffer.getvalue()
 
+        from app.services.thumbnail_engine import (
+            ThumbnailEngine,
+            ThumbnailResult,
+            ThumbnailStrategy,
+        )
+
         monkeypatch.setattr(
-            "app.services.mesh_processing.render_thumbnail",
-            lambda _path: replacement,
+            ThumbnailEngine,
+            "generate",
+            lambda _engine, _request: ThumbnailResult(
+                image=replacement,
+                geometry={
+                    "bbox_x_mm": None,
+                    "bbox_y_mm": None,
+                    "bbox_z_mm": None,
+                    "volume_mm3": None,
+                    "triangle_count": None,
+                },
+                strategy=ThumbnailStrategy.FULL,
+                complete=True,
+                failure_reason=None,
+                duration_ms=0,
+                peak_rss_bytes=None,
+            ),
         )
 
         response = client.post(
@@ -744,7 +768,9 @@ class TestIngestModel:
         assert thumbnail.status_code == 200, thumbnail.text
         assert thumbnail.content.startswith(WEBP_MAGIC)
         with Image.open(io.BytesIO(thumbnail.content)) as refreshed:
-            assert refreshed.convert("RGB").getpixel((0, 0)) == (220, 30, 20)
+            assert refreshed.convert("RGB").getpixel(
+                (refreshed.width // 2, refreshed.height // 2)
+            ) == (220, 30, 20)
 
     def test_ingest_refuses_an_upload_when_staging_is_full(
         self,

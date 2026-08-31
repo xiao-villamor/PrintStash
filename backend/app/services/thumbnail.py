@@ -21,7 +21,11 @@ _MAX_LINE_BYTES = 1024 * 1024
 _MAX_BASE64_BYTES = 16 * 1024 * 1024
 
 
-def to_webp(data: bytes) -> bytes:
+class ThumbnailValidationError(ValueError):
+    """A decodable candidate failed the canonical thumbnail contract."""
+
+
+def to_webp(data: bytes, *, normalize: bool = True) -> bytes:
     """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
 
     Single conversion seam for every thumbnail write. Lossless keeps the
@@ -42,13 +46,71 @@ def to_webp(data: bytes) -> bytes:
                 if img.width * img.height > _MAX_IMAGE_PIXELS:
                     raise ValueError("thumbnail_too_large")
                 img.load()
-                if img.mode not in ("RGB", "RGBA"):
-                    img = img.convert("RGBA")
                 width = int(settings.model_thumbnail_width)
-                img.thumbnail((width, round(width * 3 / 4)))
+                height = round(width * 3 / 4)
+                source_had_alpha = "A" in img.getbands()
+                source_is_webp = img.format == "WEBP"
+                rgba = img.convert("RGBA")
+                alpha_bounds = rgba.getchannel("A").getbbox()
+                if alpha_bounds is None:
+                    raise ThumbnailValidationError("thumbnail_empty")
+
+                if normalize:
+                    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+
+                    canonical_with_safe_border = (
+                        source_had_alpha
+                        and rgba.size == (width, height)
+                        and alpha_bounds[0] > 0
+                        and alpha_bounds[1] > 0
+                        and alpha_bounds[2] < width
+                        and alpha_bounds[3] < height
+                        and 0.76
+                        <= max(
+                            (alpha_bounds[2] - alpha_bounds[0]) / width,
+                            (alpha_bounds[3] - alpha_bounds[1]) / height,
+                        )
+                        <= 0.84
+                    )
+                    if not canonical_with_safe_border:
+                        rgba = rgba.crop(alpha_bounds)
+                        margin = PREVIEW_PROFILE.margin_fraction
+                        content_size = (
+                            max(round(width * (1 - 2 * margin)), 1),
+                            max(round(height * (1 - 2 * margin)), 1),
+                        )
+                        scale = min(
+                            content_size[0] / rgba.width,
+                            content_size[1] / rgba.height,
+                        )
+                        normalized_size = (
+                            max(round(rgba.width * scale), 1),
+                            max(round(rgba.height * scale), 1),
+                        )
+                        if rgba.size != normalized_size:
+                            rgba = rgba.resize(
+                                normalized_size, Image.Resampling.LANCZOS
+                            )
+                        canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+                        offset = (
+                            (width - rgba.width) // 2,
+                            (height - rgba.height) // 2,
+                        )
+                        canvas.alpha_composite(rgba, dest=offset)
+                        rgba = canvas
+                    elif source_is_webp:
+                        # The full renderer already encoded the canonical,
+                        # lossless recipe. Validation above is still shared;
+                        # only the redundant second WebP encode is skipped.
+                        return data
+                else:
+                    rgba.thumbnail((width, height), Image.Resampling.LANCZOS)
+
                 buf = io.BytesIO()
-                img.save(buf, format="WEBP", lossless=True, exact=True, method=6)
+                rgba.save(buf, format="WEBP", lossless=True, exact=True, method=6)
                 return buf.getvalue()
+    except ThumbnailValidationError:
+        raise
     except Exception as exc:
         logger.warning("thumbnail: webp conversion failed", exc_info=True)
         raise ValueError("thumbnail_too_large") from exc

@@ -43,7 +43,9 @@ from __future__ import annotations
 import io
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
+
+from .preview_profile import PREVIEW_PROFILE
 
 if TYPE_CHECKING:
     import numpy as np
@@ -53,17 +55,15 @@ if TYPE_CHECKING:
     UInt8Array: TypeAlias = NDArray[np.uint8]
     Shade: TypeAlias = Callable[[FloatArray], FloatArray]
 
-FLAT_MESH_THICKNESS_RATIO = 0.35
-
-# Render at 2x and downsample with Lanczos for anti-aliasing. (3x was trialled:
-# it only marginally smoothed residual facet banding on tessellated curves while
-# ~doubling render time and the full-frame buffer area, so it wasn't worth the
-# cost — the shading fixes, not supersampling, are what removed the artefacts.)
-_SUPERSAMPLE = 2
+FLAT_MESH_THICKNESS_RATIO = PREVIEW_PROFILE.flat_thickness_ratio
 
 # Cap candidate-pixel expansion per rasteriser chunk (~tens of MB of
 # temporaries at this size).
-_CHUNK_PIXEL_BUDGET = 2_000_000
+# One million candidates keeps the largest NumPy expansion below the RSS of
+# the 0.13.0 renderer even with the canonical 10% framing (which paints more
+# pixels than the legacy margin). Smaller batches also fit CPU caches better;
+# output is invariant because every batch resolves through the same z-buffer.
+_CHUNK_PIXEL_BUDGET = 1_000_000
 
 
 @dataclass
@@ -112,6 +112,7 @@ def render_mesh_thumbnail(
     face_chunk_size: int = 200_000,
     logger: LogSink | None = None,
     rasterise_triangles: Rasteriser | None = None,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
 ) -> bytes | None:
     """Render a PNG thumbnail from an already-loaded mesh.
 
@@ -150,8 +151,9 @@ def render_mesh_thumbnail(
         verts = np.asarray(mesh.vertices, dtype=np.float32)
         faces = np.asarray(mesh.faces, dtype=np.int64)
 
-        ss_width = width * _SUPERSAMPLE
-        ss_height = height * _SUPERSAMPLE
+        supersample = PREVIEW_PROFILE.supersample_for(width)
+        ss_width = width * supersample
+        ss_height = height * supersample
 
         # ------------------------------------------------------------------
         # 1. Centre and normalise the mesh to a unit-ish bounding sphere.
@@ -173,14 +175,14 @@ def render_mesh_thumbnail(
         view = verts @ rotation.T.astype(np.float32)  # (N, 3) camera at -Z → +Z
 
         # ------------------------------------------------------------------
-        # 3. Orthographic projection with 8% margin on each side.
+        # 3. Orthographic projection with the canonical safe margin.
         # ------------------------------------------------------------------
         xs, ys = view[:, 0], view[:, 1]
         x_min, x_max = float(xs.min()), float(xs.max())
         y_min, y_max = float(ys.min()), float(ys.max())
         extent_x = max(x_max - x_min, 1e-6)
         extent_y = max(y_max - y_min, 1e-6)
-        margin = 0.18
+        margin = PREVIEW_PROFILE.margin_fraction
         scale = min(
             (ss_width * (1 - 2 * margin)) / extent_x,
             (ss_height * (1 - 2 * margin)) / extent_y,
@@ -450,7 +452,8 @@ def render_mesh_thumbnail(
         pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba.tobytes())
         # ``Resampling`` is present in both supported Pillow lines (10 and 12),
         # while Pillow 12's typing no longer exposes the legacy Image.LANCZOS.
-        pil = pil.resize((width, height), Image.Resampling.LANCZOS)
+        if supersample > 1:
+            pil = pil.resize((width, height), Image.Resampling.LANCZOS)
 
         # Vignette: darken the corners slightly so the model "pops"
         vx = np.linspace(-1, 1, width, dtype=np.float32)
@@ -462,7 +465,16 @@ def render_mesh_thumbnail(
         pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
 
         buf = io.BytesIO()
-        pil.save(buf, format="PNG", optimize=True)
+        if output_format == "WEBP":
+            pil.save(
+                buf,
+                format="WEBP",
+                lossless=True,
+                exact=True,
+                method=PREVIEW_PROFILE.encoding_method,
+            )
+        else:
+            pil.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
 
     except Exception:
@@ -495,8 +507,9 @@ def _select_view_rotation(verts: FloatArray) -> FloatArray:
     # front-left tilted ~18° down — the way the interactive 3D viewer frames a
     # model. The old view stared 30° *down the Z axis*, which showed the top of
     # an upright model (e.g. the gathered top of a dumpling) instead of its face.
-    azim = np.radians(-35.0)  # spin around the up (Z) axis for a 3/4 view
-    tilt = np.radians(-18.0)  # look slightly down on the top
+    azim = np.radians(PREVIEW_PROFILE.hero_azimuth_degrees)
+    # View-space rotation is opposite the positive camera elevation.
+    tilt = np.radians(-PREVIEW_PROFILE.hero_elevation_degrees)
     ca, sa = np.cos(azim), np.sin(azim)
     ct, st = np.cos(tilt), np.sin(tilt)
     spin_z = np.array([[ca, -sa, 0], [sa, ca, 0], [0, 0, 1]], dtype=np.float64)
@@ -511,7 +524,7 @@ def _front_rotation_for_thin_axis(thin_axis: int) -> FloatArray:
     import numpy as np
 
     # 25° tilt rotation around the screen-X axis (tips the model top toward camera).
-    tilt = np.radians(25.0)
+    tilt = np.radians(PREVIEW_PROFILE.flat_tilt_degrees)
     ct, st = float(np.cos(tilt)), float(np.sin(tilt))
 
     if thin_axis == 0:

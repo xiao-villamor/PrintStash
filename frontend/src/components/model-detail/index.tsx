@@ -179,6 +179,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
+  const [viewerReady, setViewerReady] = useState(false);
   const viewerControls = useRef<STLViewerControls | null>(null);
   const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
   const canViewPrinters = !!user?.is_superuser;
@@ -658,6 +659,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   onControlsReady={(api) => {
                     viewerControls.current = api;
                   }}
+                  onReadyChange={setViewerReady}
                   displayMode={displayMode}
                   showGrid={showGrid}
                   screenshotName={model.slug || model.name}
@@ -686,6 +688,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 viewerMode={viewerMode}
                 setViewerMode={setViewerMode}
                 hasGcode={hasGcode}
+                viewerReady={viewerReady}
               />
             )}
 

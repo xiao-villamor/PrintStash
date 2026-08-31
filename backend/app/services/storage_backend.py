@@ -265,6 +265,20 @@ class StorageBackend(ABC):
     @abstractmethod
     def thumbnail_key(self, file_id: int) -> str: ...
 
+    def thumbnail_variant_key(
+        self, file_id: int, source_sha256: str, recipe_fingerprint: str
+    ) -> str:
+        """Create-only key for an immutable thumbnail generation.
+
+        The base key remains the legacy compatibility address. Keeping this
+        derivation on the opaque-key adapter avoids callers guessing whether a
+        configured backend uses filesystem paths, S3 keys, or another namespace.
+        """
+        base = self.thumbnail_key(file_id)
+        suffix = ".webp"
+        stem = base[: -len(suffix)] if base.endswith(suffix) else base
+        return f"{stem}-{source_sha256[:12]}-{recipe_fingerprint[:16]}.webp"
+
     @abstractmethod
     def source_cover_key(self, provenance_source_id: int) -> str: ...
 

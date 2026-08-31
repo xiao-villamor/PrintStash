@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,36 @@ def _enable_feature(session: Session) -> None:
 
 
 class TestExternalRootBinding:
+    def test_changed_source_is_rejected_before_thumbnail_processing(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        source = root / "model.stl"
+        source.write_bytes(b"original-mesh")
+        original = source.stat()
+        parent_fd = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        pinned = external_library._PinnedFile(
+            path=str(source),
+            name=source.name,
+            parent_fd=parent_fd,
+            size=original.st_size,
+            mtime=original.st_mtime,
+            device=original.st_dev,
+            inode=original.st_ino,
+        )
+        source.write_bytes(b"replacement-mesh-is-different")
+
+        try:
+            with pytest.raises(external_library.ExternalRootBindingError) as caught:
+                with external_library._open_pinned_file(pinned):
+                    raise AssertionError("changed source reached thumbnail processing")
+        finally:
+            os.close(parent_fd)
+
+        assert caught.value.state == "mismatch"
+        assert str(caught.value) == "external_file_changed"
+
     def test_matching_orphan_marker_requires_explicit_reenrollment(
         self, tmp_path: Path, db_session: Session
     ) -> None:

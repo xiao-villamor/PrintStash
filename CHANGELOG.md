@@ -75,6 +75,13 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
+- **Thumbnail generation now shares one versioned visual recipe.** Full,
+  streaming, fallback, embedded 3MF, and browser preview paths use deterministic
+  framing and an upper-hemisphere camera. Durable recipe/hash caching coalesces
+  concurrent work across instances, enforces database-backed render slots, and
+  prevents repeated CPU/GPU cost for ready or deterministically failed results.
+  Screenshots render on demand from the visible scene without retaining the
+  drawing buffer, reject empty captures, and obey texture and 16-megapixel caps.
 - **The browser extension now shows its normal SemVer release.** The popup header
   displays the packaged `0.x.y` version, and every browser manifest derives that
   version from the extension package so release identifiers cannot drift.

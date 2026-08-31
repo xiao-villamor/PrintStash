@@ -70,7 +70,9 @@ def get_shared_thumbnail(
     model = session.get(Model, link.model_id)
     if model is None or model.thumbnail_file_id is None:
         raise HTTPException(status_code=404, detail="not_found")
-    return thumbnail_response(model.thumbnail_file_id, request)
+    return thumbnail_response(
+        model.thumbnail_file_id, request, thumbnail_path=model.thumbnail_path
+    )
 
 
 @router.get(

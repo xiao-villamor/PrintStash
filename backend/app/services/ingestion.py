@@ -46,7 +46,6 @@ from app.services.storage_backend import (
 )
 from app.services.storage_ownership import (
     provider_ref_for_backend,
-    publish_bytes,
     publish_file,
 )
 
@@ -186,12 +185,17 @@ def verify_durable_artifact(
         ):
             raise ArtifactDurabilityError("artifact_rows_not_durable")
         primary_key = artifact.path
+        thumbnail_key = artifact.thumbnail_path
 
     backend = get_backend()
     if not backend.exists(primary_key):
         raise ArtifactDurabilityError("artifact_blob_not_durable")
     if thumbnail_status in {"generated", "fallback_generated"}:
-        if not backend.exists(backend.thumbnail_key(file_id)):
+        # New generations are immutable, recipe-versioned objects. Keep the
+        # legacy address only as a read-compatible fallback for artifacts that
+        # predate durable thumbnail generations.
+        candidate = thumbnail_key or backend.thumbnail_key(file_id)
+        if not backend.exists(candidate):
             raise ThumbnailDurabilityError("thumbnail_blob_not_durable")
 
 
@@ -636,28 +640,29 @@ def persist_artifact(
     # own durable reservation never competes with an already-open SQLite writer.
     if thumb_bytes:
         assert file_row.id is not None
-        candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
-        thumbnail_receipt = None
         try:
-            encoded_thumbnail = thumbnail.to_webp(thumb_bytes)
-            thumbnail_receipt = publish_bytes(
-                session,
-                backend,
-                candidate_thumbnail_key,
-                encoded_thumbnail,
-                object_kind="thumbnail",
+            from app.services.thumbnail_engine import ThumbnailStrategy
+            from app.services.thumbnail_generations import (
+                publish_precomputed_thumbnail,
             )
-            file_row.thumbnail_path = candidate_thumbnail_key
-            session.add(file_row)
-            if overwrite_thumbnail or not model.thumbnail_path:
-                model.thumbnail_path = candidate_thumbnail_key
-                model.thumbnail_file_id = file_row.id
-                session.add(model)
-            session.commit()
+
+            is_fallback = isinstance(thumb_bytes, FallbackThumbnail)
+            publish_precomputed_thumbnail(
+                session,
+                file_row,
+                thumb_bytes,
+                strategy=(
+                    ThumbnailStrategy.FALLBACK
+                    if is_fallback
+                    else ThumbnailStrategy.FULL
+                ),
+                complete=not is_fallback or thumb_bytes.complete,
+                promote=overwrite_thumbnail or not model.thumbnail_path,
+                normalize=file_type != FileType.GCODE,
+                backend=backend,
+            )
         except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
             session.rollback()
-            if thumbnail_receipt is not None:
-                backend.rollback_create(thumbnail_receipt)
             logger.exception(
                 "thumbnail derivation failed; continuing Artifact persistence",
                 extra={"file_id": file_row.id},
@@ -1122,7 +1127,7 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
         # Single mesh load for both geometry and thumbnail.
-        return mesh_processing.analyze_mesh(path, report=report)
+        return mesh_processing.analyze_mesh(path, report=report, output_format="WEBP")
 
     return IngestionStrategy(
         file_type=file_type,
