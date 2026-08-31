@@ -45,6 +45,7 @@ class TestPreviewProfile:
 
         assert generated_path.read_text() == generator.render_typescript(manifest)
 
+    @staticmethod
     @pytest.mark.parametrize(
         ("call", "expected"),
         [
@@ -62,11 +63,11 @@ class TestPreviewProfile:
             ),
         ],
     )
-    @staticmethod
     def test_profile_scalar_validation_is_typed(call, expected: str) -> None:
         with pytest.raises(ValueError, match=expected):
             call()
 
+    @staticmethod
     @pytest.mark.parametrize(
         "mutate",
         [
@@ -74,7 +75,6 @@ class TestPreviewProfile:
             lambda payload: payload.__setitem__("marginFraction", 0.5),
         ],
     )
-    @staticmethod
     def test_profile_structure_rejects_invalid_recipe(monkeypatch, mutate) -> None:
         manifest = json.loads(
             (
