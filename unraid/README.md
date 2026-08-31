@@ -29,7 +29,9 @@ your own storage, with no subscription or required external account.
   inventory, upload, start, controls, and job history.
 - **Operations and cost:** measured Moonraker print duration and filament use,
   print statistics, optional Spoolman synchronization, Prometheus metrics, and
-  local or S3-compatible backup and storage options.
+  local or remote storage and S3-compatible backup options. Local and generic
+  S3 are stable; named S3, Nextcloud/WebDAV, and SFTP presets are beta (see
+  [storage providers](../docs/storage-providers.md)).
 
 See the [full capabilities](https://www.printstash.org/capabilities),
 [printer compatibility matrix](https://www.printstash.org/compatibility), and
@@ -100,8 +102,9 @@ From the `printstash-frontend` template:
 Browse to `http://<server-ip>:3000` and complete the **first-run setup wizard**:
 
 - create your admin account,
-- choose **storage** — local disk (default) **or S3/R2** (bucket, endpoint, and
-  keys are entered here in the wizard — *not* as container variables), and
+- choose **storage** — local disk (default), generic/named S3-compatible
+  storage, Nextcloud/WebDAV, or SFTP (remote presets remain beta; configure
+  them in the wizard rather than as container variables), and
 - optionally configure **backups** (local and/or an S3 destination).
 
 That's it — you're in your vault.
@@ -131,8 +134,11 @@ path:
 ## Configuration reference
 
 Most settings are configured **in the app's setup wizard / Settings** and stored
-in the database — including storage backend (local vs S3/R2) and backups. The
-container variables are mainly bootstrap defaults:
+in the database — including local, generic/named S3-compatible,
+Nextcloud/WebDAV, or SFTP storage and backups. Local and generic S3 are stable;
+the named remote presets are beta. The container variables are mainly bootstrap
+defaults; see [storage providers](../docs/storage-providers.md) for capability
+tiers and environment-only setup caveats:
 
 | Variable | Container | Required | Notes |
 |----------|-----------|----------|-------|

@@ -8,21 +8,29 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Current Release: 0.12.1 — Container Startup Reliability
+## Upcoming Release: 0.13.0 — Storage Safety And Capture Provenance
 
-Production hardening is in place. The app is useful for local-first 3D print
+The latest tagged release remains 0.12.1. The `0.13.0` branch is the upcoming
+minor release and is not yet shipped. Production hardening is in place. The app
+is useful for local-first 3D print
 library workflows, installable through Docker Compose (the default compose pulls
 prebuilt GHCR images; a build overlay is available for contributors), and ready
 for real homelab feedback. SQLite plus local filesystem storage remain the
 default path. Postgres, S3/R2-compatible storage, cloud backups, and provider
-adapters are available as optional deployment paths. The 0.12.1 patch prevents
-legacy or operator-supplied uv commands from reusing the root-owned image-build
-cache during unprivileged startup.
+adapters are available as optional deployment paths. The upcoming release adds
+runtime-probed storage safety tiers and typed remote providers, paired-browser
+marketplace capture and Model Source provenance, richer Bambu job evidence,
+safer mesh/3MF previews, and stricter storage ownership and recovery boundaries.
+See the canonical [unreleased changelog](../CHANGELOG.md#unreleased) for the
+complete scope.
 
 Developed features in the current app:
 
 - STL, 3MF, OBJ, STEP/STP, and G-code ingestion through the web UI, REST API, and OrcaSlicer post-processing hook
-- Import from URL or `.zip` (including Printables/MakerWorld/Thingiverse model pages resolved to their downloadable asset), SSRF-guarded and zip-slip/zip-bomb protected
+- Import from safe URLs or `.zip`, plus reviewed browser transfer for
+  authenticated Printables/MakerWorld files and extension/manual Thingiverse
+  capture; server resolution remains SSRF-guarded and archives remain
+  zip-slip/zip-bomb protected
 - Shared volumes: mirror a server folder or NAS in place with two-way write-back, per-volume cron scheduling, and optional real-time watching with network-aware fallback
 - Public, expiring, read-only share links to a single model (view-only by default; opt-in original-file download)
 - Print statistics dashboard (cost, filament, prints, print time; time series + top collections/filaments) with a configurable display currency
@@ -241,6 +249,24 @@ queue manager.
 - A verified, non-destructive MinIO-to-SeaweedFS migration helper, with MinIO
   removed from the normal Compose stack
 
+## 0.13 — Storage Safety And Capture Provenance (upcoming)
+
+- Runtime-probed Verified, Guarded, and Unguarded storage tiers, durable
+  publication intents, provider-bound ownership, and fail-closed recovery
+- Typed setup for generic/native S3, Cloudflare R2, Backblaze B2, Wasabi,
+  self-hosted S3, Nextcloud, WebDAV, and SFTP; the remote presets remain beta
+  while local and generic/native S3 remain stable
+- Paired, named, revocable browsers for authenticated Printables file selection
+  and MakerWorld package transfer without sharing marketplace cookies
+- Per-user MyMiniFactory OAuth and Cults metadata connections, bounded Model
+  Source snapshots, user overrides, and portable provenance sidecars
+- Evidence-labelled Bambu LAN external-job history and best-effort G-code or
+  project 3MF recovery while the printer cache entry remains available
+- GitHub-flavoured Markdown tables, component-aware 3MF transforms, embedded
+  3MF preview preference, and denser bounded STL preview sampling
+- Safer bind-mounted container ownership through validated `PUID`/`PGID`, plus
+  guarded legacy Artifact and backup adoption paths
+
 ## Auth and Platform (folded into 0.11.0)
 
 Goal: fit cleanly into existing homelab infrastructure.
@@ -255,7 +281,8 @@ Goal: support larger installs while keeping the default path self-hosted and
 local-first.
 
 - More complete Postgres deployment guidance
-- S3/R2 lifecycle policy templates
+- Operator-owned S3/R2 lifecycle guidance and broader read-only policy
+  diagnostics; PrintStash does not create or change provider lifecycle policies
 - Multi-tenant/org routing only if there is real demand
 - Cloud printer/provider adapters only when they do not compromise local-first use
 

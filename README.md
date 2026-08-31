@@ -39,6 +39,13 @@ usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
 as the primary install path. SQLite plus local disk is the default; Postgres and
 S3/R2-compatible storage are optional.
 
+The `0.13.0` branch is the upcoming release. It adds runtime-probed storage
+safety tiers, typed S3/WebDAV/SFTP provider setup, paired-browser marketplace
+capture with Model Source provenance, richer Bambu LAN history evidence,
+GitHub-flavoured Markdown tables, and safer 3MF/STL preview handling. It is not
+yet a tagged release; see the [unreleased changelog](./CHANGELOG.md#unreleased)
+and [0.13.0 upgrade notes](./UPGRADE.md#0130-notes) before testing an upgrade.
+
 Hardware reports, parser fixtures, install notes, docs fixes, and UX feedback
 are welcome in
 [Discussions](https://github.com/xiao-villamor/PrintStash/discussions) or issues.
@@ -120,6 +127,12 @@ are welcome in
 **Capture, Documents, sharing, and notifications**
 - Pending Imports keep URL and browser captures reviewable across restarts, with
   retry, archive/file selection, tags, and Collection assignment before ingest.
+- Pair named, revocable browsers for authenticated Printables file selection
+  and MakerWorld package transfer without sending marketplace cookies to
+  PrintStash. MyMiniFactory OAuth and Cults metadata connections are per-user.
+- Captured Models retain bounded source snapshots, confirmed/inferred fields,
+  and explicit user overrides; portable archives can carry the provenance as
+  an optional backward-compatible sidecar.
 - Attach Markdown notes, PDFs, images, and other files to any Collection.
   Markdown includes a built-in editor, preview, and pasted or dropped images.
 - Create expiring, read-only public links for a Model. Original-file downloads
@@ -164,9 +177,12 @@ are welcome in
 - Metadata export to JSON or CSV for analysis, migration planning, or audits.
 - Model-card metrics and the metadata fields shown on detail pages are
   configurable.
-- Local disk by default, with optional S3/R2 object storage and Postgres, plus
-  upload limits, trash retention, and backup retention.
-- Health checks report database, storage, backup, and printer-provider readiness.
+- Local disk by default, with optional S3/R2, B2, Wasabi, self-hosted S3,
+  Nextcloud/WebDAV, or SFTP storage and optional Postgres. Storage support
+  maturity is distinct from the Verified/Guarded/Unguarded tier measured at
+  runtime; remote presets remain beta except the generic/native S3 path.
+- Health checks report database, measured storage capabilities, backup, and
+  printer-provider readiness.
 
 ## Quick Start
 

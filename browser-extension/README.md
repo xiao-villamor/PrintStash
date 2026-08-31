@@ -60,10 +60,13 @@ metadata such as title, description, creator, and license). It never includes
 raw HTML or JSON-LD, cookies, session headers, or signed download URLs.
 MakerWorld cookies and credentials never leave the browser and are not stored
 by PrintStash. MakerWorld collections are not supported; capture their model
-pages individually. Printables and direct file captures use server-side
-resolution with PrintStash's SSRF protections. Thingiverse remains a
-user-assisted flow: the extension creates a bounded metadata draft for a
-later user-selected file and never automatically downloads a package or ZIP.
+pages individually. On Printables, the extension can use the signed-in page to
+let the user select files and transfer those bytes directly; server-side
+resolution remains available for the limited public fields and choices its
+supported endpoints expose. Direct URL capture uses PrintStash's SSRF
+protections. Thingiverse remains a user-assisted flow: the extension creates a
+bounded metadata draft for user-selected files and never automatically
+downloads a package or ZIP.
 Direct URLs may point to `.zip`,
 `.3mf`, `.stl`, `.obj`, `.step`, `.stp`, `.gcode`, `.g`, `.gco`, or `.bgcode`
 files.

@@ -82,4 +82,19 @@ Secrets are write-only: configuration reads expose only which secret fields are 
 
 PrintStash never creates an S3 bucket or changes its lifecycle policy. Grant data-plane access plus read-only bucket/versioning/lifecycle inspection; remove `s3:CreateBucket` and `s3:PutLifecycleConfiguration` from older policies.
 
-`VAULT_STORAGE_BACKEND` and the legacy S3 variables remain compatibility inputs. New deployments should use `VAULT_STORAGE_PROVIDER` and `VAULT_STORAGE_PROVIDER_CONFIG`.
+New deployments should select and save a provider through Setup or Settings.
+Environment-only deployments use scalar fields: `VAULT_STORAGE_PROVIDER` and
+`VAULT_STORAGE_ROOT`, plus `VAULT_S3_*`, `VAULT_WEBDAV_*`, or `VAULT_SFTP_*`
+for the selected transport. `VAULT_STORAGE_PROVIDER_CONFIG` and
+`VAULT_STORAGE_PROVIDER_SECRETS` remain compatibility inputs but are deprecated.
+
+The checked-in Compose files forward the legacy/local and `VAULT_S3_*` fields,
+but do not automatically forward `VAULT_STORAGE_PROVIDER`,
+`VAULT_STORAGE_ROOT`, `VAULT_WEBDAV_*`, `VAULT_SFTP_*`, or
+`VAULT_STORAGE_ALLOW_UNVERIFIED` from `.env`. When configuring those fields
+entirely through environment variables, add them explicitly under the API
+service's `environment` in a Compose override. Configuration saved through the
+Setup or Settings UI does not need that override.
+
+`VAULT_STORAGE_BACKEND` and the legacy S3 variables remain supported upgrade
+inputs. Keep them unchanged for the first 0.13.0 compatibility boot.

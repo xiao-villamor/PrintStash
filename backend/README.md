@@ -211,10 +211,18 @@ endpoint. The compatibility helper is scheduled for removal in 1.0.
   - `GET /api/v1/files/{id}/stl`
 - Thumbnail rebuild job:
   - `POST /api/v1/files/thumbnails/rebuild`
-- Optional bucket lifecycle policy:
-  - `VAULT_S3_LIFECYCLE_EXPIRATION_DAYS`
-  - `VAULT_S3_LIFECYCLE_TRANSITION_DAYS`
-  - `VAULT_S3_TRANSITION_STORAGE_CLASS`
+- Read-only bucket versioning and lifecycle inspection for runtime safety
+  diagnostics. PrintStash never creates S3 buckets or changes lifecycle
+  policies; provision the bucket and its policy outside the application.
+
+New deployments can select typed S3-compatible, Nextcloud/WebDAV, or SFTP
+providers through Setup or Settings. Environment-only deployments use scalar
+`VAULT_STORAGE_PROVIDER`/`VAULT_STORAGE_ROOT` and transport-specific fields;
+the checked-in Compose files require an explicit environment override for the
+new provider, WebDAV, and SFTP fields. Existing `VAULT_STORAGE_BACKEND`/S3
+variables remain supported for upgrades. See
+[`docs/storage-providers.md`](../docs/storage-providers.md) for provider support,
+credentials, and runtime Verified/Guarded/Unguarded tiers.
 
 ## Tests
 

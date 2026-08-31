@@ -34,12 +34,14 @@ credentials.
 
 ## Browser extension and supported sources
 
-The Chrome importer lives in `browser-extension/`. Load it unpacked, create a
-named API key in Settings, and configure the Vault URL. It verifies the
-PrintStash service and authenticated user before saving credentials, rechecks
-the connection when opened, and removes the saved API key and Vault host
-permission on disconnect. Every capture remains reviewable in Pending Imports
-before ingestion.
+The Chrome/Firefox importer lives in `browser-extension/`. Build and load it,
+then create a one-time pairing code in **Settings → Imports** and enter it with
+the Vault URL and a device name. It verifies the PrintStash service and
+authenticated user before exchanging the code for a browser-only credential,
+rechecks the connection when opened, and removes that credential and the Vault
+host permission on disconnect. Existing username/API-key setups remain a legacy
+migration path; new setups should use pairing. Every capture remains reviewable
+in Pending Imports before ingestion.
 
 | Source | Capture path and current boundary |
 | --- | --- |
