@@ -12,16 +12,23 @@ import { describe, expect, it, vi } from "vitest";
 import { ViewerToolbar } from "@/components/model-detail/viewer-toolbar";
 import type { STLViewerControls } from "@/components/stl-viewer";
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
+
 function renderToolbar(
   viewerReady: boolean,
   screenshot = vi.fn<() => Promise<void>>(async () => {}),
+  actions: {
+    fit?: () => void;
+    setShowGrid?: (visible: boolean) => void;
+  } = {},
 ) {
   const controls = createRef<STLViewerControls>();
   controls.current = {
     zoomIn: vi.fn<() => void>(),
     zoomOut: vi.fn<() => void>(),
     resetView: vi.fn<() => void>(),
-    fit: vi.fn<() => void>(),
+    fit: actions.fit ?? vi.fn<() => void>(),
     screenshot,
   };
   render(
@@ -29,7 +36,7 @@ function renderToolbar(
       displayMode="solid"
       setDisplayMode={vi.fn<(mode: "solid" | "xray" | "wireframe") => void>()}
       showGrid
-      setShowGrid={vi.fn<(visible: boolean) => void>()}
+      setShowGrid={actions.setShowGrid ?? vi.fn<(visible: boolean) => void>()}
       controls={controls}
       viewerMode="model"
       setViewerMode={vi.fn<(mode: "model" | "gcode") => void>()}
@@ -54,5 +61,35 @@ describe("ViewerToolbar screenshot", () => {
     await user.click(screen.getByRole("button", { name: "Screenshot" }));
 
     expect(screenshot).toHaveBeenCalledOnce();
+  });
+
+  it("reports an asynchronous capture failure without downloading an empty image", async () => {
+    const user = userEvent.setup();
+    const screenshot = renderToolbar(
+      true,
+      vi.fn<() => Promise<void>>(async () => {
+        throw new Error("screenshot_empty");
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Screenshot" }));
+
+    expect(screenshot).toHaveBeenCalledOnce();
+    await vi.waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Screenshot could not be created"),
+    );
+  });
+
+  it("delegates visible preview controls", async () => {
+    const user = userEvent.setup();
+    const fit = vi.fn<() => void>();
+    const setShowGrid = vi.fn<(visible: boolean) => void>();
+    renderToolbar(true, undefined, { fit, setShowGrid });
+
+    await user.click(screen.getByRole("button", { name: "Fit to view" }));
+    await user.click(screen.getByRole("button", { name: "Build plate grid" }));
+
+    expect(fit).toHaveBeenCalledOnce();
+    expect(setShowGrid).toHaveBeenCalledWith(false);
   });
 });
