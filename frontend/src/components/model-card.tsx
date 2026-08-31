@@ -4,8 +4,9 @@ import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { FileText, Star } from "lucide-react";
+import { FileText, Star, Tags } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { getAssetUrl, starModel, unstarModel } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
@@ -157,6 +158,7 @@ function ModelCardInner({
   selected = false,
   onToggleSelect,
   draggable = false,
+  onEditTags,
 }: {
   model: ModelListItem;
   metrics: CardMetrics;
@@ -164,6 +166,7 @@ function ModelCardInner({
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onEditTags?: (model: ModelListItem) => void;
 }) {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
@@ -185,6 +188,7 @@ function ModelCardInner({
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;
+  const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
 
   async function toggleStar() {
     if (starBusy) return;
@@ -257,6 +261,25 @@ function ModelCardInner({
         >
           <Star className={`h-4 w-4 ${starred ? "fill-current text-primary" : ""}`} />
         </button>
+        {!selectable && canEditTags && onEditTags && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onEditTags(model);
+            }}
+            aria-label={
+              model.tags.length > 0 ? `Edit tags for ${model.name}` : `Add tags to ${model.name}`
+            }
+            className="absolute left-2 top-2 z-10 bg-card/95 shadow-sm"
+          >
+            <Tags className="h-3.5 w-3.5" />
+            {model.tags.length > 0 ? "Edit tags" : "Add tags"}
+          </Button>
+        )}
         <Link
           href={`/models/${model.id}`}
           draggable={false}
@@ -386,12 +409,14 @@ export function ModelCard({
   selected,
   onToggleSelect,
   draggable,
+  onEditTags,
 }: {
   model: ModelListItem;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onEditTags?: (model: ModelListItem) => void;
 }) {
   // `readCardMetrics` already falls back to the defaults when there is no stored
   // preference, so it is the correct initial value rather than something to
@@ -415,6 +440,7 @@ export function ModelCard({
         selected={selected}
         onToggleSelect={onToggleSelect}
         draggable={draggable}
+        onEditTags={onEditTags}
       />
     </Localized>
   );

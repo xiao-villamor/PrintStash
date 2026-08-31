@@ -146,6 +146,15 @@ describe("listModelPage", () => {
     expect(url).toContain("sort=name-asc");
     expect(url).toContain("cursor=abc");
   });
+
+  it("refetches the page instead of reusing the legacy response cache", async () => {
+    respondWith({ items: [], total: 0, next_cursor: null });
+
+    await listModelPage();
+    await listModelPage();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("listOutlinerModels", () => {
@@ -163,6 +172,15 @@ describe("listOutlinerModels", () => {
     await listOutlinerModels({ tag: ["functional"] });
 
     expect(lastCall().url).toContain("tag=functional");
+  });
+
+  it("refetches the tree instead of reusing the legacy response cache", async () => {
+    respondWith([]);
+
+    await listOutlinerModels();
+    await listOutlinerModels();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -206,6 +224,15 @@ describe("getModelFacets", () => {
     expect(url).toContain("collection=functional");
     expect(url).toContain("printer_presence=any");
     expect(url).toContain("uploaded_before=2026-02-01");
+  });
+
+  it("refetches counts instead of reusing the legacy response cache", async () => {
+    respondWith({});
+
+    await getModelFacets();
+    await getModelFacets();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "aspectRatio": [4, 3],
   "background": "transparent",
   "upAxis": "z",
@@ -12,6 +12,9 @@
     "thicknessRatio": 0.35
   },
   "marginFraction": 0.1,
+  "material": {
+    "albedo": [0.7, 0.75, 0.84]
+  },
   "supersampling": {
     "maxOutputWidth": 640,
     "smallFactor": 2,

@@ -243,6 +243,12 @@ describe("ModelDetail", () => {
   });
 
   describe("editing", () => {
+    it("offers direct tag editing in the header", async () => {
+      renderDetail();
+
+      expect(await screen.findByRole("button", { name: "Add tags to Benchy" })).toBeVisible();
+    });
+
     it("offers editing to someone with write access", async () => {
       renderDetail();
 
@@ -553,7 +559,7 @@ describe("ModelDetail", () => {
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("tab", { name: /Revisions/ }));
 
-      await user.click(await screen.findByRole("button", { name: /Add/ }));
+      await user.click(await screen.findByRole("button", { name: /^Add$/ }));
 
       expect(await screen.findByText("Add G-code revision")).toBeInTheDocument();
     });

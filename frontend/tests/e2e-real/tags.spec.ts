@@ -9,6 +9,20 @@ import { test, expect } from "./helpers";
 import { clickModelAction, modelCard, uploadModel } from "./util";
 
 test.describe("tags", () => {
+  test("assigns a newly created tag from the model card", async ({ page }) => {
+    const tag = `e2e-quick-tag-${Date.now()}`;
+    const model = `e2e-quick-tagged-${Date.now()}`;
+
+    await uploadModel(page, model);
+    await page.getByRole("button", { name: `Add tags to ${model}` }).click();
+    const dialog = page.getByRole("dialog", { name: "Model tags" });
+    await dialog.getByLabel("Search or create a tag").fill(tag);
+    await dialog.getByRole("option", { name: /Create tag/ }).click();
+    await dialog.getByRole("button", { name: "Save tags" }).click();
+
+    await expect(modelCard(page, model)).toContainText(tag);
+  });
+
   test("delete an assigned tag from model editing (with confirm)", async ({ page }) => {
     const tag = `e2e-assigned-${Date.now()}`;
     const model = `e2e-tagged-${Date.now()}`;

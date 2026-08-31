@@ -69,6 +69,36 @@ afterEach(() => {
 });
 
 describe("ModelCard", () => {
+  describe("quick tag access", () => {
+    it("offers adding tags on an editable untagged card", () => {
+      renderApp(<ModelCard model={model} onEditTags={vi.fn<(item: ModelListItem) => void>()} />);
+
+      expect(screen.getByRole("button", { name: "Add tags to Cam Holder v4" })).toBeVisible();
+    });
+
+    it("offers editing tags when the card already has one", () => {
+      renderApp(
+        <ModelCard
+          model={{ ...model, tags: ["Workshop"] }}
+          onEditTags={vi.fn<(item: ModelListItem) => void>()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Edit tags for Cam Holder v4" })).toBeVisible();
+    });
+
+    it("hides tag editing from a view-only card", () => {
+      renderApp(
+        <ModelCard
+          model={{ ...model, effective_role: "view" }}
+          onEditTags={vi.fn<(item: ModelListItem) => void>()}
+        />,
+      );
+
+      expect(screen.queryByRole("button", { name: /tags (to|for) Cam Holder v4/ })).toBeNull();
+    });
+  });
+
   it("shows revision status alongside a custom revision label", () => {
     // The card links to the model detail route and prefetches it on hover, so
     // it needs a real router; `thumbnail_url: null` keeps the thumbnail hook

@@ -158,6 +158,7 @@ class JobRegistry:
         *,
         is_superuser: bool,
         terminal_limit: int,
+        tracked_job_ids: tuple[str, ...],
     ) -> list[IngestJobStatus]:
         with get_session_factory().scoped_session() as session:
             terminal_cutoff = utcnow() - _FINISHED_TTL
@@ -188,8 +189,19 @@ class JobRegistry:
                 .order_by(BackgroundJob.updated_at.desc())  # type: ignore[attr-defined]
                 .limit(terminal_limit)
             ).all()
+            tracked = (
+                session.exec(
+                    select(BackgroundJob).where(
+                        *scope,
+                        BackgroundJob.id.in_(tracked_job_ids),  # type: ignore[union-attr]
+                    )
+                ).all()
+                if tracked_job_ids
+                else []
+            )
+            rows_by_id = {row.id: row for row in [*active, *terminal, *tracked]}
             rows = sorted(
-                [*active, *terminal], key=lambda row: row.updated_at, reverse=True
+                rows_by_id.values(), key=lambda row: row.updated_at, reverse=True
             )
             return [
                 IngestJobStatus(
@@ -454,12 +466,14 @@ class JobRegistry:
         *,
         is_superuser: bool = False,
         terminal_limit: int = _DEFAULT_TERMINAL_HISTORY,
+        tracked_job_ids: tuple[str, ...] = (),
     ) -> list[IngestJobStatus]:
         with self._lock:
             persisted = self._load_for_user(
                 user_id,
                 is_superuser=is_superuser,
                 terminal_limit=max(0, min(100, terminal_limit)),
+                tracked_job_ids=tracked_job_ids,
             )
             for job in persisted:
                 self._jobs[job.job_id] = job

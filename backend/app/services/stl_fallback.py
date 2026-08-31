@@ -11,6 +11,8 @@ from itertools import product
 from pathlib import Path
 from typing import Iterator
 
+from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+
 
 @dataclass(frozen=True)
 class STLThumbnailResult:
@@ -422,7 +424,7 @@ def render_stl_thumbnail(
         (coverage_height, coverage_width), np.inf, dtype=np.float64
     )
     raster_budget = RasterBudget(limit=_MAX_COVERAGE_CANDIDATES)
-    base_color = np.asarray([176, 190, 214], dtype=np.float32)
+    base_color = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
     light = np.asarray([-0.45, 0.6, 1.0], dtype=np.float32)
     light /= np.linalg.norm(light)
 

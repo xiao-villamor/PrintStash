@@ -76,7 +76,13 @@ export async function refreshVaultAfterIngest(): Promise<void> {
  * recognised here falls back to a full invalidation in `invalidateApiCache`.
  */
 export function invalidateQueriesForPath(path: string): void {
-  const bust = (queryKey: readonly unknown[]) => queryClient.invalidateQueries({ queryKey });
+  const invalidated = new Set<string>();
+  const bust = (queryKey: readonly unknown[]) => {
+    const identity = JSON.stringify(queryKey);
+    if (invalidated.has(identity)) return;
+    invalidated.add(identity);
+    void queryClient.invalidateQueries({ queryKey });
+  };
 
   if (/\/collections(\/|$|\?)/.test(path)) {
     bust(queryKeys.collections);

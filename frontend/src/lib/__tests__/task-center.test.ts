@@ -213,6 +213,81 @@ describe("clearCompletedTasks", () => {
 });
 
 describe("groupUploadJobs", () => {
+  it("removes a duplicate pending row persisted by an older client", async () => {
+    localStorage.setItem(
+      "printstash:import-tasks:v1",
+      JSON.stringify([
+        {
+          id: "duplicate",
+          title: "Import",
+          status: "pending",
+          progress: 0,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          jobId: "mesh-job",
+        },
+        {
+          id: "upload",
+          title: "Upload Benchy",
+          status: "running",
+          progress: 50,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          jobIds: ["mesh-job"],
+          expectedJobCount: 1,
+        },
+      ]),
+    );
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    listIngestJobs.mockResolvedValue([
+      {
+        job_id: "mesh-job",
+        state: "completed",
+        model_id: 1,
+        file_id: 1,
+        error: null,
+        started_at: null,
+        finished_at: null,
+        progress: 100,
+      },
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks().map((task) => task.title)).toEqual(["Upload Benchy"]);
+  });
+
+  it("reuses the upload task when waiting for one of its linked jobs", async () => {
+    const taskId = tc.createTask({
+      title: "Upload Benchy",
+      status: "running",
+      expectedJobCount: 1,
+    });
+    tc.linkTaskToJob(taskId, "mesh-job");
+    listIngestJobs.mockResolvedValue([
+      {
+        job_id: "mesh-job",
+        state: "completed",
+        model_id: 1,
+        file_id: 1,
+        error: null,
+        started_at: null,
+        finished_at: null,
+        progress: 100,
+      },
+    ]);
+
+    await tc.waitForImportJob("mesh-job");
+
+    expect(tc.listTasks()).toHaveLength(1);
+    expect(tc.listTasks()[0]).toMatchObject({
+      id: taskId,
+      title: "Upload Benchy",
+      status: "completed",
+    });
+  });
+
   it("keeps mesh and G-code jobs from one upload in one task", async () => {
     const taskId = tc.createTask({
       title: "Upload Benchy",
@@ -271,6 +346,60 @@ describe("subscribeTasks", () => {
 });
 
 describe("syncImportJobs", () => {
+  it("passes active task ids to the reconnect source", async () => {
+    const taskId = tc.trackImportJob("missed-job", "Recreate Model preview images");
+    tc.updateTask(taskId, { status: "running" });
+
+    await tc.syncImportJobs();
+
+    expect(listIngestJobs).toHaveBeenCalledWith(["missed-job"]);
+  });
+
+  it("fails a direct task the server no longer reports", async () => {
+    const taskId = tc.trackImportJob("forgotten-job", "Recreate Model preview images");
+    tc.updateTask(taskId, { status: "running", detail: "thumbnailing 0/2" });
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      progress: 100,
+      retryable: true,
+    });
+    expect(tc.listTasks()[0].detail).toMatch(/no longer available/i);
+  });
+
+  it("fails a grouped upload when a linked server job disappears", async () => {
+    const taskId = tc.createTask({
+      title: "Upload Benchy",
+      status: "running",
+      expectedJobCount: 2,
+    });
+    tc.linkTaskToJob(taskId, "mesh-job");
+    tc.linkTaskToJob(taskId, "gcode-job");
+    listIngestJobs.mockResolvedValue([
+      {
+        job_id: "mesh-job",
+        state: "completed",
+        model_id: 1,
+        file_id: 1,
+        error: null,
+        started_at: null,
+        finished_at: "2026-06-14T12:00:01Z",
+        progress: 100,
+      },
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      progress: 100,
+      retryable: true,
+    });
+    expect(tc.listTasks()[0].detail).toMatch(/no longer available/i);
+  });
+
   it("emits one completion event per job id and never regresses terminal state", async () => {
     const completed = vi.fn<(job: IngestJobStatus) => void>();
     const unsubscribe = tc.subscribeImportJobCompletions(completed);

@@ -75,6 +75,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
+- **Model tags are now discoverable from the library.** Editable model cards
+  and detail headers expose a direct Add/Edit tags action, where users can find
+  existing tags or create and assign a new one without entering full model edit.
 - **Thumbnail generation now shares one versioned visual recipe.** Full,
   streaming, fallback, embedded 3MF, and browser preview paths use deterministic
   framing and an upper-hemisphere camera. Durable recipe/hash caching coalesces
@@ -132,6 +135,19 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Completed uploads no longer leave a duplicate generic Import task polling
+  forever; clients also reconcile the stuck duplicate rows persisted by the
+  affected build.
+- Task Center reconnects now request every locally active job explicitly, so a
+  thumbnail rebuild or upload that finished while the browser was disconnected
+  reaches its terminal state instead of spinning forever after normal history
+  expires. Jobs the server genuinely no longer knows become retryable failures.
+- Completed ingestion now bypasses the legacy response cache when refreshing
+  the vault grid, outliner, and facets, so a newly uploaded Model appears
+  without a page reload.
+- Full, streaming, and sampled thumbnail renderers now take their material
+  albedo from the same versioned preview recipe, preventing large-STL previews
+  from looking like a different colour or material.
 - **BGCODE uploads now work from every browser upload surface.** Main uploads,
   vault drag-and-drop, and revision uploads now accept PrusaSlicer `.bgcode`
   files and route them through the existing binary G-code metadata and thumbnail

@@ -17,6 +17,7 @@ import {
   Printer as PrinterIcon,
   RotateCcw,
   Star,
+  Tags,
   Trash2,
   Wifi,
 } from "lucide-react";
@@ -67,6 +68,7 @@ import { SourceTab } from "./source-tab";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { Localized } from "@/components/ui/localized";
+import { ModelTagsDialog } from "@/components/model-tags-dialog";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
@@ -139,6 +141,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagDialogSession, setTagDialogSession] = useState(0);
   const [saving, setSaving] = useState(false);
   const [starBusy, setStarBusy] = useState(false);
   const [editName, setEditName] = useState(model.name);
@@ -492,6 +496,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           open={shareOpen}
           onClose={() => setShareOpen(false)}
         />
+        <ModelTagsDialog
+          key={`${model.id}:${tagDialogSession}`}
+          model={model}
+          suggestions={tags}
+          open={tagDialogOpen}
+          onClose={() => setTagDialogOpen(false)}
+          onSaved={(nextTags) => setModel((current) => ({ ...current, tags: nextTags }))}
+        />
         {/* Detail Header */}
         <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
           <div className="flex items-center gap-4">
@@ -562,6 +574,25 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </>
             ) : (
               <>
+                {canEditModel && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={
+                      model.tags.length > 0
+                        ? `Edit tags for ${model.name}`
+                        : `Add tags to ${model.name}`
+                    }
+                    onClick={() => {
+                      setTagDialogSession((session) => session + 1);
+                      setTagDialogOpen(true);
+                    }}
+                  >
+                    <Tags className="h-4 w-4" />
+                    {model.tags.length > 0 ? "Edit tags" : "Add tags"}
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="outline"

@@ -556,6 +556,20 @@ class TestMain:
 
         assert (tmp_path / "out.png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
+    def test_uses_the_canonical_material_colour(self, stl, tmp_path: Path) -> None:
+        import numpy as np
+        from PIL import Image
+
+        source = stl(_binary_stl([TRIANGLE, SECOND]))
+
+        self._run(self._argv(source, tmp_path))
+
+        pixels = np.asarray(Image.open(tmp_path / "out.png").convert("RGBA"))
+        opaque = pixels[:, :, :3][pixels[:, :, 3] > 200].mean(axis=0)
+        observed = opaque / opaque.max()
+        expected = np.asarray([0.70, 0.75, 0.84]) / 0.84
+        np.testing.assert_allclose(observed, expected, atol=0.05)
+
     @pytest.mark.parametrize(
         "override",
         [

@@ -1,6 +1,6 @@
 // Generated from printstash-core/mesh/preview_profile.json. Do not edit by hand.
 export const THUMBNAIL_PROFILE = {
-  version: 1,
+  version: 2,
   aspectRatio: [4, 3],
   background: "transparent",
   upAxis: "z",

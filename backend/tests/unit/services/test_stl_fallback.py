@@ -96,6 +96,23 @@ def _write_hostile_ascii(path: Path) -> Path:
 
 
 class TestRenderStlThumbnail:
+    def test_uses_the_canonical_material_colour(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "canonical-material.stl"
+        _write_renderable_binary_stl(path, 12)
+        profile = type("PreviewProfile", (), {"material_albedo": (1.0, 0.0, 0.0)})()
+        monkeypatch.setattr(stl_fallback, "PREVIEW_PROFILE", profile)
+
+        result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
+
+        assert result is not None
+        pixels = np.asarray(Image.open(io.BytesIO(result.png)).convert("RGBA"))
+        shaded = pixels[:, :, :3][pixels[:, :, 3] > 20]
+        assert shaded.size > 0
+        assert float(shaded[:, 0].mean()) > float(shaded[:, 1].mean()) + 40.0
+        assert float(shaded[:, 0].mean()) > float(shaded[:, 2].mean()) + 40.0
+
     def test_stl_fallback_uniformly_caps_sample_to_100k(
         self, tmp_path: Path, monkeypatch
     ) -> None:

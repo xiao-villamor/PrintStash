@@ -78,7 +78,9 @@ export async function listModelPage(params?: ListModelPageParams): Promise<Model
   if (params?.sort) search.set("sort", params.sort);
   if (params?.cursor) search.set("cursor", params.cursor);
   const query = search.toString();
-  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`);
+  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, {
+    fresh: true,
+  });
 }
 
 export async function listOutlinerModels(
@@ -86,7 +88,9 @@ export async function listOutlinerModels(
 ): Promise<OutlinerModelRead[]> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`);
+  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`, {
+    fresh: true,
+  });
 }
 
 export async function getModelFacets(
@@ -115,7 +119,9 @@ export async function getModelFacets(
   if (params?.uploaded_after) search.set("uploaded_after", params.uploaded_after);
   if (params?.uploaded_before) search.set("uploaded_before", params.uploaded_before);
   const query = search.toString();
-  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`);
+  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {
+    fresh: true,
+  });
 }
 
 export function starModel(id: number): Promise<ModelStarRead> {
@@ -324,8 +330,11 @@ export function getJobStatus(jobId: string): Promise<IngestJobStatus> {
   return getJson<IngestJobStatus>(`/api/v1/ingest/jobs/${jobId}`, { fresh: true });
 }
 
-export function listIngestJobs(): Promise<IngestJobStatus[]> {
-  return getJson<IngestJobStatus[]>("/api/v1/ingest/jobs", { fresh: true });
+export function listIngestJobs(trackedJobIds: string[] = []): Promise<IngestJobStatus[]> {
+  const params = new URLSearchParams();
+  trackedJobIds.forEach((jobId) => params.append("tracked_job_id", jobId));
+  const query = params.size ? `?${params.toString()}` : "";
+  return getJson<IngestJobStatus[]>(`/api/v1/ingest/jobs${query}`, { fresh: true });
 }
 
 export function ingestUrl(payload: {

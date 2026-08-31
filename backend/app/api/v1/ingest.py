@@ -1128,14 +1128,18 @@ async def select_collection_members(
 def list_jobs(
     response: Response,
     terminal_limit: int = Query(20, ge=0, le=100),
+    tracked_job_id: list[str] = Query(default=[]),
     current_user: User = Depends(require_user),
 ) -> list[IngestJobStatus]:
     response.headers["Cache-Control"] = "no-store"
+    if len(tracked_job_id) > 20:
+        raise HTTPException(status_code=422, detail="too_many_tracked_job_ids")
     assert current_user.id is not None
     return registry.list_for_user(
         current_user.id,
         is_superuser=current_user.is_superuser,
         terminal_limit=terminal_limit,
+        tracked_job_ids=tuple(dict.fromkeys(tracked_job_id)),
     )
 
 

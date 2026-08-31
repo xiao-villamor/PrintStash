@@ -34,6 +34,7 @@ class PreviewProfile:
     version: int
     aspect_ratio: tuple[int, int]
     margin_fraction: float
+    material_albedo: tuple[float, float, float]
     hero_azimuth_degrees: float
     hero_elevation_degrees: float
     flat_tilt_degrees: float
@@ -67,6 +68,18 @@ def _load_profile() -> PreviewProfile:
     flat = _mapping(root.get("flat"), "flat")
     supersampling = _mapping(root.get("supersampling"), "supersampling")
     encoding = _mapping(root.get("encoding"), "encoding")
+    material = _mapping(root.get("material"), "material")
+    albedo = material.get("albedo")
+    if (
+        not isinstance(albedo, list)
+        or len(albedo) != 3
+        or not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+            for value in albedo
+        )
+        or not all(0 <= float(value) <= 1 for value in albedo)
+    ):
+        raise ValueError("preview_profile_invalid_material_albedo")
     margin = _number(root, "marginFraction")
     if not 0 < margin < 0.5:
         raise ValueError("preview_profile_invalid_margin")
@@ -74,6 +87,7 @@ def _load_profile() -> PreviewProfile:
         version=_integer(root, "version"),
         aspect_ratio=(int(aspect[0]), int(aspect[1])),
         margin_fraction=margin,
+        material_albedo=(float(albedo[0]), float(albedo[1]), float(albedo[2])),
         hero_azimuth_degrees=_number(hero, "azimuthDegrees"),
         hero_elevation_degrees=_number(hero, "elevationDegrees"),
         flat_tilt_degrees=_number(flat, "tiltDegrees"),

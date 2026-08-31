@@ -6,7 +6,7 @@ import type { IngestJobStatus } from "@/types";
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 
 /** How the Task Center reads the server's import-job list. */
-export type IngestJobSource = () => Promise<IngestJobStatus[]>;
+export type IngestJobSource = (trackedJobIds: string[]) => Promise<IngestJobStatus[]>;
 
 let ingestJobSource: IngestJobSource = listIngestJobs;
 
@@ -359,7 +359,7 @@ function applyGroupedJobs(task: TaskItem, jobs: IngestJobStatus[]): void {
 }
 
 export function trackImportJob(jobId: string, title: string): string {
-  const existing = tasks.find((task) => task.jobId === jobId);
+  const existing = tasks.find((task) => task.jobId === jobId || task.jobIds?.includes(jobId));
   if (existing) return existing.id;
   const taskId = createTask({
     title,
@@ -399,8 +399,40 @@ export function waitForImportJob(
   });
 }
 
+function reconcileLinkedJobDuplicates(): void {
+  const groupedOwners = new Map<string, string>();
+  for (const task of tasks) {
+    for (const jobId of task.jobIds ?? []) groupedOwners.set(jobId, task.id);
+  }
+  const next = tasks.filter(
+    (task) =>
+      task.jobId === undefined ||
+      groupedOwners.get(task.jobId) === undefined ||
+      groupedOwners.get(task.jobId) === task.id,
+  );
+  if (next.length === tasks.length) return;
+  tasks = next;
+  persist();
+  emit();
+}
+
 export async function syncImportJobs(): Promise<boolean> {
-  const jobs = (await ingestJobSource()).filter((job) => !dismissedJobIds.has(job.job_id));
+  // Older clients created a generic server-job row even after the same job had
+  // been linked to its user-facing upload task. The grouped owner is the richer
+  // record; remove the duplicate before claiming jobs so persisted stuck rows
+  // repair themselves on the first sync after an upgrade.
+  reconcileLinkedJobDuplicates();
+  const trackedJobIds = [
+    ...new Set(
+      tasks
+        .filter((task) => task.status === "pending" || task.status === "running")
+        .flatMap((task) => task.jobIds ?? (task.jobId ? [task.jobId] : [])),
+    ),
+  ].slice(0, 20);
+  const requestedJobIds = new Set(trackedJobIds);
+  const jobs = (await ingestJobSource(trackedJobIds)).filter(
+    (job) => !dismissedJobIds.has(job.job_id),
+  );
   const jobsById = new Map(jobs.map((job) => [job.job_id, job]));
   const claimedJobIds = new Set<string>();
 
@@ -414,6 +446,36 @@ export async function syncImportJobs(): Promise<boolean> {
   }
 
   jobs.filter((job) => !claimedJobIds.has(job.job_id)).forEach(applyJob);
+
+  const unavailableDetail =
+    "Task status is no longer available. It may have finished while this browser was disconnected.";
+  for (const task of tasks) {
+    if (task.status !== "pending" && task.status !== "running") continue;
+    const linkedJobIds = task.jobIds ?? (task.jobId ? [task.jobId] : []);
+    const missingJobIds = linkedJobIds.filter(
+      (jobId) => requestedJobIds.has(jobId) && !jobsById.has(jobId),
+    );
+    if (!missingJobIds.length) continue;
+    updateTask(task.id, {
+      status: "failed",
+      progress: 100,
+      detail: unavailableDetail,
+      retryable: true,
+    });
+    for (const jobId of missingJobIds) {
+      publishTerminal({
+        job_id: jobId,
+        state: "failed",
+        model_id: null,
+        file_id: null,
+        error: "job_status_unavailable",
+        retryable: true,
+        started_at: null,
+        finished_at: null,
+        updated_at: new Date().toISOString(),
+      });
+    }
+  }
   return jobs.some((job) => job.state === "pending" || job.state === "running");
 }
 

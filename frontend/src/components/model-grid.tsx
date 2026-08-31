@@ -16,6 +16,7 @@ import {
   TagRead,
 } from "@/types";
 import { ModelCard } from "@/components/model-card";
+import { ModelTagsDialog } from "@/components/model-tags-dialog";
 import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -489,6 +490,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.get("v") === "docs" ? "docs" : readLastView(),
   );
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
+  const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [tagDialogSession, setTagDialogSession] = useState(0);
   // `?upload=1` is a deep link into the upload dialog. Open it on the render that
   // first sees the param; the effect below strips the param again so a reload (or
   // a later deep link) behaves the same way.
@@ -900,6 +904,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = models;
+
+  const openTagEditor = useCallback((model: ModelListItem) => {
+    setTagTarget(model);
+    setTagDialogSession((session) => session + 1);
+    setTagDialogOpen(true);
+  }, []);
 
   const toggleSelect = useCallback(
     (id: number, range = false) => {
@@ -2171,6 +2181,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         selected={selectedIds.has(model.id)}
                         onToggleSelect={toggleSelect}
                         draggable={canUploadToVault && !selectMode}
+                        onEditTags={openTagEditor}
                       />
                     ))}
                   </div>
@@ -2232,6 +2243,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onDeleteSelection={deleteSelection}
           onClear={clearSelection}
         />
+        {tagTarget && (
+          <ModelTagsDialog
+            key={`${tagTarget.id}:${tagDialogSession}`}
+            model={tagTarget}
+            suggestions={tags}
+            open={tagDialogOpen}
+            onClose={() => setTagDialogOpen(false)}
+            onSaved={(nextTags) => {
+              setTagTarget((current) => (current ? { ...current, tags: nextTags } : current));
+              refresh();
+            }}
+          />
+        )}
       </>
     </Localized>
   );

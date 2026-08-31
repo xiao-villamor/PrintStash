@@ -74,6 +74,13 @@ describe("invalidateQueriesForPath", () => {
     expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.tags, queryKeys.models]));
   });
 
+  it("refreshes taxonomy after a model tag mutation", () => {
+    invalidateQueriesForPath("/api/v1/models/batch/tags");
+    expect(bustedKeys(spy.mock.calls)).toEqual(
+      keyNames([queryKeys.tags, queryKeys.models, queryKeys.vaultStats, queryKeys.collections]),
+    );
+  });
+
   it("busts models, vault stats AND collections on a model write (stats + counts derive from models)", () => {
     invalidateQueriesForPath("/api/v1/models/12");
     expect(bustedKeys(spy.mock.calls)).toEqual(

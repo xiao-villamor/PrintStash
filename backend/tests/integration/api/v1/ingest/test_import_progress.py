@@ -298,6 +298,83 @@ class TestListForUser:
         assert ingest_module._owns(1, admin) is True
 
 
+class TestReconnectJobListing:
+    def test_explicitly_tracked_terminal_job_survives_history_expiry(
+        self, owner: User, make_background_job
+    ) -> None:
+        old = utcnow() - timedelta(hours=2)
+        job = make_background_job(
+            owner=owner,
+            state="completed",
+            status_json=json.dumps({"state": "completed", "progress": 100}),
+            updated_at=old,
+            finished_at=old,
+        )
+
+        listed = JobRegistry().list_for_user(
+            owner.id,  # type: ignore[arg-type]
+            tracked_job_ids=(job.id,),
+        )
+
+        assert [(item.job_id, item.state, item.progress) for item in listed] == [
+            (job.id, "completed", 100)
+        ]
+
+    def test_explicit_tracking_does_not_bypass_owner_scope(
+        self,
+        owner: User,
+        other_owner: User,
+        make_background_job,
+    ) -> None:
+        job = make_background_job(owner=other_owner, state="running")
+
+        listed = JobRegistry().list_for_user(
+            owner.id,  # type: ignore[arg-type]
+            tracked_job_ids=(job.id,),
+        )
+
+        assert all(item.job_id != job.id for item in listed)
+
+    def test_explicit_tracking_does_not_reveal_hidden_jobs(
+        self, owner: User, make_background_job
+    ) -> None:
+        job = make_background_job(owner=owner, state="running", visible=False)
+
+        listed = JobRegistry().list_for_user(
+            owner.id,  # type: ignore[arg-type]
+            tracked_job_ids=(job.id,),
+        )
+
+        assert all(item.job_id != job.id for item in listed)
+
+    def test_explicit_tracking_deduplicates_recent_history(
+        self, owner: User, make_background_job
+    ) -> None:
+        job = make_background_job(
+            owner=owner,
+            state="completed",
+            status_json=json.dumps({"state": "completed"}),
+        )
+
+        listed = JobRegistry().list_for_user(
+            owner.id,  # type: ignore[arg-type]
+            tracked_job_ids=(job.id, job.id),
+        )
+
+        assert [item.job_id for item in listed].count(job.id) == 1
+
+    def test_explicit_tracking_is_bounded(self, owner: User) -> None:
+        with pytest.raises(ingest_module.HTTPException) as error:
+            ingest_module.list_jobs(
+                response=ingest_module.Response(),
+                terminal_limit=20,
+                tracked_job_id=[f"job-{index}" for index in range(21)],
+                current_user=owner,
+            )
+
+        assert error.value.status_code == 422
+
+
 # --------------------------------------------------------------------------- #
 # Everything below drives ``app.api.v1.ingest`` internals directly — pure
 # helpers, the pending-registry TTL, and the URL/archive/collection background

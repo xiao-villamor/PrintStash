@@ -620,7 +620,7 @@ def _render(
     brightness = 0.30 + diffuse * 0.70
     # A cool blue-grey surface provides contrast against the light card while
     # retaining enough range for the reconstructed depth shading to read.
-    albedo = np.asarray([104.0, 130.0, 166.0], dtype=np.float32)
+    albedo = np.asarray(PREVIEW_PROFILE.material_albedo, dtype=np.float32) * 255.0
     rim = (1.0 - np.clip(normals[:, :, 2], 0.0, 1.0)) ** 2 * 18.0
     shaded = np.clip(
         albedo[None, None, :] * brightness[:, :, None] + rim[:, :, None], 0, 255

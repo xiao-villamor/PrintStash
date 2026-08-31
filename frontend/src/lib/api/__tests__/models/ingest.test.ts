@@ -149,4 +149,12 @@ describe("listIngestJobs", () => {
 
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
+
+  it("requests the exact persisted jobs the task center is reconnecting", async () => {
+    respondWith([]);
+
+    await listIngestJobs(["thumbnail-job", "upload job"]);
+
+    expectRequest("/api/v1/ingest/jobs?tracked_job_id=thumbnail-job&tracked_job_id=upload+job");
+  });
 });

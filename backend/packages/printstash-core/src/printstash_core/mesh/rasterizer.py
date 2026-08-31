@@ -282,7 +282,7 @@ def render_mesh_thumbnail(
         # a bright sheen that reads on the dark card instead of clipping at a dim
         # blue-grey ceiling. Slightly lighter + less saturated than the old base so
         # the model pops against a near-black background.
-        albedo = np.array([0.70, 0.75, 0.84])
+        albedo = np.array(PREVIEW_PROFILE.material_albedo)
 
         # Key light: main illumination, upper-left and well in front of the
         # camera so the lit side reads as one clean gradient. Strength >1 so the
