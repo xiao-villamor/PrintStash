@@ -10,6 +10,7 @@ import posixpath
 import tempfile
 import uuid
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from types import SimpleNamespace
 from typing import BinaryIO, Iterator
@@ -496,6 +497,48 @@ class OpenDALStorageBackend(StorageBackend):
         """Return full storage keys below a namespace-relative prefix."""
         return self.list_keys(prefix)
 
+    @property
+    def source_namespace(self) -> str:
+        """Stable managed prefix used by the read-only LibrarySource adapter."""
+        return self._namespace
+
+    def source_key(self, relative: str) -> str:
+        cleaned = relative.strip("/")
+        return self._key(cleaned) if cleaned else self._namespace
+
+    def source_relative_key(self, key: str) -> str:
+        if key.rstrip("/") == self._namespace:
+            return ""
+        return self._relative(key.rstrip("/"))
+
+    def list_source_directory(
+        self, relative: str, *, max_entries: int
+    ) -> list[SourceDirectoryEntry]:
+        """List one immediate directory with a hard response-size ceiling."""
+        directory = relative.strip("/")
+        # OpenDAL's WebDAV lister treats a non-root path without a trailing slash
+        # as the collection object itself. A directory path must end in `/` to
+        # return its immediate children; the SFTP adapter normalizes either form.
+        listing_directory = f"{directory}/" if directory else ""
+        iterator = iter(self._operator.list(listing_directory))
+        raw_entries = list(islice(iterator, max_entries + 1))
+        if len(raw_entries) > max_entries:
+            raise StorageConfigurationError("remote_directory_entry_limit")
+        entries: list[SourceDirectoryEntry] = []
+        for entry in raw_entries:
+            path = str(entry.path).strip("/")
+            if not path or path == directory:
+                continue
+            metadata = entry.metadata
+            entries.append(
+                SourceDirectoryEntry(
+                    key=path,
+                    size=int(getattr(metadata, "content_length", 0) or 0),
+                    is_dir=bool(getattr(metadata, "is_dir", False)),
+                )
+            )
+        return entries
+
     def walk_keys(self, prefix: str = "") -> Iterator[str]:
         relative = self._relative(prefix) if prefix else ""
         for entry in self._operator.scan(relative):
@@ -603,6 +646,15 @@ def _operator_for(spec: TransportSpec):
 class _AsyncSSHMetadata:
     content_length: int
     etag: None = None
+
+
+@dataclass(frozen=True)
+class SourceDirectoryEntry:
+    """One immediate child below a read-only library source directory."""
+
+    key: str
+    size: int
+    is_dir: bool
 
 
 class _AsyncSSHSFTPOperator:
@@ -856,6 +908,35 @@ class _AsyncSSHSFTPOperator:
                         found.append(SimpleNamespace(path=child))
 
             await walk(relative)
+            return found
+
+        return self._run(operation)
+
+    def list(self, relative: str):
+        """List one directory only; recursive paging belongs to LibrarySource."""
+        import asyncssh
+
+        async def operation(client) -> list[SimpleNamespace]:
+            directory = relative.strip("/")
+            path = self._path(directory)
+            if not await client.exists(path):
+                return []
+            found: list[SimpleNamespace] = []
+            async for entry in client.scandir(path):
+                name = str(entry.filename)
+                if name in {"", ".", ".."}:
+                    continue
+                child = posixpath.join(directory, name).strip("/")
+                is_dir = entry.attrs.type == asyncssh.FILEXFER_TYPE_DIRECTORY
+                found.append(
+                    SimpleNamespace(
+                        path=child,
+                        metadata=SimpleNamespace(
+                            is_dir=is_dir,
+                            content_length=int(entry.attrs.size or 0),
+                        ),
+                    )
+                )
             return found
 
         return self._run(operation)

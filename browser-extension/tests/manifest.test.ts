@@ -2,6 +2,16 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("MV3 manifest contract", () => {
+  it.each(["chrome-mv3", "firefox-mv3", "edge-mv3"])(
+    "uses the package release version in the %s manifest",
+    async (target) => {
+      const packageMetadata = JSON.parse(await readFile("package.json", "utf8"));
+      const manifest = JSON.parse(await readFile(`.output/${target}/manifest.json`, "utf8"));
+
+      expect(manifest.version).toBe(packageMetadata.version);
+    },
+  );
+
   it("declares the exact Firefox data collection categories for explicit Vault transfers", async () => {
     const manifest = JSON.parse(await readFile(".output/firefox-mv3/manifest.json", "utf8"));
     expect(manifest.browser_specific_settings.gecko.id).toBe(

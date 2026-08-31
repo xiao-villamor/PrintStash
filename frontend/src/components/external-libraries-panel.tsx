@@ -12,11 +12,15 @@ import {
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   createExternalLibrary,
+  createStorageConnection,
   deleteExternalLibrary,
+  deleteStorageConnection,
   getJobStatus,
   getVaultConfig,
   enrollExternalLibraryRoot,
   listExternalLibraries,
+  listStorageConnections,
+  probeStorageConnection,
   scanExternalLibrary,
   updateExternalLibrary,
   updateVaultConfig,
@@ -24,10 +28,14 @@ import {
 import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
 import { trackImportJob } from "@/lib/task-center";
+import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
 import type {
   ExternalLibrary,
   ExternalLibraryCollectionMode,
+  ExternalLibraryCreate,
   ExternalLibraryWatchMode,
+  LibrarySourceKind,
+  StorageConnection,
 } from "@/types";
 
 const BTN_PRIMARY =
@@ -78,6 +86,9 @@ function describeSchedule(cron: string): string {
 
 function watchStatus(lib: ExternalLibrary): string {
   if (!lib.enabled) return "Paused";
+  if ((lib.source_kind ?? "mounted") !== "mounted") {
+    return "Remote source — bounded scheduled scans only";
+  }
   if (lib.watch_active) {
     return lib.fs_kind === "network"
       ? "Watching (forced — polling network folder)"
@@ -182,6 +193,14 @@ function formatDate(value: string | null | undefined): string {
   }).format(new Date(value));
 }
 
+function isLibrarySourceKind(value: string): value is LibrarySourceKind {
+  return value === "mounted" || value === "s3" || value === "webdav" || value === "sftp";
+}
+
+function isRemoteLibrarySourceKind(value: string): value is Exclude<LibrarySourceKind, "mounted"> {
+  return value === "s3" || value === "webdav" || value === "sftp";
+}
+
 /**
  * The API this panel drives. Declared as a port so a test can render the panel
  * against a stub; production callers get {@link VAULT_API}, which wires the real
@@ -198,6 +217,10 @@ export interface ExternalLibrariesApi {
   remove: typeof deleteExternalLibrary;
   scan: typeof scanExternalLibrary;
   jobStatus: typeof getJobStatus;
+  listConnections?: typeof listStorageConnections;
+  createConnection?: typeof createStorageConnection;
+  probeConnection?: typeof probeStorageConnection;
+  deleteConnection?: typeof deleteStorageConnection;
 }
 
 const VAULT_API: ExternalLibrariesApi = {
@@ -212,6 +235,10 @@ const VAULT_API: ExternalLibrariesApi = {
   remove: deleteExternalLibrary,
   scan: scanExternalLibrary,
   jobStatus: getJobStatus,
+  listConnections: listStorageConnections,
+  createConnection: createStorageConnection,
+  probeConnection: probeStorageConnection,
+  deleteConnection: deleteStorageConnection,
 };
 
 async function pollScanJob(
@@ -243,6 +270,7 @@ export function ExternalLibrariesPanel({
   const [loaded, setLoaded] = useState(false);
 
   const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
+  const [connections, setConnections] = useState<StorageConnection[]>([]);
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExternalLibrary | null>(null);
   const [enrollTarget, setEnrollTarget] = useState<ExternalLibrary | null>(null);
@@ -250,13 +278,33 @@ export function ExternalLibrariesPanel({
   // Add-library draft.
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState("");
+  const [sourceKind, setSourceKind] = useState<LibrarySourceKind>("mounted");
+  const [connectionId, setConnectionId] = useState<number | "">("");
+  const [sourcePrefix, setSourcePrefix] = useState("");
   const [scanSchedule, setScanSchedule] = useState("0 * * * *");
   const [watchMode, setWatchMode] = useState<ExternalLibraryWatchMode>("auto");
   const [mode, setMode] = useState<ExternalLibraryCollectionMode>("mirror");
 
+  // Reusable encrypted remote-source profile draft. Secret fields are sent
+  // once and never returned by the API.
+  const [profileName, setProfileName] = useState("");
+  const [profileKind, setProfileKind] = useState<Exclude<LibrarySourceKind, "mounted">>("s3");
+  const [profileEndpoint, setProfileEndpoint] = useState("");
+  const [profileBucket, setProfileBucket] = useState("");
+  const [profileRegion, setProfileRegion] = useState("us-east-1");
+  const [profileUsername, setProfileUsername] = useState("");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [profileAccessKey, setProfileAccessKey] = useState("");
+  const [profileSecretKey, setProfileSecretKey] = useState("");
+  const [profileHostKey, setProfileHostKey] = useState("");
+  const [profilePort, setProfilePort] = useState(22);
+  const [profileRoot, setProfileRoot] = useState("models");
+  const [profileBusy, setProfileBusy] = useState<number | "create" | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       setLibraries(await api.list());
+      if (api.listConnections) setConnections(await api.listConnections());
     } catch (e) {
       toast.error(e);
     }
@@ -294,21 +342,34 @@ export function ExternalLibrariesPanel({
   }
 
   async function handleCreate() {
-    if (!name.trim() || !rootPath.trim()) {
-      toast.error("Name and folder path are required.");
+    if (!name.trim() || (sourceKind === "mounted" ? !rootPath.trim() : connectionId === "")) {
+      toast.error(
+        sourceKind === "mounted"
+          ? "Name and folder path are required."
+          : "Name and a compatible connection profile are required.",
+      );
       return;
     }
     setBusyId("create");
     try {
-      await api.create({
+      const body: ExternalLibraryCreate = {
         name: name.trim(),
-        root_path: rootPath.trim(),
+        root_path: sourceKind === "mounted" ? rootPath.trim() : undefined,
         scan_schedule: scanSchedule,
-        watch_mode: watchMode,
+        watch_mode: sourceKind === "mounted" ? watchMode : "off",
         collection_mode: mode,
-      });
+      };
+      if (sourceKind !== "mounted") {
+        body.source_kind = sourceKind;
+        body.connection_id = connectionId === "" ? null : connectionId;
+        body.source_prefix = sourcePrefix.trim();
+      }
+      await api.create(body);
       setName("");
       setRootPath("");
+      setSourceKind("mounted");
+      setConnectionId("");
+      setSourcePrefix("");
       setScanSchedule("0 * * * *");
       setWatchMode("auto");
       setMode("mirror");
@@ -318,6 +379,85 @@ export function ExternalLibrariesPanel({
       toast.error(e);
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleCreateConnection() {
+    if (!api.createConnection || !api.probeConnection || !profileName.trim()) return;
+    setProfileBusy("create");
+    try {
+      const body: StorageConnectionCreate =
+        profileKind === "s3"
+          ? {
+              name: profileName.trim(),
+              kind: profileKind,
+              configuration: {
+                provider: profileEndpoint.trim() ? "s3_self_hosted" : "s3",
+                bucket: profileBucket.trim(),
+                endpoint_url: profileEndpoint.trim(),
+                region: profileRegion.trim(),
+                addressing_style: profileEndpoint.trim() ? "path" : "auto",
+                root: profileRoot.trim(),
+              },
+              secrets: {
+                access_key: profileAccessKey,
+                secret_key: profileSecretKey,
+              },
+            }
+          : profileKind === "webdav"
+            ? {
+                name: profileName.trim(),
+                kind: profileKind,
+                configuration: {
+                  provider: "webdav",
+                  endpoint_url: profileEndpoint.trim(),
+                  username: profileUsername.trim(),
+                  root: profileRoot.trim(),
+                },
+                secrets: { password: profilePassword },
+              }
+            : {
+                name: profileName.trim(),
+                kind: profileKind,
+                configuration: {
+                  host: profileEndpoint.trim(),
+                  port: profilePort,
+                  username: profileUsername.trim(),
+                  host_key: profileHostKey.trim(),
+                  root: profileRoot.trim(),
+                },
+                secrets: { password: profilePassword },
+              };
+      const created = await api.createConnection(body);
+      setConnections((current) => [...current, created]);
+      setProfileName("");
+      setProfilePassword("");
+      setProfileAccessKey("");
+      setProfileSecretKey("");
+      try {
+        await api.probeConnection(created.id);
+        toast.success("Encrypted connection profile saved and verified.");
+      } catch (e) {
+        toast.error(e);
+      }
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setProfileBusy(null);
+    }
+  }
+
+  async function handleDeleteConnection(connection: StorageConnection) {
+    if (!api.deleteConnection) return;
+    setProfileBusy(connection.id);
+    try {
+      await api.deleteConnection(connection.id);
+      setConnections((current) => current.filter((item) => item.id !== connection.id));
+      toast.success(`Removed connection profile "${connection.name}".`);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setProfileBusy(null);
     }
   }
 
@@ -468,6 +608,12 @@ export function ExternalLibrariesPanel({
                           <p className="text-xs text-muted-foreground font-mono mt-1 truncate">
                             {lib.root_path}
                           </p>
+                          {(lib.source_kind ?? "mounted") !== "mounted" && (
+                            <p className="mt-1 text-2xs text-muted-foreground">
+                              {(lib.source_kind ?? "mounted").toUpperCase()} · read-only · remote
+                              writes disabled
+                            </p>
+                          )}
                           <div
                             className={`mt-2 flex items-start gap-2 rounded border p-2 ${
                               binding.tone === "bound"
@@ -529,22 +675,24 @@ export function ExternalLibrariesPanel({
                                 inputClass={`${INPUT} !py-1.5 text-xs`}
                                 onChange={(cron) => handleUpdate(lib, { scan_schedule: cron })}
                               />
-                              <select
-                                className={`${INPUT} !py-1.5 text-xs self-start`}
-                                value={lib.watch_mode}
-                                disabled={busy}
-                                onChange={(e) =>
-                                  handleUpdate(lib, {
-                                    watch_mode: parseWatchMode(e.target.value),
-                                  })
-                                }
-                              >
-                                {WATCH_OPTIONS.map((o) => (
-                                  <option key={o.value} value={o.value}>
-                                    {o.label}
-                                  </option>
-                                ))}
-                              </select>
+                              {(lib.source_kind ?? "mounted") === "mounted" && (
+                                <select
+                                  className={`${INPUT} !py-1.5 text-xs self-start`}
+                                  value={lib.watch_mode}
+                                  disabled={busy}
+                                  onChange={(e) =>
+                                    handleUpdate(lib, {
+                                      watch_mode: parseWatchMode(e.target.value),
+                                    })
+                                  }
+                                >
+                                  {WATCH_OPTIONS.map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                      {o.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
                             </div>
                           )}
                           {lib.last_scan_status === "error" && (
@@ -612,10 +760,190 @@ export function ExternalLibrariesPanel({
               </ul>
             )}
 
+            {api.createConnection && api.probeConnection && api.deleteConnection && (
+              <div className="rounded border border-border bg-muted/20 p-3 sm:p-4 space-y-3">
+                <div>
+                  <p className="text-2xs font-mono uppercase tracking-wider text-primary">
+                    Encrypted remote connections
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Credentials stay encrypted on the PrintStash server. Remote sources are
+                    read-only and are scanned with bounded requests and bandwidth.
+                  </p>
+                </div>
+                {connections.length > 0 && (
+                  <ul className="divide-y divide-border rounded border border-border bg-background">
+                    {connections.map((connection) => (
+                      <li
+                        key={connection.id}
+                        className="flex items-center justify-between gap-3 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {connection.name}
+                          </p>
+                          <p className="text-2xs text-muted-foreground">
+                            {connection.kind.toUpperCase()} · secrets stored:{" "}
+                            {connection.secret_fields_set.join(", ") || "none"}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className={BTN_SECONDARY}
+                          disabled={!canEdit || profileBusy !== null}
+                          onClick={() => handleDeleteConnection(connection)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remove profile
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input
+                    className={INPUT}
+                    aria-label="Connection profile name"
+                    placeholder="Profile name"
+                    value={profileName}
+                    disabled={!canEdit}
+                    onChange={(event) => setProfileName(event.target.value)}
+                  />
+                  <select
+                    className={INPUT}
+                    aria-label="Connection protocol"
+                    value={profileKind}
+                    disabled={!canEdit}
+                    onChange={(event) => {
+                      if (isRemoteLibrarySourceKind(event.target.value)) {
+                        setProfileKind(event.target.value);
+                      }
+                    }}
+                  >
+                    <option value="s3">S3 / compatible</option>
+                    <option value="webdav">WebDAV</option>
+                    <option value="sftp">SFTP</option>
+                  </select>
+                  {profileKind === "s3" ? (
+                    <>
+                      <input
+                        className={INPUT}
+                        aria-label="S3 endpoint"
+                        placeholder="Endpoint (blank for AWS S3)"
+                        value={profileEndpoint}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileEndpoint(event.target.value)}
+                      />
+                      <input
+                        className={INPUT}
+                        aria-label="S3 bucket"
+                        placeholder="Bucket"
+                        value={profileBucket}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileBucket(event.target.value)}
+                      />
+                      <input
+                        className={INPUT}
+                        aria-label="S3 region"
+                        placeholder="Region"
+                        value={profileRegion}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileRegion(event.target.value)}
+                      />
+                      <input
+                        className={INPUT}
+                        aria-label="S3 access key"
+                        placeholder="Access key"
+                        value={profileAccessKey}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileAccessKey(event.target.value)}
+                      />
+                      <input
+                        className={INPUT}
+                        type="password"
+                        aria-label="S3 secret key"
+                        placeholder="Secret key"
+                        value={profileSecretKey}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileSecretKey(event.target.value)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className={INPUT}
+                        aria-label={profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
+                        placeholder={profileKind === "sftp" ? "Host" : "WebDAV endpoint"}
+                        value={profileEndpoint}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileEndpoint(event.target.value)}
+                      />
+                      {profileKind === "sftp" && (
+                        <input
+                          className={INPUT}
+                          type="number"
+                          aria-label="SFTP port"
+                          value={profilePort}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfilePort(Number(event.target.value))}
+                        />
+                      )}
+                      <input
+                        className={INPUT}
+                        aria-label="Connection username"
+                        placeholder="Username"
+                        value={profileUsername}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfileUsername(event.target.value)}
+                      />
+                      <input
+                        className={INPUT}
+                        type="password"
+                        aria-label="Connection password"
+                        placeholder="Password"
+                        value={profilePassword}
+                        disabled={!canEdit}
+                        onChange={(event) => setProfilePassword(event.target.value)}
+                      />
+                      {profileKind === "sftp" && (
+                        <textarea
+                          className={INPUT}
+                          aria-label="SFTP host key"
+                          placeholder="Pinned OpenSSH known_hosts entry"
+                          value={profileHostKey}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileHostKey(event.target.value)}
+                        />
+                      )}
+                    </>
+                  )}
+                  <input
+                    className={INPUT}
+                    aria-label="Connection root"
+                    placeholder="Remote root"
+                    value={profileRoot}
+                    disabled={!canEdit}
+                    onChange={(event) => setProfileRoot(event.target.value)}
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    className={BTN_PRIMARY}
+                    disabled={!canEdit || profileBusy !== null || !profileName.trim()}
+                    onClick={handleCreateConnection}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {profileBusy === "create" ? "Saving" : "Save and test profile"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Add a library */}
             <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
               <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                Add a folder
+                Add a library source
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
                 <input
@@ -625,13 +953,63 @@ export function ExternalLibrariesPanel({
                   disabled={!canEdit}
                   onChange={(e) => setName(e.target.value)}
                 />
-                <input
-                  className={INPUT}
-                  placeholder="Absolute folder path (e.g. /mnt/nas/3d)"
-                  value={rootPath}
-                  disabled={!canEdit}
-                  onChange={(e) => setRootPath(e.target.value)}
-                />
+                {connections.length > 0 && (
+                  <select
+                    className={INPUT}
+                    aria-label="Library source type"
+                    value={sourceKind}
+                    disabled={!canEdit}
+                    onChange={(event) => {
+                      if (!isLibrarySourceKind(event.target.value)) return;
+                      setSourceKind(event.target.value);
+                      setConnectionId("");
+                    }}
+                  >
+                    <option value="mounted">Mounted folder (SMB/NFS/local)</option>
+                    <option value="s3">S3 / compatible</option>
+                    <option value="webdav">WebDAV / Nextcloud</option>
+                    <option value="sftp">SFTP</option>
+                  </select>
+                )}
+                {sourceKind === "mounted" ? (
+                  <input
+                    className={INPUT}
+                    placeholder="Absolute folder path (e.g. /mnt/nas/3d)"
+                    value={rootPath}
+                    disabled={!canEdit}
+                    onChange={(e) => setRootPath(e.target.value)}
+                  />
+                ) : (
+                  <>
+                    <select
+                      className={INPUT}
+                      aria-label="Library connection profile"
+                      value={connectionId}
+                      disabled={!canEdit}
+                      onChange={(event) =>
+                        setConnectionId(event.target.value ? Number(event.target.value) : "")
+                      }
+                    >
+                      <option value="">Choose a connection profile</option>
+                      {connections
+                        .filter(
+                          (connection) => connection.kind === sourceKind && connection.enabled,
+                        )
+                        .map((connection) => (
+                          <option key={connection.id} value={connection.id}>
+                            {connection.name}
+                          </option>
+                        ))}
+                    </select>
+                    <input
+                      className={INPUT}
+                      placeholder="Remote prefix (optional)"
+                      value={sourcePrefix}
+                      disabled={!canEdit}
+                      onChange={(event) => setSourcePrefix(event.target.value)}
+                    />
+                  </>
+                )}
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
                   Scan schedule
                   <ScheduleControl
@@ -641,21 +1019,23 @@ export function ExternalLibrariesPanel({
                     onChange={setScanSchedule}
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                  Real-time watching
-                  <select
-                    className={INPUT}
-                    value={watchMode}
-                    disabled={!canEdit}
-                    onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
-                  >
-                    {WATCH_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {sourceKind === "mounted" && (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Real-time watching
+                    <select
+                      className={INPUT}
+                      value={watchMode}
+                      disabled={!canEdit}
+                      onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
+                    >
+                      {WATCH_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <select
                   className={INPUT}
                   value={mode}
@@ -667,8 +1047,8 @@ export function ExternalLibrariesPanel({
                 </select>
               </div>
               <p className="text-2xs text-muted-foreground">
-                Watching gives near-real-time updates on local folders. Network folders (NAS over
-                NFS/SMB) don't deliver file events, so they fall back to the schedule above.
+                Mounted local folders can be watched. SMB/NFS and remote sources use conservative
+                scheduled scans; S3/WebDAV/SFTP sources are always read-only.
               </p>
               <div className="flex justify-end">
                 <button

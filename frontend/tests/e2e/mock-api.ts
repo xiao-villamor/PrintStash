@@ -208,6 +208,8 @@ const state = {
   browserDeviceRevoked: false,
   s3LegacyCandidate: true,
   s3LegacyAdopted: false,
+  // SAFETY: The mutable mock state is limited to the API's GC lifecycle values.
+  gcPlanState: null as null | "preview" | "quarantined" | "aborted" | "completed",
 };
 
 export function resetMockApiState(): void {
@@ -223,6 +225,24 @@ export function resetMockApiState(): void {
   state.browserDeviceRevoked = false;
   state.s3LegacyCandidate = true;
   state.s3LegacyAdopted = false;
+  state.gcPlanState = null;
+}
+
+function gcPlan() {
+  const planState = state.gcPlanState ?? "preview";
+  return {
+    id: 7,
+    state: planState,
+    digest: "a".repeat(64),
+    resource_count: 1,
+    candidate_pool_count: 1,
+    key_count: 4,
+    size_bytes: 1572864,
+    quarantine_until: planState === "quarantined" ? "2099-06-11T00:24:22Z" : null,
+    backup_id: planState === "quarantined" ? "backup-verified" : null,
+    last_error: null,
+    items: [],
+  };
 }
 
 function inboxItem() {
@@ -684,6 +704,38 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         updated_at: now,
       },
     ]);
+    return;
+  }
+  if (url.pathname === "/api/v1/admin/gc") {
+    if (req.method === "POST") {
+      drainRequest(req, () => {
+        state.gcPlanState = "preview";
+        sendJson(res, gcPlan());
+      });
+      return;
+    }
+    sendJson(res, state.gcPlanState === null ? null : gcPlan());
+    return;
+  }
+  if (url.pathname === "/api/v1/admin/gc/7/approve" && req.method === "POST") {
+    drainRequest(req, () => {
+      state.gcPlanState = "quarantined";
+      sendJson(res, gcPlan());
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/admin/gc/7/abort" && req.method === "POST") {
+    drainRequest(req, () => {
+      state.gcPlanState = "aborted";
+      sendJson(res, gcPlan());
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/admin/gc/7/finalize" && req.method === "POST") {
+    drainRequest(req, () => {
+      state.gcPlanState = "completed";
+      sendJson(res, gcPlan());
+    });
     return;
   }
   if (url.pathname === "/api/v1/collections") {

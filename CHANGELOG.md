@@ -8,6 +8,13 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
+- **Read-only remote libraries and guarded garbage collection.** Reusable,
+  encrypted S3-compatible, WebDAV, and SFTP connections can discover external
+  files through bounded, resumable scans without writing back to the source.
+  Destructive cleanup now requires an immutable preview digest, a recent fully
+  verified independent backup, explicit approval, quarantine, and final
+  revalidation; scheduled maintenance can never approve a deletion plan.
+
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.
   Both are Guarded: permanent deletion requires confirmation and scheduled
@@ -63,6 +70,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
+- **The browser extension now shows its normal SemVer release.** The popup header
+  displays the packaged `0.x.y` version, and every browser manifest derives that
+  version from the extension package so release identifiers cannot drift.
 - **Storage ownership is data-plane only.** PrintStash no longer creates S3
   buckets or changes lifecycle policies. It inspects versioning/lifecycle state
   to report safety, keeps backup S3 configuration independent, and requires an

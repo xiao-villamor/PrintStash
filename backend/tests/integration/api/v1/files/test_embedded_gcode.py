@@ -10,6 +10,7 @@ which must trip before the bytes are materialised.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import zipfile
 from collections.abc import AsyncIterator
@@ -193,6 +194,7 @@ class TestEmbeddedGcode:
         self,
         api_client: httpx.AsyncClient,
         auth_headers: dict[str, str],
+        db_session: Session,
         three_mf,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -237,7 +239,7 @@ class TestEmbeddedGcode:
         def vanished(*_args: object, **_kwargs: object):
             raise FileNotFoundError("deleted between the check and the read")
 
-        monkeypatch.setattr(files_api, "read_embedded_gcode", vanished)
+        monkeypatch.setattr(files_api, "read_embedded_gcode_path", vanished)
 
         response = await api_client.get(
             f"/api/v1/files/{artifact.id}/embedded-gcode", headers=auth_headers
@@ -245,6 +247,38 @@ class TestEmbeddedGcode:
 
         assert response.status_code == 410, response.text
         assert response.json()["detail"] == "file_blob_missing"
+
+    async def test_reads_an_external_3mf_without_using_the_active_vault(
+        self,
+        api_client: httpx.AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        three_mf,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.api.v1 import files as files_api
+
+        payload = _zip_bytes({"Metadata/plate_1.gcode": b"external\n"})
+        artifact = three_mf(content=payload)
+        stored = db_session.get(File, artifact.id)
+        assert stored is not None
+        stored.is_external = True
+        stored.size_bytes = len(payload)
+        stored.sha256 = hashlib.sha256(payload).hexdigest()
+        db_session.add(stored)
+        db_session.commit()
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(files_api, "get_backend", active_vault_must_not_be_used)
+
+        response = await api_client.get(
+            f"/api/v1/files/{artifact.id}/embedded-gcode", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == b"external\n"
 
     async def test_rejects_an_unauthenticated_caller(
         self, api_client: httpx.AsyncClient, three_mf

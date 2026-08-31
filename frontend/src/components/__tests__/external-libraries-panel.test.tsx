@@ -37,6 +37,7 @@ import type {
   ExternalLibraryUpdate,
   IngestJobStatus,
   IngestResponse,
+  StorageConnection,
 } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
@@ -559,6 +560,87 @@ describe("ExternalLibrariesPanel", () => {
           collection_mode: "mirror",
         }),
       );
+    });
+
+    it("adds a read-only remote S3 source through a reusable profile", async () => {
+      const user = userEvent.setup();
+      const profile: StorageConnection = {
+        id: 41,
+        name: "TrueNAS MinIO",
+        kind: "s3",
+        configuration: { bucket: "models" },
+        secret_fields_set: ["access_key", "secret_key"],
+        enabled: true,
+      };
+      const { api } = renderPanel({
+        listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([profile]),
+      });
+      await screen.findByText("NAS models");
+      await user.selectOptions(await screen.findByLabelText("Library source type"), "s3");
+      await user.type(screen.getByPlaceholderText(/^Name/), "Remote catalogue");
+      await user.selectOptions(screen.getByLabelText("Library connection profile"), "41");
+      await user.type(screen.getByPlaceholderText(/Remote prefix/), "production");
+
+      await user.click(screen.getByRole("button", { name: /Add library/ }));
+
+      await waitFor(() =>
+        expect(api.create).toHaveBeenCalledWith({
+          name: "Remote catalogue",
+          root_path: undefined,
+          scan_schedule: "0 * * * *",
+          watch_mode: "off",
+          collection_mode: "mirror",
+          source_kind: "s3",
+          connection_id: 41,
+          source_prefix: "production",
+        }),
+      );
+    });
+
+    it("keeps secrets write-only across remote profile verification", async () => {
+      const user = userEvent.setup();
+      const profile: StorageConnection = {
+        id: 42,
+        name: "AWS archive",
+        kind: "s3",
+        configuration: { bucket: "archive" },
+        secret_fields_set: ["access_key", "secret_key"],
+        enabled: true,
+      };
+      const createConnection = vi
+        .fn<NonNullable<ExternalLibrariesApi["createConnection"]>>()
+        .mockResolvedValue(profile);
+      const probeConnection = vi
+        .fn<NonNullable<ExternalLibrariesApi["probeConnection"]>>()
+        .mockResolvedValue({ ok: true });
+      renderPanel({
+        listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
+        createConnection,
+        probeConnection,
+        deleteConnection: vi
+          .fn<NonNullable<ExternalLibrariesApi["deleteConnection"]>>()
+          .mockResolvedValue(undefined),
+      });
+      await screen.findByText("Encrypted remote connections");
+      await user.type(screen.getByLabelText("Connection profile name"), "AWS archive");
+      await user.type(screen.getByLabelText("S3 bucket"), "archive");
+      await user.type(screen.getByLabelText("S3 access key"), "ACCESS");
+      await user.type(screen.getByLabelText("S3 secret key"), "SECRET");
+
+      await user.click(screen.getByRole("button", { name: "Save and test profile" }));
+
+      await waitFor(() =>
+        expect(createConnection).toHaveBeenCalledWith(
+          expect.objectContaining({
+            name: "AWS archive",
+            kind: "s3",
+            secrets: { access_key: "ACCESS", secret_key: "SECRET" },
+          }),
+        ),
+      );
+      expect(probeConnection).toHaveBeenCalledWith(42);
+      expect(await screen.findByText(/secrets stored: access_key, secret_key/)).toBeVisible();
+      expect(screen.queryByDisplayValue("SECRET")).toBeNull();
     });
 
     it("trims a path the operator pasted with whitespace", async () => {

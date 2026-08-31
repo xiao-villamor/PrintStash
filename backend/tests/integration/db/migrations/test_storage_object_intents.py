@@ -23,7 +23,7 @@ class TestStorageObjectIntentMigration:
         cfg = migrate_mod._alembic_config(f"sqlite:///{tmp_path / 'offline.sqlite'}")
         rendered = StringIO()
         with redirect_stdout(rendered):
-            command.downgrade(cfg, "head:8c44c3bfef74", sql=True)
+            command.downgrade(cfg, "c3ec006ced6a:8c44c3bfef74", sql=True)
 
         assert (
             "UPDATE owned_storage_objects SET state = 'committed'"

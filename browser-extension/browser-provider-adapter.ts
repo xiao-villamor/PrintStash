@@ -4,6 +4,9 @@
  * exercise storage, permissions, tabs, and scripting without a live browser.
  */
 export interface BrowserProviderAdapter {
+  runtime: {
+    getManifest(): { version: string };
+  };
   storage: {
     get(keys: string | string[]): Promise<Record<string, unknown>>;
     set(values: Record<string, unknown>): Promise<void>;
@@ -24,6 +27,7 @@ export interface BrowserProviderAdapter {
 }
 
 export interface BrowserExtensionApi {
+  runtime: BrowserProviderAdapter["runtime"];
   storage: { local: BrowserProviderAdapter["storage"] };
   permissions: BrowserProviderAdapter["permissions"];
   tabs: BrowserProviderAdapter["tabs"];
@@ -45,6 +49,7 @@ export interface BrowserScriptRequest {
 
 export function createBrowserProviderAdapter(browser: BrowserExtensionApi): BrowserProviderAdapter {
   return {
+    runtime: browser.runtime,
     storage: browser.storage.local,
     permissions: browser.permissions,
     tabs: browser.tabs,

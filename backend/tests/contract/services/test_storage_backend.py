@@ -23,6 +23,7 @@ import boto3
 import pytest
 
 from app.core.config import _overlay, settings
+from app.services.library_source import S3LibrarySource
 from app.services.storage_backend import (
     S3StorageBackend,
     StorageCollisionError,
@@ -121,6 +122,25 @@ class TestExists:
                 s3_backend.exists("vault-data/models/anything.txt")
         finally:
             s3_backend._client.head_object = original_head_object
+
+
+class TestS3LibrarySource:
+    def test_real_s3_compatible_object_is_materializable(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        key = "library-source/models/contract.gcode"
+        payload = b"G1 X10 Y10\n"
+        s3_backend._client.put_object(Bucket=s3_backend._bucket, Key=key, Body=payload)
+        source = S3LibrarySource(
+            {"bucket": s3_backend._bucket}, client=s3_backend._client
+        )
+
+        page = source.list_page("library-source/models", cursor=None, limit=1000)
+
+        assert [entry.key for entry in page.entries] == [key]
+        assert page.complete is True
+        with source.materialize(key) as local_path:
+            assert local_path.read_bytes() == payload
 
 
 class TestWriteStream:

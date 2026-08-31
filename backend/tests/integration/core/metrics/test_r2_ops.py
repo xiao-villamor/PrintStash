@@ -151,3 +151,26 @@ class TestResetOrphanedScans:
         )
         db_session.commit()
         assert external_library.reset_orphaned_scans(db_session) == 0
+
+    def test_reset_orphaned_scans_releases_the_abandoned_claim(
+        self, db_session: Session
+    ) -> None:
+        library = ExternalLibrary(
+            name="claimed-nas",
+            root_path="/mnt/claimed-nas",
+            enabled=True,
+            scan_schedule="* * * * *",
+            last_scan_status=ExternalLibraryScanStatus.RUNNING,
+            scan_claim_token="abandoned-claim",
+            scan_claim_expires_at=utcnow() + timedelta(minutes=30),
+            scan_job_id="dead-worker-job",
+        )
+        db_session.add(library)
+        db_session.commit()
+
+        external_library.reset_orphaned_scans(db_session)
+
+        db_session.refresh(library)
+        assert library.scan_claim_token is None
+        assert library.scan_claim_expires_at is None
+        assert library.scan_job_id is None

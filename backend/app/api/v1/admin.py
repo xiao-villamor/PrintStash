@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.core.security import require_superuser
@@ -12,6 +13,8 @@ from app.db.models import (
     Collection,
     Document,
     File,
+    GcItem,
+    GcRun,
     Model,
     Printer,
     PrinterProfile,
@@ -22,6 +25,7 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session
 from app.schemas.auth import UserCreate, UserPasswordUpdate, UserRead, UserUpdate
+from app.services import gc_planner
 from app.services.auth import (
     get_user_by_username,
     hash_password,
@@ -30,18 +34,23 @@ from app.services.auth import (
 from app.services.storage_deletion import process_storage_delete_intents
 from app.services.storage_ownership import UnsafeStorageDeleteError
 from app.services.trash import (
+    PurgeConflictError,
     StorageRiskConfirmationRequired,
-    gc_soft_deleted,
     hard_delete_collection,
     hard_delete_document,
     hard_delete_file,
     hard_delete_model,
 )
+from app.services.trash import restore_resource as trash_restore_resource
 
 router = APIRouter(
     prefix="/admin", tags=["admin"], dependencies=[Depends(require_superuser)]
 )
 _admin_security_lock = threading.RLock()
+
+
+class GcApprovalRequest(BaseModel):
+    digest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 
 _RESOURCE_MODEL = {
     "models": Model,
@@ -263,10 +272,14 @@ def restore_resource(
     row = session.get(model, resource_id)
     if row is None:
         raise HTTPException(status_code=404, detail="resource_id_not_found")
-    row.deleted_at = None
-    row.deleted_by = None
-    session.add(row)
-    session.commit()
+    try:
+        trash_restore_resource(session, row)
+    except PurgeConflictError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="storage_cleanup_blocked",
+        ) from exc
     return {"restored": True}
 
 
@@ -292,9 +305,92 @@ def list_audit(
     return [r.model_dump() for r in rows]
 
 
-@router.post("/gc")
-def run_gc(confirm_storage_risk: bool = Query(default=False)) -> dict[str, int]:
-    return gc_soft_deleted(
-        confirm_storage_risk=confirm_storage_risk,
-        scheduled=False,
+def _gc_read(session: Session, run: GcRun) -> dict:
+    items = session.exec(
+        select(GcItem)
+        .where(GcItem.run_id == run.id)
+        .order_by(GcItem.id.asc())  # type: ignore[attr-defined]
+    ).all()
+    body = run.model_dump(mode="json")
+    body["items"] = [item.model_dump(mode="json") for item in items]
+    return body
+
+
+def _gc_error(exc: gc_planner.GcSafetyError) -> HTTPException:
+    code = str(exc)
+    return HTTPException(
+        status_code=404 if code == "gc_plan_not_found" else status.HTTP_409_CONFLICT,
+        detail=code,
     )
+
+
+@router.post("/gc")
+def run_gc(
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_superuser),
+) -> dict:
+    """Create a non-destructive GC preview; approval is a separate request."""
+    try:
+        run = gc_planner.create_plan(
+            session,
+            retention_days=int(gc_planner.settings.trash_retention_days),
+            requested_by=admin.id,
+        )
+    except gc_planner.GcSafetyError as exc:
+        raise _gc_error(exc) from exc
+    body = _gc_read(session, run)
+    # Preserve the old observability fields while making their zero value
+    # explicit: this endpoint no longer crosses the destructive boundary.
+    body.update({"rows": 0, "orphan_blobs": 0})
+    return body
+
+
+@router.get("/gc")
+def read_active_gc_plan(session: Session = Depends(get_session)) -> dict | None:
+    """Return the durable active plan so UI reloads cannot lose the interlock."""
+    run = session.exec(
+        select(GcRun)
+        .where(GcRun.active_slot == 1)
+        .order_by(GcRun.id.desc())  # type: ignore[attr-defined]
+    ).first()
+    return None if run is None else _gc_read(session, run)
+
+
+@router.get("/gc/{run_id}")
+def read_gc_plan(run_id: int, session: Session = Depends(get_session)) -> dict:
+    run = session.get(GcRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="gc_plan_not_found")
+    return _gc_read(session, run)
+
+
+@router.post("/gc/{run_id}/approve")
+def approve_gc_plan(
+    run_id: int,
+    request: GcApprovalRequest,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_superuser),
+) -> dict:
+    try:
+        run = gc_planner.approve_plan(session, run_id, request.digest, int(admin.id))
+    except gc_planner.GcSafetyError as exc:
+        raise _gc_error(exc) from exc
+    return _gc_read(session, run)
+
+
+@router.post("/gc/{run_id}/abort")
+def abort_gc_plan(run_id: int, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = gc_planner.abort_plan(session, run_id)
+    except gc_planner.GcSafetyError as exc:
+        raise _gc_error(exc) from exc
+    return _gc_read(session, run)
+
+
+@router.post("/gc/{run_id}/finalize")
+def finalize_gc_plan(run_id: int, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = gc_planner.finalize_plan(session, run_id)
+    except gc_planner.GcSafetyError as exc:
+        raise _gc_error(exc) from exc
+    return _gc_read(session, run)

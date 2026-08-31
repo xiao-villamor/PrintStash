@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -527,9 +528,11 @@ class TestQueueScheduler:
             def exists(self, _key: str) -> bool:
                 return True
 
-            def download_to_path(self, _key: str, target: Path) -> Path:
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "queued-artifact.gcode"
                 target.write_text("G28\n")
-                return target
+                yield target
 
         provider = AsyncMock()
         from app.services.printer_provider import capabilities_for_provider
@@ -595,6 +598,7 @@ class TestQueueScheduler:
         client: TestClient,
         auth_headers: dict[str, str],
         db_session: Session,
+        tmp_path: Path,
     ) -> None:
         printer = build_printer(
             db_session,
@@ -613,9 +617,11 @@ class TestQueueScheduler:
             def exists(self, _key: str) -> bool:
                 return True
 
-            def download_to_path(self, _key: str, target: Path) -> Path:
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "lifecycle-artifact.gcode"
                 target.write_text("G28\n")
-                return target
+                yield target
 
         provider = AsyncMock()
         from app.services.printer_hub import PrinterHub

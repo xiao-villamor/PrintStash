@@ -212,6 +212,25 @@ def _test_exact_released_sqlite_create_all_schema_upgrades_without_data_loss(
                 is None
             )
             assert Path(external_identity_before[0]).read_bytes() == external_bytes
+            assert connection.execute(
+                text(
+                    "SELECT source_kind, connection_id, source_prefix, "
+                    "writeback_enabled FROM external_libraries WHERE id = 1"
+                )
+            ).one() == ("MOUNTED", None, "", 0)
+            assert connection.execute(
+                text("SELECT source_key, source_verified_at FROM files WHERE id = 1")
+            ).one() == (None, None)
+            assert (
+                connection.execute(
+                    text("SELECT COUNT(*) FROM storage_connections")
+                ).scalar_one()
+                == 0
+            )
+            assert (
+                connection.execute(text("SELECT COUNT(*) FROM gc_runs")).scalar_one()
+                == 0
+            )
             assert (
                 connection.execute(
                     text("SELECT version_num FROM alembic_version")

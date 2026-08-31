@@ -56,10 +56,25 @@ A soft-deleted row awaiting retention expiry; query via
 _Avoid_: deleted (ambiguous with hard delete)
 
 **Trash lifecycle**:
-soft-delete → restore → expiry → hard delete (rows + explicitly owned blobs);
-owned solely by `services/trash` (including the hourly GC loop). PrintStash
-never walks configured storage and deletes files merely because no database row
-claims them; failed writes clean up their exact destinations at the write site.
+soft-delete → restore or expiry → GC preview → explicit approval → quarantine →
+revalidated hard delete. `services/trash` owns individual transitions and
+`services/gc_planner` owns automatic expiry. Automatic GC never approves its
+own plan. It requires a recent, verified backup on an independent S3 provider,
+an unchanged candidate digest, Verified active storage, and a completed
+quarantine interval. PrintStash never walks configured storage and deletes
+files merely because no database row claims them; failed writes clean up only
+their exact destinations at the write site.
+
+**GC plan**:
+A durable, bounded and immutable preview of expired catalog rows and their
+explicitly owned storage keys. At most one plan is active. Approval binds its
+exact digest to a backup witness; finalization rechecks the candidate rows,
+restore generation, provider identity, backup and quarantine deadline.
+
+**Backup witness**:
+The exact archive id, source reference, provider identity and digest of a fully
+verified, application-compatible S3 backup created in the previous 24 hours on
+a provider different from active Vault storage.
 
 ### Storage
 
@@ -92,40 +107,59 @@ streaming.
 temp download remotely. The only sanctioned way to feed a stored blob to
 code that needs a filesystem path (mesh loading, tar, restore).
 
+**Artifact content**:
+`services/artifact_content` is the only read seam for an Artifact's bytes. It
+resolves managed storage, descriptor-pinned mounted files, and read-only remote
+sources without asking callers to understand `File.path`. Mounted reads reject
+symlinks and changes between open, hash and close. Remote reads verify stable
+object metadata around materialization.
+
 **Thumbnail**:
 A WebP preview stored under `thumbnail_key()` (`{file_id}.webp`);
 `thumbnail.to_webp()` is the single conversion seam every write goes
 through. Pre-WebP installs left PNGs under `legacy_thumbnail_key()` —
 read/delete only, never written.
 
-### External libraries (NAS folder mirroring)
+### Library sources
 
 **External library**:
-A user-managed folder (typically on a NAS) that PrintStash mirrors *in place* —
-the folder is the source of truth. Files are indexed where they live; only the
-generated thumbnail + metadata are stored by the vault. Opt-in and OFF by
-default (`SystemConfig.external_libraries_enabled`). Owned by
-`services/external_library`.
+A user-managed mounted folder or read-only S3, WebDAV, or SFTP namespace that
+PrintStash indexes in place. The source remains authoritative; only generated
+thumbnails and metadata are stored by the Vault. Opt-in and OFF by default
+(`SystemConfig.external_libraries_enabled`). Owned by
+`services/external_library`. The UI calls these **Library sources** or
+**Shared volumes**.
+
+**Storage connection**:
+A reusable remote-source profile. Non-secret configuration is stored separately
+from encrypted credentials, and API reads never return secret values. A
+connection can serve more than one library source.
 
 **Linked file**:
-An Artifact with `File.is_external = true`: its blob lives on an external root
-(`File.path` is that absolute path), not in vault storage. PrintStash never
-overwrites or deletes a linked file's bytes — trash/GC skip external blobs.
+An Artifact with `File.is_external = true`: its bytes live on a library source,
+not in managed Vault storage. `File.source_key` is the stable source-relative
+identity. `File.path` is an absolute display path for mounted sources and an
+opaque `source://` display URI for remote sources. PrintStash never deletes a
+linked file's bytes; trash and GC skip them.
 _Avoid_: "imported file" (that means a vault-owned copy).
 
-**Mirror scan**:
-`scan_library()` reconciling the index with the folder — new files indexed,
-removed files trashed, changed files (size/mtime → re-hash) refreshed in place.
-Safety rule: a scan **aborts without deleting** when the root is missing/
-unreadable, or empty while live indexed files exist (an unmounted NAS must never
-trigger mass deletion). Manual (`POST /libraries/{id}/scan`) or the periodic
-`_external_scan_loop` in `main.py`.
+**Discovery epoch**:
+A complete, restart-safe reconciliation of one library source. Mounted sources
+use a descriptor-pinned filesystem snapshot. Remote sources page through a
+durable cursor in bounded slices; absence is interpreted only after the full
+epoch completes. Empty or unexpectedly large removal sets fail closed. A
+weekly rotating hash check catches changes that preserve size and mtime.
+
+**Discovery tombstone**:
+A durable `(library, source_key)` suppression created when a linked Artifact is
+trashed. It prevents the still-present source object from being re-imported on
+the next scan. Restore or explicit Rediscover clears it.
 
 **Write-back**:
-Web uploads/revisions routed into a library folder instead of vault storage
-(`ingestion.resolve_write_target`). Revisions follow their model's library
-automatically; new uploads pick a target in the upload modal. Collision-safe —
-write-back only *adds* files, never overwrites.
+Create-only web uploads or revisions routed into a mounted library folder
+instead of Vault storage (`ingestion.resolve_write_target`). It is disabled for
+S3, WebDAV, and SFTP library sources. Mounted write-back only adds files and
+never overwrites existing bytes.
 
 ## Flagged ambiguities
 

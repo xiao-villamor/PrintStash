@@ -421,7 +421,13 @@ def persist_artifact(
         )
         if library is None:
             raise ExternalRootBindingError("unbound", "external_library_missing")
-        assert_root_binding(library)
+        if library.source_kind.value == "mounted":
+            assert_root_binding(library)
+        elif move_blob or library.writeback_enabled:
+            # Remote sources are intentionally read-only. A future writeback
+            # capability must prove atomic create/replace per protocol before
+            # it can cross this boundary.
+            raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
 
     if ingestion_key is not None:
         existing_ingestion = session.exec(
@@ -737,6 +743,9 @@ def resolve_write_target(
     library = session.get(ExternalLibrary, library_id)
     if library is None:
         raise ExternalRootBindingError("missing", "external_library_missing")
+
+    if library.source_kind.value != "mounted":
+        raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
 
     # An explicitly selected library, or a model already linked to one, must
     # fail closed. Falling back to vault storage would make the UI appear to

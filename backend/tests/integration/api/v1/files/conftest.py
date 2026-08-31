@@ -41,6 +41,7 @@ def make_file(db_session: Session):
         filename: str = "part.stl",
         ftype: str = "stl",
         path: str | None = None,
+        size_bytes: int = 10,
         sha256: str = "a" * 64,
         **fields: Any,
     ) -> File:
@@ -50,7 +51,7 @@ def make_file(db_session: Session):
             original_filename=filename,
             file_type=ftype,
             version=1,
-            size_bytes=10,
+            size_bytes=size_bytes,
             sha256=sha256,
             **fields,
         )

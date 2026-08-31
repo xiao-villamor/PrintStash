@@ -14,6 +14,7 @@ so clearly rather than accepting the request and quietly doing nothing.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
@@ -89,8 +90,9 @@ class TestBambuPrinter:
             def exists(self, _path):
                 return True
 
-            def download_to_path(self, _path, _target):
-                return local
+            @contextmanager
+            def local_path(self, _path):
+                yield local
 
         with (
             patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),

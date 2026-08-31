@@ -3,8 +3,10 @@ checks, and finding repair dispatch — beyond the happy-path in test_vault_audi
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from sqlmodel import Session
@@ -1335,6 +1337,38 @@ class TestReparseMetadata:
         ).first()
         assert meta is not None
         assert meta.material_type == "PLA"
+
+    def test_reparse_metadata_reads_an_external_source_without_the_vault(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "external.gcode"
+        payload = b"G28\n"
+        source.write_bytes(payload)
+        model = _make_model(db_session, "reparse-external")
+        file_row = _make_file(
+            db_session,
+            model,
+            path=str(source),
+            file_type=FileType.GCODE,
+            is_external=True,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
+        monkeypatch.setattr(
+            "app.services.ingestion._gcode_strategy", lambda: _StubStrategy()
+        )
+        monkeypatch.setattr(
+            vault_audit,
+            "get_backend",
+            lambda: (_ for _ in ()).throw(AssertionError("vault backend used")),
+        )
+
+        result = vault_audit._reparse_metadata(db_session, file_row.id)
+
+        assert result is True
 
     def test_reparse_metadata_missing_blob_returns_false(
         self, db_session: Session

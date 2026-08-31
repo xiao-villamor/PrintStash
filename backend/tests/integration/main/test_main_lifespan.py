@@ -788,7 +788,7 @@ class TestGcLoop:
 
         monkeypatch.setattr(
             app_main,
-            "gc_soft_deleted",
+            "run_scheduled_gc",
             lambda: (_ for _ in ()).throw(RuntimeError("gc fail")),
         )
         monkeypatch.setattr(
@@ -843,7 +843,7 @@ class TestGcLoop:
             await real_sleep(0)
             raise asyncio.CancelledError
 
-        monkeypatch.setattr(app_main, "gc_soft_deleted", gc)
+        monkeypatch.setattr(app_main, "run_scheduled_gc", gc)
         monkeypatch.setattr(app_main.asyncio, "sleep", stop_after_first_tick)
 
         with pytest.raises(asyncio.CancelledError):

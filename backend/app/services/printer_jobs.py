@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy import case, update
@@ -28,6 +26,11 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.services import fleet, printer_rbac, rbac
+from app.services.artifact_content import (
+    ArtifactContentError,
+    ArtifactContentMissingError,
+    resolve,
+)
 from app.services.printer_files import upsert_printer_file
 from app.services.printer_provider import PrinterProviderClient, ProviderError
 from app.services.storage_backend import get_backend
@@ -79,12 +82,9 @@ def reproducibility_payload(
     }
     has_identity = any(value is not None for value in identity.values())
     exact = (
-        (
-            job.source != "external"
-            or job.artifact_evidence in {"gcode_archived", "project_archived"}
-        )
-        and download_url is not None
-    )
+        job.source != "external"
+        or job.artifact_evidence in {"gcode_archived", "project_archived"}
+    ) and download_url is not None
     level = "exact" if exact else "metadata" if has_identity else "basic"
     error_code = getattr(job, "artifact_capture_error_code", None)
     error_message = getattr(job, "artifact_capture_error_message", None)
@@ -169,38 +169,27 @@ async def transfer_artifact(
     mark_outcome_unknown: bool = False,
 ) -> None:
     """Single storage-to-provider transfer seam for immediate and queued sends."""
-    if not await asyncio.to_thread(backend.exists, artifact.path):
-        raise PrinterJobError("file_blob_missing")
-    temp = tempfile.NamedTemporaryFile(
-        prefix=f"print-{artifact.id}-",
-        suffix=Path(artifact.original_filename).suffix or ".gcode",
-        delete=False,
-    )
-    target = Path(temp.name)
-    temp.close()
-    # Storage downloads are create-only; remove only the placeholder this
-    # operation just created before publishing into its random destination.
-    target.unlink()
     try:
         try:
-            local = await asyncio.to_thread(
-                backend.download_to_path, artifact.path, target
-            )
-        except Exception as exc:
+            handle = resolve(artifact, backend=backend)
+            with handle.materialize() as local:
+                try:
+                    await provider.upload(local, remote_filename)
+                    if start_print:
+                        await provider.start(remote_filename)
+                except Exception as exc:
+                    # Upload and start are non-transactional remote operations. A
+                    # transport error can arrive after the printer accepted either
+                    # request, therefore automatic replay is unsafe.
+                    if mark_outcome_unknown:
+                        raise DispatchOutcomeUnknownError() from exc
+                    raise
+        except ArtifactContentMissingError as exc:
+            raise PrinterJobError("file_blob_missing") from exc
+        except ArtifactContentError as exc:
             raise PrinterJobError("storage_error") from exc
-        try:
-            await provider.upload(local, remote_filename)
-            if start_print:
-                await provider.start(remote_filename)
-        except Exception as exc:
-            # Upload and start are non-transactional remote operations. A
-            # transport error can arrive after the printer accepted either
-            # request, therefore automatic replay is unsafe.
-            if mark_outcome_unknown:
-                raise DispatchOutcomeUnknownError() from exc
-            raise
-    finally:
-        target.unlink(missing_ok=True)
+    except OSError as exc:
+        raise PrinterJobError("storage_error") from exc
 
 
 def reconcile_stranded_dispatches() -> int:

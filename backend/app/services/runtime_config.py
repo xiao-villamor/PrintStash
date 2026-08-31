@@ -378,6 +378,11 @@ def _typed_environment_provider_config() -> dict[str, object]:
             ("bucket", "s3_bucket", settings.s3_bucket),
             ("region", "s3_region", settings.s3_region),
             ("endpoint_url", "s3_endpoint_url", settings.s3_endpoint_url),
+            (
+                "addressing_style",
+                "s3_addressing_style",
+                settings.s3_addressing_style,
+            ),
             ("access_key", "s3_access_key", settings.s3_access_key),
             ("secret_key", "s3_secret_key", settings.s3_secret_key),
         ):
@@ -455,6 +460,7 @@ def _project_provider_overlay(config: StorageProviderConfig) -> None:
         _overlay["s3_bucket"] = str(spec.options["bucket"])
         _overlay["s3_endpoint_url"] = str(spec.options["endpoint_url"])
         _overlay["s3_region"] = str(spec.options["region"])
+        _overlay["s3_addressing_style"] = str(spec.options["addressing_style"])
         _overlay["s3_access_key"] = str(spec.options["access_key"])
         _overlay["s3_secret_key"] = str(spec.options["secret_key"])
         # Keep the managed namespace alongside the compatibility S3 fields.
@@ -1050,6 +1056,7 @@ def get_effective_config(session: Session) -> dict:
         "s3_bucket": str(settings.s3_bucket),
         "s3_endpoint_url": str(settings.s3_endpoint_url),
         "s3_region": str(settings.s3_region),
+        "s3_addressing_style": str(settings.s3_addressing_style),
         "s3_access_key": _mask_secret(str(settings.s3_access_key)),
         "s3_secret_key": _mask_secret(str(settings.s3_secret_key)),
         "has_s3_access_key": bool(settings.s3_access_key),

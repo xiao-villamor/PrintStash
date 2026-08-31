@@ -9,7 +9,9 @@ serves its own in-memory result rather than failing or overwriting.
 
 from __future__ import annotations
 
+import hashlib
 import io
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -60,6 +62,44 @@ class TestFileAsStl:
 
         assert response.status_code == 410, response.text
         assert response.json()["detail"] == "file_blob_missing"
+
+    def test_serves_an_external_stl_without_using_the_active_vault(
+        self,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+        make_model,
+        make_file,
+        tmp_path: Path,
+    ) -> None:
+        from app.api.v1 import files as files_api
+        from app.services import artifact_content
+
+        payload = b"solid nas endsolid"
+        source = tmp_path / "nas" / "external.stl"
+        source.parent.mkdir()
+        source.write_bytes(payload)
+        row = make_file(
+            make_model("stl-external"),
+            filename=source.name,
+            path=str(source),
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            is_external=True,
+        )
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(
+            artifact_content, "get_backend", active_vault_must_not_be_used
+        )
+        monkeypatch.setattr(files_api, "get_backend", active_vault_must_not_be_used)
+
+        response = client.get(f"/api/v1/files/{row.id}/stl", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.content == payload
 
     def test_converts_a_mesh_that_is_not_stl(
         self,

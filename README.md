@@ -13,7 +13,8 @@ PrintStash is a local-first web app for STL, 3MF, OBJ, STEP, and G-code
 libraries. It connects Models and G-code revisions to printer fleets, material
 state, print history, Documents, share links, notifications, access control,
 Pending Imports, and Vault audits. Upload from the browser, capture a model URL,
-mirror a NAS folder, or let OrcaSlicer push new G-code after every slice.
+index a mounted or remote library source, or let OrcaSlicer push new G-code
+after every slice.
 
 ![PrintStash demo](screenshots/00-demo-v010.gif)
 
@@ -62,17 +63,22 @@ are welcome in
 - Nested collections, flat tags, search, filters, thumbnails, grid/list views,
   sorting, breadcrumbs, and drag-and-drop between collections.
 
-**Shared volumes (mirror a folder or NAS)**
-- Point PrintStash at a folder on the server or a NAS and it indexes files **in
-  place** — no copying, no second source of truth; only thumbnails and metadata
-  are stored in the vault.
-- Two-way sync: scans pick up added, removed, and edited files, and web uploads
-  and revisions write back into the folder (never overwriting existing bytes).
+**Library sources (mounted folders, NAS, and remote protocols)**
+- Point PrintStash at a mounted folder, S3 prefix, WebDAV collection, or SFTP
+  directory and it indexes files **in place**. Only thumbnails and metadata are
+  stored in the Vault.
+- Discovery picks up added, removed, and edited files without a recursive
+  full-download loop. Remote sources are read-only. Mounted folders may accept
+  create-only web uploads and revisions without overwriting existing bytes.
 - Keep it current with a per-volume schedule (presets or custom cron), manual
   "Scan now", and optional real-time watching of local folders.
 - Network folders (NFS/SMB) can't deliver filesystem events, so watching
   auto-detects the filesystem and falls back to the schedule — with a per-volume
   override. An unmounted share can never trigger a mass delete.
+- Remote scans use durable cursors, one global scan slot, 1,000-key pages, a
+  2 GiB and 15-minute slice budget, 8 MiB/s content pacing, 4 metadata calls/s
+  for WebDAV/SFTP, and a 24-hour provider-error backoff. A weekly rotating hash
+  check catches same-size, same-mtime replacements.
 
 **Preview and inspect**
 - A browser 3D viewer for source meshes — solid, X-ray, and wireframe modes,
@@ -160,8 +166,11 @@ are welcome in
 - Per-printer roles grant view, print, control, or admin independently and apply
   to UI sessions, API keys, REST endpoints, and live WebSocket state.
 - Audit logs record who changed what, including authenticated browser actions.
-- A recycle bin keeps soft-deleted models restorable until retention expires,
-  with manual restore, purge-expired, and permanent-delete.
+- A recycle bin keeps soft-deleted models restorable until retention expires.
+  Scheduled cleanup only creates a bounded preview. Physical deletion requires
+  an exact administrator approval, Verified active storage, a fresh verified
+  backup on independent S3, and a configurable quarantine (seven days by
+  default), with every proof checked again before finalization.
 
 **Vault integrity, backups, and portability**
 - Quick and Full Vault audits persist findings, support cancellation, group
@@ -183,6 +192,13 @@ are welcome in
   runtime; remote presets remain beta except the generic/native S3 path.
 - Health checks report database, measured storage capabilities, backup, and
   printer-provider readiness.
+
+Storage and migration guides:
+
+- [Library sources and NAS recipes](./docs/library-sources.md)
+- [Storage provider and protocol matrix](./docs/provider-support.md#storage-and-library-source-compatibility)
+- [Garbage collection safety and recovery](./docs/storage-data-safety.md)
+- [Upgrade and migration to 0.13.0](./UPGRADE.md#0130-notes)
 
 ## Quick Start
 

@@ -27,8 +27,9 @@ instance.
 After rebuilding, confirm Chrome is loading the exact unpacked directory
 `browser-extension/.output/chrome-mv3`, then click **Reload** for PrintStash on
 `chrome://extensions`. Close and reopen the popup and confirm its header shows
-**Capture protocol v2 · diagnostics 4**. If the marker is missing, Chrome has a stale or
-different unpacked directory loaded: use **Load unpacked** to select
+the current SemVer release from `package.json` (for example, **Version 0.12.1**).
+If the version is stale, Chrome has a different unpacked directory or an older
+build loaded: use **Load unpacked** to select
 `browser-extension/.output/chrome-mv3` again, click **Reload**, and reopen the
 popup before testing capture behavior.
 
@@ -75,6 +76,31 @@ The helper does not persist access tokens. The popup links directly to the
 Imports settings on the configured vault to create a pairing code.
 
 Capture transfers are user-initiated and go only to the Vault URL you configure.
+
+## Storage and Library sources in 0.13
+
+The extension does not connect to local disks, NAS shares, S3, WebDAV or SFTP.
+It never receives their credentials. Every capture first enters **Pending
+Imports** through the paired PrintStash API, where a user reviews the selected
+files and metadata.
+
+Finalizing a capture writes to managed Vault storage or to a mounted Library
+source that explicitly permits create-only write-back. Read-only S3, WebDAV and
+SFTP Library sources are discovery destinations, not capture targets, and do
+not appear in the upload destination selector. Capturing a page cannot overwrite
+or delete a source object.
+
+Upgrading from 0.12 to 0.13 does not require re-pairing a browser. Existing
+browser device credentials and legacy username/API-key setups retain their
+normal migration behavior. If capture fails after an upgrade:
+
+1. Confirm the popup still shows the expected Vault hostname and user.
+2. Open the Vault health endpoint and resolve any read-only storage recovery
+   state before retrying finalization.
+3. Check **Pending Imports**. A successful browser transfer can remain there
+   even when finalization to managed storage was blocked.
+4. Rebuild and reload the extension only when the popup release version is stale;
+   storage-provider changes alone do not require an extension rebuild.
 
 Run the WXT/Vitest adapter, storage, messaging, and popup fixtures with:
 

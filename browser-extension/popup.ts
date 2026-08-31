@@ -91,6 +91,7 @@ const vaultInput = requiredElement("#vault", HTMLInputElement);
 const pairingCodeInput = requiredElement("#pairing-code", HTMLInputElement);
 const usernameInput = requiredElement("#username", HTMLInputElement);
 const keyInput = requiredElement("#key", HTMLInputElement);
+const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
@@ -113,6 +114,8 @@ const editButton = requiredElement("#edit-connection", HTMLButtonElement);
 const cancelButton = requiredElement("#cancel-edit", HTMLButtonElement);
 const disconnectButton = requiredElement("#disconnect", HTMLButtonElement);
 const apiSettingsButton = requiredElement("#open-api-settings", HTMLButtonElement);
+
+runtimeMarker.textContent = `Version ${browser.runtime.getManifest().version}`;
 
 let activePage: Page | null = null;
 let activeSource: Source = null;

@@ -49,6 +49,7 @@ from app.services.backup import (
     end_mutating_operation,
     inspect_restore_recovery,
 )
+from app.services.gc_planner import run_scheduled_gc
 from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
 from app.services.printer_hub import PrinterHub
@@ -71,7 +72,6 @@ from app.services.storage_backend import (
     bind_backend,
 )
 from app.services.task_queue import LocalTaskQueue
-from app.services.trash import gc_soft_deleted
 
 logger = get_logger(__name__)
 
@@ -358,7 +358,7 @@ async def _gc_loop(*, storage_maintenance_enabled: bool = True) -> None:
         try:
             try:
                 # Sync DB + storage I/O — keep it off the event loop.
-                await asyncio.to_thread(gc_soft_deleted)
+                await asyncio.to_thread(run_scheduled_gc)
             except Exception:
                 logger.exception("scheduled GC failed")
             try:

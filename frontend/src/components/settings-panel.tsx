@@ -57,6 +57,10 @@ import {
   createApiKey,
   createAdminUser,
   createBackup,
+  createGcPlan,
+  approveGcPlan,
+  abortGcPlan,
+  finalizeGcPlan,
   adoptLocalBackup,
   adoptS3Backup,
   deactivateAdminUser,
@@ -68,6 +72,7 @@ import {
   importLibraryArchive,
   rebuildModelThumbnails,
   getHealthDetails,
+  getActiveGcPlan,
   getLatestRelease,
   getVaultConfig,
   listBackupSources,
@@ -80,7 +85,6 @@ import {
   listApiKeys,
   listAdminUsers,
   listTrash,
-  purgeExpiredTrash,
   purgeModel,
   resetAdminUserPassword,
   restoreBackup,
@@ -93,6 +97,7 @@ import {
 } from "@/lib/api";
 import type {
   BackupMeta,
+  GcPlan,
   ReleaseStatus,
   UnownedBackupCandidate,
   UnownedS3BackupCandidate,
@@ -224,11 +229,13 @@ type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
  * What the trash panel is busy with: the id of the single model being purged, or a
  * label for one of the bulk retention actions.
  */
-type TrashOperation = number | "expired" | "settings";
+type TrashOperation = number | "expired" | "settings" | "gc";
 
 /** Only a per-model purge carries an id; the bulk actions carry their label instead. */
 function isModelPurge(operation: TrashOperation | null): operation is number {
-  return operation !== null && operation !== "expired" && operation !== "settings";
+  return (
+    operation !== null && operation !== "expired" && operation !== "settings" && operation !== "gc"
+  );
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
@@ -255,6 +262,13 @@ function formatDate(value: string | null | undefined): string {
     month: "short",
     day: "numeric",
     year: "numeric",
+  }).format(new Date(value));
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
   }).format(new Date(value));
 }
 
@@ -299,6 +313,27 @@ function cleanupStatusMessage(t: ReturnType<typeof useI18n>["t"], result: TrashP
     default:
       return t("settings.trashCleanupCompleted");
   }
+}
+
+function useDeadlineReached(deadline: string | null): boolean {
+  const [reachedDeadline, setReachedDeadline] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!deadline) return;
+    let timer: number;
+    const poll = () => {
+      const remaining = Date.parse(deadline) - Date.now();
+      if (remaining <= 0) {
+        setReachedDeadline(deadline);
+        return;
+      }
+      timer = window.setTimeout(poll, Math.min(remaining, 60_000));
+    };
+    timer = window.setTimeout(poll, 0);
+    return () => window.clearTimeout(timer);
+  }, [deadline]);
+
+  return deadline !== null && reachedDeadline === deadline;
 }
 
 // Consistent card shell used across every settings section.
@@ -396,6 +431,11 @@ export function SettingsPanel() {
   const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
   const [trashLoading, setTrashLoading] = useState(false);
   const [trashPurgeResult, setTrashPurgeResult] = useState<TrashPurgeRead | null>(null);
+  const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
+  const gcQuarantineReady = useDeadlineReached(
+    gcPlan?.state === "quarantined" ? (gcPlan.quarantine_until ?? null) : null,
+  );
+  const [gcDigestConfirmation, setGcDigestConfirmation] = useState("");
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
   const [trashRetentionDays, setTrashRetentionDays] = useState(30);
   const [autoMarkKnownGood, setAutoMarkKnownGood] = useState(true);
@@ -531,10 +571,15 @@ export function SettingsPanel() {
     }
     setTrashLoading(true);
     try {
-      const [items, cfg] = await Promise.all([listTrash(), getVaultConfig()]);
+      const [items, cfg, activePlan] = await Promise.all([
+        listTrash(),
+        getVaultConfig(),
+        user.is_superuser ? getActiveGcPlan() : Promise.resolve(null),
+      ]);
       setTrashItems(items);
       setTrashRetentionDays(cfg.trash_retention_days ?? 30);
       setTrashStorageTier(cfg.storage_tier ?? "unguarded");
+      setGcPlan(activePlan);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -1098,18 +1143,60 @@ export function SettingsPanel() {
     }
   }
 
-  async function purgeExpiredItems() {
+  async function createExpiredGcPreview() {
     setPurgeExpiredOpen(false);
-    setTrashBusy("expired");
+    setTrashBusy("gc");
     try {
-      const result = await purgeExpiredTrash(trashStorageTier !== "verified");
-      setTrashPurgeResult(result);
-      const summary = `${result.purged_count} expired model${result.purged_count === 1 ? "" : "s"} deleted.`;
-      if (result.storage_cleanup_status === "completed") {
-        toast.success(`${summary} ${cleanupStatusMessage(t, result)}`);
-      } else {
-        toast.warning(`${summary} ${cleanupStatusMessage(t, result)}`);
-      }
+      const plan = await createGcPlan();
+      setGcPlan(plan);
+      setGcDigestConfirmation("");
+      toast.success(
+        `Preview created for ${plan.resource_count} expired resource${plan.resource_count === 1 ? "" : "s"}. Nothing was deleted.`,
+      );
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function approveExpiredGcPlan() {
+    if (!gcPlan) return;
+    setTrashBusy("gc");
+    try {
+      const approved = await approveGcPlan(gcPlan.id, gcDigestConfirmation);
+      setGcPlan(approved);
+      setGcDigestConfirmation("");
+      toast.success("Backup verified. The plan is now in its recovery quarantine.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function abortExpiredGcPlan() {
+    if (!gcPlan) return;
+    setTrashBusy("gc");
+    try {
+      const aborted = await abortGcPlan(gcPlan.id);
+      setGcPlan(aborted);
+      setGcDigestConfirmation("");
+      toast.success("GC plan aborted. Every candidate remains in the trash.");
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setTrashBusy(null);
+    }
+  }
+
+  async function finalizeExpiredGcPlan() {
+    if (!gcPlan) return;
+    setTrashBusy("gc");
+    try {
+      const finalized = await finalizeGcPlan(gcPlan.id);
+      setGcPlan(finalized);
+      toast.success("GC plan finalized after all safety evidence was reverified.");
       await loadTrash();
     } catch (e) {
       toast.error(e);
@@ -1233,15 +1320,11 @@ export function SettingsPanel() {
         <ConfirmModal
           open={purgeExpiredOpen}
           onClose={() => setPurgeExpiredOpen(false)}
-          onConfirm={purgeExpiredItems}
-          busy={trashBusy === "expired"}
-          title="Purge expired trash?"
-          description={
-            trashStorageTier === "verified"
-              ? "This permanently deletes every expired model and its stored files. This cannot be undone."
-              : `This ${trashStorageTier} storage cannot verify every destructive mutation. Confirm this one-time storage risk acknowledgement to permanently delete expired models.`
-          }
-          confirmLabel="Purge forever"
+          onConfirm={createExpiredGcPreview}
+          busy={trashBusy === "gc"}
+          title="Create a safe GC preview?"
+          description="This only records a bounded candidate plan. It does not delete catalog rows or storage bytes. Approval later requires the exact digest, verified storage, and a recent independent backup."
+          confirmLabel="Create preview"
         />
         <ConfirmModal
           open={restoreTarget !== null}
@@ -2880,11 +2963,17 @@ export function SettingsPanel() {
                     <button
                       type="button"
                       onClick={() => setPurgeExpiredOpen(true)}
-                      disabled={!user || trashBusy === "expired" || trashRetentionDays < 0}
+                      disabled={
+                        !user?.is_superuser ||
+                        trashBusy === "gc" ||
+                        trashRetentionDays < 0 ||
+                        (gcPlan !== null &&
+                          ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
+                      }
                       className={BTN_SECONDARY}
                     >
                       <Eraser className="h-3.5 w-3.5" />
-                      {trashBusy === "expired" ? "Purging" : "Purge expired"}
+                      {trashBusy === "gc" ? "Preparing" : "Review expired"}
                     </button>
                   </div>
                   {trashPurgeResult && (
@@ -2899,6 +2988,91 @@ export function SettingsPanel() {
                       )}
                     >
                       {cleanupStatusMessage(t, trashPurgeResult)}
+                    </div>
+                  )}
+                  {gcPlan && (
+                    <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-foreground">
+                            GC plan #{gcPlan.id} · {gcPlan.state}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {gcPlan.resource_count} of {gcPlan.candidate_pool_count} expired
+                            resources · {gcPlan.key_count} storage keys ·{" "}
+                            {formatBytes(gcPlan.size_bytes)}
+                          </p>
+                        </div>
+                        <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                          {gcPlan.backup_id ? "backup verified" : "no backup bound"}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-2xs text-muted-foreground">Exact plan digest</p>
+                      <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
+                        {gcPlan.digest}
+                      </code>
+                      {gcPlan.state === "preview" && (
+                        <div className="mt-3 space-y-3">
+                          <p className="text-xs text-muted-foreground">
+                            Approval is fail-closed: paste the exact digest below. The server will
+                            also require verified storage and a recent backup on an independent S3
+                            provider before starting the quarantine.
+                          </p>
+                          <input
+                            className={INPUT}
+                            aria-label="Confirm GC plan digest"
+                            placeholder="Paste the 64-character digest"
+                            value={gcDigestConfirmation}
+                            disabled={trashBusy === "gc"}
+                            onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
+                          />
+                        </div>
+                      )}
+                      {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          Recovery quarantine ends {formatDateTime(gcPlan.quarantine_until)}. The
+                          plan and backup are reverified before final deletion.
+                        </p>
+                      )}
+                      {gcPlan.last_error && (
+                        <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        {gcPlan.state === "preview" && (
+                          <button
+                            type="button"
+                            className={BTN_PRIMARY}
+                            disabled={trashBusy === "gc" || gcDigestConfirmation !== gcPlan.digest}
+                            onClick={approveExpiredGcPlan}
+                          >
+                            <ShieldCheck className="h-3.5 w-3.5" />
+                            Verify backup and quarantine
+                          </button>
+                        )}
+                        {gcPlan.state === "quarantined" && (
+                          <button
+                            type="button"
+                            className={BTN_PRIMARY}
+                            disabled={
+                              trashBusy === "gc" || !gcPlan.quarantine_until || !gcQuarantineReady
+                            }
+                            onClick={finalizeExpiredGcPlan}
+                          >
+                            <Eraser className="h-3.5 w-3.5" />
+                            Reverify and finalize
+                          </button>
+                        )}
+                        {["preview", "quarantined"].includes(gcPlan.state) && (
+                          <button
+                            type="button"
+                            className={BTN_SECONDARY}
+                            disabled={trashBusy === "gc"}
+                            onClick={abortExpiredGcPlan}
+                          >
+                            Abort plan
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
                 </SettingsCard>
