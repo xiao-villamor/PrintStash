@@ -20,6 +20,7 @@ export function ViewerToolbar({
   setViewerMode,
   hasGcode,
   viewerReady,
+  notifyScreenshotError = toast.error,
 }: {
   displayMode: ViewerDisplayMode;
   setDisplayMode: (m: ViewerDisplayMode) => void;
@@ -30,6 +31,7 @@ export function ViewerToolbar({
   setViewerMode: (m: ViewerMode) => void;
   hasGcode: boolean;
   viewerReady: boolean;
+  notifyScreenshotError?: (message: string) => void;
 }) {
   const cluster =
     "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
@@ -99,7 +101,9 @@ export function ViewerToolbar({
                 onClick={() => {
                   const screenshot = controls.current?.screenshot();
                   if (screenshot) {
-                    void screenshot.catch(() => toast.error("Screenshot could not be created"));
+                    void screenshot.catch(() =>
+                      notifyScreenshotError("Screenshot could not be created"),
+                    );
                   }
                 }}
                 disabled={!viewerReady}

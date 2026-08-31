@@ -12,15 +12,13 @@ import { describe, expect, it, vi } from "vitest";
 import { ViewerToolbar } from "@/components/model-detail/viewer-toolbar";
 import type { STLViewerControls } from "@/components/stl-viewer";
 
-const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
-vi.mock("sonner", () => ({ toast: { error: toastError } }));
-
 function renderToolbar(
   viewerReady: boolean,
   screenshot = vi.fn<() => Promise<void>>(async () => {}),
   actions: {
     fit?: () => void;
     setShowGrid?: (visible: boolean) => void;
+    notifyScreenshotError?: (message: string) => void;
   } = {},
 ) {
   const controls = createRef<STLViewerControls>();
@@ -42,6 +40,7 @@ function renderToolbar(
       setViewerMode={vi.fn<(mode: "model" | "gcode") => void>()}
       hasGcode={false}
       viewerReady={viewerReady}
+      notifyScreenshotError={actions.notifyScreenshotError}
     />,
   );
   return screenshot;
@@ -65,18 +64,20 @@ describe("ViewerToolbar screenshot", () => {
 
   it("reports an asynchronous capture failure without downloading an empty image", async () => {
     const user = userEvent.setup();
+    const notifyScreenshotError = vi.fn<(message: string) => void>();
     const screenshot = renderToolbar(
       true,
       vi.fn<() => Promise<void>>(async () => {
         throw new Error("screenshot_empty");
       }),
+      { notifyScreenshotError },
     );
 
     await user.click(screen.getByRole("button", { name: "Screenshot" }));
 
     expect(screenshot).toHaveBeenCalledOnce();
     await vi.waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith("Screenshot could not be created"),
+      expect(notifyScreenshotError).toHaveBeenCalledWith("Screenshot could not be created"),
     );
   });
 
