@@ -986,6 +986,27 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("GC plan #12 · preview")).toBeVisible();
     });
 
+    it("aborts an active preview without issuing a destructive transition", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/admin/gc": json(GC_PLAN),
+          "POST /api/v1/admin/gc/12/abort": json({ ...GC_PLAN, state: "aborted" }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Abort plan" }));
+
+      await waitFor(() =>
+        expect(requestsWithMethod("POST").some((call) => call.url.endsWith("/gc/12/abort"))).toBe(
+          true,
+        ),
+      );
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+      expect(await screen.findByText("GC plan #12 · aborted")).toBeVisible();
+    });
+
     it("restores a model out of the trash", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({

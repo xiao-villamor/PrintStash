@@ -1690,7 +1690,9 @@ class ExternalLibrary(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)
     root_path: str = Field(max_length=1024)
-    source_kind: LibrarySourceKind = Field(default=LibrarySourceKind.MOUNTED, index=True)
+    source_kind: LibrarySourceKind = Field(
+        default=LibrarySourceKind.MOUNTED, index=True
+    )
     connection_id: Optional[int] = Field(
         default=None, foreign_key="storage_connections.id", index=True
     )
@@ -1771,7 +1773,9 @@ class ExternalLibraryCheckpoint(SQLModel, table=True):
     epoch: str = Field(max_length=64, index=True)
     cursor: Optional[str] = Field(default=None, max_length=2048)
     complete: bool = Field(default=False, index=True)
-    observed_keys_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    observed_keys_json: str = Field(
+        default="[]", sa_column=Column(Text, nullable=False)
+    )
     metadata_ops: int = 0
     bytes_read: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
     backoff_until: Optional[datetime] = Field(default=None, index=True)

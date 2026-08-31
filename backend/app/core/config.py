@@ -82,9 +82,7 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_endpoint_url: str = ""
     s3_region: str = "auto"
-    s3_addressing_style: str = Field(
-        default="auto", pattern=r"^(auto|path|virtual)$"
-    )
+    s3_addressing_style: str = Field(default="auto", pattern=r"^(auto|path|virtual)$")
     s3_access_key: str = ""
     s3_secret_key: str = ""
     # Historical installs default to the literal ``vault-data`` prefix. Typed
