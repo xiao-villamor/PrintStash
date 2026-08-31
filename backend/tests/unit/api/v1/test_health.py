@@ -49,6 +49,14 @@ def _installed(*present: str):
 
 
 class TestRuntimeCapabilities:
+    @pytest.mark.parametrize("enabled", [True, False], ids=["enabled", "disabled"])
+    def test_reports_restart_support(
+        self, monkeypatch: pytest.MonkeyPatch, enabled: bool
+    ) -> None:
+        monkeypatch.setitem(_overlay, "restart_enabled", enabled)
+
+        assert health_mod._runtime_capabilities()["restart"] is enabled
+
     def test_reports_the_image_variant_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

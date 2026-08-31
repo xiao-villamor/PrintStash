@@ -65,12 +65,11 @@ status, compare) · public share links (view-only vs downloadable, revoke → 40
 RBAC (create user, grant collection access, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management
 (promote/disable/reset password) · API keys · settings overview (system status
-
-- vault stats) · display currency · auto-mark-known-good toggle · metadata
-  export (JSON/CSV) · manual backup · notification channels (add webhook + delete) ·
-  About (running version + changelog) · design customization (metadata visibility,
-  card-metric slots + reset) · printer add/remove · cross-cutting (theme
-  persistence, health version, routes free of uncaught errors).
+and vault stats) · supervised API restart · display currency · auto-mark-known-good toggle · metadata
+export (JSON/CSV) · manual backup · notification channels (add webhook + delete) ·
+About (running version + changelog) · design customization (metadata visibility,
+card-metric slots + reset) · printer add/remove · cross-cutting (theme
+persistence, health version, routes free of uncaught errors).
 
 `util.ts` uploads a model through the real ingest flow; its G-code embeds the
 model name so the backend's content-hash dedupe doesn't collapse separate

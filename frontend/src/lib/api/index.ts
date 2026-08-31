@@ -28,4 +28,5 @@ export * from "@/lib/api/printers";
 export * from "@/lib/api/share";
 export * from "@/lib/api/spoolman";
 export * from "@/lib/api/statistics";
+export * from "@/lib/api/system";
 export * from "@/lib/api/taxonomy";

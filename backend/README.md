@@ -104,6 +104,7 @@ backend/
 | `VAULT_MAX_UPLOAD_MB` | Upload size limit | `512` |
 | `VAULT_MODEL_THUMBNAIL_WIDTH` | Generated Model preview width (320–1280; Settings offers 320/640/1280 presets) | `640` |
 | `VAULT_LOG_LEVEL` | Python log level | `INFO` |
+| `VAULT_RESTART_ENABLED` | Allow admins to restart from Settings; enable only under a process/container supervisor | `false` |
 
 > The first admin user is created via the web-based first-run wizard at
 > `/setup`; there is no env-driven default account. Storage paths above are

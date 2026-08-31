@@ -68,6 +68,9 @@ services:
       VAULT_OIDC_ALLOW_INSECURE_HTTP: ${VAULT_OIDC_ALLOW_INSECURE_HTTP:-false}
       VAULT_MAX_UPLOAD_MB: ${VAULT_MAX_UPLOAD_MB:-512}
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      # Settings can request a graceful API exit because this service has an
+      # unless-stopped restart policy. Disable if you remove that supervisor.
+      VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}
       # The API runs as this host identity so bind-mounted data remains
       # writable. Defaults match the image's unprivileged account.
       PUID: "${PUID:-10001}"

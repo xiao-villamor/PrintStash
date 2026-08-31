@@ -89,6 +89,7 @@ import {
   resetAdminUserPassword,
   restoreBackup,
   restoreModel,
+  restartPrintStash,
   revokeApiKey,
   updateCollectionPermission,
   updatePrinterPermission,
@@ -467,6 +468,8 @@ export function SettingsPanel() {
   const [cardMetrics, setCardMetrics] = useState(readCardMetrics);
   const showPrinterCardImage = usePrinterCardImagePreference();
   const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
+  const [restartBusy, setRestartBusy] = useState(false);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
     (section) => !["sso", "maintenance"].includes(section.id) || user?.is_superuser,
   );
@@ -1040,6 +1043,19 @@ export function SettingsPanel() {
     }
   }
 
+  async function confirmRestart() {
+    setRestartBusy(true);
+    try {
+      await restartPrintStash();
+      setRestartConfirmOpen(false);
+      toast.success(t("settings.restartSuccess"));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setRestartBusy(false);
+    }
+  }
+
   function updateMetadataPreference(field: keyof MetadataPreferences, visible: boolean) {
     const next = { ...metadataPrefs, [field]: visible };
     setMetadataPrefs(next);
@@ -1305,6 +1321,17 @@ export function SettingsPanel() {
     <Localized>
       <div className="w-full space-y-6">
         <ConfirmModal
+          open={restartConfirmOpen}
+          onClose={() => {
+            if (!restartBusy) setRestartConfirmOpen(false);
+          }}
+          onConfirm={confirmRestart}
+          busy={restartBusy}
+          title={t("settings.restartTitle")}
+          description={t("settings.restartDescription")}
+          confirmLabel={t("settings.restartConfirm")}
+        />
+        <ConfirmModal
           open={purgeTarget !== null}
           onClose={() => setPurgeTarget(null)}
           onConfirm={confirmPurge}
@@ -1522,6 +1549,19 @@ export function SettingsPanel() {
                     icon={Server}
                     title="System"
                     description="Server status and vault configuration"
+                    action={
+                      user?.is_superuser && health?.capabilities?.restart ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRestartConfirmOpen(true)}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                          {t("settings.restartAction")}
+                        </Button>
+                      ) : undefined
+                    }
                   >
                     <div className="px-4 sm:px-5">
                       {systemItems.map((item) => (

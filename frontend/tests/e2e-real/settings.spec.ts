@@ -1,7 +1,7 @@
 /**
  * The settings surface, which is where a deployment is actually operated from.
  *
- * Eleven flows that have nothing in common except that an operator does them from one
+ * These flows have nothing in common except that an operator does them from one
  * page and each writes something durable: an API key that must work then stop working,
  * a currency every price is rendered in, an export that has to be a real file, a backup,
  * a notification channel, and the trash purge. Each is asserted after a reload or against
@@ -132,6 +132,46 @@ test.describe("settings", () => {
     // Stat cards render counts.
     await expect(page.getByText("Models", { exact: true })).toBeVisible();
     await expect(page.getByText("Collections", { exact: true })).toBeVisible();
+  });
+
+  test("restart returns the supervised API to a healthy state", async ({ page }) => {
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Restart PrintStash" }).click();
+
+    const restartResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/system/restart") && response.request().method() === "POST",
+    );
+    await page
+      .getByRole("dialog", { name: "Restart PrintStash?" })
+      .getByRole("button", { name: "Restart now" })
+      .click();
+    expect((await restartResponse).status()).toBe(202);
+
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await page.request.get("/api/v1/health")).ok();
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000, intervals: [50, 100, 250] },
+      )
+      .toBe(false);
+    await expect
+      .poll(
+        async () => {
+          try {
+            return (await page.request.get("/api/v1/health")).ok();
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 30_000, intervals: [100, 250, 500] },
+      )
+      .toBe(true);
   });
 
   test("auto-mark-known-good toggle persists across reload", async ({ page }) => {

@@ -165,6 +165,10 @@ class Settings(BaseSettings):
     capture_provider_concurrency: int = Field(default=4, ge=1, le=4)
     capture_provider_retry_after_max_seconds: float = Field(default=10, ge=0, le=10)
     log_level: str = "INFO"
+    # A restart request exits the API process gracefully. Enable this only when
+    # Docker, systemd, Kubernetes, or another supervisor is configured to
+    # relaunch it; source/dev launches stay safely disabled by default.
+    restart_enabled: bool = False
 
     # Static ceiling on mesh density for geometry extraction + thumbnail
     # rendering. Loading + rasterising a mesh peaks (measured) at ~0.8–2 GB of RSS
