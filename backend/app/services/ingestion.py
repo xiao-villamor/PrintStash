@@ -185,12 +185,17 @@ def verify_durable_artifact(
         ):
             raise ArtifactDurabilityError("artifact_rows_not_durable")
         primary_key = artifact.path
+        thumbnail_key = artifact.thumbnail_path
 
     backend = get_backend()
     if not backend.exists(primary_key):
         raise ArtifactDurabilityError("artifact_blob_not_durable")
     if thumbnail_status in {"generated", "fallback_generated"}:
-        if not backend.exists(backend.thumbnail_key(file_id)):
+        # New generations are immutable, recipe-versioned objects. Keep the
+        # legacy address only as a read-compatible fallback for artifacts that
+        # predate durable thumbnail generations.
+        candidate = thumbnail_key or backend.thumbnail_key(file_id)
+        if not backend.exists(candidate):
             raise ThumbnailDurabilityError("thumbnail_blob_not_durable")
 
 

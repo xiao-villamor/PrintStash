@@ -186,7 +186,7 @@ class TestWriteStream:
 
 
 class TestThumbnailLifecycle:
-    def test_s3_thumbnail_variant_publish_and_pointer_replacement(
+    def test_s3_thumbnail_lifecycle_is_consistent(
         self, s3_backend: S3StorageBackend, db_session: Session
     ) -> None:
         model = build_model(db_session)

@@ -79,7 +79,18 @@ def to_webp(data: bytes, *, normalize: bool = True) -> bytes:
                             max(round(width * (1 - 2 * margin)), 1),
                             max(round(height * (1 - 2 * margin)), 1),
                         )
-                        rgba.thumbnail(content_size, Image.Resampling.LANCZOS)
+                        scale = min(
+                            content_size[0] / rgba.width,
+                            content_size[1] / rgba.height,
+                        )
+                        normalized_size = (
+                            max(round(rgba.width * scale), 1),
+                            max(round(rgba.height * scale), 1),
+                        )
+                        if rgba.size != normalized_size:
+                            rgba = rgba.resize(
+                                normalized_size, Image.Resampling.LANCZOS
+                            )
                         canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
                         offset = (
                             (width - rgba.width) // 2,

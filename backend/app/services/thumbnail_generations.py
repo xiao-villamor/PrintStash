@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-from typing import Callable, TypeVar
+from typing import Callable, Protocol, TypeVar
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 from sqlalchemy import update
@@ -33,9 +33,7 @@ from app.services.storage_backend import (
     get_backend,
 )
 from app.services.storage_ownership import (
-    UnsafeStorageDeleteError,
     publish_bytes,
-    replace_owned_bytes,
 )
 from app.services.thumbnail_engine import (
     ThumbnailEngine,
@@ -88,6 +86,12 @@ class ThumbnailEnsureResult:
             ThumbnailEnsureOutcome.GENERATED,
             ThumbnailEnsureOutcome.CACHED,
         )
+
+
+class ThumbnailRenderer(Protocol):
+    """Minimal engine seam used by durable coordination and deterministic fakes."""
+
+    def generate(self, request: ThumbnailRequest, /) -> ThumbnailResult: ...
 
 
 _DETERMINISTIC_FAILURES = {
@@ -211,7 +215,7 @@ def _acquire_slot(
             claimed = session.connection().execute(
                 update(ThumbnailRenderSlot)
                 .where(
-                    ThumbnailRenderSlot.id == candidate.id,
+                    ThumbnailRenderSlot.id == candidate.id,  # type: ignore[arg-type]
                     or_(
                         ThumbnailRenderSlot.lease_token.is_(None),  # type: ignore[union-attr]
                         ThumbnailRenderSlot.lease_expires_at < now,  # type: ignore[operator]
@@ -259,7 +263,7 @@ def _claim_generation(
         result = session.connection().execute(
             update(ThumbnailGeneration)
             .where(
-                ThumbnailGeneration.id == generation.id,
+                ThumbnailGeneration.id == generation.id,  # type: ignore[arg-type]
                 ThumbnailGeneration.state.in_(claimable_states),  # type: ignore[attr-defined]
                 or_(
                     ThumbnailGeneration.state == ThumbnailGenerationState.READY.value,
@@ -367,10 +371,17 @@ def _publish_encoded(
             failure_reason=ThumbnailFailureReason.LEASE_LOST.value,
         )
     assert file_row.id is not None
-    key = backend.thumbnail_variant_key(
-        file_row.id, file_row.sha256, generation.recipe_fingerprint
-    )
     digest = hashlib.sha256(encoded).hexdigest()
+    # The generation identity says whether rendering work can be reused; the
+    # immutable object identity additionally includes the encoded result. This
+    # lets an explicit repair publish a new object without ever overwriting the
+    # bytes readers may currently be serving.
+    variant_fingerprint = hashlib.sha256(
+        f"{generation.recipe_fingerprint}:{digest}".encode()
+    ).hexdigest()
+    key = backend.thumbnail_variant_key(
+        file_row.id, file_row.sha256, variant_fingerprint
+    )
     try:
         receipt = publish_bytes(
             session,
@@ -389,27 +400,15 @@ def _publish_encoded(
             or existing.size != len(encoded)
             or hashlib.sha256(backend.read_bytes(key)).hexdigest() != digest
         ):
-            try:
-                receipt = replace_owned_bytes(
-                    session,
-                    backend,
-                    key,
-                    encoded,
-                    object_kind="thumbnail",
-                )
-            except (UnsafeStorageDeleteError, NotImplementedError):
-                return _mark_failure(
-                    session,
-                    generation,
-                    ThumbnailFailureReason.STORAGE.value,
-                    slot_id=slot_id,
-                    token=token,
-                )
-            output_size = receipt.size
-            output_etag = receipt.etag
-        else:
-            output_size = existing.size
-            output_etag = existing.etag
+            return _mark_failure(
+                session,
+                generation,
+                ThumbnailFailureReason.STORAGE.value,
+                slot_id=slot_id,
+                token=token,
+            )
+        output_size = existing.size
+        output_etag = existing.etag
 
     generation.state = ThumbnailGenerationState.READY
     generation.storage_key = key
@@ -444,14 +443,16 @@ def ensure_thumbnail(
     force: bool = False,
     promote: bool = True,
     backend: StorageBackend | None = None,
-    engine: ThumbnailEngine | None = None,
+    engine: ThumbnailRenderer | None = None,
 ) -> ThumbnailEnsureResult:
     backend = backend or get_backend()
     generation = _get_or_create_generation(session, file_row)
     now = utcnow()
 
-    if generation.state == ThumbnailGenerationState.READY and _cache_is_valid(
-        generation, backend
+    if (
+        not force
+        and generation.state == ThumbnailGenerationState.READY
+        and _cache_is_valid(generation, backend)
     ):
         assert generation.storage_key is not None
         _publish_pointers(session, file_row, generation.storage_key, promote=promote)

@@ -21,7 +21,7 @@ import trimesh
 from PIL import Image
 from sqlmodel import select
 
-from app.core.config import _overlay
+from app.core.config import _overlay, settings
 from app.core.time import utcnow
 from app.db.models import BackgroundJob, InboxItem, InboxItemState, User
 from app.services.jobs import registry
@@ -293,7 +293,7 @@ class TestMetadata:
     async def test_3mf_upload_persists_embedded_preview(
         self, api, tmp_path, e2e_db, monkeypatch
     ):
-        """The public ingest flow serves a valid embedded 3MF preview unchanged."""
+        """The public ingest flow normalizes a valid embedded 3MF preview."""
         # Force the safe over-cap branch: geometry is intentionally skipped, while
         # the valid embedded image must still bypass any mesh rasterization.
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1)
@@ -318,8 +318,12 @@ class TestMetadata:
         assert thumbnail.headers["content-type"] == "image/webp"
 
         with Image.open(io.BytesIO(thumbnail.content)) as image:
-            pixels = np.asarray(image.convert("RGB"))
-        assert np.all(pixels == color)
+            pixels = np.asarray(image.convert("RGBA"))
+        width = int(settings.model_thumbnail_width)
+        assert image.size == (width, round(width * 3 / 4))
+        assert tuple(pixels[0, 0]) == (0, 0, 0, 0)
+        assert tuple(pixels[image.height // 2, image.width // 2, :3]) == color
+        assert pixels[:, :, 3].mean() > 100
 
     @pytest.mark.asyncio
     async def test_a_3mf_whose_parts_are_placed_by_transform_previews_correctly(
@@ -352,9 +356,7 @@ class TestMetadata:
         job = await _await_job(api, headers, uploaded.json()["job_id"])
         assert job["state"] == "completed", job
 
-        response = await api.get(
-            f"/api/v1/files/{job['file_id']}/stl", headers=headers
-        )
+        response = await api.get(f"/api/v1/files/{job['file_id']}/stl", headers=headers)
 
         assert response.status_code == 200, response.text
         assert response.headers["content-type"].startswith("application/sla")

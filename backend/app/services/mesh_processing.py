@@ -614,20 +614,24 @@ def extract_embedded_3mf_thumbnail(
                 if total_uncompressed > _MAX_3MF_TOTAL_UNCOMPRESSED_BYTES:
                     logger.warning("mesh_processing: 3MF expanded size limit exceeded")
                     return None
-                if (
-                    info.file_size > 0
-                    and info.file_size / max(info.compress_size, 1)
-                    > _MAX_3MF_COMPRESSION_RATIO
-                ):
-                    logger.warning(
-                        "mesh_processing: 3MF compression ratio limit exceeded"
-                    )
-                    return None
-                if not (
+                is_thumbnail_candidate = (
                     name.lower().startswith(_3MF_THUMBNAIL_DIRS)
                     and name.lower().endswith(".png")
                     and info.file_size > 0
+                )
+                if not is_thumbnail_candidate:
+                    continue
+                # Geometry members can legitimately compress extremely well and
+                # are never inflated by this extractor. Their declared expanded
+                # size still contributes to the archive-wide budget above, while
+                # the ratio guard belongs on the image bytes we actually read.
+                if (
+                    info.file_size / max(info.compress_size, 1)
+                    > _MAX_3MF_COMPRESSION_RATIO
                 ):
+                    logger.warning(
+                        "mesh_processing: 3MF thumbnail compression ratio limit exceeded"
+                    )
                     continue
                 candidates.append(info)
                 if len(candidates) > _MAX_3MF_THUMBNAIL_CANDIDATES:

@@ -202,7 +202,7 @@ class TestThumbnailRebuildJob:
         assert status is not None
         assert model.id in status.result["rebuilt"]
 
-    def test_rebuild_is_paginated_and_reports_additive_cache_counts(
+    def test_rebuild_is_paginated_with_additive_cache_counts(
         self,
         db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
