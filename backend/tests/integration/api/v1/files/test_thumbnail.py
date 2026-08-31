@@ -176,6 +176,10 @@ class TestThumbnailRebuildJob:
         import app.services.thumbnail_repair as repair
         from app.api.v1.files import _run_thumbnail_rebuild
         from app.db.session import get_session_factory
+        from app.services.thumbnail_generations import (
+            ThumbnailEnsureOutcome,
+            ThumbnailEnsureResult,
+        )
 
         model = make_model("render-works")
         key = "render-works.stl"
@@ -184,7 +188,11 @@ class TestThumbnailRebuildJob:
         # Rendering a real mesh is `thumbnail_repair`'s job and is covered there;
         # here the question is only what the pass does with a success.
         monkeypatch.setattr(
-            repair, "regenerate_model_thumbnail", lambda _session, _model_id: True
+            repair,
+            "regenerate_model_thumbnail_result",
+            lambda _session, _model_id, **_kwargs: ThumbnailEnsureResult(
+                ThumbnailEnsureOutcome.GENERATED, 1
+            ),
         )
         job_id = registry.create(owner_user_id=None)
 
@@ -193,6 +201,45 @@ class TestThumbnailRebuildJob:
         status = registry.get(job_id)
         assert status is not None
         assert model.id in status.result["rebuilt"]
+
+    def test_rebuild_is_paginated_and_reports_additive_cache_counts(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        make_model,
+        make_file,
+    ) -> None:
+        import app.services.thumbnail_repair as repair
+        from app.api.v1.files import _run_thumbnail_rebuild
+        from app.db.session import get_session_factory
+        from app.services.thumbnail_generations import (
+            ThumbnailEnsureOutcome,
+            ThumbnailEnsureResult,
+        )
+
+        model_ids: list[int] = []
+        for index in range(101):
+            model = make_model(f"page-{index}")
+            make_file(model, filename=f"page-{index}.stl", path=f"page-{index}.stl")
+            assert model.id is not None
+            model_ids.append(model.id)
+
+        seen: list[int] = []
+
+        def cached(_session, model_id: int, **_kwargs):
+            seen.append(model_id)
+            return ThumbnailEnsureResult(ThumbnailEnsureOutcome.CACHED, model_id)
+
+        monkeypatch.setattr(repair, "regenerate_model_thumbnail_result", cached)
+        job_id = registry.create(owner_user_id=None)
+
+        _run_thumbnail_rebuild(job_id, True, get_session_factory())
+
+        status = registry.get(job_id)
+        assert status is not None
+        assert status.result["scanned"] >= 101
+        assert status.result["cache_hits"] == seen
+        assert set(model_ids).issubset(seen)
 
     def test_skips_a_model_that_already_has_one_unless_forced(
         self,

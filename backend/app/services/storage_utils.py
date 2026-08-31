@@ -21,6 +21,7 @@ from app.db.models import (
     Document,
     File,
     ModelSourceCover,
+    ThumbnailGeneration,
 )
 from app.services.storage_backend import get_backend
 
@@ -63,6 +64,12 @@ def ownership_snapshot(
     result = StorageOwnershipSnapshot()
 
     files = list(session.exec(select(File)).all())
+    generation_keys: dict[int, set[str]] = {}
+    for generation in session.exec(select(ThumbnailGeneration)).all():
+        if generation.storage_key:
+            generation_keys.setdefault(generation.file_id, set()).add(
+                generation.storage_key
+            )
     for row in files:
         if row.id is None:
             continue
@@ -82,14 +89,35 @@ def ownership_snapshot(
             display_name=row.original_filename,
         )
         (result.external if row.is_external else result.primary).append(blob)
+        current_thumbnail = row.thumbnail_path or backend.thumbnail_key(row.id)
         result.derived.append(
             OwnedBlob(
-                key=backend.thumbnail_key(row.id),
+                key=current_thumbnail,
                 resource_type="thumbnail",
                 resource_id=row.id,
                 display_name=row.original_filename,
             )
         )
+        if current_thumbnail != backend.thumbnail_key(row.id):
+            result.derived.append(
+                OwnedBlob(
+                    key=backend.thumbnail_key(row.id),
+                    resource_type="legacy_webp_thumbnail",
+                    resource_id=row.id,
+                    display_name=row.original_filename,
+                )
+            )
+        for generation_key in sorted(generation_keys.get(row.id, set())):
+            if generation_key == current_thumbnail:
+                continue
+            result.derived.append(
+                OwnedBlob(
+                    key=generation_key,
+                    resource_type="thumbnail_generation",
+                    resource_id=row.id,
+                    display_name=row.original_filename,
+                )
+            )
         result.derived.append(
             OwnedBlob(
                 key=backend.legacy_thumbnail_key(row.id),

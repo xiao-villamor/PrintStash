@@ -52,12 +52,14 @@ def _make_3mf(
 
 
 class TestExtractEmbedded3mfThumbnail:
-    def test_picks_largest_thumbnail(self, tmp_path: Path) -> None:
+    def test_prefers_the_canonical_thumbnail_over_a_larger_plate_image(
+        self, tmp_path: Path
+    ) -> None:
         p = _make_3mf(
             tmp_path,
             {"Metadata/thumbnail.png": _PNG_SMALL, "Metadata/plate_1.png": _PNG_BIG},
         )
-        assert extract_embedded_3mf_thumbnail(p) == _PNG_BIG
+        assert extract_embedded_3mf_thumbnail(p) == _PNG_SMALL
 
     @pytest.mark.parametrize("folder", ["Metadata", "3D/thumbnails", "thumbnails"])
     def test_accepts_known_thumbnail_dirs(self, tmp_path: Path, folder: str) -> None:
@@ -85,7 +87,7 @@ class TestExtractEmbedded3mfThumbnail:
             {
                 "Metadata/larger-invalid.png": larger_invalid,
                 "Metadata/oversized.png": oversized,
-                "Metadata/valid.png": valid,
+                "Metadata/thumbnail.png": valid,
             },
         )
 
@@ -143,6 +145,28 @@ class TestExtractEmbedded3mfThumbnail:
     def test_returns_none_for_corrupt_archive(self, tmp_path: Path) -> None:
         p = tmp_path / "broken.3mf"
         p.write_bytes(b"this is not a zip file")
+        assert extract_embedded_3mf_thumbnail(p) is None
+
+    def test_rejects_unsafe_member_names(self, tmp_path: Path) -> None:
+        p = _make_3mf(
+            tmp_path,
+            {
+                "../Metadata/thumbnail.png": _PNG_BIG,
+                "Metadata/thumbnail.png": _PNG_SMALL,
+            },
+        )
+
+        assert extract_embedded_3mf_thumbnail(p) is None
+
+    def test_rejects_ambiguous_generic_previews(self, tmp_path: Path) -> None:
+        p = _make_3mf(
+            tmp_path,
+            {
+                "Metadata/front.png": _PNG_SMALL,
+                "Metadata/back.png": _PNG_BIG,
+            },
+        )
+
         assert extract_embedded_3mf_thumbnail(p) is None
 
 

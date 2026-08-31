@@ -19,9 +19,10 @@ tasks. Each one sized for the *whole* budget would collectively OOM the box, so
 the per-job cap divides by `max_render_jobs` and a semaphore holds the actual
 count to that number.
 
-**Failing open on the cheap checks.** `_exceeds_cap` stats the file; a stat that
-fails must not decide the file is over the cap, because that would silently
-refuse a thumbnail for every file on a filesystem that hiccupped.
+**Failing closed on unknown cost.** `_exceeds_cap` permits an unknown triangle
+estimate only after a successful stat proves the source fits the byte budget.
+That keeps an unreadable stat or disabled byte ceiling from authorising an
+unbounded full-mesh allocation.
 
 `_reclaim_memory` is the other half: a loaded mesh's arrays are returned to the
 OS between files so a long library scan's RSS does not only ever climb. It is
@@ -229,7 +230,7 @@ class TestRenderSemaphore:
 
 
 class TestExceedsCap:
-    def test_exceeds_cap_survives_stat_failure(
+    def test_unknown_estimate_without_a_size_proof_uses_the_bounded_path(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_load_mb", 1)
@@ -241,9 +242,20 @@ class TestExceedsCap:
             raise OSError("gone")
 
         monkeypatch.setattr(Path, "stat", fake_stat)
-        # size_mb falls back to 0.0 on OSError, so the size cap can't trip; the
-        # (also-mocked-out) triangle estimate then decides. Real stat is restored
-        # by monkeypatch teardown.
+        # A failed stat is not evidence that the file is small enough for an
+        # unrestricted trimesh load. Real stat is restored by teardown.
+        assert mesh_processing._exceeds_cap(p) is True
+
+    def test_unknown_estimate_is_safe_when_the_byte_budget_is_proven(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "mesh_max_load_mb", 1)
+        p = tmp_path / "small.ply"
+        p.write_bytes(b"ply\nend_header\n")
+        monkeypatch.setattr(
+            mesh_processing, "_estimate_triangle_count", lambda *_a, **_k: None
+        )
+
         assert mesh_processing._exceeds_cap(p) is False
 
 

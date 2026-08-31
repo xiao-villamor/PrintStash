@@ -279,6 +279,17 @@ class TestThumbUrl:
         model = detached_model(thumbnail_file_id=7, thumbnail_path="99.png")
         assert mv.thumb_url(model) == "/api/v1/files/7/thumbnail"
 
+    def test_versioned_path_changes_the_asset_cache_key(self) -> None:
+        model = detached_model(
+            thumbnail_file_id=7,
+            thumbnail_path="thumbs/7-aaaaaaaaaaaa-recipe.webp",
+        )
+
+        url = mv.thumb_url(model)
+
+        assert url is not None
+        assert url.startswith("/api/v1/files/7/thumbnail?v=")
+
     def test_falls_back_to_legacy_digit_stem_path(self) -> None:
         model = detached_model(thumbnail_path="uploads/42.png")
         assert mv.thumb_url(model) == "/api/v1/files/42/thumbnail"

@@ -20,6 +20,7 @@ from fastapi.responses import (
     RedirectResponse,
     StreamingResponse,
 )
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -322,8 +323,8 @@ def file_thumbnail(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
-    _accessible_file(session, file_id, current_user)
-    return thumbnail_response(file_id, request)
+    file_row = _accessible_file(session, file_id, current_user)
+    return thumbnail_response(file_id, request, thumbnail_path=file_row.thumbnail_path)
 
 
 def _etag_matches(request: Request | None, etag: str) -> bool:
@@ -335,12 +336,20 @@ def _etag_matches(request: Request | None, etag: str) -> bool:
     )
 
 
-def thumbnail_response(file_id: int, request: Request | None = None):
+def thumbnail_response(
+    file_id: int,
+    request: Request | None = None,
+    *,
+    thumbnail_path: str | None = None,
+):
     """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
-    thumb_key = backend.thumbnail_key(file_id)
+    thumb_key = thumbnail_path or backend.thumbnail_key(file_id)
     filename, media_type = f"{file_id}.webp", "image/webp"
     info = backend.object_info(thumb_key)
+    if info is None and thumbnail_path is not None:
+        thumb_key = backend.thumbnail_key(file_id)
+        info = backend.object_info(thumb_key)
     if info is None:
         # Thumbnails written before the WebP switch are still PNG on disk.
         thumb_key = backend.legacy_thumbnail_key(file_id)
@@ -350,7 +359,9 @@ def thumbnail_response(file_id: int, request: Request | None = None):
             raise HTTPException(status_code=404, detail="thumbnail_not_found")
     # Thumbnails only change on explicit rebuilds; let the browser cache them
     # so the library grid doesn't re-request every image on each visit.
-    headers = {"Cache-Control": "public, max-age=3600"}
+    # Revalidate cheaply so a newly-published immutable generation is visible
+    # immediately instead of leaving cards stale for the previous one-hour TTL.
+    headers = {"Cache-Control": "public, max-age=0, must-revalidate"}
     if info.etag:
         headers["ETag"] = info.etag
         if _etag_matches(request, info.etag):
@@ -464,7 +475,8 @@ def _run_thumbnail_rebuild(
     job_id: str, force: bool, session_factory: SessionFactory
 ) -> None:
     """Walk models and re-render thumbnails. Runs as a background task."""
-    from app.services.thumbnail_repair import regenerate_model_thumbnail
+    from app.services.thumbnail_generations import ThumbnailEnsureOutcome
+    from app.services.thumbnail_repair import regenerate_model_thumbnail_result
 
     registry.update(job_id, state="running", label="scanning_models")
     try:
@@ -472,70 +484,98 @@ def _run_thumbnail_rebuild(
             stmt = select(Model).where(live(Model))
             if not force:
                 stmt = stmt.where(Model.thumbnail_file_id.is_(None))  # type: ignore[union-attr]
-            models = session.exec(stmt).all()
+            total = session.exec(
+                select(func.count()).select_from(stmt.subquery())
+            ).one()
             registry.update(
                 job_id,
                 stage="thumbnailing",
                 processed=0,
-                total=len(models),
-                total_steps=len(models),
+                total=total,
+                total_steps=total,
             )
 
             rebuilt: list[int] = []
+            cached: list[int] = []
+            coalesced: list[int] = []
+            negative_cached: list[int] = []
             skipped: list[int] = []
             failed: list[int] = []
-
-            for index, m in enumerate(models):
-                assert m.id is not None
-                registry.update(
-                    job_id,
-                    step=index + 1,
-                    total_steps=len(models),
-                    label=f"rendering model {m.id}",
-                    progress=index / len(models) * 100,
-                    stage="thumbnailing",
-                    processed=index,
-                    total=len(models),
-                )
-                mesh_file = session.exec(
-                    select(File)
-                    .where(File.model_id == m.id, File.file_type.in_(_MESH_TYPES))  # type: ignore[attr-defined]
-                    .order_by(File.version.desc())  # type: ignore[attr-defined]
-                ).first()
-                if mesh_file is None:
-                    skipped.append(m.id)
-                    continue
-
-                try:
-                    regenerated = regenerate_model_thumbnail(session, m.id)
-                except Exception:  # noqa: BLE001 — defensive, log and continue
-                    logger.exception(
-                        "rebuild: thumbnail regeneration crashed for model %s", m.id
+            processed = 0
+            after_id = 0
+            while True:
+                page_stmt = (
+                    stmt.where(Model.id > after_id).order_by(Model.id).limit(100)
+                )  # type: ignore[operator,union-attr]
+                models = session.exec(page_stmt).all()
+                if not models:
+                    break
+                for m in models:
+                    assert m.id is not None
+                    processed += 1
+                    registry.update(
+                        job_id,
+                        step=processed,
+                        total_steps=total,
+                        label=f"rendering model {m.id}",
+                        progress=(processed - 1) / max(total, 1) * 100,
+                        stage="thumbnailing",
+                        processed=processed - 1,
+                        total=total,
                     )
-                    regenerated = False
+                    mesh_file = session.exec(
+                        select(File)
+                        .where(
+                            File.model_id == m.id,
+                            File.file_type.in_(_MESH_TYPES),  # type: ignore[attr-defined]
+                            live(File),
+                        )
+                        .order_by(File.version.desc())  # type: ignore[attr-defined]
+                    ).first()
+                    if mesh_file is None:
+                        skipped.append(m.id)
+                        continue
 
-                if not regenerated:
-                    failed.append(m.id)
-                    continue
-                rebuilt.append(m.id)
-                logger.info(
-                    "rebuild: thumbnail regenerated for model %s file %s",
-                    m.id,
-                    mesh_file.id,
-                )
+                    try:
+                        result = regenerate_model_thumbnail_result(
+                            session, m.id, force=force
+                        )
+                    except Exception:  # noqa: BLE001 — task boundary
+                        logger.exception(
+                            "rebuild: thumbnail regeneration crashed for model %s",
+                            m.id,
+                        )
+                        failed.append(m.id)
+                        continue
+
+                    if result.outcome is ThumbnailEnsureOutcome.GENERATED:
+                        rebuilt.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.CACHED:
+                        cached.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.COALESCED:
+                        coalesced.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.NEGATIVE_CACHED:
+                        negative_cached.append(m.id)
+                    else:
+                        failed.append(m.id)
+                after_id = models[-1].id or after_id
 
             registry.update(
                 job_id,
                 state="completed",
                 stage="completed",
-                processed=len(models),
-                total=len(models),
-                succeeded=len(rebuilt),
+                processed=processed,
+                total=total,
+                succeeded=len(rebuilt) + len(cached),
                 skipped=len(skipped),
                 failed=len(failed),
                 completion="partial" if failed else "complete",
                 thumbnail_status=(
-                    "failed" if failed else "generated" if rebuilt else "skipped"
+                    "failed"
+                    if failed
+                    else "generated"
+                    if rebuilt or cached
+                    else "skipped"
                 ),
                 thumbnail_reason=(
                     "renderer_no_output"
@@ -545,8 +585,11 @@ def _run_thumbnail_rebuild(
                     else None
                 ),
                 result={
-                    "scanned": len(models),
+                    "scanned": processed,
                     "rebuilt": rebuilt,
+                    "cache_hits": cached,
+                    "coalesced": coalesced,
+                    "negative_cached": negative_cached,
                     "skipped_no_mesh": skipped,
                     "failed_render": failed,
                 },

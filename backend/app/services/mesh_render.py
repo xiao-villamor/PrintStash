@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 from printstash_core.mesh import rasterizer as _core
 
@@ -43,6 +43,8 @@ def render_mesh_thumbnail(
     name: str,
     width: int = 640,
     height: int = 480,
+    *,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
 ) -> Optional[bytes]:
     """Render through core with application settings and logging injected."""
     return _core.render_mesh_thumbnail(
@@ -53,6 +55,7 @@ def render_mesh_thumbnail(
         face_chunk_size=settings.mesh_render_face_chunk_size,
         logger=logger,
         rasterise_triangles=_rasterise_triangles,
+        output_format=output_format,
     )
 
 

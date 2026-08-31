@@ -38,6 +38,7 @@ from app.db.models import (
     PrintJob,
     ShareLink,
     Tag,
+    ThumbnailGeneration,
     User,
     VaultAuditFinding,
     VaultAuditFindingState,
@@ -358,14 +359,41 @@ def hard_delete_file(
                 object_kind="legacy_artifact",
                 resource_id=file_id,
             )
+    current_thumbnail = file_row.thumbnail_path or backend.thumbnail_key(file_id)
     enqueue_owned_key(
         session,
         backend,
-        backend.thumbnail_key(file_id),
+        current_thumbnail,
         resource_kind="file_thumbnail",
         resource_id=file_id,
         allow_unverified=confirm_storage_risk,
     )
+    if current_thumbnail != backend.thumbnail_key(file_id):
+        enqueue_owned_key(
+            session,
+            backend,
+            backend.thumbnail_key(file_id),
+            resource_kind="file_thumbnail_legacy_webp",
+            resource_id=file_id,
+            allow_unverified=confirm_storage_risk,
+        )
+    generation_keys = session.exec(
+        select(ThumbnailGeneration.storage_key).where(
+            ThumbnailGeneration.file_id == file_id,
+            ThumbnailGeneration.storage_key.is_not(None),  # type: ignore[union-attr]
+        )
+    ).all()
+    for generation_key in set(generation_keys):
+        if not generation_key or generation_key == current_thumbnail:
+            continue
+        enqueue_owned_key(
+            session,
+            backend,
+            generation_key,
+            resource_kind="thumbnail_generation",
+            resource_id=file_id,
+            allow_unverified=confirm_storage_risk,
+        )
     enqueue_owned_key(
         session,
         backend,

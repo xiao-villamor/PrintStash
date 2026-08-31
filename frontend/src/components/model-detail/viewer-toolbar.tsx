@@ -1,6 +1,7 @@
 "use client";
 
 import { Camera, Code2, Grid3x3, Layers, Maximize2 } from "lucide-react";
+import { toast } from "sonner";
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import { Localized } from "@/components/ui/localized";
 
@@ -18,6 +19,7 @@ export function ViewerToolbar({
   viewerMode,
   setViewerMode,
   hasGcode,
+  viewerReady,
 }: {
   displayMode: ViewerDisplayMode;
   setDisplayMode: (m: ViewerDisplayMode) => void;
@@ -27,6 +29,7 @@ export function ViewerToolbar({
   viewerMode: ViewerMode;
   setViewerMode: (m: ViewerMode) => void;
   hasGcode: boolean;
+  viewerReady: boolean;
 }) {
   const cluster =
     "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
@@ -88,13 +91,21 @@ export function ViewerToolbar({
                 onClick={() => controls.current?.fit()}
                 className={`${iconBtn} border-r border-outline-variant`}
                 title="Fit to view"
+                aria-label="Fit to view"
               >
                 <Maximize2 className="h-4 w-4" />
               </button>
               <button
-                onClick={() => controls.current?.screenshot()}
-                className={`${iconBtn} border-r border-outline-variant`}
+                onClick={() => {
+                  const screenshot = controls.current?.screenshot();
+                  if (screenshot) {
+                    void screenshot.catch(() => toast.error("Screenshot could not be created"));
+                  }
+                }}
+                disabled={!viewerReady}
+                className={`${iconBtn} border-r border-outline-variant disabled:cursor-not-allowed disabled:opacity-50`}
                 title="Screenshot"
+                aria-label="Screenshot"
               >
                 <Camera className="h-4 w-4" />
               </button>
@@ -102,6 +113,7 @@ export function ViewerToolbar({
                 onClick={() => setShowGrid(!showGrid)}
                 className={`${iconBtn} ${showGrid ? "text-primary bg-secondary-container" : ""}`}
                 title="Build plate grid"
+                aria-label="Build plate grid"
               >
                 <Grid3x3 className="h-4 w-4" />
               </button>

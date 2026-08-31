@@ -9,6 +9,7 @@ and no error anywhere to explain it.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import threading
 from pathlib import Path
@@ -67,6 +68,14 @@ def _staged(tmp_path: Path, name: str = "bracket.stl") -> Path:
     staged = tmp_path / name
     staged.write_bytes(b"solid bracket\nendsolid\n")
     return staged
+
+
+def _visible_png() -> bytes:
+    from PIL import Image
+
+    output = io.BytesIO()
+    Image.new("RGBA", (8, 8), (120, 150, 210, 255)).save(output, format="PNG")
+    return output.getvalue()
 
 
 def _persist(db_session: Session, model: Model, staged: Path, **kwargs):
@@ -542,18 +551,17 @@ class TestThumbnail:
         occupied = Path(storage.thumbnail_key(1))
         occupied.parent.mkdir(parents=True, exist_ok=True)
         occupied.write_bytes(b"user-owned thumbnail-shaped file")
-        monkeypatch.setattr(storage, "thumbnail_key", lambda _file_id: str(occupied))
+        monkeypatch.setattr(
+            storage,
+            "thumbnail_variant_key",
+            lambda _file_id, _sha, _recipe: str(occupied),
+        )
 
         file_row = _persist(
             db_session,
             model,
             _staged(tmp_path),
-            thumb_bytes=(
-                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
-                b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
-                b"\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
-                b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
-            ),
+            thumb_bytes=_visible_png(),
         )
 
         assert occupied.read_bytes() == b"user-owned thumbnail-shaped file"
@@ -563,13 +571,10 @@ class TestThumbnail:
     def test_a_new_thumbnail_becomes_the_models_selected_one(
         self, db_session: Session, storage, model: Model, tmp_path: Path
     ) -> None:
-        png = (
-            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00"
-            b"\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
-        )
+        png = _visible_png()
         file_row = _persist(db_session, model, _staged(tmp_path), thumb_bytes=png)
 
         db_session.refresh(model)
         assert model.thumbnail_file_id == file_row.id
-        assert Path(storage.thumbnail_key(file_row.id)).exists()
+        assert file_row.thumbnail_path is not None
+        assert Path(file_row.thumbnail_path).exists()

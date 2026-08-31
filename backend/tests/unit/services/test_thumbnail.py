@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import base64
+import io
 from pathlib import Path
 
-from app.services.thumbnail import _MAX_BLOCK_LINES, extract
+import pytest
+
+from app.core.config import _overlay
+from app.services.thumbnail import _MAX_BLOCK_LINES, extract, to_webp
 from tests.paths import FIXTURES_DIR
 
 
@@ -65,3 +69,50 @@ class TestExtract:
             + "G1 X0\n"
         )
         assert extract(f) == real
+
+
+class TestWebpNormalization:
+    def test_embedded_preview_is_centered_on_the_canonical_canvas(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from PIL import Image
+
+        source = io.BytesIO()
+        Image.new("RGB", (100, 200), "white").save(source, format="PNG")
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
+
+        encoded = to_webp(source.getvalue())
+
+        with Image.open(io.BytesIO(encoded)) as result:
+            assert result.size == (320, 240)
+            assert result.mode == "RGBA"
+            alpha = result.getchannel("A")
+            bounds = alpha.getbbox()
+            assert bounds is not None
+            assert bounds[0] > 0
+            assert bounds[1] > 0
+            assert bounds[2] < result.width
+            assert bounds[3] < result.height
+
+    def test_empty_transparent_preview_is_rejected(self) -> None:
+        from PIL import Image
+
+        source = io.BytesIO()
+        Image.new("RGBA", (64, 64), (0, 0, 0, 0)).save(source, format="PNG")
+
+        with pytest.raises(ValueError, match="thumbnail_empty"):
+            to_webp(source.getvalue())
+
+    def test_canonical_renderer_webp_is_validated_without_reencoding(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from PIL import Image, ImageDraw
+
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
+        source = io.BytesIO()
+        image = Image.new("RGBA", (320, 240), (0, 0, 0, 0))
+        ImageDraw.Draw(image).rectangle((32, 24, 287, 215), fill=(90, 130, 210, 255))
+        image.save(source, format="WEBP", lossless=True, exact=True, method=6)
+        encoded = source.getvalue()
+
+        assert to_webp(encoded) == encoded

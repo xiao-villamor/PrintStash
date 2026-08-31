@@ -13,6 +13,7 @@ this file runs everywhere or the session stops saying why. See
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import uuid
 from io import BytesIO
@@ -21,6 +22,8 @@ from typing import Callable, Iterator
 
 import boto3
 import pytest
+from PIL import Image
+from sqlmodel import Session
 
 from app.core.config import _overlay, settings
 from app.services.library_source import S3LibrarySource
@@ -29,7 +32,10 @@ from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,
 )
+from app.services.thumbnail_engine import ThumbnailStrategy
+from app.services.thumbnail_generations import publish_precomputed_thumbnail
 from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
+from tests.factories import build_file, build_model
 
 # The `s3` marker is what tells conftest.py this file needs a real endpoint, so
 # the prerequisite is stated once for every resource-gated file rather than
@@ -177,6 +183,51 @@ class TestWriteStream:
         assert info is not None
         assert info.size == len(b"hello s3")
         assert info.etag
+
+
+class TestThumbnailLifecycle:
+    def test_s3_thumbnail_variant_publish_and_pointer_replacement(
+        self, s3_backend: S3StorageBackend, db_session: Session
+    ) -> None:
+        model = build_model(db_session)
+        file_row = build_file(
+            db_session,
+            model,
+            filename="part.stl",
+            sha256="a" * 64,
+        )
+        image = io.BytesIO()
+        Image.new("RGBA", (80, 60), (80, 140, 220, 255)).save(image, format="PNG")
+
+        publish_precomputed_thumbnail(
+            db_session,
+            file_row,
+            image.getvalue(),
+            strategy=ThumbnailStrategy.FULL,
+            complete=True,
+            promote=True,
+            backend=s3_backend,
+        )
+        first_key = file_row.thumbnail_path
+        assert first_key is not None
+        assert s3_backend.read_bytes(first_key).startswith(b"RIFF")
+
+        file_row.sha256 = "b" * 64
+        db_session.add(file_row)
+        db_session.commit()
+        publish_precomputed_thumbnail(
+            db_session,
+            file_row,
+            image.getvalue(),
+            strategy=ThumbnailStrategy.FULL,
+            complete=True,
+            promote=True,
+            backend=s3_backend,
+        )
+
+        assert file_row.thumbnail_path is not None
+        assert file_row.thumbnail_path != first_key
+        assert s3_backend.exists(file_row.thumbnail_path)
 
 
 class TestMove:
@@ -431,6 +482,10 @@ class TestKeyDerivation:
         ("derive", "expected"),
         [
             (lambda b: b.thumbnail_key(7), "thumbs/7.webp"),
+            (
+                lambda b: b.thumbnail_variant_key(7, "a" * 64, "recipe-v1"),
+                "thumbs/7-aaaaaaaaaaaa-recipe-v1.webp",
+            ),
             (lambda b: b.legacy_thumbnail_key(7), "thumbs/7.png"),
             (lambda b: b.source_cover_key(9), "source-covers/9.webp"),
             (lambda b: b.capture_upload_slot_key("abc"), "capture-slots/abc"),

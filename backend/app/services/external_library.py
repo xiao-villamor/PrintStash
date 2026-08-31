@@ -518,7 +518,9 @@ def _process_external_file(
         return strategy.process(read_path)
     from app.services import mesh_processing
 
-    return mesh_processing.analyze_mesh(read_path, file_type=file_type.value)
+    return mesh_processing.analyze_mesh(
+        read_path, file_type=file_type.value, output_format="WEBP"
+    )
 
 
 def _walk(root: Path) -> dict[str, tuple[int, float]]:
@@ -735,9 +737,7 @@ def _index_external_file(
             Path(library.root_path).expanduser().resolve(strict=False)
         ).as_posix()
     except ValueError as exc:
-        raise ExternalRootBindingError(
-            "mismatch", "path_outside_library_root"
-        ) from exc
+        raise ExternalRootBindingError("mismatch", "path_outside_library_root") from exc
     row.source_verified_at = utcnow()
     session.add(row)
     session.commit()
@@ -868,7 +868,9 @@ def _remote_collection_path(library: ExternalLibrary, key: str) -> str | None:
     if library.collection_mode != ExternalLibraryCollectionMode.MIRROR:
         return None
     prefix = library.source_prefix.strip("/")
-    relative = key[len(prefix) :].lstrip("/") if prefix and key.startswith(prefix) else key
+    relative = (
+        key[len(prefix) :].lstrip("/") if prefix and key.startswith(prefix) else key
+    )
     parent = Path(relative).parent.as_posix()
     return None if parent in {"", "."} else parent
 
@@ -994,9 +996,10 @@ def scan_remote_library(
             if library.source_kind == LibrarySourceKind.MOUNTED:
                 raise ValueError("library_source_is_mounted")
             checkpoint = _remote_checkpoint(session, library)
-            if checkpoint.backoff_until and ensure_utc(
+            if (
                 checkpoint.backoff_until
-            ) > utcnow():
+                and ensure_utc(checkpoint.backoff_until) > utcnow()
+            ):
                 return {
                     **summary.as_dict(),
                     "backoff_until": checkpoint.backoff_until.isoformat(),

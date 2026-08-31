@@ -136,6 +136,16 @@ class TestRenderMeshThumbnail:
         assert png is not None and png.startswith(PNG_MAGIC)
         assert Image.open(io.BytesIO(png)).size == (80, 60)
 
+    def test_can_encode_the_canonical_webp_without_a_png_intermediate(self) -> None:
+        webp = render_mesh_thumbnail(
+            box_mesh(), "box.stl", width=80, height=60, output_format="WEBP"
+        )
+
+        assert webp is not None and webp.startswith(b"RIFF")
+        with Image.open(io.BytesIO(webp)) as decoded:
+            assert decoded.format == "WEBP"
+            assert decoded.size == (80, 60)
+
     def test_accepts_a_mesh_through_the_structural_interface(self) -> None:
         # `SimpleNamespace` with `vertices`/`faces` — not a Trimesh object.
         # Trimesh is not importable from this module by design, so callers that
