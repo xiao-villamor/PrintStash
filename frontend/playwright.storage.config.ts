@@ -11,12 +11,15 @@ export default defineConfig({
   expect: { timeout: 20_000 },
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
-  retries: process.env.CI ? 1 : 0,
+  // This suite begins at /setup and persists one provider lifecycle in a single
+  // database. Playwright retries reuse the already-configured web server, so a
+  // retry cannot reproduce the failed test from its required initial state.
+  retries: 0,
   workers: 1,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: `http://127.0.0.1:${port}`,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
   },
   webServer: [
     {

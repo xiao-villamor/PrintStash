@@ -17,6 +17,7 @@ const sftpUsername = process.env.PLAYWRIGHT_STORAGE_SFTP_USERNAME ?? "contract";
 const sftpPassword = process.env.PLAYWRIGHT_STORAGE_SFTP_PASSWORD ?? "contract-only";
 const sftpHostKey = process.env.PLAYWRIGHT_STORAGE_SFTP_HOST_KEY;
 const apiBase = `http://127.0.0.1:${apiPort}`;
+const webdavBase = `http://127.0.0.1:${webdavPort}`;
 const restartTrigger = path.resolve("tests/e2e-real/.storage-data/restart");
 
 const nextcloudUsername = "admin";
@@ -34,6 +35,16 @@ async function nextcloudRemoteHrefs(page: Page): Promise<string[]> {
       },
     },
   );
+  if (!response.ok()) return [];
+  const xml = await response.text();
+  return [...xml.matchAll(/<(?:d|D):href>([^<]+)<\/(?:d|D):href>/g)].map((match) => match[1]);
+}
+
+async function webdavRemoteHrefs(page: Page): Promise<string[]> {
+  const response = await page.request.fetch(`${webdavBase}/vault-data`, {
+    method: "PROPFIND",
+    headers: { Depth: "infinity" },
+  });
   if (!response.ok()) return [];
   const xml = await response.text();
   return [...xml.matchAll(/<(?:d|D):href>([^<]+)<\/(?:d|D):href>/g)].map((match) => match[1]);
@@ -87,7 +98,20 @@ test.describe("storage provider setup", () => {
     // bind a backend instance: the upload, trash, confirmation, and cleanup
     // result must all cross the configured provider boundary.
     const modelName = `storage-lifecycle-${Date.now()}`;
+    const remoteBefore = await webdavRemoteHrefs(page);
     await uploadGcodeModel(page, modelName);
+    await expect
+      .poll(async () => {
+        const hrefs = await webdavRemoteHrefs(page);
+        return hrefs.some((href) => !remoteBefore.includes(href) && /\.gcode(?:$|\?)/i.test(href));
+      })
+      .toBe(true);
+    const remoteObject = (await webdavRemoteHrefs(page)).find(
+      (href) => !remoteBefore.includes(href) && /\.gcode(?:$|\?)/i.test(href),
+    );
+    expect(remoteObject).toBeTruthy();
+    const remoteObjectUrl = new URL(remoteObject!, webdavBase).toString();
+    const expectedBytes = Buffer.from(gcodeFor(modelName));
     await modelCard(page, modelName).click();
     await clickModelAction(page, "Delete model");
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
@@ -97,9 +121,22 @@ test.describe("storage provider setup", () => {
     await page.getByRole("spinbutton").fill("0");
     await page.getByRole("button", { name: "Save retention" }).click();
     await page.getByRole("button", { name: "Purge expired" }).click();
+    const purgeResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        response.url().includes("/models/trash/expired") &&
+        response.url().includes("confirm_storage_risk=true"),
+    );
     await page.getByRole("dialog").getByRole("button", { name: "Purge forever" }).click();
+    const purgeBody = await (await purgeResponse).json();
+    expect(purgeBody).toMatchObject({ storage_cleanup_status: "blocked" });
+    expect(purgeBody.storage_blocked).toBeGreaterThan(0);
     await expect(page.getByText(modelName)).toHaveCount(0);
-    await expect(page.getByRole("status")).toContainText("Storage cleanup completed");
+    await expect(page.getByRole("status")).toContainText("retained");
+    const retainedBytes = await page.request.fetch(remoteObjectUrl);
+    expect(retainedBytes.status()).toBe(200);
+    expect(Number(retainedBytes.headers()["content-length"] ?? 0)).toBe(expectedBytes.length);
+    expect(await retainedBytes.body()).toEqual(expectedBytes);
   });
 
   test("configures real Nextcloud with confirmed cleanup", async ({ page }) => {

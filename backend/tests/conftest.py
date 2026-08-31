@@ -71,6 +71,7 @@ _RESOURCE_DIRS = {"postgres": "postgres"}
 # and their absence is an error rather than a skip — see `tests/containers.py`.
 _RESOURCES = {
     "postgres": containers.POSTGRES_RESOURCE,
+    "remote_storage": "Nextcloud WebDAV and OpenSSH/SFTP",
     "s3": containers.S3_RESOURCE,
 }
 
@@ -84,10 +85,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     heuristic (``*_integration.py``, ``"migration" in name``) silently mis-tiered any
     file that did not happen to match.
 
-    ``postgres`` and ``s3`` are *resource* markers, not tiers: they gate a subset
-    inside a tier and get their service from a container. If a selected test carries
-    one and Docker is not running, the **session stops here** rather than skipping —
-    a green run with those tests quietly absent verified none of what it claimed.
+    ``postgres``, ``s3``, and ``remote_storage`` are *resource* markers, not tiers:
+    they gate a subset inside a tier and get their service from a container. If a
+    selected test carries one and Docker is not running, the **session stops here**
+    rather than skipping — a green run with those tests quietly absent verified none
+    of what it claimed.
     Checking at collection means the failure arrives before any test runs, naming
     the prerequisite once instead of twenty-one times.
     """

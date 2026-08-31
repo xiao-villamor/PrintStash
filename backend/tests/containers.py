@@ -85,9 +85,44 @@ S3_SECRET_KEY = "printstash-secret"
 # Generous, because these run on a cold image pull in CI and on a laptop that may
 # be starting Docker at the same time. A tight timeout here is a flake.
 STARTUP_TIMEOUT_S = 180
+CONTAINER_START_ATTEMPTS = 3
+
+_TRANSIENT_START_MARKERS = (
+    "toomanyrequests",
+    "too many requests",
+    "rate limit",
+    "429 client error",
+    "connection reset by peer",
+    "i/o timeout",
+    "tls handshake timeout",
+    "temporary failure in name resolution",
+    "service unavailable",
+)
 
 _started: list[Any] = []
 _resolved: dict[str, str | None] = {}
+
+
+def _start_container(factory: Callable[[], Any]) -> Any:
+    """Start a fresh container, retrying only transient registry failures."""
+    for attempt in range(CONTAINER_START_ATTEMPTS):
+        container = factory()
+        try:
+            container.start()
+        except Exception as exc:
+            try:
+                container.stop()
+            except Exception:
+                pass
+            transient = any(
+                marker in str(exc).lower() for marker in _TRANSIENT_START_MARKERS
+            )
+            if not transient or attempt == CONTAINER_START_ATTEMPTS - 1:
+                raise
+            time.sleep(2**attempt)
+        else:
+            return container
+    raise AssertionError("container start retry loop exhausted without an outcome")
 
 
 def docker_available() -> bool:
@@ -146,13 +181,14 @@ def require_docker(resource: str) -> None | NoReturn:
 def _start_postgres() -> str:
     from testcontainers.community.postgres import PostgresContainer
 
-    container = PostgresContainer(
-        POSTGRES_IMAGE,
-        username=POSTGRES_USER,
-        password=POSTGRES_PASSWORD,
-        dbname=POSTGRES_DB,
+    container = _start_container(
+        lambda: PostgresContainer(
+            POSTGRES_IMAGE,
+            username=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            dbname=POSTGRES_DB,
+        )
     )
-    container.start()
     _started.append(container)
     # `driver=None` asks for the plain `postgresql://` form. The app normalises the
     # scheme to whichever driver it needs, so handing it a pre-selected one would
@@ -164,19 +200,20 @@ def _start_seaweedfs() -> str:
     from testcontainers.core.container import DockerContainer
     from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
-    container = (
-        DockerContainer(SEAWEEDFS_IMAGE)
-        .with_env("AWS_ACCESS_KEY_ID", S3_ACCESS_KEY)
-        .with_env("AWS_SECRET_ACCESS_KEY", S3_SECRET_KEY)
-        .with_exposed_ports(SEAWEEDFS_S3_PORT)
-        .with_command(SEAWEEDFS_COMMAND)
-        .waiting_for(
-            LogMessageWaitStrategy(SEAWEEDFS_READY_LOG).with_startup_timeout(
-                STARTUP_TIMEOUT_S
+    container = _start_container(
+        lambda: (
+            DockerContainer(SEAWEEDFS_IMAGE)
+            .with_env("AWS_ACCESS_KEY_ID", S3_ACCESS_KEY)
+            .with_env("AWS_SECRET_ACCESS_KEY", S3_SECRET_KEY)
+            .with_exposed_ports(SEAWEEDFS_S3_PORT)
+            .with_command(SEAWEEDFS_COMMAND)
+            .waiting_for(
+                LogMessageWaitStrategy(SEAWEEDFS_READY_LOG).with_startup_timeout(
+                    STARTUP_TIMEOUT_S
+                )
             )
         )
     )
-    container.start()
     _started.append(container)
     host = container.get_container_host_ip()
     port = container.get_exposed_port(SEAWEEDFS_S3_PORT)
@@ -198,17 +235,20 @@ def _start_nextcloud() -> str:
     from testcontainers.core.container import DockerContainer
     from testcontainers.core.wait_strategies import HttpWaitStrategy
 
-    container = (
-        DockerContainer(NEXTCLOUD_IMAGE)
-        .with_env("SQLITE_DATABASE", "nextcloud")
-        .with_env("NEXTCLOUD_ADMIN_USER", "admin")
-        .with_env("NEXTCLOUD_ADMIN_PASSWORD", "contract-only")
-        .with_exposed_ports(80)
-        .waiting_for(
-            HttpWaitStrategy(80, "/status.php").with_startup_timeout(STARTUP_TIMEOUT_S)
+    container = _start_container(
+        lambda: (
+            DockerContainer(NEXTCLOUD_IMAGE)
+            .with_env("SQLITE_DATABASE", "nextcloud")
+            .with_env("NEXTCLOUD_ADMIN_USER", "admin")
+            .with_env("NEXTCLOUD_ADMIN_PASSWORD", "contract-only")
+            .with_exposed_ports(80)
+            .waiting_for(
+                HttpWaitStrategy(80, "/status.php").with_startup_timeout(
+                    STARTUP_TIMEOUT_S
+                )
+            )
         )
     )
-    container.start()
     _started.append(container)
     return (
         f"http://{container.get_container_host_ip()}:{container.get_exposed_port(80)}"
@@ -220,16 +260,17 @@ def _start_openssh() -> tuple[str, int, str]:
     from testcontainers.core.container import DockerContainer
     from testcontainers.core.wait_strategies import PortWaitStrategy
 
-    container = (
-        DockerContainer(OPENSSH_IMAGE)
-        .with_env("USER_NAME", "contract")
-        .with_env("USER_PASSWORD", "contract-only")
-        .with_env("PASSWORD_ACCESS", "true")
-        .with_env("SUDO_ACCESS", "false")
-        .with_exposed_ports(2222)
-        .waiting_for(PortWaitStrategy(2222).with_startup_timeout(STARTUP_TIMEOUT_S))
+    container = _start_container(
+        lambda: (
+            DockerContainer(OPENSSH_IMAGE)
+            .with_env("USER_NAME", "contract")
+            .with_env("USER_PASSWORD", "contract-only")
+            .with_env("PASSWORD_ACCESS", "true")
+            .with_env("SUDO_ACCESS", "false")
+            .with_exposed_ports(2222)
+            .waiting_for(PortWaitStrategy(2222).with_startup_timeout(STARTUP_TIMEOUT_S))
+        )
     )
-    container.start()
     _started.append(container)
     host = container.get_container_host_ip()
     port = int(container.get_exposed_port(2222))

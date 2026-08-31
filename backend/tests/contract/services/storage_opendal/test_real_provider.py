@@ -18,7 +18,7 @@ from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_providers import TransportKind, TransportSpec
 from tests.containers import nextcloud_endpoint, openssh_endpoint
 
-pytestmark = pytest.mark.contract
+pytestmark = [pytest.mark.contract, pytest.mark.remote_storage]
 
 
 class TestOpenDALStorageBackend:

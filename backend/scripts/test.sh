@@ -13,8 +13,8 @@ Lanes
   fast       tests/unit + tests/integration, minus `slow`.        (default)
              The feature loop: real SQLite, real routers, no sockets.
   contract   tests/contract — our clients against contract-enforcing fakes
-             over a real loopback socket. Needs no external services;
-             `s3`-marked cases skip themselves without an endpoint.
+             over a real loopback socket. Needs no external services; the
+             container-backed provider contracts run in `full`.
   e2e        tests/e2e — the whole app over ASGITransport plus the fakes.
   full       everything, including `slow`, minus the coverage gate.
   coverage   `full` under branch coverage, then the coverage gate: aggregate
@@ -66,7 +66,13 @@ for arg in "${pytest_args[@]:-}"; do
   fi
 done
 
+# Preserve work-stealing for the ordinary suite: coverage floors and tests with
+# module-level state rely on the scheduling CI has historically exercised. The
+# default full/coverage lanes run container-backed contracts in a second, serial
+# pass so every service starts once rather than once per xdist worker.
 parallel=(-n auto --dist worksteal)
+resource_expression="postgres or s3 or remote_storage"
+non_resource_expression="not postgres and not s3 and not remote_storage"
 
 # `${a[@]+"${a[@]}"}` rather than `"${a[@]}"` everywhere below. bash 3.2 — still
 # the default shell on macOS — treats `"${empty[@]}"` under `set -u` as an unbound
@@ -87,11 +93,11 @@ add_paths() {
 case "$lane" in
   fast)
     add_paths tests/unit tests/integration
-    exec uv run pytest "${parallel[@]}" -m "not slow and not coverage_gate" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    exec uv run pytest "${parallel[@]}" -m "not slow and not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   contract)
     add_paths tests/contract
-    exec uv run pytest "${parallel[@]}" -m "not coverage_gate" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    exec uv run pytest "${parallel[@]}" -m "not coverage_gate and $non_resource_expression" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   e2e)
     add_paths tests/e2e
@@ -99,7 +105,11 @@ case "$lane" in
     ;;
   full)
     add_paths tests
-    exec uv run pytest "${parallel[@]}" -m "not coverage_gate" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    if [[ "$has_target" == true ]]; then
+      exec uv run pytest "${parallel[@]}" -m "not coverage_gate" ${pytest_args[@]+"${pytest_args[@]}"}
+    fi
+    uv run pytest "${parallel[@]}" -m "not coverage_gate and $non_resource_expression" tests ${pytest_args[@]+"${pytest_args[@]}"}
+    exec uv run pytest -m "$resource_expression" tests ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   coverage)
     # Two invocations on purpose. The gate reads `coverage.json`, and that file is
@@ -109,9 +119,17 @@ case "$lane" in
     # to judge. Hence `not coverage_gate` on the measured pass, and a second, tiny
     # pass that runs nothing else.
     add_paths tests
-    uv run pytest "${parallel[@]}" -m "not coverage_gate" \
-      --cov --cov-report=term-missing --cov-report=json --cov-report=html \
-      ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    if [[ "$has_target" == true ]]; then
+      uv run pytest "${parallel[@]}" -m "not coverage_gate" \
+        --cov --cov-report=term-missing --cov-report=json --cov-report=html \
+        ${pytest_args[@]+"${pytest_args[@]}"}
+    else
+      uv run pytest "${parallel[@]}" -m "not coverage_gate and $non_resource_expression" \
+        --cov --cov-report= tests ${pytest_args[@]+"${pytest_args[@]}"}
+      uv run pytest -m "$resource_expression" --cov --cov-append \
+        --cov-report=term-missing --cov-report=json --cov-report=html \
+        tests ${pytest_args[@]+"${pytest_args[@]}"}
+    fi
     echo
     echo "HTML report: $(pwd)/.coverage-html/index.html"
     echo

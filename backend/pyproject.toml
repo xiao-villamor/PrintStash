@@ -100,6 +100,7 @@ markers = [
     "e2e: the whole app over ASGITransport against the fakes (lane: e2e)",
     # Resources. These gate a subset *inside* a tier and skip when the resource is absent.
     "postgres: runs against a real PostgreSQL container (tests/containers.py)",
+    "remote_storage: runs against real Nextcloud and OpenSSH containers (tests/containers.py)",
     "s3: runs against a real SeaweedFS container (tests/containers.py)",
     "slow: large real fixtures or long simulations; excluded from the fast lane",
     # Reads the report a finished coverage run wrote, so it cannot run inside the run

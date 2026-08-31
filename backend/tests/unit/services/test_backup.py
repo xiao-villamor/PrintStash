@@ -1058,6 +1058,33 @@ class TestRestoreJournalV2:
         ]
         backup._restore_gate.clear()
 
+    def test_legacy_swap_without_binding_stays_gated_without_marker_lookup(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        journal = tmp_path / ".restore-legacy-swap.journal"
+        journal.touch()
+        monkeypatch.setitem(_overlay, "backup_dir", tmp_path)
+        monkeypatch.setattr(
+            backup,
+            "_load_restore_journal",
+            lambda _path: SimpleNamespace(
+                started={"backup_id": "legacy-swap"},
+                database_swap_intent=True,
+                database_active=False,
+            ),
+        )
+
+        def fail_marker_lookup(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("an unbound legacy journal cannot query a marker")
+
+        monkeypatch.setattr(backup, "_active_restore_marker", fail_marker_lookup)
+        backup._restore_gate.clear()
+        try:
+            assert backup.inspect_restore_recovery() is True
+            assert backup.restore_in_progress() is True
+        finally:
+            backup._restore_gate.clear()
+
     def test_returns_none_when_journal_discovery_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1530,9 +1557,7 @@ class TestBackupStorageHelpers:
         ]
 
     def test_remote_identity_is_required_before_candidate_validation(self) -> None:
-        with pytest.raises(
-            RuntimeError, match="backup_remote_identity_unavailable"
-        ):
+        with pytest.raises(RuntimeError, match="backup_remote_identity_unavailable"):
             backup._require_remote_identity({})
 
     def test_unconfigured_remote_provider_has_no_adoption_candidates(
