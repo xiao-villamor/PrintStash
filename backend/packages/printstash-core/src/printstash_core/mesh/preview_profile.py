@@ -51,7 +51,9 @@ class PreviewProfile:
 
 
 def _load_profile() -> PreviewProfile:
-    payload = files("printstash_core.mesh").joinpath("preview_profile.json").read_bytes()
+    payload = (
+        files("printstash_core.mesh").joinpath("preview_profile.json").read_bytes()
+    )
     raw: object = json.loads(payload)
     root = _mapping(raw, "root")
     aspect = root.get("aspectRatio")
