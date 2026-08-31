@@ -10,6 +10,9 @@ pre-signed URL so the bytes never transit the app.
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
@@ -130,7 +133,7 @@ class TestDownloadFile:
         make_model,
         make_file,
     ) -> None:
-        from app.api.v1 import files as files_api
+        from app.services import artifact_content
 
         model = make_model("remote-backend")
         row = make_file(model, path="remote.stl")
@@ -142,16 +145,52 @@ class TestDownloadFile:
             def direct_path(self, key: str):
                 return None
 
-            def stream_chunks(self, key: str):
+            def stream_chunks(self, key: str, chunk_size: int):
+                del key, chunk_size
                 yield b"remote-"
                 yield b"bytes"
 
-        monkeypatch.setattr(files_api, "get_backend", lambda: RemoteBackend())
+        monkeypatch.setattr(artifact_content, "get_backend", lambda: RemoteBackend())
 
         response = client.get(f"/api/v1/files/{row.id}/download", headers=auth_headers)
 
         assert response.status_code == 200, response.text
         assert response.content == b"remote-bytes"
+
+    def test_serves_an_external_file_without_using_the_active_vault_backend(
+        self,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+        make_model,
+        make_file,
+        tmp_path: Path,
+    ) -> None:
+        from app.services import artifact_content
+
+        payload = b"bytes from a mounted NAS"
+        source = tmp_path / "mounted-nas" / "part.stl"
+        source.parent.mkdir()
+        source.write_bytes(payload)
+        row = make_file(
+            make_model("external-on-remote-vault"),
+            path=str(source),
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            is_external=True,
+        )
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(
+            artifact_content, "get_backend", active_vault_must_not_be_used
+        )
+
+        response = client.get(f"/api/v1/files/{row.id}/download", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.content == payload
 
     def test_rejects_an_unauthenticated_caller(
         self, client: TestClient, make_model, make_file
@@ -197,6 +236,40 @@ class TestDownloadUrl:
         assert body["backend"] == "s3"
         assert body["url"] == PRESIGNED
         assert "expires_in" in body
+
+    def test_external_file_uses_the_api_instead_of_the_vault_presigner(
+        self,
+        client: TestClient,
+        auth_headers,
+        monkeypatch: pytest.MonkeyPatch,
+        make_model,
+        make_file,
+        tmp_path: Path,
+    ) -> None:
+        from app.api.v1 import files as files_api
+
+        source = tmp_path / "nas" / "external-url.stl"
+        source.parent.mkdir()
+        source.write_bytes(b"external")
+        row = make_file(
+            make_model("external-url"),
+            path=str(source),
+            is_external=True,
+        )
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(files_api, "get_backend", active_vault_must_not_be_used)
+
+        body = client.get(
+            f"/api/v1/files/{row.id}/download-url", headers=auth_headers
+        ).json()
+
+        assert body == {
+            "url": f"/api/v1/files/{row.id}/download",
+            "backend": "local",
+        }
 
 
 class TestDownloadDirect:

@@ -2874,6 +2874,22 @@
         "title": "FleetSummary",
         "type": "object"
       },
+      "GcApprovalRequest": {
+        "properties": {
+          "digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "GcApprovalRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3816,6 +3832,17 @@
             "$ref": "#/components/schemas/ExternalLibraryCollectionMode",
             "default": "mirror"
           },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
+          },
           "enabled": {
             "default": true,
             "title": "Enabled",
@@ -3828,8 +3855,8 @@
             "type": "string"
           },
           "root_path": {
+            "default": "",
             "maxLength": 1024,
-            "minLength": 1,
             "title": "Root Path",
             "type": "string"
           },
@@ -3837,6 +3864,16 @@
             "default": "0 * * * *",
             "maxLength": 128,
             "title": "Scan Schedule",
+            "type": "string"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind",
+            "default": "mounted"
+          },
+          "source_prefix": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Source Prefix",
             "type": "string"
           },
           "target_collection_id": {
@@ -3856,8 +3893,7 @@
           }
         },
         "required": [
-          "name",
-          "root_path"
+          "name"
         ],
         "title": "LibraryCreate",
         "type": "object"
@@ -3894,6 +3930,17 @@
           },
           "collection_mode": {
             "$ref": "#/components/schemas/ExternalLibraryCollectionMode"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
           },
           "enabled": {
             "title": "Enabled",
@@ -3968,6 +4015,13 @@
             "title": "Scan Schedule",
             "type": "string"
           },
+          "source_kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "source_prefix": {
+            "title": "Source Prefix",
+            "type": "string"
+          },
           "target_collection_id": {
             "anyOf": [
               {
@@ -3985,12 +4039,20 @@
           },
           "watch_mode": {
             "$ref": "#/components/schemas/ExternalLibraryWatchMode"
+          },
+          "writeback_enabled": {
+            "title": "Writeback Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "root_path",
+          "source_kind",
+          "connection_id",
+          "source_prefix",
+          "writeback_enabled",
           "enabled",
           "scan_interval_minutes",
           "scan_schedule",
@@ -4009,6 +4071,22 @@
         "title": "LibraryRead",
         "type": "object"
       },
+      "LibraryRediscover": {
+        "additionalProperties": false,
+        "properties": {
+          "source_key": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_key"
+        ],
+        "title": "LibraryRediscover",
+        "type": "object"
+      },
       "LibraryRootEnrollment": {
         "additionalProperties": false,
         "properties": {
@@ -4024,6 +4102,16 @@
         ],
         "title": "LibraryRootEnrollment",
         "type": "object"
+      },
+      "LibrarySourceKind": {
+        "enum": [
+          "mounted",
+          "s3",
+          "webdav",
+          "sftp"
+        ],
+        "title": "LibrarySourceKind",
+        "type": "string"
       },
       "LibraryUpdate": {
         "additionalProperties": false,
@@ -10955,6 +11043,80 @@
         "title": "StartPrinterFile",
         "type": "object"
       },
+      "StorageConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "configuration"
+        ],
+        "title": "StorageConnectionCreate",
+        "type": "object"
+      },
+      "StorageConnectionRead": {
+        "properties": {
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "secret_fields_set": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Fields Set",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "configuration",
+          "secret_fields_set",
+          "enabled"
+        ],
+        "title": "StorageConnectionRead",
+        "type": "object"
+      },
       "StorageFieldDescriptor": {
         "properties": {
           "default": {
@@ -12693,17 +12855,79 @@
       }
     },
     "/api/v1/admin/gc": {
+      "get": {
+        "description": "Return the durable active plan so UI reloads cannot lose the interlock.",
+        "operationId": "read_active_gc_plan_api_v1_admin_gc_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Read Active Gc Plan Api V1 Admin Gc Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Active Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      },
       "post": {
+        "description": "Create a non-destructive GC preview; approval is a separate request.",
         "operationId": "run_gc_api_v1_admin_gc_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Run Gc Api V1 Admin Gc Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Run Gc",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}": {
+      "get": {
+        "operationId": "read_gc_plan_api_v1_admin_gc__run_id__get",
         "parameters": [
           {
-            "in": "query",
-            "name": "confirm_storage_risk",
-            "required": false,
+            "in": "path",
+            "name": "run_id",
+            "required": true,
             "schema": {
-              "default": false,
-              "title": "Confirm Storage Risk",
-              "type": "boolean"
+              "title": "Run Id",
+              "type": "integer"
             }
           }
         ],
@@ -12712,10 +12936,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
-                  "title": "Response Run Gc Api V1 Admin Gc Post",
+                  "additionalProperties": true,
+                  "title": "Response Read Gc Plan Api V1 Admin Gc  Run Id  Get",
                   "type": "object"
                 }
               }
@@ -12738,7 +12960,164 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Run Gc",
+        "summary": "Read Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/abort": {
+      "post": {
+        "operationId": "abort_gc_plan_api_v1_admin_gc__run_id__abort_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Abort Gc Plan Api V1 Admin Gc  Run Id  Abort Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Abort Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/approve": {
+      "post": {
+        "operationId": "approve_gc_plan_api_v1_admin_gc__run_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GcApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Gc Plan Api V1 Admin Gc  Run Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Approve Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/finalize": {
+      "post": {
+        "operationId": "finalize_gc_plan_api_v1_admin_gc__run_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Finalize Gc Plan Api V1 Admin Gc  Run Id  Finalize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finalize Gc Plan",
         "tags": [
           "admin"
         ]
@@ -18800,6 +19179,67 @@
           }
         ],
         "summary": "Update an external library",
+        "tags": [
+          "external-libraries"
+        ]
+      }
+    },
+    "/api/v1/libraries/{library_id}/rediscover": {
+      "post": {
+        "operationId": "rediscover_source_api_v1_libraries__library_id__rediscover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryRediscover"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Rediscover Source Api V1 Libraries  Library Id  Rediscover Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Allow one intentionally removed source key to be indexed again",
         "tags": [
           "external-libraries"
         ]
@@ -25280,6 +25720,169 @@
         "summary": "Test the configured Spoolman connection",
         "tags": [
           "spoolman"
+        ]
+      }
+    },
+    "/api/v1/storage-connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_storage_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorageConnectionRead"
+                  },
+                  "title": "Response List Connections Api V1 Storage Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "storage-connections"
+        ]
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_storage_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConnectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      }
+    },
+    "/api/v1/storage-connections/{connection_id}": {
+      "delete": {
+        "operationId": "delete_connection_api_v1_storage_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      }
+    },
+    "/api/v1/storage-connections/{connection_id}/probe": {
+      "post": {
+        "operationId": "probe_connection_api_v1_storage_connections__connection_id__probe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Probe Connection Api V1 Storage Connections  Connection Id  Probe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Probe Connection",
+        "tags": [
+          "storage-connections"
         ]
       }
     },

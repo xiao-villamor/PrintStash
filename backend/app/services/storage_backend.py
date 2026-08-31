@@ -1916,7 +1916,17 @@ class S3StorageBackend(StorageBackend):
         # never from mutable runtime settings after composition.
         self._endpoint_url = str(getattr(settings, "s3_endpoint_url", "") or "")
         self._region = str(getattr(settings, "s3_region", "auto") or "auto")
-        self._addressing_style = "path"
+        addressing_style = str(
+            getattr(settings, "s3_addressing_style", "auto") or "auto"
+        )
+        if addressing_style not in {"auto", "path", "virtual"}:
+            raise StorageConfigurationError("s3_addressing_style_invalid")
+        if (
+            addressing_style == "auto"
+            and str(getattr(settings, "storage_provider", "")) == "s3_self_hosted"
+        ):
+            addressing_style = "path"
+        self._addressing_style = addressing_style
 
         client_kwargs: dict = {
             "service_name": "s3",
@@ -1925,7 +1935,7 @@ class S3StorageBackend(StorageBackend):
             "aws_secret_access_key": settings.s3_secret_key or None,
             "config": BotoConfig(
                 signature_version="s3v4",
-                s3={"addressing_style": "path"},
+                s3={"addressing_style": addressing_style},
             ),
         }
         if settings.s3_endpoint_url:
@@ -2000,13 +2010,16 @@ class S3StorageBackend(StorageBackend):
 
         key = f"{self._prefix()}.printstash-probe/{uuid.uuid4().hex}"
         payload = b"printstash-s3-conditional-create-proof"
+        version_id: str | None = None
         try:
-            self._client.put_object(
+            created = self._client.put_object(
                 Bucket=self._bucket,
                 Key=key,
                 Body=payload,
                 IfNoneMatch="*",
             )
+            if isinstance(created, dict) and created.get("VersionId"):
+                version_id = str(created["VersionId"])
             try:
                 self._client.put_object(
                     Bucket=self._bucket,
@@ -2031,7 +2044,10 @@ class S3StorageBackend(StorageBackend):
             ) from exc
         finally:
             try:
-                self._client.delete_object(Bucket=self._bucket, Key=key)
+                cleanup = {"Bucket": self._bucket, "Key": key}
+                if version_id is not None:
+                    cleanup["VersionId"] = version_id
+                self._client.delete_object(**cleanup)
             except Exception:
                 logger.warning(
                     "S3 conditional-create probe cleanup failed", exc_info=True

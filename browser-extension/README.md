@@ -76,6 +76,31 @@ Imports settings on the configured vault to create a pairing code.
 
 Capture transfers are user-initiated and go only to the Vault URL you configure.
 
+## Storage and Library sources in 0.13
+
+The extension does not connect to local disks, NAS shares, S3, WebDAV or SFTP.
+It never receives their credentials. Every capture first enters **Pending
+Imports** through the paired PrintStash API, where a user reviews the selected
+files and metadata.
+
+Finalizing a capture writes to managed Vault storage or to a mounted Library
+source that explicitly permits create-only write-back. Read-only S3, WebDAV and
+SFTP Library sources are discovery destinations, not capture targets, and do
+not appear in the upload destination selector. Capturing a page cannot overwrite
+or delete a source object.
+
+Upgrading from 0.12 to 0.13 does not require re-pairing a browser. Existing
+browser device credentials and legacy username/API-key setups retain their
+normal migration behavior. If capture fails after an upgrade:
+
+1. Confirm the popup still shows the expected Vault hostname and user.
+2. Open the Vault health endpoint and resolve any read-only storage recovery
+   state before retrying finalization.
+3. Check **Pending Imports**. A successful browser transfer can remain there
+   even when finalization to managed storage was blocked.
+4. Rebuild and reload the extension only when the popup protocol marker is
+   stale; storage-provider changes alone do not require an extension rebuild.
+
 Run the WXT/Vitest adapter, storage, messaging, and popup fixtures with:
 
 ```bash

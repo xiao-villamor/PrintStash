@@ -17,7 +17,9 @@ or revoking a link is an EDIT-level act on the model, listing is VIEW-level.
 
 from __future__ import annotations
 
+import hashlib
 from datetime import timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -345,6 +347,48 @@ class TestSharedDownload:
 
         assert response.status_code == 410, response.text
         assert response.json()["detail"] == "file_blob_missing"
+
+    def test_serves_external_bytes_without_using_the_vault_backend(
+        self,
+        client: TestClient,
+        db_session: Session,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from app.services import artifact_content
+
+        payload = b"shared NAS bytes"
+        source = tmp_path / "nas" / "shared.stl"
+        source.parent.mkdir()
+        source.write_bytes(payload)
+        model = _make_model(db_session, slug="shared-external", hash_="e" * 64)
+        row = build_file(
+            db_session,
+            model,
+            path=str(source),
+            filename=source.name,
+            file_type="stl",
+            version=1,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            external=True,
+        )
+        created = _create_share(client, auth_headers, model.id, allow_download=True)
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(
+            artifact_content, "get_backend", active_vault_must_not_be_used
+        )
+
+        response = client.get(
+            f"/api/v1/share/{created['token']}/files/{row.id}/download"
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == payload
 
 
 class TestSharedGcode:

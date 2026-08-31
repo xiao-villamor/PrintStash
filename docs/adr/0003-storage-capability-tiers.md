@@ -1,6 +1,6 @@
 # ADR-0003: Storage capability tiers, and OpenDAL as an additive adapter
 
-- **Status**: Accepted and implemented
+- **Status**: Accepted and implemented; decision 12 superseded by ADR-0004
 - **Date**: 2026-08-27
 - **Deciders**: maintainers
 - **Tracking issue**: [#90](https://github.com/xiao-villamor/PrintStash/issues/90)
@@ -901,6 +901,12 @@ generated from the same per-axis table as the boot log and the UI. One source, s
 the docs cannot promise what the probe denies.
 
 ### 12. External libraries keep the local-filesystem *transport*; the catalogue reaches them later
+
+> **Superseded by [ADR-0004](0004-library-sources-and-gc-safety-boundaries.md).**
+> The mounted-source reasoning below remains the historical basis for keeping
+> mounted folders. ADR-0004 adds a separate read-only `LibrarySource` seam for
+> S3, WebDAV and SFTP after bounded paging, tombstones and content-stability
+> proofs supplied the missing correctness argument.
 
 Two questions hide inside "should external libraries get provider support", and
 they have different answers.

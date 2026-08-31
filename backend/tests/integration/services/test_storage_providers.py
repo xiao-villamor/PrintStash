@@ -106,6 +106,22 @@ class TestStorageProviders:
         assert spec.options["endpoint_url"] == "https://minio.example.test"
         assert spec.options["path_style"] is True
 
+    def test_explicit_s3_addressing_style_overrides_the_provider_default(self) -> None:
+        spec = resolve_transport(
+            S3ProviderConfig(
+                provider="s3_self_hosted",
+                bucket="models",
+                endpoint_url="https://minio.example.test",
+                region="us-east-1",
+                addressing_style="virtual",
+                access_key="access",
+                secret_key="secret",
+            )
+        )
+
+        assert spec.options["addressing_style"] == "virtual"
+        assert spec.options["path_style"] is False
+
     @pytest.mark.parametrize("root", ["", ".", "..", "safe/../escape"])
     def test_rejects_invalid_provider_roots(self, root: str) -> None:
         with pytest.raises(ValidationError, match="storage_root"):

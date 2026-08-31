@@ -34,6 +34,7 @@ from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.schemas.maintenance import VaultAuditFindingRead, VaultAuditRunRead
 from app.services import audit, thumbnail_repair
+from app.services.artifact_content import ArtifactContentError, resolve
 from app.services.storage_backend import get_backend
 from app.services.storage_utils import OwnedBlob, ownership_snapshot
 
@@ -771,16 +772,16 @@ def _reparse_metadata(session: Session, file_id: int) -> bool:
         is not None
     ):
         return row is not None
-    backend = get_backend()
-    if not backend.exists(row.path):
+    try:
+        with resolve(row).materialize() as path:
+            strategy = (
+                _gcode_strategy()
+                if row.file_type == FileType.GCODE
+                else _mesh_strategy(row.file_type)
+            )
+            values, _thumbnail = strategy.process(path)
+    except ArtifactContentError:
         return False
-    with backend.local_path(row.path) as path:
-        strategy = (
-            _gcode_strategy()
-            if row.file_type == FileType.GCODE
-            else _mesh_strategy(row.file_type)
-        )
-        values, _thumbnail = strategy.process(path)
     fields = {
         key: value for key, value in values.items() if key in Metadata.model_fields
     }

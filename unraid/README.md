@@ -17,9 +17,10 @@ your own storage, with no subscription or required external account.
 - **Automatic print metadata:** extract slicer, printer profile, nozzle, layer
   height, material, temperatures, estimated duration, and filament use from
   OrcaSlicer, PrusaSlicer, Bambu Studio, and Cura output when available.
-- **NAS and existing folders:** index shared volumes in place, mirror folder
-  structure as collections, detect local changes, and write new uploads or
-  revisions back without overwriting existing files.
+- **NAS and existing folders:** index a mounted Unraid share in place, mirror
+  folder structure as collections, detect changes, and optionally write new
+  uploads or revisions back without overwriting existing files. Remote S3,
+  WebDAV, and SFTP sources are read-only.
 - **Private multi-user access:** accounts, per-collection view/edit/admin roles,
   API keys, audit logs, expiring read-only share links, and a recoverable trash
   workflow.
@@ -78,7 +79,8 @@ From the `printstash-api` template:
 > **Never map an existing model, NAS, or Nextcloud folder to `/data/files`.**
 > This is PrintStash's private blob store, not an import path. Finish setup with
 > the default dedicated directory, then add existing folders under **Settings →
-> External Libraries** to index their files safely in place.
+> Shared volumes** to index their files safely in place. See the
+> [Unraid library-source recipe](../docs/library-sources.md#unraid).
 
 The template already:
 - relies on the API image, which runs database migrations on every start

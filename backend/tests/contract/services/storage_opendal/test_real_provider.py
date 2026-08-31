@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.library_source import OpenDalLibrarySource
 from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,
@@ -81,3 +82,50 @@ class TestOpenDALStorageBackend:
             StorageConfigurationError, match="atomic_move_not_supported"
         ):
             backend.move(key, "contract-sftp/nested/moved.stl")
+
+
+class TestOpenDalLibrarySource:
+    @pytest.mark.parametrize("provider", ["nextcloud", "sftp"])
+    def test_real_provider_content_is_materializable(self, provider: str) -> None:
+        if provider == "nextcloud":
+            endpoint = nextcloud_endpoint()
+            spec = TransportSpec(
+                kind=TransportKind.WEBDAV,
+                provider="nextcloud",
+                namespace="source-contract-nextcloud",
+                options={
+                    "endpoint_url": f"{endpoint}/remote.php/dav/files/admin",
+                    "root": "source-contract-nextcloud",
+                    "username": "admin",
+                    "password": "contract-only",
+                },
+            )
+        else:
+            host, port, host_key = openssh_endpoint()
+            spec = TransportSpec(
+                kind=TransportKind.SFTP,
+                provider="sftp",
+                namespace="source-contract-sftp",
+                options={
+                    "host": host,
+                    "port": port,
+                    "username": "contract",
+                    "password": "contract-only",
+                    "host_key": host_key,
+                    "root": "source-contract-sftp",
+                },
+            )
+        backend = OpenDALStorageBackend(spec)
+        if provider == "sftp":
+            backend.provision_root()
+        backend.ensure_setup()
+        key = f"source-contract-{provider}/models/part.gcode"
+        payload = b"G1 X20 Y20\n"
+        backend.create_bytes(payload, key)
+        source = OpenDalLibrarySource(backend)
+
+        page = source.list_page("models", cursor=None, limit=1000)
+
+        assert [entry.key for entry in page.entries] == ["models/part.gcode"]
+        with source.materialize("models/part.gcode") as local_path:
+            assert local_path.read_bytes() == payload

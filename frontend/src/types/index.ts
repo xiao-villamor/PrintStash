@@ -159,6 +159,10 @@ export type {
   ExternalLibraryBindingState,
   ExternalLibraryScanSummary,
   ExternalLibraryRootEnrollment,
+  LibrarySourceKind,
+  StorageConnectionConfiguration,
+  StorageConnectionConfigurationValue,
+  StorageConnection,
 } from "./config";
 
 export type {

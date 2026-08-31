@@ -34,6 +34,12 @@ curl -X POST \
 Via UI: open Settings, review backup storage, then create a backup before
 upgrading.
 
+Automatic GC approval has a stricter requirement than an ordinary recovery
+backup. Its witness must be no more than 24 hours old, fully verified,
+application-compatible, stored on S3, and use a provider identity different
+from active Vault storage. A second prefix on the same provider is not
+independent. See [Storage Data Safety](./storage-data-safety.md).
+
 ## Restore From A Backup
 
 1. Stop slicer hooks and any automation that uploads files.
@@ -75,6 +81,22 @@ curl -X POST \
   volumes before experimenting.
 - Restore onto a fresh Compose stack using the known-good backup archive.
 - Prefer restoring a backup over manual database edits.
+
+## If A GC Plan Is Active
+
+- `preview` or `quarantined`: abort the plan before restore. No planned physical
+  deletion has happened.
+- `finalizing`: stop writers and do not delete provider objects by hand. Preserve
+  the database and inspect the durable storage-delete outbox.
+- `blocked`: treat the failed proof as a safety stop, not as evidence that an
+  object is disposable. Preserve active storage and the exact witness backup.
+
+A restore changes the restore-generation proof and invalidates any old GC plan.
+After recovery, create a fresh preview from the restored catalog.
+
+Library-source bytes are excluded from a PrintStash backup because PrintStash
+does not own them. Restore those from the NAS/object-store backup first, verify
+the source path or profile, and only then resume discovery.
 
 ## Recovery Targets
 

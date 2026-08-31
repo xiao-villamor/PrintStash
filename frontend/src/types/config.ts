@@ -204,6 +204,18 @@ export type ExternalLibraryCollectionMode = "mirror" | "single";
 
 // auto: watch only on local filesystems; events: always watch; off: never watch.
 export type ExternalLibraryWatchMode = "auto" | "events" | "off";
+export type LibrarySourceKind = "mounted" | "s3" | "webdav" | "sftp";
+export type StorageConnectionConfigurationValue = string | number | boolean | null;
+export type StorageConnectionConfiguration = Record<string, StorageConnectionConfigurationValue>;
+
+export interface StorageConnection {
+  id: number;
+  name: string;
+  kind: Exclude<LibrarySourceKind, "mounted">;
+  configuration: StorageConnectionConfiguration;
+  secret_fields_set: string[];
+  enabled: boolean;
+}
 
 // Detected filesystem class backing the root path.
 export type ExternalLibraryFsKind = "local" | "network" | "unknown";
@@ -230,6 +242,10 @@ export interface ExternalLibrary {
   id: number;
   name: string;
   root_path: string;
+  source_kind?: LibrarySourceKind;
+  connection_id?: number | null;
+  source_prefix?: string;
+  writeback_enabled?: boolean;
   enabled: boolean;
   scan_interval_minutes: number;
   scan_schedule: string;
@@ -254,7 +270,10 @@ export interface ExternalLibraryRootEnrollment {
 
 export interface ExternalLibraryCreate {
   name: string;
-  root_path: string;
+  root_path?: string;
+  source_kind?: LibrarySourceKind;
+  connection_id?: number | null;
+  source_prefix?: string;
   enabled?: boolean;
   scan_schedule?: string;
   watch_mode?: ExternalLibraryWatchMode;

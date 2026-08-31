@@ -6,6 +6,10 @@ previous application image until validation is complete.
 
 ## 0.13.0 notes
 
+- The database migration is additive. It preserves legacy mounted External
+  Library rows as `mounted`, adds remote connection/source metadata, durable
+  discovery cursors and tombstones, source verification timestamps, and the GC
+  plan tables. No migration copies, renames, uploads, or deletes Artifact bytes.
 - Before starting 0.13.0, record and mount the exact local data, thumbnail, and
   external-library roots used by the old installation. For S3-compatible
   storage, preserve the existing bucket, endpoint, credentials, and data-root
@@ -27,6 +31,32 @@ previous application image until validation is complete.
   for the rollback window. After upgrade, verify a new upload and scan, Artifact
   download, trash/restore/permanent-purge behavior, and backup
   create/verify/download/restore against the configured storage provider.
+- Scheduled retention no longer crosses directly from expiry to hard deletion.
+  It creates a bounded GC preview. Automatic physical deletion requires exact
+  administrator approval, Verified active storage, a fully verified backup no
+  more than 24 hours old on an independent S3 provider, and the quarantine
+  configured by `VAULT_GC_QUARANTINE_DAYS` (seven days by default).
+
+### Database and application migration
+
+Before upgrading, run and retain a pre-upgrade database backup plus a storage
+snapshot. The supported application startup runs the Alembic chain. Do not edit
+the new migrations or generate an alternative schema by hand.
+
+After startup, verify:
+
+1. Every pre-0.13 External Library is shown as a mounted source with the same
+   root, collection mode, schedule and linked Artifacts.
+2. Legacy linked files have no fabricated remote connection or source key.
+   Their source key is populated only by a successful mounted scan.
+3. The Storage provider has the same provider identity and namespace as before.
+4. `GET /api/v1/admin/gc` returns no active plan on an installation that had no
+   pre-existing 0.13 plan.
+5. A Trash restore works before reviewing any expired candidates.
+
+Do not downgrade the upgraded database in place. Rollback means stopping the
+new image and restoring the database, secrets key and all managed storage from
+the same pre-upgrade snapshot.
 
 ### Existing storage: safe upgrade path
 
@@ -58,6 +88,26 @@ upgrade boot; first prove the existing configuration and bytes in place.
    Do it only after the compatibility boot is validated, using the same bucket,
    endpoint, credentials, and root `vault-data`. This changes configuration,
    not object locations; no storage copy should be performed.
+
+The optional provider adoption is equivalent configuration only. The bucket,
+endpoint, region, addressing style and `vault-data` root must still resolve to
+the same object namespace. PrintStash does not provide a general in-place byte
+mover between providers in this release.
+
+### Add a remote Library source
+
+Remote Library sources are new catalog views, not a migration of managed Vault
+storage. After the existing installation passes the compatibility boot:
+
+1. Open **Settings > Shared volumes**.
+2. Create and probe an encrypted S3, WebDAV or SFTP connection.
+3. Add a source with an optional prefix and run a manual scan.
+4. Compare a downloaded linked Artifact's SHA-256 with the source.
+5. Keep the source read-only until the full validation checklist passes. Remote
+   write-back remains disabled by design.
+
+WebDAV and SFTP require the full image. The lite image cannot activate their
+OpenDAL/SSH adapters. See [Library sources](./docs/library-sources.md).
 
 Cloudflare R2, Backblaze B2, Wasabi, self-hosted S3, Nextcloud, WebDAV, and SFTP
 presets are new in 0.13.0. An existing generic S3 installation does not need to

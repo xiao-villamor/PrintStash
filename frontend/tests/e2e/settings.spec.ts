@@ -25,7 +25,7 @@ test.describe("settings route", () => {
     await page.goto("/settings?section=trash");
     await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
     await expect(page.getByLabel("Trash size")).toHaveText("1.5 MB reclaimable");
-    await expect(page.getByText("2 files")).toBeVisible();
+    await expect(page.getByText("1 deleted model")).toBeVisible();
     await page.getByRole("button", { name: "About" }).click();
     await expect(page).toHaveURL(/\/settings\?section=about$/);
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
@@ -59,27 +59,36 @@ test.describe("settings route", () => {
     await expect(page.getByText("Exact key: nexus3d-backups/legacy-2025.tar.gz")).toBeVisible();
   });
 
-  test("non-Verified trash purge sends a one-shot storage-risk acknowledgement", async ({
-    page,
-  }) => {
+  test("expired trash requires a durable preview before approval", async ({ page }) => {
     await page.goto("/settings?section=trash");
-    await page.getByRole("button", { name: "Purge expired" }).click();
+    await page.getByRole("button", { name: "Review expired" }).click();
 
-    const dialog = page.getByRole("dialog", { name: "Purge expired trash?" });
+    const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
     await expect(dialog).toContainText(
-      "unguarded storage cannot verify every destructive mutation",
+      "This only records a bounded candidate plan. It does not delete catalog rows or storage bytes.",
     );
-    const request = page.waitForRequest((candidate) => {
+    const previewRequest = page.waitForRequest((candidate) => {
       const url = new URL(candidate.url());
-      return (
-        candidate.method() === "DELETE" &&
-        url.pathname === "/api/v1/models/trash/expired" &&
-        url.searchParams.get("confirm_storage_risk") === "true"
-      );
+      return candidate.method() === "POST" && url.pathname === "/api/v1/admin/gc";
     });
-    await dialog.getByRole("button", { name: "Purge forever" }).click();
-    await request;
-    await expect(page.getByText("1 expired model deleted.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Create preview" }).click();
+    await previewRequest;
+
+    await expect(page.getByText("GC plan #7 · preview")).toBeVisible();
+    await expect(page.getByText("no backup bound")).toBeVisible();
+    await expect(page.getByText("Nothing was deleted.")).toBeVisible();
+    const approve = page.getByRole("button", { name: "Verify backup and quarantine" });
+    await expect(approve).toBeDisabled();
+    await page.getByLabel("Confirm GC plan digest").fill("a".repeat(64));
+
+    const approvalRequest = page.waitForRequest((candidate) => {
+      const url = new URL(candidate.url());
+      return candidate.method() === "POST" && url.pathname === "/api/v1/admin/gc/7/approve";
+    });
+    await approve.click();
+    await approvalRequest;
+    await expect(page.getByText("GC plan #7 · quarantined")).toBeVisible();
+    await expect(page.getByText("backup verified", { exact: true })).toBeVisible();
   });
 
   test("settings prepares a one-time browser extension setup", async ({ page }) => {

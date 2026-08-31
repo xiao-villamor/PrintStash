@@ -31,10 +31,16 @@ from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestResponse
 from app.services import auth, rbac
+from app.services.artifact_content import (
+    ArtifactContentError,
+    ArtifactContentMissingError,
+    presigned_download_url,
+    resolve,
+)
 from app.services.jobs import registry
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_ownership import publish_bytes
-from app.services.three_mf_preview import EmbeddedGcodeError, read_embedded_gcode
+from app.services.three_mf_preview import EmbeddedGcodeError, read_embedded_gcode_path
 
 logger = get_logger(__name__)
 
@@ -96,6 +102,39 @@ def _serve_file(
     )
 
 
+def _serve_artifact(
+    artifact: File,
+    filename: str,
+    media_type: str = "application/octet-stream",
+    *,
+    headers: dict[str, str] | None = None,
+):
+    handle = resolve(artifact)
+    if handle.backend is not None:
+        direct = handle.backend.direct_path(artifact.path)
+        if direct is not None:
+            if not direct.exists():
+                raise HTTPException(status_code=410, detail="file_blob_missing")
+            return FileResponse(
+                path=str(direct),
+                filename=filename,
+                media_type=media_type,
+                headers=headers,
+            )
+    try:
+        chunks = handle.stream()
+    except ArtifactContentMissingError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    return StreamingResponse(
+        chunks,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            **(headers or {}),
+        },
+    )
+
+
 def _serve_download(
     session: Session,
     file_id: int,
@@ -112,9 +151,7 @@ def _serve_download(
         f = _live_file(session, file_id)
     else:
         raise HTTPException(status_code=401, detail="not_authenticated")
-    if not get_backend().exists(f.path):
-        raise HTTPException(status_code=410, detail="file_blob_missing")
-    return _serve_file(f.path, f.original_filename)
+    return _serve_artifact(f, f.original_filename)
 
 
 @router.get(
@@ -159,15 +196,12 @@ def embedded_gcode(
     artifact = _accessible_file(session, file_id, current_user)
     if artifact.file_type != FileType.THREE_MF:
         raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
-    backend = get_backend()
-    if not backend.exists(artifact.path):
-        raise HTTPException(status_code=410, detail="file_blob_missing")
+    archive_cap = settings.three_mf_preview_max_archive_mb * 1024 * 1024
+    if artifact.size_bytes > archive_cap:
+        raise HTTPException(status_code=413, detail="embedded_gcode_archive_too_large")
     try:
-        embedded = read_embedded_gcode(
-            backend,
-            artifact.path,
-            plate_index=plate_index,
-        )
+        with resolve(artifact).materialize() as path:
+            embedded = read_embedded_gcode_path(path, plate_index=plate_index)
     except EmbeddedGcodeError as exc:
         status_code = (
             413
@@ -185,6 +219,8 @@ def embedded_gcode(
         )
         raise HTTPException(status_code=status_code, detail=exc.code) from exc
     except FileNotFoundError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    except ArtifactContentError as exc:
         raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     return PlainTextResponse(
         content=embedded.content,
@@ -250,8 +286,7 @@ def download_url(
     session: Session = Depends(get_session),
 ) -> dict:
     f = _accessible_file(session, file_id, current_user)
-    backend = get_backend()
-    url = backend.presigned_download_url(f.path, f.original_filename)
+    url = presigned_download_url(f, f.original_filename)
     if url:
         return {
             "url": url,
@@ -271,8 +306,7 @@ def download_direct(
     session: Session = Depends(get_session),
 ):
     f = _accessible_file(session, file_id, current_user)
-    backend = get_backend()
-    url = backend.presigned_download_url(f.path, f.original_filename)
+    url = presigned_download_url(f, f.original_filename)
     if url:
         return RedirectResponse(url=url, status_code=307)
     return download_file(file_id=file_id, current_user=current_user, session=session)
@@ -350,10 +384,6 @@ def file_as_stl(
 def stl_response(f: File, request: Request):
     """Serve a mesh File as binary STL (cached). No access checks — callers
     are responsible for authorising access to *f* first."""
-    backend = get_backend()
-    if not backend.exists(f.path):
-        raise HTTPException(status_code=410, detail="file_blob_missing")
-
     stem = Path(f.original_filename).stem
     # File blobs are immutable (content-addressed by sha256), so the rendered
     # STL never changes (content-addressed), but keep the browser TTL modest;
@@ -371,8 +401,8 @@ def stl_response(f: File, request: Request):
     # Already STL: stream the blob straight through, no conversion — never read
     # a (potentially multi-GB) STL fully into memory just to serve it.
     if Path(f.original_filename).suffix.lower() == ".stl":
-        return _serve_file(
-            f.path,
+        return _serve_artifact(
+            f,
             f"{stem}.stl",
             media_type="application/sla",
             headers=cache_headers,
@@ -380,6 +410,7 @@ def stl_response(f: File, request: Request):
 
     # 3MF/OBJ: trimesh conversion is expensive, so cache the result keyed by the
     # source sha256 and serve the cached STL on every subsequent request.
+    backend = get_backend()
     cache_key = backend.stl_cache_key(f.sha256)
     if backend.exists(cache_key):
         return _serve_file(
@@ -392,8 +423,11 @@ def stl_response(f: File, request: Request):
     # Lazy import: trimesh is heavy; pull it in only when we must convert.
     from app.services import mesh_processing
 
-    with backend.local_path(f.path) as path:
-        data = mesh_processing.to_stl_bytes(path)
+    try:
+        with resolve(f).materialize() as path:
+            data = mesh_processing.to_stl_bytes(path)
+    except ArtifactContentMissingError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     if data is None:
         raise HTTPException(status_code=500, detail="stl_conversion_failed")
 
@@ -506,7 +540,9 @@ def _run_thumbnail_rebuild(
                 thumbnail_reason=(
                     "renderer_no_output"
                     if failed
-                    else "no_mesh" if skipped and not rebuilt else None
+                    else "no_mesh"
+                    if skipped and not rebuilt
+                    else None
                 ),
                 result={
                     "scanned": len(models),

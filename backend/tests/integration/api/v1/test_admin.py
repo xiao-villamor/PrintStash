@@ -688,6 +688,28 @@ class TestRestoreResource:
         db_session.refresh(tag)
         assert tag.deleted_at is None
 
+    def test_restore_rejects_an_active_purge_claim(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "admin-claimed-restore", superuser=True)
+        model = build_model(
+            db_session,
+            name="Claimed restore",
+            slug="claimed-restore",
+            hash="9" * 64,
+            deleted_at=utcnow(),
+        )
+        model.purge_token = "purge-in-progress"
+        db_session.add(model)
+        db_session.commit()
+
+        response = client.post(
+            f"/api/v1/admin/models/{model.id}/restore", headers=_headers(admin)
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_cleanup_blocked"
+
 
 class TestAuditLog:
     def test_cookie_authenticated_mutation_records_actor(
@@ -768,3 +790,126 @@ class TestRunGc:
         resp = client.post("/api/v1/admin/gc", headers=_headers(admin))
         assert resp.status_code == 200
         assert isinstance(resp.json(), dict)
+
+    def test_run_gc_is_a_preview_that_preserves_expired_data(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        from datetime import timedelta
+
+        admin = build_user(db_session, "admin-gc-preview", superuser=True)
+        model = build_model(db_session, name="expired", slug="expired-gc-preview")
+        model.deleted_at = utcnow() - timedelta(days=31)
+        db_session.add(model)
+        db_session.commit()
+
+        resp = client.post("/api/v1/admin/gc", headers=_headers(admin))
+
+        assert resp.status_code == 200
+        assert resp.json()["state"] == "preview"
+        assert resp.json()["rows"] == 0
+        assert db_session.get(Model, model.id) is not None
+
+    def test_active_plan_can_be_recovered_after_a_page_reload(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "admin-gc-recover", superuser=True)
+        created = client.post("/api/v1/admin/gc", headers=_headers(admin))
+
+        recovered = client.get("/api/v1/admin/gc", headers=_headers(admin))
+
+        assert recovered.status_code == 200
+        assert recovered.json()["id"] == created.json()["id"]
+        assert recovered.json()["digest"] == created.json()["digest"]
+
+    def test_gc_reads_distinguish_absence_from_unknown_id(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "admin-gc-missing", superuser=True)
+
+        active = client.get("/api/v1/admin/gc", headers=_headers(admin))
+        missing = client.get("/api/v1/admin/gc/999999", headers=_headers(admin))
+
+        assert active.status_code == 200
+        assert active.json() is None
+        assert missing.status_code == 404
+        assert missing.json()["detail"] == "gc_plan_not_found"
+
+    def test_second_preview_is_rejected_without_changing_the_first(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "admin-gc-single", superuser=True)
+        first = client.post("/api/v1/admin/gc", headers=_headers(admin))
+
+        second = client.post("/api/v1/admin/gc", headers=_headers(admin))
+
+        assert first.status_code == 200
+        assert second.status_code == 409
+        assert second.json()["detail"] == "gc_plan_active"
+
+    @pytest.mark.parametrize("transition", ["approve", "abort", "finalize"])
+    def test_gc_transitions_report_a_missing_durable_plan(
+        self,
+        client: TestClient,
+        db_session: Session,
+        transition: str,
+    ) -> None:
+        admin = build_user(
+            db_session, f"admin-gc-missing-{transition}", superuser=True
+        )
+        kwargs = (
+            {"json": {"digest": "0" * 64}} if transition == "approve" else {}
+        )
+
+        response = client.post(
+            f"/api/v1/admin/gc/999999/{transition}",
+            headers=_headers(admin),
+            **kwargs,
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "gc_plan_not_found"
+
+    def test_gc_transition_routes_return_the_exact_durable_plan(
+        self,
+        client: TestClient,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        admin = build_user(db_session, "admin-gc-transitions", superuser=True)
+        created = client.post("/api/v1/admin/gc", headers=_headers(admin)).json()
+        run = db_session.get(admin_api.GcRun, created["id"])
+        assert run is not None
+        monkeypatch.setattr(
+            admin_api.gc_planner,
+            "approve_plan",
+            lambda _session, run_id, digest, actor_id: run,
+        )
+        monkeypatch.setattr(
+            admin_api.gc_planner,
+            "abort_plan",
+            lambda _session, run_id: run,
+        )
+        monkeypatch.setattr(
+            admin_api.gc_planner,
+            "finalize_plan",
+            lambda _session, run_id: run,
+        )
+
+        approved = client.post(
+            f"/api/v1/admin/gc/{run.id}/approve",
+            headers=_headers(admin),
+            json={"digest": run.digest},
+        )
+        aborted = client.post(
+            f"/api/v1/admin/gc/{run.id}/abort", headers=_headers(admin)
+        )
+        finalized = client.post(
+            f"/api/v1/admin/gc/{run.id}/finalize", headers=_headers(admin)
+        )
+
+        assert approved.status_code == 200
+        assert aborted.status_code == 200
+        assert finalized.status_code == 200
+        assert {approved.json()["id"], aborted.json()["id"], finalized.json()["id"]} == {
+            run.id
+        }

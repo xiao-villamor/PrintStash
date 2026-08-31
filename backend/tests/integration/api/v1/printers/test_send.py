@@ -13,6 +13,7 @@ explicitly overridden.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -178,8 +179,9 @@ class TestSendToPrinter:
             def exists(self, _path):
                 return True
 
-            def download_to_path(self, _path, _target):
-                return local
+            @contextmanager
+            def local_path(self, _path):
+                yield local
 
         with (
             patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
@@ -229,8 +231,9 @@ class TestSendToPrinter:
             def exists(self, _path):
                 return True
 
-            def download_to_path(self, _path, _target):
-                return local
+            @contextmanager
+            def local_path(self, _path):
+                yield local
 
         with (
             patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),
@@ -347,8 +350,9 @@ class TestSendToPrinter:
             def exists(self, _path):
                 return True
 
-            def download_to_path(self, _path, _target):
-                return local
+            @contextmanager
+            def local_path(self, _path):
+                yield local
 
         with (
             patch("app.api.v1.printers.get_backend", return_value=FakeBackend()),

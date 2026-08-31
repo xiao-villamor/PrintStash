@@ -75,6 +75,7 @@ class S3ProviderConfig(_ProviderConfig):
     provider: Literal["s3", "cloudflare_r2", "backblaze_b2", "wasabi", "s3_self_hosted"]
     bucket: str = Field(min_length=1)
     region: str = "auto"
+    addressing_style: Literal["auto", "path", "virtual"] = "auto"
     endpoint_url: str = ""
     account_id: str = ""
     access_key: str = Field(min_length=1, json_schema_extra={"secret": True})
@@ -240,7 +241,10 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
     if isinstance(config, S3ProviderConfig):
         endpoint = config.endpoint_url.strip()
         region = config.region.strip() or "auto"
-        path_style = config.provider == "s3_self_hosted"
+        addressing_style = config.addressing_style
+        if addressing_style == "auto" and config.provider == "s3_self_hosted":
+            addressing_style = "path"
+        path_style = addressing_style == "path"
         if config.provider == "cloudflare_r2":
             if not config.account_id.strip():
                 raise ValueError("r2_account_id_required")
@@ -264,6 +268,7 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
                 "region": region,
                 "root": root,
                 "path_style": path_style,
+                "addressing_style": addressing_style,
                 "access_key": config.access_key,
                 "secret_key": config.secret_key,
             },
@@ -337,6 +342,12 @@ def provider_catalogue() -> list[StorageProvider]:
     common_s3 = [
         _field("bucket", "Bucket", "Existing bucket name"),
         _field("region", "Region", "Provider region", default="auto"),
+        _field(
+            "addressing_style",
+            "Addressing style",
+            "auto, path, or virtual (path is typical for self-hosted S3)",
+            default="auto",
+        ),
         _field("root", "Root", "Non-empty managed prefix", default="vault-data"),
         _field("access_key", "Access key", "Object-storage access key", secret=True),
         _field(
@@ -544,6 +555,8 @@ def render_storage_provider_docs() -> str:
     lines = [
         "# Storage providers",
         "",
+        "This page configures **managed Vault storage**, where PrintStash owns object\ncreation and cleanup. To index files already owned by a NAS, S3 bucket, WebDAV\ncollection or SFTP directory, use a read-only\n[Library source](./library-sources.md). Reusing the same server does not merge\nthe two ownership domains.",
+        "",
         "PrintStash probes the configured storage at startup. Support maturity and storage safety are separate: the expected tier below is guidance, while `/api/v1/health` and Settings report the measured active tier.",
         "",
         "| Provider | Category | Support | Expected tier | Configuration fields |",
@@ -581,6 +594,15 @@ def render_storage_provider_docs() -> str:
                 "",
             ]
         )
+        if provider.id == "s3":
+            lines.extend(
+                [
+                    "Use the concrete AWS region for Amazon S3. Leave `endpoint_url` empty and keep\n`addressing_style=auto` unless the account has a specific endpoint requirement.\nFor self-hosted S3, `addressing_style=auto` resolves to path style because many\nNAS and local object stores do not provide wildcard bucket DNS. Select\n`virtual` only when the endpoint, DNS and TLS certificate support virtual-host\nbucket names.",
+                    "",
+                    "The startup probe creates and cleans up a unique probe object. When the server\nreturns a VersionId, cleanup targets that exact version. It never deletes a\nsame-key replacement by an external writer.",
+                    "",
+                ]
+            )
     lines.extend(
         [
             "## Credentials and upgrades",
@@ -594,6 +616,8 @@ def render_storage_provider_docs() -> str:
             "The checked-in Compose files forward the legacy/local and `VAULT_S3_*` fields,\nbut do not automatically forward `VAULT_STORAGE_PROVIDER`,\n`VAULT_STORAGE_ROOT`, `VAULT_WEBDAV_*`, `VAULT_SFTP_*`, or\n`VAULT_STORAGE_ALLOW_UNVERIFIED` from `.env`. When configuring those fields\nentirely through environment variables, add them explicitly under the API\nservice's `environment` in a Compose override. Configuration saved through the\nSetup or Settings UI does not need that override.",
             "",
             "`VAULT_STORAGE_BACKEND` and the legacy S3 variables remain supported upgrade\ninputs. Keep them unchanged for the first 0.13.0 compatibility boot.",
+            "",
+            "Changing from the legacy `s3` input to a typed provider does not move bytes.\nAdopt only an equivalent bucket, endpoint, region, addressing style and root.\nThere is no general provider-to-provider byte migration in 0.13.0.",
         ]
     )
     return "\n".join(lines) + "\n"

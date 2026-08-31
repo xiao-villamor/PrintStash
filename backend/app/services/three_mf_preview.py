@@ -349,3 +349,13 @@ def read_embedded_gcode(
             zipfile.BadZipFile,
         ) as exc:
             raise EmbeddedGcodeError("embedded_gcode_malformed") from exc
+
+
+def read_embedded_gcode_path(
+    archive_path: Path,
+    *,
+    plate_index: int | None = None,
+) -> EmbeddedGcode:
+    """Read embedded G-code from an already resolved, stable Artifact path."""
+    with preview_capacity():
+        return extract_embedded_gcode(archive_path, plate_index=plate_index)

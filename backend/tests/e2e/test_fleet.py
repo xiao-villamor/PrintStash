@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
@@ -56,9 +58,12 @@ class _Backend:
     def exists(self, _key: str) -> bool:
         return True
 
-    def download_to_path(self, _key: str, target: Path) -> Path:
-        target.write_text("G28\n")
-        return target
+    @contextmanager
+    def local_path(self, _key: str):
+        with TemporaryDirectory(prefix="printstash-e2e-artifact-") as directory:
+            target = Path(directory) / "artifact.gcode"
+            target.write_text("G28\n")
+            yield target
 
 
 async def _wait_job_state(

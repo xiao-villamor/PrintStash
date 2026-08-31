@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import contextmanager
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -37,9 +39,12 @@ class _Backend:
     def exists(self, _key: str) -> bool:
         return True
 
-    def download_to_path(self, _key: str, target: Path) -> Path:
-        target.write_text("G28\n")
-        return target
+    @contextmanager
+    def local_path(self, _key: str):
+        with TemporaryDirectory(prefix="printstash-contract-artifact-") as directory:
+            target = Path(directory) / "artifact.gcode"
+            target.write_text("G28\n")
+            yield target
 
 
 REGISTRY = build_provider_registry()

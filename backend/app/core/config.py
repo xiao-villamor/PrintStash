@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_endpoint_url: str = ""
     s3_region: str = "auto"
+    s3_addressing_style: str = Field(
+        default="auto", pattern=r"^(auto|path|virtual)$"
+    )
     s3_access_key: str = ""
     s3_secret_key: str = ""
     # Historical installs default to the literal ``vault-data`` prefix. Typed
@@ -261,6 +264,9 @@ class Settings(BaseSettings):
     # Zero means eligible for cleanup immediately; negative retention is invalid.
     backup_retention_days: int = Field(default=30, ge=0)
     trash_retention_days: int = Field(default=30, ge=0)
+    # Approved GC plans retain restorable catalog rows for this interval before
+    # any exact owned object may be physically deleted.
+    gc_quarantine_days: int = Field(default=7, ge=1, le=90)
 
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""

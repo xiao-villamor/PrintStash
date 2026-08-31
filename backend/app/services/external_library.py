@@ -1,10 +1,9 @@
-"""External library (NAS folder) scan + reconcile engine.
+"""Mounted and remote library-source scan and reconciliation engine.
 
-The folder is the source of truth. A scan walks ``root_path`` and reconciles the
-index against what is on disk: new files are indexed in place (no copy), removed
-files are moved to trash, and changed files are re-hashed and refreshed. Web
-uploads/revisions write back into the folder (see ``ingestion.resolve_write_target``)
-so the folder stays complete — PrintStash never overwrites or deletes existing bytes.
+The configured source is the source of truth. Mounted sources may accept
+create-only write-back. S3, WebDAV, and SFTP sources are read-only: scans page
+through their namespace and materialize only the objects that need indexing or
+verification. PrintStash never overwrites or deletes source bytes.
 
 Safety: a scan never mass-deletes on an unmounted/empty root. If ``root_path`` is
 missing/unreadable, or it yields zero candidate files while the library still has
@@ -19,6 +18,7 @@ import json
 import os
 import secrets
 import stat
+import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -36,11 +36,14 @@ from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     SUFFIX_TO_FILE_TYPE,
     ExternalLibrary,
+    ExternalLibraryCheckpoint,
     ExternalLibraryCollectionMode,
     ExternalLibraryScanStatus,
+    ExternalLibraryTombstone,
     ExternalLibraryWatchMode,
     File,
     FileType,
+    LibrarySourceKind,
     Metadata,
     Model,
 )
@@ -56,6 +59,15 @@ from app.services.ingestion import (
     resolve_or_create_model,
 )
 from app.services.jobs import registry
+from app.services.library_source import (
+    LibrarySource,
+    LibrarySourceError,
+    SourceEntry,
+    source_for_library,
+)
+from app.services.library_source import (
+    timestamp as source_timestamp,
+)
 from app.services.profile_detection import upsert_detected_profiles
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_ownership import publish_bytes
@@ -86,6 +98,11 @@ _ROOT_MARKER_MAX_BYTES = 4096
 _PINNED_READ_PATHS: contextvars.ContextVar[dict[str, Path] | None] = (
     contextvars.ContextVar("external_library_pinned_read_paths", default=None)
 )
+_REMOTE_SCAN_LOCK = threading.Lock()
+_REMOTE_PAGE_LIMIT = 1000
+_REMOTE_SLICE_MAX_BYTES = 2 * 1024 * 1024 * 1024
+_REMOTE_SLICE_MAX_SECONDS = 15 * 60
+_SOURCE_HASH_MAX_AGE = timedelta(days=7)
 
 
 class ExternalRootBindingError(RuntimeError):
@@ -434,6 +451,8 @@ def should_watch(library: ExternalLibrary, fs_kind: FsKind) -> bool:
     """Whether real-time watching is active for *library* given its watch mode."""
     if not library.enabled:
         return False
+    if library.source_kind != LibrarySourceKind.MOUNTED:
+        return False
     if library.watch_mode == ExternalLibraryWatchMode.OFF:
         return False
     if library.watch_mode == ExternalLibraryWatchMode.EVENTS:
@@ -695,7 +714,7 @@ def _index_external_file(
                 session.commit()
                 session.refresh(model)
 
-    persist_artifact(
+    row = persist_artifact(
         session,
         model=model,
         staged_path=source_path,
@@ -711,6 +730,17 @@ def _index_external_file(
         external_library_id=library.id,
         source_mtime=mtime,
     )
+    try:
+        row.source_key = source_path.relative_to(
+            Path(library.root_path).expanduser().resolve(strict=False)
+        ).as_posix()
+    except ValueError as exc:
+        raise ExternalRootBindingError(
+            "mismatch", "path_outside_library_root"
+        ) from exc
+    row.source_verified_at = utcnow()
+    session.add(row)
+    session.commit()
     upsert_detected_profiles(session, meta)
 
 
@@ -730,6 +760,7 @@ def _reindex_changed(
     if new_hash == file_row.sha256:
         file_row.size_bytes = size
         file_row.source_mtime = mtime
+        file_row.source_verified_at = utcnow()
         session.add(file_row)
         session.commit()
         return False
@@ -741,6 +772,7 @@ def _reindex_changed(
     file_row.sha256 = new_hash
     file_row.size_bytes = size
     file_row.source_mtime = mtime
+    file_row.source_verified_at = utcnow()
     file_row.uploaded_at = utcnow()
     session.add(file_row)
 
@@ -828,6 +860,289 @@ def _finish(
     session.commit()
 
 
+def _remote_uri(library: ExternalLibrary, key: str) -> str:
+    return f"source://{library.connection_id}/{key.lstrip('/')}"
+
+
+def _remote_collection_path(library: ExternalLibrary, key: str) -> str | None:
+    if library.collection_mode != ExternalLibraryCollectionMode.MIRROR:
+        return None
+    prefix = library.source_prefix.strip("/")
+    relative = key[len(prefix) :].lstrip("/") if prefix and key.startswith(prefix) else key
+    parent = Path(relative).parent.as_posix()
+    return None if parent in {"", "."} else parent
+
+
+def _index_remote_file(
+    session: Session,
+    library: ExternalLibrary,
+    source: LibrarySource,
+    entry: SourceEntry,
+) -> None:
+    source_name = Path(entry.key)
+    file_type = SUFFIX_TO_FILE_TYPE[source_name.suffix.lower()]
+    with source.materialize(entry.key) as read_path:
+        blob_hash = sha256_file(read_path)
+        strategy = _strategy_for(file_type)
+        meta, thumb_bytes = _process_external_file(strategy, file_type, read_path)
+        model, created = resolve_or_create_model(
+            session,
+            dedup_hash=blob_hash,
+            model_name=source_name.stem,
+            actor=None,
+        )
+        if created or model.collection_id is None:
+            collection_path = _remote_collection_path(library, entry.key)
+            if collection_path:
+                collection = taxonomy.resolve_or_create_collection(
+                    session, collection_path
+                )
+                if collection is not None:
+                    model.collection_id = collection.id
+                    session.add(model)
+                    session.commit()
+                    session.refresh(model)
+        row = persist_artifact(
+            session,
+            model=model,
+            staged_path=read_path,
+            original_filename=source_name.name,
+            file_type=file_type,
+            blob_hash=blob_hash,
+            meta=meta,
+            thumb_bytes=thumb_bytes,
+            overwrite_thumbnail=strategy.overwrite_thumbnail,
+            move_blob=False,
+            dest_key_override=_remote_uri(library, entry.key),
+            is_external=True,
+            external_library_id=library.id,
+            source_mtime=source_timestamp(entry.modified_at),
+        )
+        row.source_key = entry.key
+        row.source_verified_at = utcnow()
+        session.add(row)
+        session.commit()
+        upsert_detected_profiles(session, meta)
+
+
+def _reindex_remote_file(
+    session: Session,
+    file_row: File,
+    source: LibrarySource,
+    entry: SourceEntry,
+) -> bool:
+    with source.materialize(entry.key) as read_path:
+        display_path = Path(file_row.path)
+        current = dict(_PINNED_READ_PATHS.get() or {})
+        current[str(display_path)] = read_path
+        token = _PINNED_READ_PATHS.set(current)
+        try:
+            return _reindex_changed(
+                session,
+                file_row,
+                display_path,
+                entry.size,
+                source_timestamp(entry.modified_at),
+            )
+        finally:
+            _PINNED_READ_PATHS.reset(token)
+
+
+def _source_hash_due(file_row: File, now: datetime) -> bool:
+    verified_at = file_row.source_verified_at
+    return verified_at is None or ensure_utc(verified_at) <= now - _SOURCE_HASH_MAX_AGE
+
+
+def _remote_checkpoint(
+    session: Session, library: ExternalLibrary
+) -> ExternalLibraryCheckpoint:
+    checkpoint = session.exec(
+        select(ExternalLibraryCheckpoint).where(
+            ExternalLibraryCheckpoint.library_id == library.id
+        )
+    ).first()
+    if checkpoint is None or checkpoint.complete:
+        if checkpoint is not None:
+            session.delete(checkpoint)
+            session.flush()
+        checkpoint = ExternalLibraryCheckpoint(
+            library_id=int(library.id), epoch=uuid.uuid4().hex
+        )
+        session.add(checkpoint)
+        session.flush()
+    return checkpoint
+
+
+def scan_remote_library(
+    library_id: int,
+    *,
+    job_id: str | None = None,
+    session_factory: SessionFactory | None = None,
+) -> dict:
+    """Process one bounded remote page; absence is applied only at epoch end."""
+    if session_factory is None:
+        session_factory = get_session_factory()
+    if not _REMOTE_SCAN_LOCK.acquire(blocking=False):
+        return {"coalesced": True, "reason": "remote_scan_busy"}
+    summary = ScanSummary()
+    scan_started = monotonic()
+    try:
+        with session_factory.scoped_session() as session:
+            library = session.get(ExternalLibrary, library_id)
+            if library is None:
+                raise ValueError(f"external library {library_id} not found")
+            if library.source_kind == LibrarySourceKind.MOUNTED:
+                raise ValueError("library_source_is_mounted")
+            checkpoint = _remote_checkpoint(session, library)
+            if checkpoint.backoff_until and ensure_utc(
+                checkpoint.backoff_until
+            ) > utcnow():
+                return {
+                    **summary.as_dict(),
+                    "backoff_until": checkpoint.backoff_until.isoformat(),
+                }
+            source = source_for_library(library)
+            library.last_scan_status = ExternalLibraryScanStatus.RUNNING
+            session.add(library)
+            session.commit()
+            try:
+                if monotonic() - scan_started >= _REMOTE_SLICE_MAX_SECONDS:
+                    raise LibrarySourceError("remote_scan_slice_deadline")
+                page = source.list_page(
+                    library.source_prefix,
+                    cursor=checkpoint.cursor,
+                    limit=_REMOTE_PAGE_LIMIT,
+                )
+                supported = [
+                    entry
+                    for entry in page.entries
+                    if Path(entry.key).suffix.lower() in SUFFIX_TO_FILE_TYPE
+                ]
+                selected: list[SourceEntry] = []
+                bytes_in_slice = 0
+                for entry in supported:
+                    if bytes_in_slice + entry.size > _REMOTE_SLICE_MAX_BYTES:
+                        break
+                    selected.append(entry)
+                    bytes_in_slice += entry.size
+                if len(selected) != len(supported):
+                    raise LibrarySourceError("remote_scan_slice_byte_limit")
+                observed = set(json.loads(checkpoint.observed_keys_json or "[]"))
+                tombstones = {
+                    row.source_key
+                    for row in session.exec(
+                        select(ExternalLibraryTombstone).where(
+                            ExternalLibraryTombstone.library_id == library_id,
+                            ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+                        )
+                    ).all()
+                }
+                live_files = session.exec(
+                    select(File).where(
+                        File.external_library_id == library_id,
+                        live(File),
+                    )
+                ).all()
+                by_key = {row.source_key: row for row in live_files if row.source_key}
+                observation_time = utcnow()
+                for entry in selected:
+                    # Blocking provider and parser calls cannot be interrupted safely.
+                    # Enforce the wall-clock slice between objects so a slow source
+                    # cannot turn one scheduled scan into an unbounded network job.
+                    if monotonic() - scan_started >= _REMOTE_SLICE_MAX_SECONDS:
+                        raise LibrarySourceError("remote_scan_slice_deadline")
+                    observed.add(entry.key)
+                    if entry.key in tombstones:
+                        summary.skipped += 1
+                        continue
+                    existing = by_key.get(entry.key)
+                    mtime = source_timestamp(entry.modified_at)
+                    if existing is None:
+                        _index_remote_file(session, library, source, entry)
+                        summary.added += 1
+                    elif (
+                        existing.size_bytes == entry.size
+                        and existing.source_mtime is not None
+                        and abs(existing.source_mtime - mtime) <= _MTIME_TOLERANCE_S
+                        and not _source_hash_due(existing, observation_time)
+                    ):
+                        summary.skipped += 1
+                    elif _reindex_remote_file(session, existing, source, entry):
+                        summary.updated += 1
+                    else:
+                        summary.skipped += 1
+                checkpoint.cursor = page.next_cursor
+                checkpoint.complete = page.complete
+                checkpoint.observed_keys_json = json.dumps(sorted(observed))
+                checkpoint.metadata_ops += page.metadata_ops
+                checkpoint.bytes_read += bytes_in_slice
+                checkpoint.updated_at = utcnow()
+                if page.complete:
+                    missing = [
+                        row
+                        for key, row in by_key.items()
+                        if key not in observed and key not in tombstones
+                    ]
+                    removal_limit = min(25, max(1, len(by_key) // 100))
+                    if (not observed and by_key) or len(missing) > removal_limit:
+                        summary.error = "remote_mass_removal_blocked"
+                        summary.aborted = True
+                    else:
+                        for row in missing:
+                            _remove_external_file(session, row)
+                            summary.removed += 1
+                    checkpoint.completed_at = utcnow()
+                session.add(checkpoint)
+                library.last_scanned_at = utcnow()
+                library.last_scan_status = (
+                    ExternalLibraryScanStatus.ERROR
+                    if summary.aborted
+                    else ExternalLibraryScanStatus.PARTIAL
+                    if summary.errors
+                    else ExternalLibraryScanStatus.OK
+                )
+                result = {
+                    **summary.as_dict(),
+                    "epoch": checkpoint.epoch,
+                    "complete": checkpoint.complete,
+                    "cursor": checkpoint.cursor,
+                    "metadata_ops": checkpoint.metadata_ops,
+                    "bytes_read": checkpoint.bytes_read,
+                }
+                library.last_scan_summary = json.dumps(result)
+                library.updated_at = utcnow()
+                session.add(library)
+                session.commit()
+                if job_id:
+                    registry.update(job_id, state="completed", result=result)
+                return result
+            except Exception as exc:
+                session.rollback()
+                checkpoint = _remote_checkpoint(session, library)
+                deadline_reached = str(exc) == "remote_scan_slice_deadline"
+                checkpoint.backoff_until = (
+                    None if deadline_reached else utcnow() + timedelta(hours=24)
+                )
+                checkpoint.updated_at = utcnow()
+                library.last_scanned_at = utcnow()
+                library.last_scan_status = (
+                    ExternalLibraryScanStatus.PARTIAL
+                    if deadline_reached
+                    else ExternalLibraryScanStatus.ERROR
+                )
+                summary.error = str(exc)
+                summary.aborted = True
+                library.last_scan_summary = json.dumps(summary.as_dict())
+                session.add(checkpoint)
+                session.add(library)
+                session.commit()
+                if job_id:
+                    registry.update(job_id, state="failed", error=summary.error)
+                return summary.as_dict()
+    finally:
+        _REMOTE_SCAN_LOCK.release()
+
+
 def scan_library(
     library_id: int,
     *,
@@ -838,6 +1153,16 @@ def scan_library(
     """Reconcile a library's index with its on-disk folder. Returns the summary."""
     if session_factory is None:
         session_factory = get_session_factory()
+
+    with session_factory.scoped_session() as source_session:
+        source_library = source_session.get(ExternalLibrary, library_id)
+        if (
+            source_library is not None
+            and source_library.source_kind != LibrarySourceKind.MOUNTED
+        ):
+            return scan_remote_library(
+                library_id, job_id=job_id, session_factory=session_factory
+            )
 
     summary = ScanSummary()
     with session_factory.scoped_session() as session:
@@ -995,6 +1320,15 @@ def scan_library(
                     if row.path == str(scan_root) or row.path.startswith(prefix)
                 ]
             db_by_path = {f.path: f for f in live_files}
+            tombstones = {
+                row.source_key
+                for row in session.exec(
+                    select(ExternalLibraryTombstone).where(
+                        ExternalLibraryTombstone.library_id == library_id,
+                        ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+                    )
+                ).all()
+            }
 
             if not disk and db_by_path:
                 summary.error = "root_empty_aborted"
@@ -1028,6 +1362,7 @@ def scan_library(
                     total=len(disk),
                 )
             progress_updates = _ScanProgressCoalescer(total=len(disk))
+            observation_time = utcnow()
 
             for index, (path, (size, mtime)) in enumerate(disk.items(), start=1):
                 assert_root_binding(library)
@@ -1044,6 +1379,10 @@ def scan_library(
                     )
                 existing = db_by_path.get(path)
                 try:
+                    source_key = Path(path).relative_to(root).as_posix()
+                    if source_key in tombstones and existing is None:
+                        summary.skipped += 1
+                        continue
                     entry = pinned_snapshot.files.get(path)
                     if entry is None:
                         raise ExternalRootBindingError(
@@ -1059,6 +1398,7 @@ def scan_library(
                             existing.size_bytes == size
                             and existing.source_mtime is not None
                             and abs(existing.source_mtime - mtime) <= _MTIME_TOLERANCE_S
+                            and not _source_hash_due(existing, observation_time)
                         ):
                             summary.skipped += 1
                         else:
@@ -1214,6 +1554,9 @@ def reset_orphaned_scans(session: Session) -> int:
         library.last_scan_status = ExternalLibraryScanStatus.ERROR
         library.last_scan_summary = json.dumps({"error": "interrupted by restart"})
         library.last_scanned_at = now
+        library.scan_claim_token = None
+        library.scan_claim_expires_at = None
+        library.scan_job_id = None
         library.updated_at = now
         session.add(library)
     if orphaned:

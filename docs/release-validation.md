@@ -100,6 +100,55 @@ a real SeaweedFS that the suite starts as containers, so Docker must be running.
   quarantine; otherwise assert `blocked` with the exact bytes retained.
 - Run `./scripts/test_minio_migration.sh`; it verifies normal, Unicode, and
   multipart objects twice with downloaded-content comparison.
+- Run the read-only LibrarySource contracts in the same provider containers:
+  native S3 continuation-token pages against SeaweedFS, bounded directory
+  cursor traversal against Nextcloud WebDAV and OpenSSH SFTP, stable
+  materialization, and access/host-key failures. A remote source test must never
+  invoke the managed-storage delete API.
+- Run the 0.13 migration chain from the literal released 0.12.1 SQLite schema.
+  Assert legacy mounted libraries keep their root, schedule and linked rows;
+  new connection/checkpoint/tombstone/GC tables start empty; and a new
+  autogenerate pass produces no schema diff.
+
+## Library-source safety matrix
+
+For each protocol changed by the release, record all rows below. Containerized
+protocol evidence and physical-appliance evidence are separate results.
+
+| Behavior | Mounted | S3 | WebDAV | SFTP |
+| --- | --- | --- | --- | --- |
+| Nested and Unicode discovery | Required | Required | Required | Required |
+| Multi-page cursor resume after process restart | N/A | Required | Required | Required |
+| Interrupted/incomplete scan leaves unseen rows live | Required | Required | Required | Required |
+| Empty or wrong source blocks mass removal | Required | Required | Required | Required |
+| Same-size/same-mtime replacement found by rotating hash | Required | Required | Required | Required |
+| Trash tombstone prevents immediate re-import | Required | Required | Required | Required |
+| Restore/Rediscover clears suppression | Required | Required | Required | Required |
+| Source bytes unchanged by Trash and GC | Required | Required | Required | Required |
+| Network/rate/page/byte/time budgets observed | Mount-specific | Required | Required | Required |
+| Source write-back | Create-only | Rejected | Rejected | Rejected |
+
+For Unraid, Synology, TrueNAS, OpenMediaVault, QNAP, CasaOS or Proxmox, append a
+storage validation-log row in `docs/provider-support.md`. Do not replace a
+missing appliance row with the protocol-container result.
+
+## Garbage-collection safety gate
+
+Run the integration and end-to-end cases that prove:
+
+- the scheduled coordinator creates a preview but never approval
+- a second active preview is rejected by the database lease
+- the plan is capped by resource count, one percent of Models, key count and
+  bytes
+- approval rejects a wrong digest, changed candidate, provider/restore drift,
+  non-Verified storage, stale backup, same-provider backup, non-S3 backup and a
+  backup that fails full/application verification
+- quarantine blocks early finalization and defaults to seven days
+- finalization re-verifies every proof, uses only durable ownership intents and
+  resumes pending storage cleanup after restart
+- restore refuses an active purge token and successful restore clears source
+  tombstones
+- blocked cleanup retains uncertain bytes and never falls back to a storage walk
 
 The upgrade gate must also start from the literal released v0.12.1 schema and
 data shapes: linked External Library rows and bytes, pending deletion intents,

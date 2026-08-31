@@ -248,6 +248,43 @@ class TestS3CapabilityProbe:
 
         assert backend._probe_conditional_create() is False  # type: ignore[attr-defined]
 
+    def test_cleans_up_the_exact_probe_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import botocore.exceptions
+
+        class _Client:
+            def __init__(self) -> None:
+                self.payload = b""
+                self.deleted: list[dict[str, object]] = []
+
+            def put_object(self, **kwargs: object) -> dict[str, str]:
+                if self.payload:
+                    raise botocore.exceptions.ClientError(
+                        {"Error": {"Code": "PreconditionFailed"}}, "PutObject"
+                    )
+                self.payload = bytes(kwargs["Body"])
+                return {"VersionId": "probe-version"}
+
+            def get_object(self, **_kwargs: object) -> dict[str, BytesIO]:
+                return {"Body": BytesIO(self.payload)}
+
+            def delete_object(self, **kwargs: object) -> None:
+                self.deleted.append(kwargs)
+
+        client = _Client()
+        backend = _bare_s3_backend(client)  # type: ignore[arg-type]
+        monkeypatch.setattr(
+            storage_backend, "settings", type("S", (), {"s3_root": "vault-data"})()
+        )
+
+        backend._probe_conditional_create()  # type: ignore[attr-defined]
+
+        assert len(client.deleted) == 1
+        assert client.deleted[0]["Bucket"] == "vault"
+        assert str(client.deleted[0]["Key"]).startswith("vault-data/.printstash-probe/")
+        assert client.deleted[0]["VersionId"] == "probe-version"
+
     def test_records_a_versioning_probe_failure_as_guarded(self) -> None:
         class _Client:
             def get_bucket_versioning(self, **_kwargs: str) -> dict[str, object]:
@@ -367,6 +404,7 @@ def _memory_s3_backend(
             "s3_secret_key": "secret",
             "s3_endpoint_url": "https://s3.example.test",
             "s3_root": "vault-data",
+            "s3_addressing_style": "auto",
             "storage_provider": "s3",
             "s3_multipart_threshold_mb": 10,
             "s3_presigned_url_expire_seconds": 60,
@@ -375,6 +413,40 @@ def _memory_s3_backend(
     monkeypatch.setattr(storage_backend, "settings", settings)
     monkeypatch.setattr("boto3.client", lambda **_kwargs: client)
     return S3StorageBackend(check_bucket=False), client
+
+
+class TestS3ClientConfiguration:
+    def test_uses_the_configured_addressing_style(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: dict[str, object] = {}
+        fake = _CoverageMemoryS3Client()
+        configured = type(
+            "S3Settings",
+            (),
+            {
+                "s3_bucket": "vault",
+                "s3_region": "us-east-1",
+                "s3_access_key": "access",
+                "s3_secret_key": "secret",
+                "s3_endpoint_url": "https://minio.example.test",
+                "s3_root": "vault-data",
+                "s3_addressing_style": "virtual",
+                "storage_provider": "s3_self_hosted",
+            },
+        )()
+        monkeypatch.setattr(storage_backend, "settings", configured)
+
+        def client(**kwargs: object):
+            captured.update(kwargs)
+            return fake
+
+        monkeypatch.setattr("boto3.client", client)
+
+        S3StorageBackend(check_bucket=False)
+
+        assert captured["region_name"] == "us-east-1"
+        assert captured["config"].s3["addressing_style"] == "virtual"
 
 
 class TestS3CompatibilityCoverage:

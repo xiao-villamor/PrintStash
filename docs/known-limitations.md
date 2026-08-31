@@ -53,6 +53,15 @@ manufacturing platform.
   and the generic/native S3 path are stable. Cloudflare R2, Backblaze B2, Wasabi,
   self-hosted S3 presets, Nextcloud, generic WebDAV, and SFTP are beta until their
   real-service compatibility matrices and independent deployments are broader.
+- Library-source discovery supports mounted folders, native S3, WebDAV and
+  SFTP. Automated contracts run against SeaweedFS, Nextcloud and OpenSSH, but
+  that is protocol evidence rather than certification of every Unraid,
+  Synology, TrueNAS, OpenMediaVault, QNAP, CasaOS or Proxmox release. Remote
+  sources are read-only; only mounted sources may use create-only write-back.
+- Remote discovery is deliberately bounded and eventually consistent. A full
+  epoch can span several scheduled slices, and provider failures apply a
+  24-hour backoff. Absence is not applied until an epoch completes, and empty or
+  unexpectedly large removal sets require operator investigation.
 - The built-in database backup and restore operation supports file-backed
   SQLite only. PostgreSQL installations must use operator-managed `pg_dump`
   and restore procedures; the backup API exposes this capability explicitly
@@ -163,6 +172,11 @@ manufacturing platform.
   PrintStash retains the remote bytes and reports the cleanup as blocked instead of
   risking deletion of replacement data. Scheduled purge never supplies the one-time
   acknowledgement used by an administrator.
+- Scheduled retention creates a preview but cannot approve it. Automatic
+  physical GC requires Verified active storage, a recent fully verified backup
+  on an independent S3 provider, and the quarantine interval. PostgreSQL and
+  installations without that backup topology retain expired bytes until an
+  operator uses a supported explicit workflow.
 
 ## Pending Imports And Facets
 

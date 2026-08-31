@@ -57,6 +57,20 @@ const TRASHED_MODEL = {
   collection: null,
 };
 
+const GC_PLAN = {
+  id: 12,
+  state: "preview",
+  digest: "a".repeat(64),
+  resource_count: 3,
+  candidate_pool_count: 3,
+  key_count: 5,
+  size_bytes: 2048,
+  quarantine_until: null,
+  backup_id: null,
+  last_error: null,
+  items: [],
+};
+
 const ISSUED_KEY = {
   id: 9,
   name: "Slicer",
@@ -131,6 +145,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/spoolman/status": json({ enabled: false, url: null, reachable: false }),
       "GET /api/v1/maintenance/audits/latest": json(null),
       "GET /api/v1/models/trash": json([]),
+      "GET /api/v1/admin/gc": json(null),
       "GET /api/v1/backups": json([]),
       "GET /api/v1/backups/sources": json([]),
       "GET /api/v1/backups/unowned-local": json([]),
@@ -949,24 +964,26 @@ describe("SettingsPanel", () => {
 
       fireEvent.change(days, { target: { value: "-1" } });
 
-      expect(screen.getByRole("button", { name: /Purge expired/ })).toBeDisabled();
+      expect(screen.getByRole("button", { name: /Review expired/ })).toBeDisabled();
     });
 
-    it("purges what has already expired", async () => {
+    it("creates a durable preview without issuing a delete", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
-        routes: { "DELETE /api/v1/models/trash/expired": json({ purged: 3, freed_bytes: 2048 }) },
+        routes: { "POST /api/v1/admin/gc": json(GC_PLAN) },
       });
 
-      await user.click(await screen.findByRole("button", { name: /Purge expired/ }));
-      await user.click(screen.getByRole("button", { name: "Purge forever" }));
+      await user.click(await screen.findByRole("button", { name: /Review expired/ }));
+      await user.click(screen.getByRole("button", { name: "Create preview" }));
 
       await waitFor(() =>
-        expect(
-          requestsWithMethod("DELETE").some((call) => call.url.includes("trash/expired")),
-        ).toBe(true),
+        expect(requestsWithMethod("POST").some((call) => call.url.endsWith("/admin/gc"))).toBe(
+          true,
+        ),
       );
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+      expect(await screen.findByText("GC plan #12 · preview")).toBeVisible();
     });
 
     it("restores a model out of the trash", async () => {
@@ -1044,29 +1061,33 @@ describe("SettingsPanel", () => {
       expect(await screen.findByRole("status")).toHaveTextContent("retained");
     });
 
-    it("shows a pending storage result", async () => {
+    it("requires the exact digest before requesting backup verification", async () => {
       const user = userEvent.setup();
-      renderSettings({
+      const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
         routes: {
-          "DELETE /api/v1/models/trash/expired": json({
-            purged_model_ids: [7],
-            purged_count: 1,
-            storage_completed: 0,
-            storage_pending: 2,
-            storage_blocked: 0,
-            storage_cleanup_status: "pending",
+          "GET /api/v1/admin/gc": json(GC_PLAN),
+          "POST /api/v1/admin/gc/12/approve": json({
+            ...GC_PLAN,
+            state: "quarantined",
+            backup_id: "backup-1",
+            quarantine_until: "2026-02-10T00:00:00Z",
           }),
         },
       });
 
-      await user.click(await screen.findByRole("button", { name: /Purge expired/ }));
-      await user.click(
-        within(screen.getByRole("dialog")).getByRole("button", { name: "Purge forever" }),
-      );
+      const approve = await screen.findByRole("button", {
+        name: "Verify backup and quarantine",
+      });
+      expect(approve).toBeDisabled();
+      await user.type(screen.getByLabelText("Confirm GC plan digest"), GC_PLAN.digest);
+      expect(approve).toBeEnabled();
+      await user.click(approve);
 
-      expect(await screen.findByRole("status")).toHaveTextContent(
-        /2 storage object\(s\) remain pending/i,
+      await waitFor(() =>
+        expect(requestsWithMethod("POST").some((call) => call.url.endsWith("/gc/12/approve"))).toBe(
+          true,
+        ),
       );
     });
   });

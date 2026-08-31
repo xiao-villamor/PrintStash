@@ -230,7 +230,10 @@ export function UploadModal({
         return listExternalLibraries().then((libs) => {
           if (cancelled) return;
           const writableLibraries = libs.filter(
-            (library) => library.enabled && library.binding_state === "bound",
+            (library) =>
+              library.enabled &&
+              library.binding_state === "bound" &&
+              (library.source_kind ?? "mounted") === "mounted",
           );
           setLibraries(writableLibraries);
           setTargetLibraryId((selectedId) => {

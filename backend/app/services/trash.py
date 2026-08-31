@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Iterable
 
 from sqlalchemy import update
@@ -21,6 +22,8 @@ from app.db.models import (
     ArtifactMaterialRequirement,
     Collection,
     Document,
+    ExternalLibrary,
+    ExternalLibraryTombstone,
     File,
     FileType,
     InboxItem,
@@ -180,6 +183,7 @@ def soft_delete_model(session: Session, model: Model) -> None:
     """Move a model to the trash."""
     model.deleted_at = utcnow()
     model.updated_at = utcnow()
+    _record_model_tombstones(session, model)
     session.add(model)
     session.commit()
 
@@ -194,20 +198,106 @@ def soft_delete_models(session: Session, models: Iterable[Model]) -> None:
     for model in models:
         model.deleted_at = now
         model.updated_at = now
+        _record_model_tombstones(session, model)
         session.add(model)
+
+
+def record_source_tombstone(session: Session, file_row: File, reason: str) -> None:
+    """Persist user intent so discovery cannot immediately resurrect a source."""
+    if not file_row.is_external or file_row.external_library_id is None:
+        return
+    source_key = file_row.source_key
+    if not source_key:
+        library = session.get(ExternalLibrary, file_row.external_library_id)
+        if library is None:
+            return
+        try:
+            source_key = (
+                Path(file_row.path)
+                .relative_to(Path(library.root_path).expanduser().resolve(strict=False))
+                .as_posix()
+            )
+        except ValueError:
+            return
+        file_row.source_key = source_key
+        session.add(file_row)
+    tombstone = session.exec(
+        select(ExternalLibraryTombstone).where(
+            ExternalLibraryTombstone.library_id == file_row.external_library_id,
+            ExternalLibraryTombstone.source_key == source_key,
+        )
+    ).first()
+    if tombstone is None:
+        tombstone = ExternalLibraryTombstone(
+            library_id=file_row.external_library_id,
+            source_key=source_key,
+        )
+    tombstone.sha256 = file_row.sha256
+    tombstone.reason = reason[:32]
+    tombstone.cleared_at = None
+    session.add(tombstone)
+
+
+def _record_model_tombstones(session: Session, model: Model) -> None:
+    if model.id is None:
+        return
+    for file_row in session.exec(select(File).where(File.model_id == model.id)).all():
+        record_source_tombstone(session, file_row, "model_trashed")
+
+
+def _clear_model_tombstones(session: Session, model: Model) -> None:
+    if model.id is None:
+        return
+    now = utcnow()
+    for file_row in session.exec(select(File).where(File.model_id == model.id)).all():
+        _clear_file_tombstone(session, file_row, now=now)
+
+
+def _clear_file_tombstone(
+    session: Session, file_row: File, *, now: datetime | None = None
+) -> None:
+    if file_row.external_library_id is None or not file_row.source_key:
+        return
+    tombstone = session.exec(
+        select(ExternalLibraryTombstone).where(
+            ExternalLibraryTombstone.library_id == file_row.external_library_id,
+            ExternalLibraryTombstone.source_key == file_row.source_key,
+            ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+        )
+    ).first()
+    if tombstone is not None:
+        tombstone.cleared_at = now or utcnow()
+        session.add(tombstone)
+
+
+def restore_resource(session: Session, resource, *, commit: bool = True) -> None:
+    """Restore one soft-deleted row unless a purge already owns it.
+
+    Once ``purge_token`` is set, storage deletion may already have crossed the
+    database boundary. Restoring that row would expose an object whose bytes can
+    disappear underneath it, so every restore entrypoint shares this guard.
+    """
+    if resource.deleted_at is None:
+        return
+    if getattr(resource, "purge_token", None) is not None:
+        raise PurgeConflictError("storage_cleanup_blocked")
+    if isinstance(resource, Model):
+        _clear_model_tombstones(session, resource)
+    elif isinstance(resource, File):
+        _clear_file_tombstone(session, resource)
+    resource.deleted_at = None
+    if hasattr(resource, "deleted_by"):
+        resource.deleted_by = None
+    if hasattr(resource, "updated_at"):
+        resource.updated_at = utcnow()
+    session.add(resource)
+    if commit:
+        session.commit()
 
 
 def restore_model(session: Session, model: Model) -> None:
     """Bring a model back from the trash. No-op when it is live."""
-    if model.deleted_at is None:
-        return
-    if model.purge_token is not None:
-        raise PurgeConflictError("storage_cleanup_blocked")
-    model.deleted_at = None
-    model.deleted_by = None
-    model.updated_at = utcnow()
-    session.add(model)
-    session.commit()
+    restore_resource(session, model)
 
 
 def hard_delete_file(
@@ -399,12 +489,7 @@ def hard_delete_document(
 
 
 def restore_document(session: Session, document: Document) -> None:
-    if document.purge_token is not None:
-        raise PurgeConflictError("storage_cleanup_blocked")
-    document.deleted_at = None
-    document.deleted_by = None
-    document.updated_at = utcnow()
-    session.add(document)
+    restore_resource(session, document, commit=False)
 
 
 def hard_delete_collection(

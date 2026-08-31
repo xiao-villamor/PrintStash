@@ -31,7 +31,9 @@ Developed features in the current app:
   authenticated Printables/MakerWorld files and extension/manual Thingiverse
   capture; server resolution remains SSRF-guarded and archives remain
   zip-slip/zip-bomb protected
-- Shared volumes: mirror a server folder or NAS in place with two-way write-back, per-volume cron scheduling, and optional real-time watching with network-aware fallback
+- Library sources: index mounted folders with optional create-only write-back,
+  or read-only S3/WebDAV/SFTP namespaces, with bounded discovery, durable
+  cursors, tombstones, per-source scheduling, and local-only event watching
 - Public, expiring, read-only share links to a single model (view-only by default; opt-in original-file download)
 - Print statistics dashboard (cost, filament, prints, print time; time series + top collections/filaments) with a configurable display currency
 - Measured prints: real filament + duration and per-print cost captured from Moonraker, with auto known-good revision promotion

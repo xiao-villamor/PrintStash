@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from app.db.models import File, FileType, Model
 from app.db.scopes import live
 from app.services import mesh_processing, thumbnail
+from app.services.artifact_content import ArtifactContentError, resolve
 from app.services.storage_backend import get_backend
 from app.services.storage_ownership import publish_bytes, replace_owned_bytes
 
@@ -28,10 +29,11 @@ def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
     if mesh is None or mesh.id is None:
         return False
     backend = get_backend()
-    if not backend.exists(mesh.path):
+    try:
+        with resolve(mesh, backend=backend).materialize() as path:
+            data = mesh_processing.render_thumbnail(path)
+    except ArtifactContentError:
         return False
-    with backend.local_path(mesh.path) as path:
-        data = mesh_processing.render_thumbnail(path)
     if not data:
         return False
     key = backend.thumbnail_key(mesh.id)
@@ -40,9 +42,7 @@ def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
     # retried after an operator resolves the audit finding.
     encoded = thumbnail.to_webp(data)
     if backend.exists(key):
-        replace_owned_bytes(
-            session, backend, key, encoded, object_kind="thumbnail"
-        )
+        replace_owned_bytes(session, backend, key, encoded, object_kind="thumbnail")
     else:
         publish_bytes(session, backend, key, encoded, object_kind="thumbnail")
     model.thumbnail_file_id = mesh.id

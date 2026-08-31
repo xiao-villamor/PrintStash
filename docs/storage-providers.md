@@ -1,15 +1,21 @@
 # Storage providers
 
+This page configures **managed Vault storage**, where PrintStash owns object
+creation and cleanup. To index files already owned by a NAS, S3 bucket, WebDAV
+collection or SFTP directory, use a read-only
+[Library source](./library-sources.md). Reusing the same server does not merge
+the two ownership domains.
+
 PrintStash probes the configured storage at startup. Support maturity and storage safety are separate: the expected tier below is guidance, while `/api/v1/health` and Settings report the measured active tier.
 
 | Provider | Category | Support | Expected tier | Configuration fields |
 | --- | --- | --- | --- | --- |
 | [This machine](#local) | This machine | Stable | Verified | `data_dir`, `thumb_dir`, `root` |
-| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Stable | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `account_id` |
-| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Wasabi](#wasabi) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
+| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Stable | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
+| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `account_id` |
+| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret) |
+| [Wasabi](#wasabi) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret) |
+| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
 | [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
 | [WebDAV](#webdav) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
 | [SFTP](#sftp) | NAS over SFTP | Beta | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
@@ -33,6 +39,17 @@ Expected tier: **Verified**. Verified on local filesystems with working hardlink
 Native S3-compatible object storage.
 
 Expected tier: **Guarded**. Verified when bucket versioning is enabled; otherwise Guarded.
+
+Use the concrete AWS region for Amazon S3. Leave `endpoint_url` empty and keep
+`addressing_style=auto` unless the account has a specific endpoint requirement.
+For self-hosted S3, `addressing_style=auto` resolves to path style because many
+NAS and local object stores do not provide wildcard bucket DNS. Select
+`virtual` only when the endpoint, DNS and TLS certificate support virtual-host
+bucket names.
+
+The startup probe creates and cleans up a unique probe object. When the server
+returns a VersionId, cleanup targets that exact version. It never deletes a
+same-key replacement by an external writer.
 
 ## cloudflare_r2
 
@@ -98,3 +115,7 @@ Setup or Settings UI does not need that override.
 
 `VAULT_STORAGE_BACKEND` and the legacy S3 variables remain supported upgrade
 inputs. Keep them unchanged for the first 0.13.0 compatibility boot.
+
+Changing from the legacy `s3` input to a typed provider does not move bytes.
+Adopt only an equivalent bucket, endpoint, region, addressing style and root.
+There is no general provider-to-provider byte migration in 0.13.0.

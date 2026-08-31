@@ -23,6 +23,7 @@ so a tampered archive cannot swap an image for something else.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import zipfile
@@ -1706,6 +1707,59 @@ class TestCreateArchive:
         user, _, file_row = _seed(db_session, tmp_path)
         source = Path(file_row.path)
         source.write_bytes(b"x" * file_row.size_bytes)
+
+        with pytest.raises(ValueError, match="archive_blob_hash_mismatch"):
+            library_transfer.create_archive(db_session, user)
+
+    def test_library_archive_exports_external_bytes_without_using_the_vault_backend(
+        self,
+        db_session: Session,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        user, _, file_row = _seed(db_session, tmp_path)
+        payload = b"external portable bytes"
+        source = tmp_path / "nas" / "portable.stl"
+        source.parent.mkdir()
+        source.write_bytes(payload)
+        file_row.path = str(source)
+        file_row.original_filename = source.name
+        file_row.size_bytes = len(payload)
+        file_row.sha256 = hashlib.sha256(payload).hexdigest()
+        file_row.is_external = True
+        db_session.add(file_row)
+        db_session.commit()
+
+        def active_vault_must_not_be_used():
+            raise AssertionError("external path reached the active vault backend")
+
+        monkeypatch.setattr(
+            library_transfer, "get_backend", active_vault_must_not_be_used
+        )
+
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                blob_names = [
+                    name for name in archive.namelist() if name.startswith("blobs/")
+                ]
+                assert archive.read(blob_names[0]) == payload
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_library_archive_rejects_missing_external_content_before_export(
+        self,
+        db_session: Session,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        user, _, file_row = _seed(db_session, tmp_path)
+        missing = tmp_path / "nas" / "missing.stl"
+        file_row.path = str(missing)
+        file_row.is_external = True
+        db_session.add(file_row)
+        db_session.commit()
 
         with pytest.raises(ValueError, match="archive_blob_hash_mismatch"):
             library_transfer.create_archive(db_session, user)

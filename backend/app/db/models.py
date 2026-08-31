@@ -131,6 +131,17 @@ class VaultAuditRunState(str, Enum):
     FAILED = "failed"
 
 
+class GcRunState(str, Enum):
+    """Durable phases of a destructive garbage-collection decision."""
+
+    PREVIEW = "preview"
+    QUARANTINED = "quarantined"
+    FINALIZING = "finalizing"
+    COMPLETED = "completed"
+    ABORTED = "aborted"
+    BLOCKED = "blocked"
+
+
 class VaultAuditSeverity(str, Enum):
     INFO = "info"
     WARNING = "warning"
@@ -414,7 +425,15 @@ class File(SQLModel, table=True):
     external_library_id: Optional[int] = Field(
         default=None, foreign_key="external_libraries.id", index=True
     )
+    # Remote libraries keep a provider-relative immutable key here. ``path``
+    # remains the stable display/resolution URI and is never interpreted as a
+    # local pathname by ArtifactContent.
+    source_key: Optional[str] = Field(default=None, max_length=2048, index=True)
     source_mtime: Optional[float] = None
+    # Last time discovery read and hashed the source bytes. Metadata-only scans
+    # remain cheap, while a rotating weekly sweep still catches content changes
+    # on appliances that preserve both size and mtime.
+    source_verified_at: Optional[datetime] = Field(default=None, index=True)
     ingestion_key: Optional[str] = Field(
         default=None, max_length=64, unique=True, index=True
     )
@@ -1530,6 +1549,74 @@ class RestoreMarker(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class GcRun(SQLModel, table=True):
+    """Immutable candidate plan plus its explicit destructive authorization."""
+
+    __tablename__ = "gc_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # A nullable unique lease enforced by the database. Every active state owns
+    # slot 1; terminal states release it. This prevents two app processes from
+    # authorizing overlapping destructive plans.
+    active_slot: Optional[int] = Field(default=1, unique=True, index=True)
+    state: GcRunState = Field(
+        default=GcRunState.PREVIEW,
+        sa_column=Column(
+            SAEnum(
+                GcRunState,
+                values_callable=lambda members: [member.value for member in members],
+                native_enum=False,
+                length=16,
+            ),
+            nullable=False,
+            index=True,
+        ),
+    )
+    digest: str = Field(max_length=64, index=True)
+    retention_days: int
+    cutoff_at: datetime = Field(index=True)
+    resource_count: int = 0
+    candidate_pool_count: int = 0
+    key_count: int = 0
+    size_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    scheduled: bool = False
+    requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    approved_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    approved_at: Optional[datetime] = Field(default=None, index=True)
+    quarantine_until: Optional[datetime] = Field(default=None, index=True)
+    backup_id: Optional[str] = Field(default=None, max_length=255)
+    backup_source_ref: Optional[str] = Field(default=None, max_length=64)
+    backup_provider_ref: Optional[str] = Field(default=None, max_length=64)
+    backup_archive_sha256: Optional[str] = Field(default=None, max_length=64)
+    backup_verified_at: Optional[datetime] = None
+    active_provider_ref: Optional[str] = Field(default=None, max_length=64)
+    restore_generation: str = Field(default="", max_length=64)
+    last_error: Optional[str] = Field(default=None, max_length=255)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
+
+
+class GcItem(SQLModel, table=True):
+    """One exact catalog resource selected by a GC plan."""
+
+    __tablename__ = "gc_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "resource_kind", "resource_id", name="uq_gc_item_resource"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="gc_runs.id", index=True, ondelete="CASCADE")
+    resource_kind: str = Field(max_length=32, index=True)
+    resource_id: int = Field(index=True)
+    deleted_at_snapshot: datetime
+    key_count: int = 0
+    size_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ExternalLibraryCollectionMode(str, Enum):
     """How a scanned file's NAS subfolder maps to a vault Collection."""
 
@@ -1565,14 +1652,37 @@ class ExternalLibraryWatchMode(str, Enum):
     OFF = "off"
 
 
-class ExternalLibrary(SQLModel, table=True):
-    """A user-managed external folder (typically on a NAS) mirrored into the vault.
+class LibrarySourceKind(str, Enum):
+    MOUNTED = "mounted"
+    S3 = "s3"
+    WEBDAV = "webdav"
+    SFTP = "sftp"
 
-    The folder is the source of truth: PrintStash indexes files where they sit
-    (``File.is_external=true``, ``File.path`` = absolute on-disk path), stores only
-    the generated thumbnail + metadata, and streams originals on demand. A scan
-    reconciles the index with the folder; web uploads/revisions write back into the
-    folder so it stays complete. PrintStash never overwrites or deletes existing bytes.
+
+class StorageConnection(SQLModel, table=True):
+    """Reusable encrypted credentials for a read-only remote library source."""
+
+    __tablename__ = "storage_connections"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=128, unique=True, index=True)
+    kind: LibrarySourceKind = Field(index=True)
+    config_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    secret_json: str = Field(
+        default="{}", sa_column=Column(EncryptedText(), nullable=False)
+    )
+    enabled: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExternalLibrary(SQLModel, table=True):
+    """A user-managed mounted or remote source indexed into the catalog.
+
+    The source is authoritative. PrintStash stores generated thumbnails and
+    metadata, then reads originals through ArtifactContent. Mounted sources may
+    allow create-only write-back. S3, WebDAV, and SFTP sources are read-only.
+    Trash and garbage collection never delete source bytes.
     """
 
     __tablename__ = "external_libraries"
@@ -1580,6 +1690,14 @@ class ExternalLibrary(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)
     root_path: str = Field(max_length=1024)
+    source_kind: LibrarySourceKind = Field(default=LibrarySourceKind.MOUNTED, index=True)
+    connection_id: Optional[int] = Field(
+        default=None, foreign_key="storage_connections.id", index=True
+    )
+    source_prefix: str = Field(default="", max_length=1024)
+    # Remote sources are indexed read-only. An explicit future capability can
+    # opt in only after provider-specific atomic publication is proven.
+    writeback_enabled: bool = Field(default=False)
     # Random, durable identity for the exact external root.  Legacy rows are
     # intentionally NULL and remain read-only until an administrator explicitly
     # enrolls the mounted directory.
@@ -1615,6 +1733,51 @@ class ExternalLibrary(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExternalLibraryTombstone(SQLModel, table=True):
+    """Suppress automatic re-import after a source-backed Artifact is trashed."""
+
+    __tablename__ = "external_library_tombstones"
+    __table_args__ = (
+        UniqueConstraint(
+            "library_id", "source_key", name="uq_external_tombstone_source_key"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    library_id: int = Field(
+        foreign_key="external_libraries.id", index=True, ondelete="CASCADE"
+    )
+    source_key: str = Field(max_length=2048)
+    sha256: Optional[str] = Field(default=None, max_length=64)
+    reason: str = Field(default="removed", max_length=32)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    cleared_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class ExternalLibraryCheckpoint(SQLModel, table=True):
+    """Restart-safe cursor and complete-epoch evidence for bounded scans."""
+
+    __tablename__ = "external_library_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("library_id", name="uq_external_library_checkpoint"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    library_id: int = Field(
+        foreign_key="external_libraries.id", index=True, ondelete="CASCADE"
+    )
+    epoch: str = Field(max_length=64, index=True)
+    cursor: Optional[str] = Field(default=None, max_length=2048)
+    complete: bool = Field(default=False, index=True)
+    observed_keys_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    metadata_ops: int = 0
+    bytes_read: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    backoff_until: Optional[datetime] = Field(default=None, index=True)
+    started_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
 
 
 class PrintBatch(SQLModel, table=True):

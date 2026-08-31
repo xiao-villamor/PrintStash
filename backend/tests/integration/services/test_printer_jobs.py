@@ -11,6 +11,8 @@ this file targets the specific guard clauses in between.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -94,11 +96,16 @@ class TestTransferArtifact:
         self,
         tmp_path: Path,
     ) -> None:
-        backend = AsyncMock()
-        backend.exists = lambda _key: True
-        backend.download_to_path = lambda *_a, **_kw: (_ for _ in ()).throw(
-            OSError("disk full")
-        )
+        class Backend:
+            def exists(self, _key: str) -> bool:
+                return True
+
+            @contextmanager
+            def local_path(self, _key: str):
+                raise OSError("disk full")
+                yield tmp_path / "unreachable.gcode"
+
+        backend = Backend()
         artifact = detached_file(
             id=1,
             path="vault-data/x.gcode",
@@ -142,9 +149,11 @@ class TestTransferArtifact:
             def exists(self, _key: str) -> bool:
                 return True
 
-            def download_to_path(self, _key: str, target: Path) -> Path:
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "x.gcode"
                 target.write_bytes(b"G28\n")
-                return target
+                yield target
 
         artifact = detached_file(
             id=1,
@@ -170,6 +179,48 @@ class TestTransferArtifact:
                 )
 
         asyncio.run(_run())
+
+    def test_transfer_artifact_reads_an_external_source_without_the_vault_backend(
+        self, tmp_path: Path
+    ) -> None:
+        payload = b"G28\n; from NAS\n"
+        source = tmp_path / "nas" / "external.gcode"
+        source.parent.mkdir()
+        source.write_bytes(payload)
+        artifact = detached_file(
+            id=1,
+            path=str(source),
+            original_filename=source.name,
+            file_type=FileType.GCODE,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            is_external=True,
+        )
+
+        class VaultBackend:
+            def exists(self, _key: str) -> bool:
+                raise AssertionError("external path reached the active vault backend")
+
+        uploaded: list[bytes] = []
+
+        class Provider:
+            async def upload(self, local: Path, _remote: str) -> None:
+                uploaded.append(local.read_bytes())
+
+            async def start(self, _remote: str) -> None:
+                return None
+
+        asyncio.run(
+            transfer_artifact(
+                VaultBackend(),
+                Provider(),
+                artifact,
+                "external.gcode",
+                start_print=True,
+            )
+        )
+
+        assert uploaded == [payload]
 
 
 class TestDispatchClaimed:
@@ -292,9 +343,11 @@ class TestDispatchClaimed:
             def exists(self, _key: str) -> bool:
                 return True
 
-            def download_to_path(self, _key: str, target: Path) -> Path:
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "dispatch-artifact.gcode"
                 target.write_text("G28\n")
-                return target
+                yield target
 
         with (
             patch("app.services.printer_jobs.get_backend", return_value=_Backend()),

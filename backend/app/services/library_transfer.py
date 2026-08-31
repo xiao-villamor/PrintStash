@@ -48,6 +48,7 @@ from app.services import (
     storage,
     taxonomy,
 )
+from app.services.artifact_content import ArtifactContentError, resolve
 from app.services.jobs import registry
 from app.services.storage_backend import get_backend
 
@@ -428,22 +429,26 @@ def create_archive(session: Session, user: User) -> Path:
             with zipfile.ZipFile(
                 output, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True
             ) as archive:
-                backend = get_backend()
                 actual_size = len(manifest_bytes)
                 for artifact, entry in file_entries:
-                    with backend.local_path(artifact.path) as source:
-                        digest = hashlib.sha256()
-                        artifact_size = 0
-                        with (
-                            source.open("rb") as source_file,
-                            archive.open(entry, "w", force_zip64=True) as archive_entry,
-                        ):
-                            while chunk := source_file.read(_HASH_CHUNK_SIZE):
-                                artifact_size += len(chunk)
-                                if actual_size + artifact_size > MAX_UNCOMPRESSED:
-                                    raise ValueError("archive_too_large")
-                                digest.update(chunk)
-                                archive_entry.write(chunk)
+                    try:
+                        with resolve(artifact).materialize() as source:
+                            digest = hashlib.sha256()
+                            artifact_size = 0
+                            with (
+                                source.open("rb") as source_file,
+                                archive.open(
+                                    entry, "w", force_zip64=True
+                                ) as archive_entry,
+                            ):
+                                while chunk := source_file.read(_HASH_CHUNK_SIZE):
+                                    artifact_size += len(chunk)
+                                    if actual_size + artifact_size > MAX_UNCOMPRESSED:
+                                        raise ValueError("archive_too_large")
+                                    digest.update(chunk)
+                                    archive_entry.write(chunk)
+                    except ArtifactContentError as exc:
+                        raise ValueError("archive_blob_hash_mismatch") from exc
                     if (
                         artifact_size != artifact.size_bytes
                         or digest.hexdigest() != artifact.sha256.lower()
@@ -453,7 +458,7 @@ def create_archive(session: Session, user: User) -> Path:
                     if actual_size > MAX_UNCOMPRESSED:
                         raise ValueError("archive_too_large")
                 for cover, entry in cover_entries:
-                    data = backend.read_bytes(cover.storage_key)
+                    data = get_backend().read_bytes(cover.storage_key)
                     digest = hashlib.sha256(data).hexdigest()
                     if len(data) != cover.size_bytes or digest != next(
                         source["cover"]["sha256"]

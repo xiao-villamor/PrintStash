@@ -205,7 +205,7 @@ test.describe("settings", () => {
     await expect(enable).not.toBeChecked();
   });
 
-  test("purge-expired empties the trash", async ({ page }) => {
+  test("expired GC preview is non-destructive without an independent backup", async ({ page }) => {
     const name = `e2e-purge-${Date.now()}`;
     await uploadGcodeModel(page, name);
     await modelCard(page, name).click();
@@ -219,9 +219,29 @@ test.describe("settings", () => {
     // Retention 0 means everything already in trash is past expiry.
     await page.getByRole("spinbutton").fill("0");
     await page.getByRole("button", { name: "Save retention" }).click();
-    await page.getByRole("button", { name: "Purge expired" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Purge forever" }).click();
-    await expect(page.getByText(name)).toHaveCount(0);
+    await page.getByRole("button", { name: "Review expired" }).click();
+    const dialog = page.getByRole("dialog", { name: "Create a safe GC preview?" });
+    await expect(dialog).toContainText("It does not delete catalog rows or storage bytes.");
+    await dialog.getByRole("button", { name: "Create preview" }).click();
+
+    await expect(page.getByText(/GC plan #\d+ · preview/)).toBeVisible();
+    await expect(page.getByText(name)).toBeVisible();
+    const digest = await page.getByText(/^[0-9a-f]{64}$/).textContent();
+    expect(digest).not.toBeNull();
+    await page.getByLabel("Confirm GC plan digest").fill(digest!);
+
+    const refused = page.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/admin/gc/") &&
+        response.url().endsWith("/approve") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Verify backup and quarantine" }).click();
+    expect((await refused).status()).toBe(409);
+    await expect(page.getByText(name)).toBeVisible();
+
+    await page.getByRole("button", { name: "Abort plan" }).click();
+    await expect(page.getByText(/GC plan #\d+ · aborted/)).toBeVisible();
 
     // Restore the default so later runs aren't affected.
     await page.getByRole("spinbutton").fill("30");

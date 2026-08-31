@@ -120,6 +120,7 @@ from app.services.trash import (
     StorageRiskConfirmationRequired,
     hard_delete_expired_models,
     hard_delete_model,
+    record_source_tombstone,
     soft_delete_model,
     soft_delete_models,
 )
@@ -1672,6 +1673,7 @@ def delete_file_revision(
     file_row.deleted_at = utcnow()
     file_row.deleted_by = current_user.id
     file_row.is_recommended = False
+    record_source_tombstone(session, file_row, "revision_trashed")
     session.add(file_row)
     # Clear the old partial-index entry before promoting its replacement.
     session.flush()
