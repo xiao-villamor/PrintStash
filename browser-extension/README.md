@@ -27,8 +27,9 @@ instance.
 After rebuilding, confirm Chrome is loading the exact unpacked directory
 `browser-extension/.output/chrome-mv3`, then click **Reload** for PrintStash on
 `chrome://extensions`. Close and reopen the popup and confirm its header shows
-**Capture protocol v2 · diagnostics 4**. If the marker is missing, Chrome has a stale or
-different unpacked directory loaded: use **Load unpacked** to select
+the current SemVer release from `package.json` (for example, **Version 0.12.1**).
+If the version is stale, Chrome has a different unpacked directory or an older
+build loaded: use **Load unpacked** to select
 `browser-extension/.output/chrome-mv3` again, click **Reload**, and reopen the
 popup before testing capture behavior.
 
@@ -98,8 +99,8 @@ normal migration behavior. If capture fails after an upgrade:
    state before retrying finalization.
 3. Check **Pending Imports**. A successful browser transfer can remain there
    even when finalization to managed storage was blocked.
-4. Rebuild and reload the extension only when the popup protocol marker is
-   stale; storage-provider changes alone do not require an extension rebuild.
+4. Rebuild and reload the extension only when the popup release version is stale;
+   storage-provider changes alone do not require an extension rebuild.
 
 Run the WXT/Vitest adapter, storage, messaging, and popup fixtures with:
 

@@ -4,6 +4,7 @@ import { fakeBrowser } from "@webext-core/fake-browser";
 
 const popupHtml = await readFile("entrypoints/popup/index.html", "utf8");
 const popupCss = await readFile("popup.css", "utf8");
+const extensionVersion = JSON.parse(await readFile("package.json", "utf8")).version;
 
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -64,13 +65,16 @@ describe("popup browser adapters", () => {
     fakeBrowser.permissions.remove = vi.fn().mockResolvedValue(true);
     fakeBrowser.scripting.executeScript = vi.fn();
     fakeBrowser.tabs.create = vi.fn();
+    fakeBrowser.runtime.getManifest = vi.fn().mockReturnValue({ version: extensionVersion });
   });
 
-  it("shows the loaded capture protocol marker", () => {
-    expect(element("#runtime-marker").textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "Capture protocol v2 · diagnostics 4",
-    );
+  it("shows the packaged release version in the popup header", async () => {
+    await import("../popup.ts");
+
+    expect(element("#runtime-marker").textContent).toBe(`Version ${extensionVersion}`);
     expect(element("#runtime-marker").hidden).toBe(false);
+    expect(document.querySelector("header")?.textContent).not.toContain("protocol");
+    expect(document.querySelector("header")?.textContent).not.toContain("diagnostics");
   });
 
   it("reports a safe code and falls back when Printables permission checking times out", async () => {

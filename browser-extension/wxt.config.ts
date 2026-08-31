@@ -17,7 +17,6 @@ export default defineConfig({
   },
   manifest: {
     name: "PrintStash Model Importer",
-    version: "0.12.1",
     description:
       "Send models from MakerWorld, Printables, Thingiverse, or direct file links to PrintStash.",
     permissions: ["activeTab", "scripting", "storage"],

@@ -70,6 +70,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
+- **The browser extension now shows its normal SemVer release.** The popup header
+  displays the packaged `0.x.y` version, and every browser manifest derives that
+  version from the extension package so release identifiers cannot drift.
 - **Storage ownership is data-plane only.** PrintStash no longer creates S3
   buckets or changes lifecycle policies. It inspects versioning/lifecycle state
   to report safety, keeps backup S3 configuration independent, and requires an
