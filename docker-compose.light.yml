@@ -65,6 +65,8 @@ services:
       VAULT_MEDIA_WORKER_TIMEOUT_SECONDS: ${VAULT_MEDIA_WORKER_TIMEOUT_SECONDS:-180}
       VAULT_SQLITE_SYNCHRONOUS: ${VAULT_SQLITE_SYNCHRONOUS:-NORMAL}
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      # Safe because this API service is supervised by restart: unless-stopped.
+      VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}
       # Set these to the host uid/gid when using bind mounts. The image keeps
       # the secure 10001:10001 defaults when they are omitted.
       PUID: "${PUID:-10001}"

@@ -27,6 +27,7 @@ from app.api.v1 import (
     spoolman,
     storage,
     storage_connections,
+    system,
     taxonomy,
 )
 
@@ -35,6 +36,7 @@ api_router.include_router(health.router)
 api_router.include_router(setup.router)
 api_router.include_router(storage.router)
 api_router.include_router(storage_connections.router)
+api_router.include_router(system.router)
 api_router.include_router(auth.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_connections.pairing_router)

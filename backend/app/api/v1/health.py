@@ -33,6 +33,7 @@ def _runtime_capabilities() -> dict[str, bool | str]:
     """Report optional image capabilities without importing heavy modules."""
     return {
         "image_variant": os.environ.get("PRINTSTASH_IMAGE_VARIANT", "source"),
+        "restart": bool(settings.restart_enabled),
         "browser": find_spec("patchright") is not None,
         "step": find_spec("cascadio") is not None,
         "thumbnails": all(
@@ -101,9 +102,7 @@ def _storage_probe() -> dict:
         result["provider"] = settings.storage_provider or backend.backend_name
         result["tier"] = backend.capabilities.tier.value
         result["warnings"] = list(backend.capabilities.warnings)
-        result["unverified_acknowledged"] = bool(
-            settings.storage_allow_unverified
-        )
+        result["unverified_acknowledged"] = bool(settings.storage_allow_unverified)
         return result
     except Exception as exc:
         return {

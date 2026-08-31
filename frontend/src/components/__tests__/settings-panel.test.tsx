@@ -218,6 +218,88 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText(/0\.12\.1/)).toBeInTheDocument();
     });
 
+    it("shows restart when the deployment supervisor supports it", async () => {
+      renderSettings({
+        routes: {
+          "GET /api/v1/health/details": json({
+            ...HEALTH,
+            capabilities: { restart: true },
+          }),
+        },
+      });
+
+      expect(await screen.findByRole("button", { name: "Restart PrintStash" })).toBeVisible();
+    });
+
+    it("hides restart when no deployment supervisor is configured", async () => {
+      renderSettings();
+      await screen.findByText(/0\.12\.1/);
+
+      expect(screen.queryByRole("button", { name: "Restart PrintStash" })).toBeNull();
+    });
+
+    it("hides restart from non-admin users", async () => {
+      renderSettings({
+        auth: memberSession(),
+        routes: {
+          "GET /api/v1/health/details": json({
+            ...HEALTH,
+            capabilities: { restart: true },
+          }),
+        },
+      });
+
+      expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Restart PrintStash" })).toBeNull();
+    });
+
+    it("confirms the restart request", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        routes: {
+          "GET /api/v1/health/details": json({
+            ...HEALTH,
+            capabilities: { restart: true },
+          }),
+          "POST /api/v1/system/restart": json({ status: "restart_requested" }, 202),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Restart PrintStash" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Restart PrintStash?" });
+      expect(dialog).toHaveTextContent("container or service supervisor");
+      await user.click(within(dialog).getByRole("button", { name: "Restart now" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) => call.url.endsWith("/system/restart")),
+        ).toBe(true),
+      );
+      expect(
+        await screen.findByText("Restart requested. PrintStash will be back shortly."),
+      ).toBeVisible();
+    });
+
+    it("keeps restart confirmation open when the request fails", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        routes: {
+          "GET /api/v1/health/details": json({
+            ...HEALTH,
+            capabilities: { restart: true },
+          }),
+          "POST /api/v1/system/restart": json({ detail: "restart_failed" }, 500),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Restart PrintStash" }));
+
+      const dialog = screen.getByRole("dialog", { name: "Restart PrintStash?" });
+      await user.click(within(dialog).getByRole("button", { name: "Restart now" }));
+
+      expect(await screen.findByText("Restart failed.")).toBeVisible();
+      expect(screen.getByRole("dialog", { name: "Restart PrintStash?" })).toBeVisible();
+    });
+
     it("stays usable when the health check fails", async () => {
       // The one screen an operator opens when things are broken must not itself
       // break because the thing it reports on is down.

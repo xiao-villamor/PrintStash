@@ -25912,6 +25912,37 @@
         ]
       }
     },
+    "/api/v1/system/restart": {
+      "post": {
+        "description": "Return first, then gracefully stop for an external supervisor to relaunch.",
+        "operationId": "restart_api_v1_system_restart_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Restart Api V1 System Restart Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Restart PrintStash",
+        "tags": [
+          "system"
+        ]
+      }
+    },
     "/api/v1/tags": {
       "get": {
         "operationId": "list_tags_api_v1_tags_get",

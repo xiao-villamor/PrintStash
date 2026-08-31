@@ -8,6 +8,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
+- **Quick restart from Settings.** Administrators on supervised deployments
+  can now gracefully restart the PrintStash API without opening container
+  details. Official Compose stacks enable the action through their existing
+  `unless-stopped` restart policy; unsupervised source launches keep it hidden.
+
 - **Read-only remote libraries and guarded garbage collection.** Reusable,
   encrypted S3-compatible, WebDAV, and SFTP connections can discover external
   files through bounded, resumable scans without writing back to the source.

@@ -161,6 +161,9 @@ export interface HealthResponse {
   status: string;
   name: string;
   version: string;
+  capabilities?: {
+    restart?: boolean;
+  };
   storage?: StorageHealthRead;
   components?: {
     database?: { ok: boolean };
