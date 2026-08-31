@@ -518,9 +518,7 @@ def _process_external_file(
         return strategy.process(read_path)
     from app.services import mesh_processing
 
-    return mesh_processing.analyze_mesh(
-        read_path, file_type=file_type.value, output_format="WEBP"
-    )
+    return mesh_processing.analyze_mesh(read_path, file_type=file_type.value, output_format="WEBP")
 
 
 def _walk(root: Path) -> dict[str, tuple[int, float]]:
