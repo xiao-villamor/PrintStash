@@ -57,7 +57,7 @@ auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
 (create / nest / delete / recursive-delete non-empty from the sidebar) ·
 documents (markdown editor, collection README, GFM tables) · tags ·
-uploads (mesh-only source, into a collection) · filament & printer presets
+uploads (mesh-only source, BGCODE metadata, into a collection) · filament & printer presets
 (create / edit / delete) · model lifecycle (upload → edit → trash → restore →
 purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,

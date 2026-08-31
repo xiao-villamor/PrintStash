@@ -33,7 +33,7 @@ test.describe("model library", () => {
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Upload model" })).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "part.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(GCODE),

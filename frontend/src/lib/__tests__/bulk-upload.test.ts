@@ -26,6 +26,8 @@ import {
   entriesFromDataTransfer,
   extensionOf,
   fileListToItems,
+  GCODE_ACCEPT,
+  isGcodeFile,
   isMeshFile,
   mergeBulkItems,
   walkEntries,
@@ -110,6 +112,26 @@ describe("isMeshFile", () => {
     ["foo", false],
   ])("%s → %s", (name, expected) => {
     expect(isMeshFile(name)).toBe(expected);
+  });
+});
+
+// --- isGcodeFile ---------------------------------------------------------
+
+describe("isGcodeFile", () => {
+  it.each([
+    ["foo.gcode", true],
+    ["foo.g", true],
+    ["foo.gco", true],
+    ["foo.bgcode", true],
+    ["FOO.BGCODE", true],
+    ["foo.stl", false],
+    ["foo", false],
+  ])("classifies %s as %s", (name, expected) => {
+    expect(isGcodeFile(name)).toBe(expected);
+  });
+
+  it("advertises every accepted extension to native file pickers", () => {
+    expect(GCODE_ACCEPT).toBe(".gcode,.g,.gco,.bgcode");
   });
 });
 
@@ -241,5 +263,18 @@ describe("walkEntries", () => {
     const dir = dirEntry("/Lib", [[fileEntry("/Lib/a.stl")], [fileEntry("/Lib/b.stl")]]);
     const items = await walkEntries([dir]);
     expect(items.map((i) => i.file.name).sort()).toEqual(["a.stl", "b.stl"]);
+  });
+
+  it("ignores a dropped entry whose kind is unsupported", async () => {
+    // SAFETY: walkEntry reads only the two kind flags before returning an empty
+    // result, so the remaining FileSystemEntry members are deliberately absent.
+    const unsupported = {
+      isFile: false,
+      isDirectory: false,
+      fullPath: "/device",
+      name: "device",
+    } as FileSystemEntry;
+
+    expect(await walkEntries([unsupported])).toEqual([]);
   });
 });

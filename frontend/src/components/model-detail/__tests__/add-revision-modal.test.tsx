@@ -121,7 +121,7 @@ describe("AddGcodeRevisionModal", () => {
     it("names the file formats it takes", () => {
       renderModal();
 
-      expect(screen.getByText(".gcode, .g, or .gco")).toBeInTheDocument();
+      expect(screen.getByText(".gcode, .g, .gco, or .bgcode")).toBeInTheDocument();
     });
 
     it("cannot be submitted before a file is chosen", () => {
@@ -150,7 +150,7 @@ describe("AddGcodeRevisionModal", () => {
       drop(new File(["solid"], "benchy.stl", { type: "model/stl" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
-        "Choose a .gcode, .g, or .gco file.",
+        "Choose a .gcode, .g, .gco, or .bgcode file.",
       );
     });
 
@@ -180,6 +180,15 @@ describe("AddGcodeRevisionModal", () => {
       await choose(user, aGcodeFile("draft.gco"));
 
       expect(await screen.findByText("draft.gco")).toBeInTheDocument();
+    });
+
+    it("accepts binary G-code", async () => {
+      const user = userEvent.setup();
+      renderModal();
+
+      await choose(user, aGcodeFile("draft.bgcode"));
+
+      expect(await screen.findByText("draft.bgcode")).toBeInTheDocument();
     });
 
     it("lets the user take the file back off", async () => {
@@ -319,6 +328,15 @@ describe("AddGcodeRevisionModal", () => {
   });
 
   describe("backing out", () => {
+    it("closes when the user dismisses the dialog", async () => {
+      const user = userEvent.setup();
+      const { onClose } = renderModal();
+
+      await user.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(onClose).toHaveBeenCalled();
+    });
+
     it("closes when the user cancels", async () => {
       const user = userEvent.setup();
       const { onClose } = renderModal();

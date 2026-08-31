@@ -43,6 +43,7 @@ import {
   entriesFromDataTransfer,
   extensionOf,
   fileListToItems,
+  GCODE_ACCEPT,
   isGcodeFile,
   isMeshFile,
   mergeBulkItems,
@@ -94,8 +95,6 @@ function sameSeed(applied: UploadSeed | null, next: UploadSeed): boolean {
     samePreload(applied.preloadItems, next.preloadItems)
   );
 }
-
-const GCODE_ACCEPT = ".gcode,.g,.gco";
 
 // Whether a filename matches a comma-separated `accept` extension list
 // (e.g. ".stl,.3mf,.obj"). Used to validate drag-and-drop drops, which —
@@ -819,7 +818,7 @@ export function UploadModal({
                   setGcodeFile(f);
                   if (f) autoName(f);
                 }}
-                placeholder={".gcode .g .gco"}
+                placeholder={".gcode .g .gco .bgcode"}
                 inputRef={gcodeRef}
               />
             </div>

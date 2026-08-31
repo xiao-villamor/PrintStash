@@ -12,6 +12,35 @@ export function gcodeFor(name: string): string {
   ].join("\n");
 }
 
+function bgcodeBlock(type: number, params: Buffer, data: Buffer): Buffer {
+  const header = Buffer.alloc(8);
+  header.writeUInt16LE(type, 0);
+  header.writeUInt16LE(0, 2);
+  header.writeUInt32LE(data.length, 4);
+  return Buffer.concat([header, params, data]);
+}
+
+/** A minimal valid PrusaSlicer BGCODE container with unique slicer metadata. */
+export function bgcodeFor(name: string): Buffer {
+  const header = Buffer.alloc(10);
+  header.write("GCDE", 0, "ascii");
+  header.writeUInt32LE(1, 4);
+  header.writeUInt16LE(0, 8);
+
+  const metadataParams = Buffer.alloc(2);
+  const metadata = Buffer.from(
+    `Producer=PrusaSlicer 2.8.0\nfilament_type=PETG\nmodel_name=${name}\n`,
+  );
+  const gcodeParams = Buffer.alloc(2);
+  gcodeParams.writeUInt16LE(2, 0);
+
+  return Buffer.concat([
+    header,
+    bgcodeBlock(0, metadataParams, metadata),
+    bgcodeBlock(1, gcodeParams, Buffer.from(`binary-body-${name}`)),
+  ]);
+}
+
 // A minimal single-triangle ASCII STL; the solid name keeps the bytes unique.
 function stlFor(name: string): string {
   return [
@@ -75,7 +104,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   await expect(dialog).toBeVisible();
 
   if (gcode) {
-    await page.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: `${name}.gcode`,
       mimeType: "text/plain",
       buffer: Buffer.from(gcodeFor(name)),

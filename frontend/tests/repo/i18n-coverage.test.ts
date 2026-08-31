@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import { hasUiTranslation } from "@/components/ui/localized";
 
 const NON_TRANSLATABLE_LITERALS = new Set([
-  ".gcode, .g, or .gco",
+  ".gcode, .g, .gco, or .bgcode",
   "· v",
   "· Z",
   "*/30 * * * * (min hour dom mon dow)",

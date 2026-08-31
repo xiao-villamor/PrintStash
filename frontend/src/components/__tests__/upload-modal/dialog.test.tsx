@@ -89,6 +89,12 @@ describe("UploadModal", () => {
       expect(await screen.findByText(".stl .3mf .obj .step")).toBeInTheDocument();
     });
 
+    it("names every accepted G-code format", async () => {
+      renderUpload();
+
+      expect(await screen.findByText(".gcode .g .gco .bgcode")).toBeInTheDocument();
+    });
+
     it("offers a bulk drop", async () => {
       const user = userEvent.setup();
       renderUpload();
@@ -295,6 +301,16 @@ describe("UploadModal", () => {
       await screen.findByText(".stl .3mf .obj .step");
 
       await user.upload(fileInputs(container)[1], new File(["x"], "part.gcode"));
+
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeEnabled();
+    });
+
+    it("accepts binary G-code on its own", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload();
+      await screen.findByText(".stl .3mf .obj .step");
+
+      await user.upload(fileInputs(container)[1], new File(["GCDE"], "part.bgcode"));
 
       expect(screen.getByRole("button", { name: "Upload to vault" })).toBeEnabled();
     });

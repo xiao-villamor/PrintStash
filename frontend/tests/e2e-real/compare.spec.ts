@@ -21,7 +21,7 @@ test.describe("revision comparison", () => {
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
     await expect(dialog).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "rev1.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(
@@ -48,7 +48,7 @@ test.describe("revision comparison", () => {
     // should show up as a highlighted diff once compared.
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Add G-code revision" })).toBeVisible();
-    await page.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(

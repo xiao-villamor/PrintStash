@@ -123,7 +123,7 @@ test.describe("batch actions", () => {
     await expect(page.getByText("Rev 1", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Add", exact: true }).click();
-    await page.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+    await page.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
       name: "rev2.gcode",
       mimeType: "text/plain",
       buffer: Buffer.from(`; second revision for ${name}\nG28\n`),

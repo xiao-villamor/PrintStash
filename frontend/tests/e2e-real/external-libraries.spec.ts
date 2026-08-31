@@ -65,7 +65,7 @@ test.describe("external library root recovery", () => {
       await page.goto("/");
       await page.getByRole("button", { name: "Upload", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Upload model" });
-      await dialog.locator('input[accept=".gcode,.g,.gco"]').setInputFiles({
+      await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
         name: `${name}.gcode`,
         mimeType: "text/plain",
         buffer: Buffer.from(`; external root test ${name}\nG28\n`),

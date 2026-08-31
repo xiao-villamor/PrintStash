@@ -125,6 +125,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- **BGCODE uploads now work from every browser upload surface.** Main uploads,
+  vault drag-and-drop, and revision uploads now accept PrusaSlicer `.bgcode`
+  files and route them through the existing binary G-code metadata and thumbnail
+  pipeline.
 - Uploads at exactly the configured per-file limit now reach the route's precise
   `upload_too_large` response instead of being rejected as an oversized request.
   The API and reverse proxy retain a separate bounded multipart headroom above

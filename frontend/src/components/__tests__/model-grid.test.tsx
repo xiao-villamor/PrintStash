@@ -840,6 +840,15 @@ describe("ModelBrowser", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
 
+    it("opens the upload dialog for a dropped BGCODE file", async () => {
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      const main = await screen.findByText("Benchy");
+
+      fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["GCDE"], "part.bgcode")]) });
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    });
+
     it("ignores a model being dragged between folders", async () => {
       // An internal model drag carries its own MIME type and is handled by the
       // folder drop targets; treating it as a file upload would open the dialog

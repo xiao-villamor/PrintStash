@@ -4,6 +4,8 @@
 
 const MESH_EXTENSIONS = new Set([".stl", ".3mf", ".obj", ".step", ".stp"]);
 export const MESH_ACCEPT = ".stl,.3mf,.obj,.step,.stp";
+const GCODE_EXTENSIONS = new Set([".gcode", ".g", ".gco", ".bgcode"]);
+export const GCODE_ACCEPT = ".gcode,.g,.gco,.bgcode";
 
 // A queued mesh tagged with the folder path it came from (relative to the
 // drop/pick root, no filename) so we can mirror folders into nested
@@ -28,7 +30,6 @@ export function isMeshFile(name: string): boolean {
   return MESH_EXTENSIONS.has(extensionOf(name));
 }
 
-const GCODE_EXTENSIONS = new Set([".gcode", ".g", ".gco"]);
 export function isGcodeFile(name: string): boolean {
   return GCODE_EXTENSIONS.has(extensionOf(name));
 }

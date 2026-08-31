@@ -1,14 +1,15 @@
 /**
  * Getting files into the library through the browser.
  *
- * Three shapes that fail differently: a mesh-only model (the mesh must land as the
- * source, not as an attachment), a bulk upload (three jobs must all reach a terminal
- * state and every thumbnail must actually load), and an upload into a chosen collection.
- * The bulk case is the one that catches a queue that reports success while a render is
- * still missing.
+ * Four shapes that fail differently: a mesh-only model (the mesh must land as the
+ * source, not as an attachment), a BGCODE model (the binary container must reach the
+ * existing metadata parser), a bulk upload (three jobs must all reach a terminal state
+ * and every thumbnail must actually load), and an upload into a chosen collection. The
+ * bulk case is the one that catches a queue that reports success while a render is still
+ * missing.
  */
 import { test, expect } from "./helpers";
-import { createCollectionViaVault, modelCard, uploadModel } from "./util";
+import { bgcodeFor, createCollectionViaVault, modelCard, uploadModel } from "./util";
 
 test.describe("uploads", () => {
   test("upload an STL mesh-only model; the mesh lands as the source", async ({ page }) => {
@@ -22,6 +23,32 @@ test.describe("uploads", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Files/ }).click();
     await expect(page.getByText(`${name}.stl`).first()).toBeVisible();
+  });
+
+  test("upload a BGCODE model; its slicer metadata is available", async ({ page }) => {
+    const name = `e2e-bgcode-${Date.now()}`;
+    await page.goto("/");
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Upload model" });
+
+    await dialog.locator('input[accept=".gcode,.g,.gco,.bgcode"]').setInputFiles({
+      name: `${name}.bgcode`,
+      mimeType: "application/octet-stream",
+      buffer: bgcodeFor(name),
+    });
+    await page.getByPlaceholder("e.g. Bracket v2").fill(name);
+    await dialog.getByRole("button", { name: /upload to vault/i }).click();
+    await expect(dialog).toHaveCount(0);
+
+    await expect(async () => {
+      await page.goto("/");
+      await expect(modelCard(page, name)).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 60_000 });
+
+    await modelCard(page, name).click();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByText("PETG", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/PrusaSlicer/).first()).toBeVisible();
   });
 
   test("bulk upload waits for three terminal jobs and loads every WebP", async ({ page }) => {

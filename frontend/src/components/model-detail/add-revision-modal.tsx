@@ -15,13 +15,7 @@ import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
-
-const GCODE_ACCEPT = ".gcode,.g,.gco";
-
-function isGcodeFile(file: File): boolean {
-  const name = file.name.toLowerCase();
-  return [".gcode", ".g", ".gco"].some((extension) => name.endsWith(extension));
-}
+import { GCODE_ACCEPT, isGcodeFile } from "@/lib/bulk-upload";
 
 export function AddGcodeRevisionModal({
   modelId,
@@ -42,9 +36,9 @@ export function AddGcodeRevisionModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function selectFile(nextFile: File | null) {
-    if (nextFile && !isGcodeFile(nextFile)) {
+    if (nextFile && !isGcodeFile(nextFile.name)) {
       setFile(null);
-      setError("Choose a .gcode, .g, or .gco file.");
+      setError("Choose a .gcode, .g, .gco, or .bgcode file.");
       return;
     }
     setFile(nextFile);
@@ -192,7 +186,9 @@ export function AddGcodeRevisionModal({
                 <span className="text-sm font-medium text-foreground">
                   Choose G-code or drop it here
                 </span>
-                <span className="mt-1 text-xs text-muted-foreground">.gcode, .g, or .gco</span>
+                <span className="mt-1 text-xs text-muted-foreground">
+                  .gcode, .g, .gco, or .bgcode
+                </span>
               </button>
             )}
           </div>
