@@ -448,6 +448,31 @@ class TestExternalRootBinding:
         assert marker["library_id"] == library.id
         assert marker["root_identity"] == library.root_identity
 
+    def test_matching_orphan_marker_can_be_explicitly_reenrolled(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        _enable_feature(db_session)
+        root = tmp_path / "nas"
+        root.mkdir()
+        library = build_external_library(
+            db_session, root, root_identity=None, name="orphaned-enrollment"
+        )
+        marker = {
+            "format": external_library.ROOT_MARKER_FORMAT,
+            "installation": "a" * 64,
+            "role": external_library.ROOT_MARKER_ROLE,
+            "library_id": library.id,
+            "root_identity": "c" * 64,
+        }
+        marker_path = root / external_library.ROOT_MARKER_FILENAME
+        marker_path.write_text(json.dumps(marker), encoding="utf-8")
+
+        external_library.enroll_external_root(db_session, library)
+
+        assert library.root_identity == marker["root_identity"]
+        assert external_library.root_binding_state(library) == ("bound", None)
+        assert json.loads(marker_path.read_text(encoding="utf-8")) == marker
+
     def test_markerless_replacement_requires_token_rotation(
         self, tmp_path: Path, db_session: Session
     ) -> None:
