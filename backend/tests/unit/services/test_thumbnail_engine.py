@@ -92,3 +92,26 @@ def test_missing_geometry_returns_a_typed_failure(
     assert result.image is None
     assert result.strategy is ThumbnailStrategy.NONE
     assert result.failure_reason is ThumbnailFailureReason.NO_GEOMETRY
+
+
+def test_post_load_memory_budget_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "oversized.obj"
+    source.write_bytes(b"v 0 0 0\n")
+    monkeypatch.setattr(mesh_processing, "_exceeds_cap", lambda *_a, **_k: False)
+    monkeypatch.setattr(mesh_processing, "_load_mesh", lambda *_a, **_k: _Mesh())
+    monkeypatch.setattr(
+        mesh_processing, "_geometry_from_mesh", lambda _mesh: _geometry()
+    )
+    monkeypatch.setattr(mesh_processing, "_ram_triangle_cap", lambda _suffix: 5)
+    monkeypatch.setattr(
+        "app.services.mesh_render.render_mesh_thumbnail",
+        lambda *_a, **_k: pytest.fail("over-budget meshes must not reach the renderer"),
+    )
+
+    result = ThumbnailEngine().generate(ThumbnailRequest(path=source))
+
+    assert result.image is None
+    assert result.strategy is ThumbnailStrategy.NONE
+    assert result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT
