@@ -158,6 +158,46 @@ class TestExtractEmbedded3mfThumbnail:
 
         assert extract_embedded_3mf_thumbnail(p) is None
 
+    def test_compressed_geometry_does_not_reject_a_stored_preview(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "compressed-geometry.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("3D/model.model", b"x" * 10_000)
+            preview = zipfile.ZipInfo("Metadata/thumbnail.png")
+            preview.compress_type = zipfile.ZIP_STORED
+            archive.writestr(preview, _PNG_BIG)
+
+        assert extract_embedded_3mf_thumbnail(path) == _PNG_BIG
+
+    def test_rejects_archive_over_the_expanded_size_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = _make_3mf(
+            tmp_path,
+            {
+                "3D/model.model": b"x" * 100,
+                "Metadata/thumbnail.png": _PNG_SMALL,
+            },
+        )
+        monkeypatch.setattr(
+            "app.services.mesh_processing._MAX_3MF_TOTAL_UNCOMPRESSED_BYTES", 64
+        )
+
+        assert extract_embedded_3mf_thumbnail(path) is None
+
+    def test_rejects_thumbnail_over_the_compression_ratio_budget(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "compressed-preview.3mf"
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("Metadata/thumbnail.png", _PNG_MAGIC + b"x" * 10_000)
+        monkeypatch.setattr(
+            "app.services.mesh_processing._MAX_3MF_COMPRESSION_RATIO", 2
+        )
+
+        assert extract_embedded_3mf_thumbnail(path) is None
+
     def test_rejects_ambiguous_generic_previews(self, tmp_path: Path) -> None:
         p = _make_3mf(
             tmp_path,
