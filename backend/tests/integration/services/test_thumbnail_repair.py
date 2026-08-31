@@ -20,6 +20,57 @@ from tests.factories import build_file, build_model
 
 
 class TestRegenerateModelThumbnail:
+    def test_missing_model_returns_a_typed_failure(self, db_session: Session) -> None:
+        result = thumbnail_repair.regenerate_model_thumbnail_result(
+            db_session, model_id=999_999
+        )
+
+        assert result.outcome is thumbnail_repair.ThumbnailEnsureOutcome.FAILED
+        assert result.failure_reason == "model_not_found"
+
+    def test_model_without_mesh_returns_a_typed_failure(
+        self, db_session: Session
+    ) -> None:
+        model = build_model(db_session, name="No mesh")
+
+        result = thumbnail_repair.regenerate_model_thumbnail_result(
+            db_session, model.id
+        )
+
+        assert result.outcome is thumbnail_repair.ThumbnailEnsureOutcome.FAILED
+        assert result.failure_reason == "no_readable_mesh"
+
+    def test_coalesced_generation_stops_revision_fallback(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        model = build_model(db_session, name="Coalesced repair")
+        build_file(
+            db_session,
+            model,
+            filename="newest.stl",
+            file_type=FileType.STL,
+        )
+        calls = 0
+
+        def coalesced(*_args, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return thumbnail_repair.ThumbnailEnsureResult(
+                thumbnail_repair.ThumbnailEnsureOutcome.COALESCED,
+                None,
+            )
+
+        monkeypatch.setattr(thumbnail_repair, "ensure_thumbnail", coalesced)
+
+        result = thumbnail_repair.regenerate_model_thumbnail_result(
+            db_session, model.id
+        )
+
+        assert result.outcome is thumbnail_repair.ThumbnailEnsureOutcome.COALESCED
+        assert calls == 1
+
     def test_reads_an_external_mesh_without_sending_its_path_to_the_vault(
         self,
         db_session: Session,
