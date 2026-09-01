@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.time import utcnow
 from app.db.models import (
@@ -32,8 +32,11 @@ from app.db.models import (
     InboxItemState,
     InboxSourceKind,
     Model,
+    PartGroup,
+    PartOption,
 )
-from app.services import trash
+from app.schemas.models import PartGroupWrite, PartOptionWrite
+from app.services import part_options, trash
 from tests.factories import (
     build_model,
     build_stored_file,
@@ -169,6 +172,78 @@ class TestHardDeleteFile:
         )
 
         trash.hard_delete_file(db_session, unsaved)
+
+    def test_part_group_promotes_a_surviving_choice_after_default_purge(
+        self, db_session: Session, storage
+    ) -> None:
+        model = build_model(db_session, "three handles")
+        first = build_stored_file(db_session, storage, model, filename="short.stl")
+        second = build_stored_file(db_session, storage, model, filename="medium.stl")
+        third = build_stored_file(db_session, storage, model, filename="long.stl")
+        part_options.replace_for_model(
+            db_session,
+            model.id,
+            [
+                PartGroupWrite(
+                    name="Handle",
+                    options=[
+                        PartOptionWrite(
+                            file_id=first.id, name="Short", is_default=True
+                        ),
+                        PartOptionWrite(file_id=second.id, name="Medium"),
+                        PartOptionWrite(file_id=third.id, name="Long"),
+                    ],
+                )
+            ],
+        )
+
+        trash.hard_delete_file(db_session, first)
+        db_session.commit()
+
+        group = db_session.exec(
+            select(PartGroup).where(PartGroup.model_id == model.id)
+        ).one()
+        choices = db_session.exec(
+            select(PartOption)
+            .where(PartOption.part_group_id == group.id)
+            .order_by(PartOption.sort_order.asc())  # type: ignore[attr-defined]
+        ).all()
+        assert [(row.name, row.is_default) for row in choices] == [
+            ("Medium", True),
+            ("Long", False),
+        ]
+
+    def test_part_group_is_removed_when_a_purge_leaves_one_choice(
+        self, db_session: Session, storage
+    ) -> None:
+        model = build_model(db_session, "two handles")
+        first = build_stored_file(db_session, storage, model, filename="short.stl")
+        second = build_stored_file(db_session, storage, model, filename="long.stl")
+        part_options.replace_for_model(
+            db_session,
+            model.id,
+            [
+                PartGroupWrite(
+                    name="Handle",
+                    options=[
+                        PartOptionWrite(
+                            file_id=first.id, name="Short", is_default=True
+                        ),
+                        PartOptionWrite(file_id=second.id, name="Long"),
+                    ],
+                )
+            ],
+        )
+
+        trash.hard_delete_file(db_session, first)
+        db_session.commit()
+
+        assert (
+            db_session.exec(
+                select(PartGroup).where(PartGroup.model_id == model.id)
+            ).all()
+            == []
+        )
 
 
 class TestHardDeleteDocument:

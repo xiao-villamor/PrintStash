@@ -59,6 +59,7 @@ class FileRead(BaseModel):
     is_recommended: bool = False
     is_external: bool = False
     uploaded_at: datetime
+    tags: List[str] = []
     metadata: Optional[MetadataRead] = None
 
 
@@ -69,6 +70,40 @@ class FileRevisionUpdate(BaseModel):
     revision_status: Optional[FileRevisionStatus] = None
     revision_notes: Optional[str] = Field(default=None, max_length=4096)
     is_recommended: Optional[bool] = None
+
+
+class PartOptionRead(BaseModel):
+    id: int
+    file_id: int
+    name: str
+    is_default: bool
+
+
+class PartGroupRead(BaseModel):
+    id: int
+    name: str
+    options: List[PartOptionRead]
+
+
+class PartOptionWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: int
+    name: str = Field(min_length=1, max_length=128)
+    is_default: bool = False
+
+
+class PartGroupWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    options: List[PartOptionWrite] = Field(min_length=2, max_length=100)
+
+
+class PartGroupsReplace(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    groups: List[PartGroupWrite] = Field(max_length=50)
 
 
 class ModelRead(BaseModel):
@@ -86,6 +121,7 @@ class ModelRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     files: List[FileRead] = []
+    part_groups: List[PartGroupRead] = []
     starred: bool = False
 
 
@@ -469,6 +505,7 @@ class CollectionRead(BaseModel):
     parent_id: Optional[int] = None
     model_count: int = 0
     effective_role: Optional[CollectionRole] = None
+    tags: List[str] = []
 
 
 class CollectionCreate(BaseModel):
@@ -517,6 +554,12 @@ class TagCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)
+
+
+class TagSetUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tags: List[str] = Field(default_factory=list, max_length=100)
 
 
 class TagRead(BaseModel):

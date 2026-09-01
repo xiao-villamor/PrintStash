@@ -56,6 +56,8 @@ FACTORY_OWNED_MODELS = {
 CONSTRUCTION_ALLOWED = {
     "tests/factories",  # the builders themselves
     "tests/integration/_backup_harness.py",  # seeds a separate engine's schema
+    # Seeds the pre-migration schema, where current factories cannot run.
+    "tests/integration/db/migrations/test_entity_tags_migration.py",
     "tests/repo",  # these invariants, and the factory tests
 }
 

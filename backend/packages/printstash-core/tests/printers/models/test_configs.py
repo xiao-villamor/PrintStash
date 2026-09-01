@@ -40,6 +40,7 @@ from printstash_core.printers import (
     ElegooCentauriConfig,
     MoonrakerConfig,
     OctoPrintConfig,
+    PrintArtifactFormat,
     ProviderCapabilities,
     ProviderError,
     ProviderId,
@@ -77,7 +78,10 @@ VALID_CONFIGS: list[tuple[Any, ProviderId]] = [
 
 
 def all_capabilities() -> ProviderCapabilities:
-    return ProviderCapabilities(supported=frozenset(Capability))
+    return ProviderCapabilities(
+        supported=frozenset(Capability),
+        accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+    )
 
 
 class TestProviderId:
@@ -155,6 +159,20 @@ class TestProviderCapabilities:
 
         assert capabilities.supports(Capability.PAUSE) is False
 
+    def test_rejects_upload_without_an_accepted_format(self) -> None:
+        with pytest.raises(
+            ValueError, match="upload providers must declare an accepted print format"
+        ):
+            ProviderCapabilities(supported=frozenset({Capability.UPLOAD}))
+
+    def test_reports_an_accepted_print_format(self) -> None:
+        capabilities = ProviderCapabilities(
+            supported=frozenset({Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+        )
+
+        assert capabilities.accepts_format(PrintArtifactFormat.GCODE_TEXT) is True
+
     def test_accepts_a_plain_iterable_of_capabilities(self) -> None:
         # Factories declare these as literals; normalizing to a frozenset keeps
         # the dataclass hashable and the membership test O(1).
@@ -203,7 +221,12 @@ class TestProviderCapabilities:
         self, flag: str, capability: Capability
     ) -> None:
         # These flag names are the API's field names; the UI reads them directly.
-        assert getattr(ProviderCapabilities(supported=frozenset({capability})), flag)
+        capabilities = ProviderCapabilities(
+            supported=frozenset({capability}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+        )
+
+        assert getattr(capabilities, flag)
 
     def test_lists_every_unsupported_action_for_an_empty_provider(self) -> None:
         capabilities = ProviderCapabilities(supported=frozenset())
@@ -253,6 +276,24 @@ class TestProviderCapabilities:
         assert payload["support_notes"] == ["supervise first prints"]
         assert isinstance(payload["unsupported_actions"], list)
         assert payload["can_start"] is True
+
+    def test_serializes_accepted_print_formats_for_the_api(self) -> None:
+        capabilities = ProviderCapabilities(
+            supported=frozenset({Capability.UPLOAD}),
+            accepted_print_formats=frozenset(
+                {
+                    PrintArtifactFormat.GCODE_TEXT,
+                    PrintArtifactFormat.BGCODE_BINARY,
+                }
+            ),
+        )
+
+        payload = capabilities.as_api_dict()
+
+        assert payload["accepted_print_formats"] == [
+            "gcode_text",
+            "bgcode_binary",
+        ]
 
 
 class TestConfigIdentity:

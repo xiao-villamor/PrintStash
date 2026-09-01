@@ -43,6 +43,10 @@ function parseJobPriority(value: string): JobPriority | null {
   return value === "low" || value === "normal" || value === "rush" ? value : null;
 }
 
+function printArtifactFormat(filename: string): "gcode_text" | "bgcode_binary" {
+  return filename.toLowerCase().endsWith(".bgcode") ? "bgcode_binary" : "gcode_text";
+}
+
 /**
  * The four fleet commands this panel issues. Named as a seam so a test can
  * drive the panel and observe the submitted payload without a network; app
@@ -93,6 +97,8 @@ export function SendToButtons({
   const setShowSend = onOpenChange ?? setInternalOpen;
   const defaultFile = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
+  const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
+  const selectedFileFormat = printArtifactFormat(selectedFileDetails?.original_filename ?? "");
 
   useEffect(() => {
     if (showSend && preselectFileId) {
@@ -138,21 +144,32 @@ export function SendToButtons({
   useEffect(() => {
     setSelectedPrinterIds((current) => {
       const capableIds = printers
-        .filter((printer) => printer.access.can_print && printer.capabilities.can_upload)
+        .filter(
+          (printer) =>
+            printer.access.can_print &&
+            printer.capabilities.can_upload &&
+            printer.capabilities.accepted_print_formats.includes(selectedFileFormat),
+        )
         .map((printer) => printer.id);
       if (capableIds.length === 0) return [];
       const kept = current.filter((id) => capableIds.includes(id));
       return kept.length > 0 ? kept : [capableIds[0]];
     });
-  }, [printers]);
+  }, [printers, selectedFileFormat]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
     [printers, selectedPrinterIds],
   );
   const availablePrinters = useMemo(
-    () => printers.filter((printer) => printer.access.can_print && printer.capabilities.can_upload),
-    [printers],
+    () =>
+      printers.filter(
+        (printer) =>
+          printer.access.can_print &&
+          printer.capabilities.can_upload &&
+          printer.capabilities.accepted_print_formats.includes(selectedFileFormat),
+      ),
+    [printers, selectedFileFormat],
   );
   const selectedPrintersCanStart = selectedPrinters.every(
     (printer) => printer.capabilities.can_start,
@@ -330,7 +347,6 @@ export function SendToButtons({
     }
   }
 
-  const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
   const selectedSpool =
     selectedSpoolId !== "" ? spools.find((spool) => spool.id === selectedSpoolId) : undefined;
   // ponytail: single-file check only — a multi-plate build evaluated as one set
@@ -575,7 +591,12 @@ export function SendToButtons({
                 <legend className="mb-2 text-sm font-medium text-foreground">Printers</legend>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {printers.map((printer) => {
-                    const disabled = !printer.access.can_print || !printer.capabilities.can_upload;
+                    const formatSupported =
+                      printer.capabilities.accepted_print_formats.includes(selectedFileFormat);
+                    const disabled =
+                      !printer.access.can_print ||
+                      !printer.capabilities.can_upload ||
+                      !formatSupported;
                     const selected = selectedPrinterIds.includes(printer.id);
                     const offline = printer.status === "offline" || printer.status === "unknown";
                     return (
@@ -611,8 +632,12 @@ export function SendToButtons({
                               variant="outline"
                               className="font-mono text-3xs uppercase tracking-wider"
                             >
-                              {disabled
-                                ? "Upload unsupported"
+                              {!printer.access.can_print
+                                ? "No print access"
+                                : !printer.capabilities.can_upload
+                                  ? "Upload unsupported"
+                                  : !formatSupported
+                                    ? "Format unsupported"
                                 : printer.capabilities.can_start
                                   ? "Upload + start"
                                   : "Upload only"}

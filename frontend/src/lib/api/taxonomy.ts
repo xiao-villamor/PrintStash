@@ -29,6 +29,10 @@ export function renameCollection(id: number, name: string): Promise<CollectionRe
   return sendJson<CollectionRead>(`/api/v1/collections/${id}`, "PATCH", { name });
 }
 
+export function replaceCollectionTags(id: number, tags: string[]): Promise<CollectionRead> {
+  return sendJson<CollectionRead>(`/api/v1/collections/${id}/tags`, "PUT", { tags });
+}
+
 export function getCollectionReadme(id: number): Promise<{ readme: string | null }> {
   return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, { fresh: true });
 }

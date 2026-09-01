@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from printstash_core.gcode import PrintArtifactFormatError, classify_print_artifact
 from sqlalchemy import case, update
 from sqlmodel import select
 
@@ -173,6 +174,13 @@ async def transfer_artifact(
         try:
             handle = resolve(artifact, backend=backend)
             with handle.materialize() as local:
+                artifact_format = await asyncio.to_thread(
+                    classify_print_artifact,
+                    local,
+                    filename=artifact.original_filename,
+                )
+                if not provider.capabilities.accepts_format(artifact_format):
+                    raise PrinterJobError("artifact_format_not_supported")
                 try:
                     await provider.upload(local, remote_filename)
                     if start_print:
@@ -188,6 +196,8 @@ async def transfer_artifact(
             raise PrinterJobError("file_blob_missing") from exc
         except ArtifactContentError as exc:
             raise PrinterJobError("storage_error") from exc
+        except PrintArtifactFormatError as exc:
+            raise PrinterJobError(exc.code) from exc
     except OSError as exc:
         raise PrinterJobError("storage_error") from exc
 

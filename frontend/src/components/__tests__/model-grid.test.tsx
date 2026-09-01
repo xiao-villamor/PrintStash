@@ -45,6 +45,7 @@ function aCollection(override: Partial<CollectionRead> = {}): CollectionRead {
     parent_id: null,
     model_count: 2,
     effective_role: "admin",
+    tags: [],
     ...override,
   };
 }

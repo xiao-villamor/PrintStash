@@ -264,8 +264,8 @@ function ModelCardInner({
         {!selectable && canEditTags && onEditTags && (
           <Button
             type="button"
-            variant="outline"
-            size="xs"
+            variant="ghost"
+            size="icon-sm"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
@@ -274,10 +274,10 @@ function ModelCardInner({
             aria-label={
               model.tags.length > 0 ? `Edit tags for ${model.name}` : `Add tags to ${model.name}`
             }
-            className="absolute left-2 top-2 z-10 bg-card/95 shadow-sm"
+            title={model.tags.length > 0 ? "Edit tags" : "Add tags"}
+            className="absolute right-2 top-12 z-10 bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
           >
-            <Tags className="h-3.5 w-3.5" />
-            {model.tags.length > 0 ? "Edit tags" : "Add tags"}
+            <Tags className="h-4 w-4" />
           </Button>
         )}
         <Link

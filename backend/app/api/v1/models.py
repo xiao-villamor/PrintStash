@@ -44,6 +44,7 @@ from app.db.models import (
     FilamentProfile,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
@@ -81,9 +82,11 @@ from app.schemas.models import (
     ModelSort,
     ModelUpdate,
     OutlinerModelRead,
+    PartGroupsReplace,
     PrintStatisticsRead,
     RevisionBatchLabels,
     RevisionBatchResult,
+    TagSetUpdate,
     TrashedModelRead,
     TrashPurgeRead,
     VaultStatsRead,
@@ -98,6 +101,7 @@ from app.services import (
     job_import,
     library_transfer,
     model_views,
+    part_options,
     print_results,
     provenance,
     rbac,
@@ -1639,6 +1643,65 @@ def update_file_revision(
     session.add(file_row)
     session.add(m)
     session.commit()
+    return _detail_or_404(session, model_id, current_user)
+
+
+@router.put(
+    "/{model_id}/files/{file_id}/tags",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Replace an artifact's direct tags",
+)
+def replace_file_tags(
+    model_id: int,
+    file_id: int,
+    payload: TagSetUpdate,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    file_row = session.get(File, file_id)
+    if (
+        file_row is None
+        or file_row.model_id != model_id
+        or file_row.deleted_at is not None
+    ):
+        raise HTTPException(status_code=404, detail="file_not_found")
+
+    session.exec(delete(FileTagLink).where(FileTagLink.file_id == file_id))
+    tags = taxonomy.resolve_or_create_tags_in_transaction(session, payload.tags)
+    for tag in tags:
+        session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
+    model.updated_at = utcnow()
+    session.add(model)
+    session.commit()
+    return _detail_or_404(session, model_id, current_user)
+
+
+@router.put(
+    "/{model_id}/part-options",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Replace a model's Part Groups and choices",
+    description=(
+        "Atomically replaces every Part Group. Each group must contain at least "
+        "two source Artifacts and exactly one default option."
+    ),
+)
+def replace_part_options(
+    model_id: int,
+    payload: PartGroupsReplace,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    model.updated_at = utcnow()
+    session.add(model)
+    try:
+        part_options.replace_for_model(session, model_id, payload.groups)
+    except part_options.PartOptionsError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=exc.code) from exc
     return _detail_or_404(session, model_id, current_user)
 
 

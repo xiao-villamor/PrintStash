@@ -14,6 +14,7 @@ from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     Capability,
     OctoPrintConfig,
+    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
@@ -43,6 +44,7 @@ OCTOPRINT_CAPABILITIES = ProviderCapabilities(
         }
     ),
     support_level="beta",
+    accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
     support_notes=(
         "OctoPrint support is beta pending broader hardware validation.",
         "Raw G-code controls and measured filament consumption are unavailable.",

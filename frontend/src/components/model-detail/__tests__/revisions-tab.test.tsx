@@ -43,6 +43,7 @@ function aRevision(over: Partial<FileRead> = {}): FileRead {
     is_recommended: false,
     uploaded_at: FROZEN_NOW,
     metadata: null,
+    tags: [],
     ...over,
   };
 }
@@ -85,6 +86,7 @@ function renderRevisions(options: RenderAppOptions & { revisions?: FileRead[] } 
       printerFilesByFileId={new Map<number, ModelPrinterFileRead[]>()}
       onModel={onModel}
       onAddRevision={onAddRevision}
+      canEdit
     />,
     {
       routes: {
@@ -123,7 +125,7 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       const { onAddRevision } = renderRevisions();
 
-      await user.click(await screen.findByRole("button", { name: /Add revision|Add/i }));
+      await user.click(await screen.findByRole("button", { name: "Add" }));
 
       expect(onAddRevision).toHaveBeenCalledTimes(1);
     });

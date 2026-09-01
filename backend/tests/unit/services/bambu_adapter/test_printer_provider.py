@@ -39,6 +39,7 @@ from app.services.printer_provider import (
     ElegooCentauriProvider,
     MoonrakerProvider,
     OctoPrintProvider,
+    PrintArtifactFormat,
     ProviderCapabilities,
     ProviderError,
     PrusaLinkProvider,
@@ -860,7 +861,10 @@ class TestBaseProviderDefaults:
 
     class _FullySupportedProvider(BaseProvider):
         provider = PrinterProvider.MOONRAKER
-        capabilities = ProviderCapabilities(supported=frozenset(Capability))
+        capabilities = ProviderCapabilities(
+            supported=frozenset(Capability),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+        )
 
     def test_unimplemented_methods_raise_not_implemented(self):
         provider = self._FullySupportedProvider()

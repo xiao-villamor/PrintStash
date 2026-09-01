@@ -18,6 +18,7 @@ from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     Capability,
     MoonrakerConfig,
+    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
@@ -48,6 +49,7 @@ SUBSCRIPTIONS: dict[str, list[str] | None] = {
 
 MOONRAKER_CAPABILITIES = ProviderCapabilities(
     supported=frozenset(Capability),
+    accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
     support_level="stable",
 )
 

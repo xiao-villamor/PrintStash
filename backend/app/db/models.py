@@ -607,6 +607,103 @@ class ModelTagLink(SQLModel, table=True):
     tag_id: Optional[int] = Field(default=None, foreign_key="tags.id", primary_key=True)
 
 
+class CollectionTagLink(SQLModel, table=True):
+    """Association table for Collection <-> Tag."""
+
+    __tablename__ = "collection_tags"
+
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", primary_key=True
+    )
+    tag_id: Optional[int] = Field(
+        default=None, foreign_key="tags.id", primary_key=True, index=True
+    )
+
+
+class FileTagLink(SQLModel, table=True):
+    """Association table for Artifact <-> Tag."""
+
+    __tablename__ = "file_tags"
+
+    file_id: Optional[int] = Field(
+        default=None, foreign_key="files.id", primary_key=True
+    )
+    tag_id: Optional[int] = Field(
+        default=None, foreign_key="tags.id", primary_key=True, index=True
+    )
+
+
+class PartGroup(SQLModel, table=True):
+    """One replaceable physical role within a Model."""
+
+    __tablename__ = "part_groups"
+    __table_args__ = (
+        UniqueConstraint("model_id", "name_key", name="uq_part_groups_model_name_key"),
+        UniqueConstraint(
+            "model_id", "sort_order", name="uq_part_groups_model_sort_order"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PartOption(SQLModel, table=True):
+    """One source Artifact choice within a Part Group."""
+
+    __tablename__ = "part_options"
+    __table_args__ = (
+        UniqueConstraint(
+            "part_group_id", "name_key", name="uq_part_options_group_name_key"
+        ),
+        UniqueConstraint(
+            "part_group_id", "sort_order", name="uq_part_options_group_sort_order"
+        ),
+        UniqueConstraint("file_id", name="uq_part_options_file_id"),
+        Index(
+            "uq_part_options_one_default",
+            "part_group_id",
+            unique=True,
+            sqlite_where=text("is_default = 1"),
+            postgresql_where=text("is_default IS TRUE"),
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    part_group_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("part_groups.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    file_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ModelStar(SQLModel, table=True):
     """Per-user favorite marker for a live Model."""
 

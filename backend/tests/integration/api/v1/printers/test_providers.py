@@ -22,6 +22,7 @@ from sqlmodel import Session, select
 
 from app.db.models import (
     Printer,
+    PrinterProvider,
 )
 from tests.factories import build_file, build_model, build_printer
 
@@ -121,6 +122,14 @@ class TestBambuPrinter:
     def test_bambu_send_rejects_busy_printer(
         self, client: TestClient, db_session: Session, auth_headers
     ):
+        model = build_model(db_session, name="Busy printer model")
+        artifact = build_file(
+            db_session,
+            model,
+            path="busy/model.gcode",
+            filename="model.gcode",
+            file_type="gcode",
+        )
         p = build_printer(
             db_session,
             name="Bambu",
@@ -137,17 +146,16 @@ class TestBambuPrinter:
         ):
             resp = client.post(
                 f"/api/v1/printers/{p.id}/send",
-                json={"file_id": 999, "start_print": False},
+                json={"file_id": artifact.id, "start_print": False},
                 headers=auth_headers,
             )
         assert resp.status_code == 409
         assert resp.json()["detail"] == "printer_not_ready"
 
-    def test_send_rejects_binary_bgcode(
+    def test_send_rejects_bgcode_for_text_only_provider(
         self, client: TestClient, db_session: Session, auth_headers
     ):
-        # A .bgcode file is indexed (file_type "gcode") for its metadata, but
-        # Moonraker/Klipper can't print binary G-code — the send must 400.
+        # Moonraker remains text-only until its provider contract says otherwise.
 
         m = build_model(db_session, name="Model", slug="model-bgcode", hash="b" * 64)
 
@@ -171,8 +179,84 @@ class TestBambuPrinter:
             json={"file_id": f.id, "start_print": False},
             headers=auth_headers,
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == "binary_gcode_not_printable"
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "artifact_format_not_supported"
+
+    def test_bambu_rejects_bgcode_before_querying_printer(
+        self, client: TestClient, db_session: Session, auth_headers
+    ) -> None:
+        model = build_model(db_session, name="Binary plate")
+        artifact = build_file(
+            db_session,
+            model,
+            path="binary/plate.bgcode",
+            filename="plate.bgcode",
+            file_type="gcode",
+        )
+        printer = build_printer(
+            db_session,
+            name="Bambu",
+            provider="bambu_lan",
+            moonraker_url="",
+            bambu_host="192.168.1.50",
+            bambu_serial="SN123",
+            bambu_access_code="access",
+        )
+
+        with patch(
+            "app.services.printer_provider.BambuLanProvider.query_status",
+            new_callable=AsyncMock,
+        ) as query_status:
+            response = client.post(
+                f"/api/v1/printers/{printer.id}/send",
+                json={"file_id": artifact.id, "start_print": False},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "artifact_format_not_supported"
+        query_status.assert_not_awaited()
+
+    def test_send_accepts_bgcode_for_prusalink(
+        self, client: TestClient, db_session: Session, auth_headers
+    ) -> None:
+        model = build_model(db_session, name="Prusa plate")
+        artifact = build_file(
+            db_session,
+            model,
+            path="prusa/plate.bgcode",
+            filename="plate.bgcode",
+            file_type="gcode",
+        )
+        printer = build_printer(
+            db_session,
+            name="Core One",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://core-one",
+            prusalink_auth_mode="api_key",
+            prusalink_api_key="test-key",
+        )
+
+        class Backend:
+            def exists(self, _key: str) -> bool:
+                return True
+
+        backend = Backend()
+        with (
+            patch("app.api.v1.printers.get_backend", return_value=backend),
+            patch(
+                "app.api.v1.printers.transfer_artifact", new_callable=AsyncMock
+            ) as transfer,
+        ):
+            response = client.post(
+                f"/api/v1/printers/{printer.id}/send",
+                json={"file_id": artifact.id, "start_print": False},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["remote_filename"].endswith(".bgcode")
+        transfer.assert_awaited_once()
 
     def test_bambu_pause_calls_provider(
         self, client: TestClient, db_session: Session, auth_headers

@@ -24,7 +24,7 @@ from fastapi import (
     File as FileParam,
 )
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.api.v1.files import _serve_file
 from app.core.config import settings
@@ -35,6 +35,8 @@ from app.db.models import (
     Collection,
     CollectionPermission,
     CollectionRole,
+    CollectionTagLink,
+    FileTagLink,
     Model,
     ModelTagLink,
     Tag,
@@ -53,8 +55,9 @@ from app.schemas.models import (
     CollectionReadmeUpdate,
     TagCreate,
     TagRead,
+    TagSetUpdate,
 )
-from app.services import rbac, taxonomy
+from app.services import library_search, rbac, taxonomy
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_ownership import publish_bytes
 from app.services.taxonomy import slugify
@@ -73,6 +76,53 @@ _IMAGE_TYPES = {
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 
 router = APIRouter(tags=["taxonomy"])
+
+
+def _collection_tags_by_id(
+    session: Session, collection_ids: list[int]
+) -> dict[int, list[str]]:
+    if not collection_ids:
+        return {}
+    result: dict[int, list[str]] = {
+        collection_id: [] for collection_id in collection_ids
+    }
+    rows = session.exec(
+        select(CollectionTagLink.collection_id, Tag.name)
+        .join(Tag, Tag.id == CollectionTagLink.tag_id)
+        .where(
+            CollectionTagLink.collection_id.in_(collection_ids),  # type: ignore[union-attr]
+            live(Tag),
+        )
+        .order_by(CollectionTagLink.collection_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+    ).all()
+    for collection_id, tag_name in rows:
+        if collection_id is not None:
+            result[collection_id].append(tag_name)
+    return result
+
+
+def _collection_read(
+    session: Session,
+    current_user: User,
+    collection: Collection,
+    *,
+    model_count: int,
+) -> CollectionRead:
+    tags = _collection_tags_by_id(
+        session, [collection.id] if collection.id is not None else []
+    )
+    return CollectionRead(
+        id=collection.id,  # type: ignore[arg-type]
+        name=collection.name,
+        slug=collection.slug,
+        path=collection.path,
+        parent_id=collection.parent_id,
+        model_count=model_count,
+        effective_role=rbac.effective_collection_role(
+            session, current_user, collection.id
+        ),
+        tags=tags.get(collection.id or 0, []),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +180,9 @@ def list_collections(
     roles = rbac.effective_roles_for_collections(
         session, current_user, (c.id for c in cats)
     )
+    tags_by_collection = _collection_tags_by_id(
+        session, [c.id for c in cats if c.id is not None]
+    )
     return [
         CollectionRead(
             id=c.id,
@@ -143,6 +196,7 @@ def list_collections(
                 if path == c.path or path.startswith(c.path + "/")
             ),
             effective_role=roles.get(c.id),
+            tags=tags_by_collection.get(c.id or 0, []),
         )
         for c in cats
     ]
@@ -170,16 +224,11 @@ def create_collection(
         collection = taxonomy.resolve_or_create_collection(session, name)
         if collection is None:
             raise HTTPException(status_code=400, detail="collection_name_required")
-        return CollectionRead(
-            id=collection.id,
-            name=collection.name,
-            slug=collection.slug,
-            path=collection.path,
-            parent_id=collection.parent_id,
+        return _collection_read(
+            session,
+            current_user,
+            collection,
             model_count=_collection_model_count(session, collection.path, current_user),
-            effective_role=rbac.effective_collection_role(
-                session, current_user, collection.id
-            ),
         )
 
     slug = slugify(name)
@@ -207,33 +256,18 @@ def create_collection(
         session.add(existing)
         session.commit()
         session.refresh(existing)
-        return CollectionRead(
-            id=existing.id,
-            name=existing.name,
-            slug=existing.slug,
-            path=existing.path,
-            parent_id=existing.parent_id,
+        return _collection_read(
+            session,
+            current_user,
+            existing,
             model_count=_collection_model_count(session, existing.path, current_user),
-            effective_role=rbac.effective_collection_role(
-                session, current_user, existing.id
-            ),
         )
 
     collection = Collection(name=name, slug=slug, parent_id=parent_id, path=path)
     session.add(collection)
     session.commit()
     session.refresh(collection)
-    return CollectionRead(
-        id=collection.id,
-        name=collection.name,
-        slug=collection.slug,
-        path=collection.path,
-        parent_id=collection.parent_id,
-        model_count=0,
-        effective_role=rbac.effective_collection_role(
-            session, current_user, collection.id
-        ),
-    )
+    return _collection_read(session, current_user, collection, model_count=0)
 
 
 @router.patch(
@@ -279,16 +313,11 @@ def move_collection(
         new_path = new_slug
 
     if new_path == col.path and new_name == col.name:
-        return CollectionRead(
-            id=col.id,
-            name=col.name,
-            slug=col.slug,
-            path=col.path,
-            parent_id=col.parent_id,
+        return _collection_read(
+            session,
+            current_user,
+            col,
             model_count=_collection_model_count(session, col.path, current_user),
-            effective_role=rbac.effective_collection_role(
-                session, current_user, col.id
-            ),
         )
 
     if session.exec(
@@ -315,14 +344,48 @@ def move_collection(
     session.add(col)
     session.commit()
     session.refresh(col)
-    return CollectionRead(
-        id=col.id,
-        name=col.name,
-        slug=col.slug,
-        path=col.path,
-        parent_id=col.parent_id,
+    return _collection_read(
+        session,
+        current_user,
+        col,
         model_count=_collection_model_count(session, col.path, current_user),
-        effective_role=rbac.effective_collection_role(session, current_user, col.id),
+    )
+
+
+@router.put(
+    "/collections/{collection_id}/tags",
+    response_model=CollectionRead,
+    dependencies=[Depends(require_auth)],
+    summary="Replace a collection's direct tags",
+)
+def replace_collection_tags(
+    collection_id: int,
+    payload: TagSetUpdate,
+    current_user: User = Depends(require_user),
+    _: None = Depends(require_auth),
+    session: Session = Depends(get_session),
+) -> CollectionRead:
+    collection = get_or_404(session, Collection, collection_id, "collection_not_found")
+    if collection.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="collection_not_found")
+    rbac.require_collection_role(
+        session, current_user, collection.id, CollectionRole.EDIT
+    )
+
+    session.exec(
+        delete(CollectionTagLink).where(
+            CollectionTagLink.collection_id == collection_id
+        )
+    )
+    tags = taxonomy.resolve_or_create_tags_in_transaction(session, payload.tags)
+    for tag in tags:
+        session.add(CollectionTagLink(collection_id=collection_id, tag_id=tag.id))
+    session.commit()
+    return _collection_read(
+        session,
+        current_user,
+        collection,
+        model_count=_collection_model_count(session, collection.path, current_user),
     )
 
 
@@ -532,20 +595,27 @@ def list_tags(
     tags = session.exec(
         select(Tag).where(live(Tag)).order_by(Tag.name)  # type: ignore[union-attr]
     ).all()
-    count_stmt = (
-        select(ModelTagLink.tag_id, func.count(ModelTagLink.model_id))
-        .join(Model, Model.id == ModelTagLink.model_id)
-        .where(live(Model))
-    )
-    if not current_user.is_superuser:
+    if current_user.is_superuser:
+        accessible_model_ids = select(Model.id).where(live(Model))
+        counts = dict(
+            session.exec(
+                library_search.accessible_tag_counts_stmt(accessible_model_ids)
+            ).all()
+        )
+    else:
         accessible_ids = rbac.accessible_collection_ids(session, current_user)
         if not accessible_ids:
             counts = {}
         else:
-            count_stmt = count_stmt.where(Model.collection_id.in_(accessible_ids))  # type: ignore[union-attr]
-            counts = dict(session.exec(count_stmt.group_by(ModelTagLink.tag_id)).all())
-    else:
-        counts = dict(session.exec(count_stmt.group_by(ModelTagLink.tag_id)).all())
+            accessible_model_ids = select(Model.id).where(
+                live(Model),
+                Model.collection_id.in_(accessible_ids),  # type: ignore[union-attr]
+            )
+            counts = dict(
+                session.exec(
+                    library_search.accessible_tag_counts_stmt(accessible_model_ids)
+                ).all()
+            )
     return [
         TagRead(
             id=t.id,
@@ -592,10 +662,10 @@ def delete_tag(
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> Response:
-    from sqlmodel import delete
-
     tag = get_or_404(session, Tag, tag_id, "tag_not_found")
     session.exec(delete(ModelTagLink).where(ModelTagLink.tag_id == tag_id))  # type: ignore[call-overload]
+    session.exec(delete(CollectionTagLink).where(CollectionTagLink.tag_id == tag_id))
+    session.exec(delete(FileTagLink).where(FileTagLink.tag_id == tag_id))
     tag.deleted_at = utcnow()
     session.add(tag)
     session.commit()

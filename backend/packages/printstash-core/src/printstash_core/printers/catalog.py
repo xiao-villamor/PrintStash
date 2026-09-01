@@ -7,7 +7,12 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from .models import Capability, ProviderCapabilities, ProviderId
+from .models import (
+    Capability,
+    PrintArtifactFormat,
+    ProviderCapabilities,
+    ProviderId,
+)
 
 
 class ConfigValueKind(StrEnum):
@@ -55,12 +60,14 @@ def _capabilities(
     support_level: str = "stable",
     support_notes: tuple[str, ...] = (),
     requires_ready_before_send: bool = False,
+    accepted_print_formats: tuple[PrintArtifactFormat, ...] = (),
 ) -> ProviderCapabilities:
     return ProviderCapabilities(
         supported=frozenset(supported),
         support_level=support_level,
         support_notes=support_notes,
         requires_ready_before_send=requires_ready_before_send,
+        accepted_print_formats=frozenset(accepted_print_formats),
     )
 
 
@@ -77,7 +84,10 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
     {
         ProviderId.MOONRAKER: ProviderDefinition(
             provider_id=ProviderId.MOONRAKER,
-            capabilities=_capabilities(*Capability),
+            capabilities=_capabilities(
+                *Capability,
+                accepted_print_formats=(PrintArtifactFormat.GCODE_TEXT,),
+            ),
             config_fields=(
                 ConfigField("base_url", ConfigValueKind.URL),
                 ConfigField("api_key", ConfigValueKind.SECRET, required=False),
@@ -95,6 +105,7 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
                     "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",
                 ),
                 requires_ready_before_send=True,
+                accepted_print_formats=(PrintArtifactFormat.GCODE_TEXT,),
             ),
             config_fields=(
                 ConfigField("host", ConfigValueKind.HOST),
@@ -114,6 +125,10 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
                 support_notes=(
                     "PrusaLink local FDM support is beta pending broader hardware validation.",
                     "Raw G-code controls and measured filament consumption are unavailable.",
+                ),
+                accepted_print_formats=(
+                    PrintArtifactFormat.GCODE_TEXT,
+                    PrintArtifactFormat.BGCODE_BINARY,
                 ),
             ),
             config_fields=(
@@ -141,6 +156,7 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
                     "OctoPrint support is beta pending broader hardware validation.",
                     "Raw G-code controls and measured filament consumption are unavailable.",
                 ),
+                accepted_print_formats=(PrintArtifactFormat.GCODE_TEXT,),
             ),
             config_fields=(
                 ConfigField("base_url", ConfigValueKind.URL),
@@ -159,6 +175,7 @@ PROVIDER_DEFINITIONS: Mapping[ProviderId, ProviderDefinition] = MappingProxyType
                     "Upload runs over plain HTTP, independent of the SDCP/MQTT control channel.",
                     "File inventory, deletion, and print-history import remain unavailable.",
                 ),
+                accepted_print_formats=(PrintArtifactFormat.GCODE_TEXT,),
             ),
             config_fields=(
                 ConfigField("host", ConfigValueKind.HOST),
@@ -244,6 +261,11 @@ def catalog_document() -> dict[str, Any]:
             "requiresReadyBeforeSend": (
                 definition.capabilities.requires_ready_before_send
             ),
+            "acceptedPrintFormats": [
+                artifact_format.value
+                for artifact_format in PrintArtifactFormat
+                if definition.capabilities.accepts_format(artifact_format)
+            ],
             "configFields": [
                 {
                     "name": config.name,
@@ -258,6 +280,9 @@ def catalog_document() -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "capabilities": [capability.value for capability in Capability],
+        "printArtifactFormats": [
+            artifact_format.value for artifact_format in PrintArtifactFormat
+        ],
         "providers": providers,
         "setupOptions": [
             {

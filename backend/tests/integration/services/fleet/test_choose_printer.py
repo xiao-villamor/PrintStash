@@ -27,6 +27,7 @@ from app.db.models import (
     CompatibilityPolicy,
     File,
     Printer,
+    PrinterProvider,
     PrinterStatus,
     RoutingStrategy,
     User,
@@ -71,6 +72,60 @@ def fleet_of_three(
 
 
 class TestChoosePrinter:
+    def test_automatic_routing_selects_the_format_compatible_printer(
+        self, db_session: Session, pla_artifact: File
+    ) -> None:
+        pla_artifact.original_filename = "plate.bgcode"
+        db_session.add(pla_artifact)
+        text_only = build_printer(
+            db_session,
+            name="Text only",
+            moonraker_url="http://text-only",
+            status=PrinterStatus.READY,
+        )
+        prusa = build_printer(
+            db_session,
+            name="Core One",
+            provider=PrinterProvider.PRUSALINK,
+            prusalink_url="http://core-one",
+            prusalink_auth_mode="api_key",
+            prusalink_api_key="test-key",
+            status=PrinterStatus.READY,
+        )
+
+        selected, blocked = fleet.choose_printer(
+            db_session,
+            RoutingStrategy.LEAST_BUSY,
+            None,
+            snapshot=snapshot_for(db_session, pla_artifact),
+            file_id=int(pla_artifact.id),
+        )
+
+        assert selected is not None and selected.id == prusa.id
+        assert selected.id != text_only.id
+        assert blocked is None
+
+    def test_manual_incompatible_printer_is_rejected(
+        self, db_session: Session, pla_artifact: File
+    ) -> None:
+        pla_artifact.original_filename = "plate.bgcode"
+        db_session.add(pla_artifact)
+        text_only = build_printer(
+            db_session,
+            name="Manual text only",
+            moonraker_url="http://manual-text-only",
+            status=PrinterStatus.READY,
+        )
+
+        with pytest.raises(fleet.FleetError, match="artifact_format_not_supported"):
+            fleet.choose_printer(
+                db_session,
+                RoutingStrategy.MANUAL,
+                int(text_only.id),
+                snapshot=snapshot_for(db_session, pla_artifact),
+                file_id=int(pla_artifact.id),
+            )
+
     def test_prefers_a_printer_proven_to_have_the_right_filament(
         self,
         db_session: Session,

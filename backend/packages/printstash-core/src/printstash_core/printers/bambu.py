@@ -21,6 +21,7 @@ from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     BambuConfig,
     Capability,
+    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
@@ -141,6 +142,7 @@ class BambuClient:
             }
         ),
         support_level="beta",
+        accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
         support_notes=(
             "Bambu LAN upload and explicit start are beta features.",
             "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable.",

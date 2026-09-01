@@ -43,6 +43,7 @@ function aGcode(over: Partial<FileRead> = {}): FileRead {
     is_recommended: false,
     uploaded_at: FROZEN_NOW,
     metadata: null,
+    tags: [],
     ...over,
   };
 }

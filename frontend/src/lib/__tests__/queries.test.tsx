@@ -86,6 +86,7 @@ const collection: CollectionRead = {
   parent_id: null,
   model_count: 1,
   effective_role: null,
+  tags: [],
 };
 
 const tag: TagRead = { id: 1, name: "petg", slug: "petg", model_count: 1 };

@@ -169,16 +169,23 @@ interface PanelOptions {
   /** Slicer metadata on the single G-code revision the panel offers. */
   metadata?: MetadataRead | null;
   spools?: SpoolRead[];
+  filename?: string;
+  printers?: ReturnType<typeof aPrinter>[];
 }
 
 // The shared reads (printers, Spoolman) go through the real query hooks against
 // a cache seeded with fresh data, so nothing refetches and the panel sees the
 // same shapes the API returns.
-function renderPanel({ metadata = null, spools }: PanelOptions = {}) {
+function renderPanel({
+  metadata = null,
+  spools,
+  filename = "cube.gcode",
+  printers = [printer],
+}: PanelOptions = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   });
-  client.setQueryData(queryKeys.printers, [printer]);
+  client.setQueryData(queryKeys.printers, printers);
   client.setQueryData(queryKeys.spoolmanStatus, spoolmanStatus(spools !== undefined));
   client.setQueryData(queryKeys.spools, spools ?? []);
 
@@ -191,7 +198,7 @@ function renderPanel({ metadata = null, spools }: PanelOptions = {}) {
             gcodeFiles={[
               {
                 id: 42,
-                original_filename: "cube.gcode",
+                original_filename: filename,
                 version: 1,
                 gcode_revision_number: 1,
                 revision_label: null,
@@ -224,6 +231,33 @@ beforeEach(() => {
 });
 
 describe("SendToQueue", () => {
+  it("uses provider format capabilities for BGCODE actions", async () => {
+    const textOnly = aPrinter({
+      id: 8,
+      name: "Text-only printer",
+      capabilities: {
+        ...printer.capabilities,
+        accepted_print_formats: ["gcode_text"],
+      },
+    });
+    const prusa = aPrinter({
+      id: 9,
+      name: "Core One",
+      provider: "prusalink",
+      capabilities: {
+        ...printer.capabilities,
+        accepted_print_formats: ["gcode_text", "bgcode_binary"],
+      },
+    });
+    renderPanel({ filename: "plate.bgcode", printers: [textOnly, prusa] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Send to printer" }));
+
+    expect(screen.getByText("Format unsupported")).toBeVisible();
+    expect(screen.getByRole("checkbox", { name: "Select Text-only printer" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Select Core One" })).toBeEnabled();
+  });
+
   it("adds selected G-code to least-busy fleet queue", async () => {
     renderPanel();
 

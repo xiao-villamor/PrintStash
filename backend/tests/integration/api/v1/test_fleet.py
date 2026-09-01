@@ -320,7 +320,7 @@ class TestCreateQueueJobRouting:
         assert resp.status_code == 400
         assert resp.json()["detail"] == "file_not_gcode"
 
-    def test_enqueue_rejects_binary_gcode(
+    def test_enqueue_blocks_when_no_format_compatible_printer_exists(
         self, client: TestClient, auth_headers: dict[str, str], db_session: Session
     ) -> None:
         model = build_model(
@@ -336,14 +336,20 @@ class TestCreateQueueJobRouting:
             size_bytes=10,
             sha256="f" * 64,
         )
+        build_printer(
+            db_session,
+            name="Text-only queue printer",
+            moonraker_url="http://text-only",
+            status=PrinterStatus.READY,
+        )
 
         resp = client.post(
             "/api/v1/fleet/queue",
             headers=auth_headers,
             json={"file_id": bgcode.id, "strategy": "least_busy"},
         )
-        assert resp.status_code == 400
-        assert resp.json()["detail"] == "binary_gcode_not_printable"
+        assert resp.status_code == 201
+        assert resp.json()["blocked_reason"] == "no_format_compatible_printer"
 
 
 class TestListQueueJobs:
@@ -707,7 +713,9 @@ class TestQueueScheduler:
             select(PrintJob).where(PrintJob.blocked_reason == "printer_unavailable")
         ).all()
         assert len(blocked) == 100
-        assert len(statements) <= 14
+        # One batched Artifact-name query feeds format-aware routing; the
+        # budget remains fixed for 100 candidates rather than growing per job.
+        assert len(statements) <= 15
 
         # Previously blocked rows sort after untouched rows, so later ticks cannot
         # starve candidates beyond the bounded first page.

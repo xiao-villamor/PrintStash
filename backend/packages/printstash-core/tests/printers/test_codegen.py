@@ -52,6 +52,14 @@ class TestRenderTypescript:
         assert "SharedPrinterProviderId" in rendered
         assert "SharedPrinterCapability" in rendered
         assert "SharedPrinterSetupOption" in rendered
+        assert "SharedPrintArtifactFormat" in rendered
+
+    def test_exposes_provider_accepted_print_formats(self) -> None:
+        rendered = render_typescript()
+
+        assert '"printArtifactFormats"' in rendered
+        assert '"bgcode_binary"' in rendered
+        assert '"acceptedPrintFormats"' in rendered
 
 
 class TestWriteTypescript:

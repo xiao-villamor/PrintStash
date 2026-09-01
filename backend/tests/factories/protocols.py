@@ -25,11 +25,13 @@ from app.db.models import (
     Collection,
     CollectionPermission,
     CollectionRole,
+    CollectionTagLink,
     Document,
     DocumentKind,
     ExternalLibrary,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     InboxItem,
     InboxItemState,
@@ -47,6 +49,7 @@ from app.db.models import (
     ProvenanceCapture,
     ShareLink,
     SystemConfig,
+    Tag,
     User,
 )
 
@@ -133,6 +136,14 @@ class MakeCollection(Protocol):
         parent: Collection | None = None,
         **overrides: Any,
     ) -> Collection: ...
+
+
+class TagCollection(Protocol):
+    def __call__(self, collection: Collection, tag: Tag) -> CollectionTagLink: ...
+
+
+class TagFile(Protocol):
+    def __call__(self, file: File, tag: Tag) -> FileTagLink: ...
 
 
 class MakePrinter(Protocol):
@@ -316,5 +327,7 @@ __all__ = [
     "MakeProvenanceSource",
     "MakeShareLink",
     "MakeUser",
+    "TagCollection",
+    "TagFile",
     "UserHeaders",
 ]

@@ -27,6 +27,7 @@ contract tier; everything here is the client's own logic over a mock transport.
 from __future__ import annotations
 
 import asyncio
+import struct
 from pathlib import Path
 from typing import Any
 
@@ -720,6 +721,29 @@ class TestUpload:
         assert headers[0]["Content-Type"] == "text/x.gcode"
         assert headers[0]["Print-After-Upload"] == "?0"
         assert headers[0]["Overwrite"] == "?1"
+
+    @pytest.mark.asyncio
+    async def test_streams_bgcode_as_binary_without_auto_start(
+        self, tmp_path: Path
+    ) -> None:
+        source = tmp_path / "plate.bgcode"
+        body = b"G1 X1\n" * 200_000
+        block = struct.pack("<HHI", 1, 0, len(body)) + struct.pack("<H", 2) + body
+        payload = b"GCDE" + struct.pack("<IH", 1, 0) + block
+        source.write_bytes(payload)
+        received: list[tuple[httpx.Headers, bytes]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            received.append((request.headers, request.content))
+            return httpx.Response(201)
+
+        await make_client(handler).upload(source, "jobs/plate.bgcode")
+
+        headers, uploaded = received[0]
+        assert headers["Content-Type"] == "application/octet-stream"
+        assert headers["Print-After-Upload"] == "?0"
+        assert headers["Content-Length"] == str(len(payload))
+        assert uploaded == payload
 
     @pytest.mark.asyncio
     async def test_returns_the_printers_own_response_body(self, tmp_path: Path) -> None:

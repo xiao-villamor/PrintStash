@@ -16,6 +16,17 @@ _Avoid_: asset, item, part
 One physical stored blob (STL/3MF/OBJ/G-code) at a version under a Model.
 _Avoid_: upload, attachment
 
+**Part Group**:
+A named replaceable role within one Model, such as “handle” or “lid”. A Part
+Group contains at least two Part Options and has exactly one default.
+_Avoid_: collection, folder, variant group
+
+**Part Option**:
+One selectable source Artifact and its user-facing choice name within a Part
+Group. An Artifact belongs to at most one Part Option; G-code Revisions are not
+Part Options.
+_Avoid_: revision, tag, duplicate Model
+
 **Artifact persistence**:
 The invariant-heavy sequence `version → canonical publication → File row +
 Metadata + committed ownership`, owned solely by

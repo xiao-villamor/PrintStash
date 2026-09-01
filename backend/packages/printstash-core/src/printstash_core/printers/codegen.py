@@ -23,6 +23,8 @@ def render_typescript() -> str:
         "keyof typeof SHARED_PRINTER_CONTRACT.providers;\n"
         "export type SharedPrinterCapability = "
         "(typeof SHARED_PRINTER_CONTRACT.capabilities)[number];\n"
+        "export type SharedPrintArtifactFormat = "
+        "(typeof SHARED_PRINTER_CONTRACT.printArtifactFormats)[number];\n"
         "export type SharedPrinterSetupOption = "
         "(typeof SHARED_PRINTER_CONTRACT.setupOptions)[number];\n"
     )

@@ -37,22 +37,36 @@ from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import (
     ArtifactProvenanceLink,
+    CollectionTagLink,
     File,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
     ModelProvenanceField,
     ModelProvenanceSource,
     ModelStar,
+    PartGroup,
+    PartOption,
     PrintJob,
     PrintJobState,
     ProvenanceCapture,
     SavedView,
+    Tag,
     User,
 )
+from app.schemas.models import PartGroupWrite, PartOptionWrite
 from app.schemas.provenance import CaptureManifestV2
-from app.services import library_transfer, provenance
-from tests.factories import build_file, build_model, build_print_job
+from app.services import library_transfer, part_options, provenance
+from tests.factories import (
+    build_collection,
+    build_file,
+    build_model,
+    build_print_job,
+    build_tag,
+    tag_collection,
+    tag_file,
+)
 
 
 def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
@@ -95,6 +109,222 @@ def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
 
 
 class TestImportArchive:
+    def test_part_options_survive_a_portable_archive_round_trip(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, short = _seed(db_session, tmp_path)
+        long_bytes = b"solid long\nendsolid long\n"
+        long_blob = tmp_path / "files" / "calibration-cube" / "v2" / "long.stl"
+        long_blob.parent.mkdir(parents=True)
+        long_blob.write_bytes(long_bytes)
+        long = build_file(
+            db_session,
+            model,
+            path=str(long_blob),
+            filename="long.stl",
+            size_bytes=len(long_bytes),
+            sha256=hashlib.sha256(long_bytes).hexdigest(),
+        )
+        part_options.replace_for_model(
+            db_session,
+            model.id,
+            [
+                PartGroupWrite(
+                    name="Handle",
+                    options=[
+                        PartOptionWrite(
+                            file_id=short.id, name="Short", is_default=True
+                        ),
+                        PartOptionWrite(file_id=long.id, name="Long"),
+                    ],
+                )
+            ],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                portable = json.loads(archive.read("manifest.json"))["models"][0]
+            assert portable["part_groups"][0]["options"][0]["name"] == "Short"
+
+            _rewrite_manifest(
+                archive_path,
+                lambda manifest: manifest["models"][0].update(
+                    {"hash": "b" * 64, "name": "Imported choices"}
+                ),
+            )
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            imported = db_session.exec(
+                select(Model).where(Model.hash == "b" * 64)
+            ).one()
+            group = db_session.exec(
+                select(PartGroup).where(PartGroup.model_id == imported.id)
+            ).one()
+            choices = db_session.exec(
+                select(PartOption)
+                .where(PartOption.part_group_id == group.id)
+                .order_by(PartOption.sort_order.asc())  # type: ignore[attr-defined]
+            ).all()
+            assert group.name == "Handle"
+            assert [(row.name, row.is_default) for row in choices] == [
+                ("Short", True),
+                ("Long", False),
+            ]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_legacy_manifest_does_not_clear_existing_part_options(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, first = _seed(db_session, tmp_path)
+        second_bytes = b"solid second\nendsolid second\n"
+        second_blob = (
+            tmp_path / "files" / "calibration-cube" / "v2" / "second.stl"
+        )
+        second_blob.parent.mkdir(parents=True)
+        second_blob.write_bytes(second_bytes)
+        second = build_file(
+            db_session,
+            model,
+            path=str(second_blob),
+            filename="second.stl",
+            size_bytes=len(second_bytes),
+            sha256=hashlib.sha256(second_bytes).hexdigest(),
+        )
+        part_options.replace_for_model(
+            db_session,
+            model.id,
+            [
+                PartGroupWrite(
+                    name="Size",
+                    options=[
+                        PartOptionWrite(file_id=first.id, name="Small", is_default=True),
+                        PartOptionWrite(file_id=second.id, name="Large"),
+                    ],
+                )
+            ],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            _rewrite_manifest(
+                archive_path,
+                lambda manifest: manifest["models"][0].pop("part_groups"),
+            )
+
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            assert len(part_options.read_for_model(db_session, model.id)) == 1
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_entity_tags_survive_a_portable_archive_round_trip(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, artifact = _seed(db_session, tmp_path)
+        collection = build_collection(db_session, "Portable shelf")
+        model.collection_id = collection.id
+        db_session.add(model)
+        collection_tag = build_tag(db_session, "Workshop")
+        artifact_tag = build_tag(db_session, "Painted")
+        tag_collection(db_session, collection, collection_tag)
+        tag_file(db_session, artifact, artifact_tag)
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            _rewrite_manifest(
+                archive_path,
+                lambda manifest: manifest["models"][0].update(
+                    {"hash": "b" * 64, "name": "Imported tagged copy"}
+                ),
+            )
+
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            imported = db_session.exec(
+                select(Model).where(Model.hash == "b" * 64)
+            ).one()
+            imported_file = db_session.exec(
+                select(File).where(File.model_id == imported.id)
+            ).one()
+            collection_names = db_session.exec(
+                select(Tag.name)
+                .join(CollectionTagLink, CollectionTagLink.tag_id == Tag.id)
+                .where(CollectionTagLink.collection_id == imported.collection_id)
+            ).all()
+            file_names = db_session.exec(
+                select(Tag.name)
+                .join(FileTagLink, FileTagLink.tag_id == Tag.id)
+                .where(FileTagLink.file_id == imported_file.id)
+            ).all()
+            assert collection_names == ["Workshop"]
+            assert file_names == ["Painted"]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_reimport_merges_entity_tags_into_existing_rows(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, artifact = _seed(db_session, tmp_path)
+        collection = build_collection(db_session, "Portable merge shelf")
+        model.collection_id = collection.id
+        db_session.add(model)
+        tag_collection(db_session, collection, build_tag(db_session, "Workshop"))
+        tag_file(db_session, artifact, build_tag(db_session, "Painted"))
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+
+            def prepare_copy(manifest: dict) -> None:
+                portable = manifest["models"][0]
+                portable.update({"hash": "c" * 64, "name": "Merge target"})
+
+            _rewrite_manifest(archive_path, prepare_copy)
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            def add_tags(manifest: dict) -> None:
+                portable = manifest["models"][0]
+                portable["collection_tags"].append("Shared")
+                portable["artifacts"][0]["tags"].append("Retrofitted")
+
+            _rewrite_manifest(archive_path, add_tags)
+            result = library_transfer.import_archive(db_session, archive_path, user)
+
+            imported = db_session.exec(
+                select(Model).where(Model.hash == "c" * 64)
+            ).one()
+            imported_file = db_session.exec(
+                select(File).where(File.model_id == imported.id)
+            ).one()
+            collection_names = set(
+                db_session.exec(
+                    select(Tag.name)
+                    .join(CollectionTagLink, CollectionTagLink.tag_id == Tag.id)
+                    .where(CollectionTagLink.collection_id == imported.collection_id)
+                ).all()
+            )
+            file_names = set(
+                db_session.exec(
+                    select(Tag.name)
+                    .join(FileTagLink, FileTagLink.tag_id == Tag.id)
+                    .where(FileTagLink.file_id == imported_file.id)
+                ).all()
+            )
+            assert result["skipped_files"] == 1
+            assert collection_names == {"Workshop", "Shared"}
+            assert file_names == {"Painted", "Retrofitted"}
+        finally:
+            archive_path.unlink(missing_ok=True)
+
     def test_library_import_api_runs_blocking_work_in_fastapi_threadpool(self) -> None:
         from app.api.v1 import models as models_api
 

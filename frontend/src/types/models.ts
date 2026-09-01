@@ -53,6 +53,7 @@ export interface FileRead {
   is_external?: boolean;
   uploaded_at: string;
   metadata: MetadataRead | null;
+  tags: string[];
 }
 
 export interface FileRevisionUpdate {
@@ -60,6 +61,30 @@ export interface FileRevisionUpdate {
   revision_status?: FileRevisionStatus | null;
   revision_notes?: string | null;
   is_recommended?: boolean;
+}
+
+export interface PartOptionRead {
+  id: number;
+  file_id: number;
+  name: string;
+  is_default: boolean;
+}
+
+export interface PartGroupRead {
+  id: number;
+  name: string;
+  options: PartOptionRead[];
+}
+
+export interface PartOptionWrite {
+  file_id: number;
+  name: string;
+  is_default?: boolean;
+}
+
+export interface PartGroupWrite {
+  name: string;
+  options: PartOptionWrite[];
 }
 
 export interface ModelRead {
@@ -77,6 +102,7 @@ export interface ModelRead {
   created_at: string;
   updated_at: string;
   files: FileRead[];
+  part_groups?: PartGroupRead[];
   starred: boolean;
 }
 
@@ -678,6 +704,7 @@ export interface CollectionRead {
   parent_id: number | null;
   model_count: number;
   effective_role: CollectionRole | null;
+  tags: string[];
 }
 
 export interface CollectionPermissionRead {

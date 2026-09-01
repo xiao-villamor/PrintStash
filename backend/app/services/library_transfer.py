@@ -22,8 +22,10 @@ from app.core.time import utcnow
 from app.db.models import (
     ArtifactProvenanceLink,
     Collection,
+    CollectionTagLink,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
@@ -32,6 +34,8 @@ from app.db.models import (
     ModelSourceCover,
     ModelStar,
     ModelTagLink,
+    PartGroup,
+    PartOption,
     PrintJob,
     ProvenanceCapture,
     SavedView,
@@ -40,9 +44,11 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.schemas.models import PartGroupWrite, PartOptionWrite
 from app.services import (
     ingestion,
     model_views,
+    part_options,
     provenance,
     source_covers,
     storage,
@@ -85,6 +91,34 @@ class PortableArtifact(BaseModel):
     revision_notes: str | None = None
     is_recommended: bool = False
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
+    tags: list[str] = PydanticField(default_factory=list)
+
+
+class PortablePartOption(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    artifact_source_id: int
+    name: str = PydanticField(min_length=1, max_length=255)
+    is_default: bool = False
+
+
+class PortablePartGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = PydanticField(min_length=1, max_length=255)
+    options: list[PortablePartOption] = PydanticField(min_length=2, max_length=100)
+
+    @model_validator(mode="after")
+    def valid_choices(self) -> "PortablePartGroup":
+        if sum(option.is_default for option in self.options) != 1:
+            raise ValueError("part group requires exactly one default")
+        source_ids = [option.artifact_source_id for option in self.options]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("part group artifact choices must be unique")
+        names = [" ".join(option.name.split()).casefold() for option in self.options]
+        if len(names) != len(set(names)):
+            raise ValueError("part option names must be unique")
+        return self
 
 
 class PortableModel(BaseModel):
@@ -97,9 +131,37 @@ class PortableModel(BaseModel):
     description: str | None = None
     source_url: str | None = PydanticField(default=None, max_length=2048)
     collection: str | None = PydanticField(default=None, max_length=512)
+    collection_tags: list[str] = PydanticField(default_factory=list)
     tags: list[str] = PydanticField(default_factory=list)
     starred: bool = False
     artifacts: list[PortableArtifact] = PydanticField(default_factory=list)
+    # None distinguishes legacy manifests from a deliberate empty replacement.
+    part_groups: list[PortablePartGroup] | None = PydanticField(
+        default=None, max_length=50
+    )
+
+    @model_validator(mode="after")
+    def valid_part_groups(self) -> "PortableModel":
+        if self.part_groups is None:
+            return self
+        artifact_ids = {
+            artifact.source_id
+            for artifact in self.artifacts
+            if artifact.source_id is not None
+        }
+        chosen_ids = [
+            option.artifact_source_id
+            for group in self.part_groups
+            for option in group.options
+        ]
+        if not set(chosen_ids) <= artifact_ids or len(chosen_ids) != len(
+            set(chosen_ids)
+        ):
+            raise ValueError("part options must reference unique model artifacts")
+        names = [" ".join(group.name.split()).casefold() for group in self.part_groups]
+        if len(names) != len(set(names)):
+            raise ValueError("part group names must be unique")
+        return self
 
 
 class PortableManifest(BaseModel):
@@ -156,6 +218,25 @@ def create_archive(session: Session, user: User) -> Path:
         .where(File.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
         .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
     ).all()
+    portable_groups: dict[int, dict[int, dict[str, object]]] = {}
+    for group, option in session.exec(
+        select(PartGroup, PartOption)
+        .join(PartOption, PartOption.part_group_id == PartGroup.id)
+        .join(File, File.id == PartOption.file_id)
+        .where(PartGroup.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
+        .order_by(PartGroup.sort_order.asc(), PartOption.sort_order.asc())  # type: ignore[attr-defined]
+    ).all():
+        assert group.id is not None
+        portable_group = portable_groups.setdefault(group.model_id, {}).setdefault(
+            group.id, {"name": group.name, "options": []}
+        )
+        portable_group["options"].append(  # type: ignore[union-attr]
+            {
+                "artifact_source_id": option.file_id,
+                "name": option.name,
+                "is_default": option.is_default,
+            }
+        )
     metadata = {
         row.file_id: row
         for row in session.exec(
@@ -175,6 +256,24 @@ def create_archive(session: Session, user: User) -> Path:
     ).all():
         if model_id is not None:
             tags_by_model.setdefault(int(model_id), []).append(tag_name)
+    tags_by_collection: dict[int, list[str]] = {}
+    for collection_id, tag_name in session.exec(
+        select(CollectionTagLink.collection_id, Tag.name)
+        .join(Tag, Tag.id == CollectionTagLink.tag_id)
+        .where(live(Tag))
+        .order_by(CollectionTagLink.collection_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+    ).all():
+        if collection_id is not None:
+            tags_by_collection.setdefault(int(collection_id), []).append(tag_name)
+    tags_by_file: dict[int, list[str]] = {}
+    for file_id, tag_name in session.exec(
+        select(FileTagLink.file_id, Tag.name)
+        .join(Tag, Tag.id == FileTagLink.tag_id)
+        .where(FileTagLink.file_id.in_([row.id for row in files]), live(Tag))  # type: ignore[union-attr]
+        .order_by(FileTagLink.file_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+    ).all():
+        if file_id is not None:
+            tags_by_file.setdefault(int(file_id), []).append(tag_name)
     jobs = session.exec(
         select(PrintJob)
         .where(PrintJob.model_id.in_(visible_ids), live(PrintJob))  # type: ignore[union-attr]
@@ -230,6 +329,7 @@ def create_archive(session: Session, user: User) -> Path:
                     "revision_status": _json_value(artifact.revision_status),
                     "revision_notes": artifact.revision_notes,
                     "is_recommended": artifact.is_recommended,
+                    "tags": tags_by_file.get(artifact.id, []),
                     "metadata": {
                         key: _json_value(value)
                         for key, value in md.model_dump(
@@ -253,9 +353,15 @@ def create_archive(session: Session, user: User) -> Path:
                 "description": model.description,
                 "source_url": model.source_url,
                 "collection": collection_paths.get(model.collection_id),
+                "collection_tags": tags_by_collection.get(model.collection_id or 0, []),
                 "tags": tags_by_model.get(model.id or 0, []),
                 "starred": model.id in stars,
                 "artifacts": artifacts,
+                "part_groups": [
+                    group
+                    for group in portable_groups.get(model.id, {}).values()
+                    if len(group["options"]) >= 2  # type: ignore[arg-type]
+                ],
             }
         )
     for job in jobs:
@@ -1208,6 +1314,24 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                     created_models += 1
                 assert model.id is not None
                 source_models[model_data["source_id"]] = model
+                if model.collection_id is not None:
+                    collection_tags = taxonomy.resolve_or_create_tags(
+                        session, model_data.get("collection_tags", [])
+                    )
+                    existing_collection_tag_ids = set(
+                        session.exec(
+                            select(CollectionTagLink.tag_id).where(
+                                CollectionTagLink.collection_id == model.collection_id
+                            )
+                        ).all()
+                    )
+                    for tag in collection_tags:
+                        if tag.id not in existing_collection_tag_ids:
+                            session.add(
+                                CollectionTagLink(
+                                    collection_id=model.collection_id, tag_id=tag.id
+                                )
+                            )
                 resolved_tags = taxonomy.resolve_or_create_tags(
                     session, model_data.get("tags", [])
                 )
@@ -1247,6 +1371,22 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                                 merge.conflicting_override_fields
                             )
                         skipped_files += 1
+                        artifact_tags = taxonomy.resolve_or_create_tags(
+                            session, artifact_data.get("tags", [])
+                        )
+                        existing_file_tag_ids = set(
+                            session.exec(
+                                select(FileTagLink.tag_id).where(
+                                    FileTagLink.file_id == existing.id
+                                )
+                            ).all()
+                        )
+                        for tag in artifact_tags:
+                            if tag.id not in existing_file_tag_ids:
+                                session.add(
+                                    FileTagLink(file_id=existing.id, tag_id=tag.id)
+                                )
+                        session.commit()
                         continue
                     staged = (
                         Path(tempdir)
@@ -1279,6 +1419,11 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                     source_files[
                         artifact_data.get("source_id", artifact_data["version"])
                     ] = file_row
+                    artifact_tags = taxonomy.resolve_or_create_tags(
+                        session, artifact_data.get("tags", [])
+                    )
+                    for tag in artifact_tags:
+                        session.add(FileTagLink(file_id=file_row.id, tag_id=tag.id))
                     for context, overrides in provenance_contexts.get(
                         (model_data["source_id"], artifact_data.get("source_id")), []
                     ):
@@ -1287,6 +1432,27 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                         )
                         provenance_conflicts += len(merge.conflicting_override_fields)
                     created_files += 1
+                if model_data.get("part_groups") is not None:
+                    part_options.replace_for_model(
+                        session,
+                        model.id,
+                        [
+                            PartGroupWrite(
+                                name=group["name"],
+                                options=[
+                                    PartOptionWrite(
+                                        file_id=source_files[
+                                            option["artifact_source_id"]
+                                        ].id,
+                                        name=option["name"],
+                                        is_default=option["is_default"],
+                                    )
+                                    for option in group["options"]
+                                ],
+                            )
+                            for group in model_data["part_groups"]
+                        ],
+                    )
                 if model_data.get("starred"):
                     exists = session.exec(
                         select(ModelStar).where(

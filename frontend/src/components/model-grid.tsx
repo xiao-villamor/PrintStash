@@ -21,6 +21,7 @@ import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
+import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
 import { FilterSidebar } from "@/components/filter-sidebar";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
@@ -70,6 +71,7 @@ import {
   listSavedViews,
   listModels,
   restoreModel,
+  replaceCollectionTags,
 } from "@/lib/api";
 import {
   isMeshFile,
@@ -1296,6 +1298,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
 
+  async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
+    try {
+      await replaceCollectionTags(collection.id, nextTags);
+      await collectionsQuery.refetch();
+      toast.success(`Tags updated for ${collection.name}`);
+    } catch (error) {
+      toast.error(error);
+      throw error;
+    }
+  }
+
   function handleOpenCreateCollection() {
     if (isCreatingCollection) {
       setIsCreatingCollection(false);
@@ -1958,11 +1971,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </div>
 
           {selectedCollectionRow && (
-            <CollectionReadme
-              key={selectedCollectionRow.id}
-              collectionId={selectedCollectionRow.id}
-              canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
-            />
+            <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
+              <EntityTagsDialog
+                entityLabel={selectedCollectionRow.name}
+                tags={selectedCollectionRow.tags}
+                availableTags={tags}
+                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+                help="Collection tags are inherited by Models in this collection and every descendant for search and filtering."
+                onSave={(nextTags) => saveCollectionTags(selectedCollectionRow, nextTags)}
+              />
+              <CollectionReadme
+                key={selectedCollectionRow.id}
+                collectionId={selectedCollectionRow.id}
+                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+              />
+            </div>
           )}
 
           {activeFilterItems.length > 0 && (

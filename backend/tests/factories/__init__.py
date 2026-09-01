@@ -86,6 +86,8 @@ from tests.factories.library import (
     detached_collection,
     detached_file,
     detached_model,
+    tag_collection,
+    tag_file,
     tag_model,
 )
 from tests.factories.ops import (
@@ -185,5 +187,7 @@ __all__ = [
     "save",
     "store_owned_bytes",
     "tag_model",
+    "tag_collection",
+    "tag_file",
     "unique_hash",
 ]

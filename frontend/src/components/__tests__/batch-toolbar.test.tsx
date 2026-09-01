@@ -33,6 +33,7 @@ function collection(over: Partial<CollectionRead> = {}): CollectionRead {
     parent_id: null,
     model_count: 3,
     effective_role: "edit",
+    tags: [],
     ...over,
   };
 }

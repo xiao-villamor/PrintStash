@@ -27,8 +27,10 @@ from sqlmodel import Session, select
 from app.core.time import utcnow
 from app.db.models import (
     Collection,
+    CollectionTagLink,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
@@ -249,3 +251,18 @@ def tag_model(session: Session, model: Model, tag: Tag) -> None:
     """Attach an existing tag to a model, the way the taxonomy service would."""
     session.add(ModelTagLink(model_id=model.id, tag_id=tag.id))
     session.commit()
+
+
+def tag_collection(
+    session: Session, collection: Collection, tag: Tag
+) -> CollectionTagLink:
+    """Attach an existing tag directly to a collection."""
+    return save(
+        session,
+        CollectionTagLink(collection_id=collection.id, tag_id=tag.id),
+    )
+
+
+def tag_file(session: Session, file: File, tag: Tag) -> FileTagLink:
+    """Attach an existing tag directly to an artifact."""
+    return save(session, FileTagLink(file_id=file.id, tag_id=tag.id))

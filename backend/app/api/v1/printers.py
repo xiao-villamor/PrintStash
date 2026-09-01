@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Awaitable, Callable, List, Optional
 
 from fastapi import (
@@ -16,6 +15,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from printstash_core.gcode import declared_print_artifact_format
 from printstash_core.printers import ProviderRegistry
 from sqlmodel import Session, select
 from starlette.concurrency import run_in_threadpool
@@ -858,7 +858,8 @@ def delete_printer_permission(
     summary="Upload a vault file to the printer (optionally start the print)",
     description=(
         "Streams the chosen vault File to the configured provider. The File must "
-        "be a .gcode artifact. If start_print is true, the provider is asked to "
+        "be a printable G-code artifact accepted by the provider. If start_print "
+        "is true, the provider is asked to "
         "start the print immediately after upload."
     ),
 )
@@ -879,6 +880,19 @@ async def send_to_printer(
             status_code=409,
             detail="operation_not_supported_for_provider",
         )
+    # Resolve and authorize the artifact before any provider I/O. Besides avoiding
+    # unnecessary traffic, this guarantees unsupported/corrupt requests cannot
+    # disclose a printer's live state or wake a device on the local network.
+    f = get_or_404(session, File, payload.file_id, "file_not_found")
+    if f.file_type != FileType.GCODE:
+        raise HTTPException(status_code=400, detail="file_not_gcode")
+    artifact_format = declared_print_artifact_format(f.original_filename)
+    if not provider.capabilities.accepts_format(artifact_format):
+        raise HTTPException(
+            status_code=409,
+            detail="artifact_format_not_supported",
+        )
+    _require_file_role(session, current_user, f, CollectionRole.EDIT)
     if provider.capabilities.requires_ready_before_send:
         try:
             status = await provider.query_status()
@@ -892,15 +906,6 @@ async def send_to_printer(
         ).lower()
         if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
             raise HTTPException(status_code=409, detail="printer_not_ready")
-    f = get_or_404(session, File, payload.file_id, "file_not_found")
-    if f.file_type != FileType.GCODE:
-        raise HTTPException(status_code=400, detail="file_not_gcode")
-    # Binary G-code (PrusaSlicer .bgcode) is indexed for its metadata, but the
-    # providers we drive print plain-text G-code
-    # only — never hand them a .bgcode blob.
-    if Path(f.original_filename).suffix.lower() == ".bgcode":
-        raise HTTPException(status_code=400, detail="binary_gcode_not_printable")
-    _require_file_role(session, current_user, f, CollectionRole.EDIT)
     if payload.start_print:
         try:
             compatibility = materials.compatibility_for_printer(
@@ -924,7 +929,10 @@ async def send_to_printer(
         if payload.remote_filename
         else build_traceable_remote_filename(f)
     )
-    if not remote_name.lower().endswith((".gcode", ".g", ".gco")):
+    if artifact_format.value == "bgcode_binary":
+        if not remote_name.lower().endswith(".bgcode"):
+            remote_name += ".bgcode"
+    elif not remote_name.lower().endswith((".gcode", ".g", ".gco")):
         remote_name += ".gcode"
 
     job = PrintJob(
@@ -969,7 +977,13 @@ async def send_to_printer(
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=exc.code) from exc
+        status_code = {
+            "invalid_binary_gcode": 400,
+            "print_artifact_extension_mismatch": 400,
+            "artifact_format_not_supported": 409,
+            "file_blob_missing": 410,
+        }.get(exc.code, 502)
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
     except HTTPException:
         raise
     except Exception as exc:

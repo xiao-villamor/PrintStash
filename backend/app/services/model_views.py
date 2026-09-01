@@ -35,6 +35,7 @@ from app.db.models import (
     FilamentProfile,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
@@ -81,7 +82,7 @@ from app.schemas.provenance import (
     ProvenanceFieldRead,
     ProvenanceSourceRead,
 )
-from app.services import provenance, rbac
+from app.services import library_search, part_options, provenance, rbac
 from app.services.storage_backend import get_backend
 from app.services.trash import trash_expires_at
 
@@ -377,6 +378,22 @@ def metadata_read(
     return MetadataRead(**data)
 
 
+def _file_tag_names(session: Session, file_ids: list[int]) -> dict[int, list[str]]:
+    if not file_ids:
+        return {}
+    result: dict[int, list[str]] = defaultdict(list)
+    rows = session.exec(
+        select(FileTagLink.file_id, Tag.name)
+        .join(Tag, Tag.id == FileTagLink.tag_id)
+        .where(FileTagLink.file_id.in_(file_ids), live(Tag))  # type: ignore[union-attr]
+        .order_by(FileTagLink.file_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+    ).all()
+    for file_id, name in rows:
+        if file_id is not None:
+            result[file_id].append(name)
+    return dict(result)
+
+
 def _file_reads_with_revisions(
     session: Session, files_with_meta: list
 ) -> list[FileRead]:
@@ -387,6 +404,10 @@ def _file_reads_with_revisions(
         if f.file_type == FileType.GCODE and f.id is not None:
             gcode_revision_numbers[f.id] = gcode_index
             gcode_index += 1
+    tags_by_file = _file_tag_names(
+        session,
+        [f.id for f, _md in files_with_meta if f.id is not None],
+    )
     profiles = _load_filament_profiles(session)
     return [
         FileRead(
@@ -404,6 +425,7 @@ def _file_reads_with_revisions(
             is_recommended=f.is_recommended,
             is_external=f.is_external,
             uploaded_at=f.uploaded_at,
+            tags=tags_by_file.get(f.id, []),
             metadata=metadata_read(session, md, profiles) if md else None,
         )
         for f, md in files_with_meta
@@ -512,16 +534,11 @@ def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
             (Collection.path == cat_path) | (Collection.path.startswith(cat_path + "/"))
         )
         stmt = stmt.where(Model.collection_id.in_(matching))  # type: ignore[union-attr]
-    if filters.q:
-        stmt = stmt.where(Model.name.ilike(f"%{filters.q}%"))  # type: ignore[attr-defined]
-    for slug in (tag.strip().lower() for tag in filters.tag if tag.strip()):
-        stmt = stmt.where(
-            Model.id.in_(  # type: ignore[union-attr]
-                select(ModelTagLink.model_id)
-                .join(Tag, Tag.id == ModelTagLink.tag_id)
-                .where(Tag.slug == slug)
-            )
-        )
+    stmt = library_search.apply_library_search(
+        stmt,
+        query=filters.q,
+        tag_slugs=filters.tag,
+    )
     stmt = _apply_structured_filters(stmt, filters)
     present_model_ids = (
         select(File.model_id)
@@ -1254,6 +1271,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         created_at=m.created_at,
         updated_at=m.updated_at,
         files=_file_reads_with_revisions(session, files_with_meta),
+        part_groups=part_options.read_for_model(session, model_id),
         starred=starred,
     )
 
@@ -1445,6 +1463,14 @@ def export_payload(session: Session, user: User) -> dict:
             .outerjoin(Metadata, Metadata.file_id == File.id)
             .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
         ).all()
+        file_tags_by_id = _file_tag_names(
+            session,
+            [
+                file_row.id
+                for file_row, _metadata in file_rows
+                if file_row.id is not None
+            ],
+        )
         for file_row, metadata in file_rows:
             gcode_revision_number = None
             if file_row.file_type == FileType.GCODE:
@@ -1466,6 +1492,7 @@ def export_payload(session: Session, user: User) -> dict:
                     is_recommended=file_row.is_recommended,
                     is_external=file_row.is_external,
                     uploaded_at=file_row.uploaded_at,
+                    tags=file_tags_by_id.get(file_row.id, []),
                     metadata=metadata_read(session, metadata, profiles)
                     if metadata
                     else None,

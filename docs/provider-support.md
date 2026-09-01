@@ -105,11 +105,16 @@ send printer credentials or jobs through Prusa Connect cloud. Supported:
 - HTTP Digest username/password authentication on modern PrusaLink
 - legacy `X-Api-Key` authentication
 - polled printer/job status and temperatures
-- Vault G-code upload and explicit start
+- streamed Vault upload and explicit start for plain-text G-code and validated
+  PrusaSlicer binary G-code (`.bgcode`)
 - remote G-code inventory and deletion
 - pause, resume, and cancel controls
 
 Raw G-code commands and measured filament consumption are not supported.
+BGCODE is validated locally before transfer, keeps its `.bgcode` suffix, and is
+uploaded as `application/octet-stream`; upload never implies start. Other
+providers remain plain-text-only until their capability contract declares
+otherwise. PrintStash does not currently render a BGCODE toolpath preview.
 Physical-printer coverage is still expanding, so supervise first prints after
 adding or updating a PrusaLink device.
 

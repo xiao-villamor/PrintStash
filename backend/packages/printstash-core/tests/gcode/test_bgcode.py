@@ -34,7 +34,9 @@ from __future__ import annotations
 
 import struct
 import zlib
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 from printstash_core.gcode import (
     GcodeMetadata,
@@ -76,6 +78,10 @@ def _gcode_block(body: bytes = b"body") -> bytes:
     return _block(_GCODE, struct.pack("<H", 2), body, compression=0)
 
 
+def _checksummed(block: bytes) -> bytes:
+    return block + struct.pack("<I", zlib.crc32(block) & 0xFFFFFFFF)
+
+
 def _sample_container() -> bytes:
     """One metadata block, one thumbnail, one heatshrink-compressed body."""
 
@@ -103,6 +109,25 @@ def _sample_container() -> bytes:
 def _written(path: Path, payload: bytes) -> Path:
     path.write_bytes(payload)
     return path
+
+
+class _ReportedSizePath:
+    """File-like path whose bytes can disappear after the size check.
+
+    A regular local file rarely truncates between ``stat`` and ``read``, but an
+    interrupted slicer export or storage-backed mount can do exactly that. The
+    validator must reject the short read instead of trusting the earlier size.
+    """
+
+    def __init__(self, payload: bytes, *, reported_size: int = 1_000_000) -> None:
+        self.payload = payload
+        self.reported_size = reported_size
+
+    def stat(self) -> SimpleNamespace:
+        return SimpleNamespace(st_size=self.reported_size)
+
+    def open(self, _mode: str) -> BytesIO:
+        return BytesIO(self.payload)
 
 
 class TestIsBgcode:
@@ -186,6 +211,31 @@ class TestIsValidContainerFraming:
         # read, so a hostile length cannot make the parser allocate for it.
         assert is_valid_container(path) is False
 
+    def test_rejects_metadata_truncated_after_the_size_check(self) -> None:
+        metadata = struct.pack("<HHI", _FILE_METADATA, 0, 4)
+        metadata += struct.pack("<H", 0) + b"x"
+
+        assert is_valid_container(_ReportedSizePath(_container(metadata))) is False  # type: ignore[arg-type]
+
+    def test_rejects_gcode_truncated_while_computing_its_checksum(self) -> None:
+        gcode = struct.pack("<HHI", _GCODE, 0, 4) + struct.pack("<H", 0) + b"x"
+        payload = b"GCDE" + struct.pack("<IH", 1, 1) + gcode
+
+        assert is_valid_container(_ReportedSizePath(payload)) is False  # type: ignore[arg-type]
+
+    def test_rejects_a_checksum_truncated_after_the_block_body(self) -> None:
+        gcode = _gcode_block()
+        payload = b"GCDE" + struct.pack("<IH", 1, 1) + gcode
+
+        assert is_valid_container(_ReportedSizePath(payload)) is False  # type: ignore[arg-type]
+
+    def test_rejects_more_blocks_than_the_safety_limit(self, tmp_path: Path) -> None:
+        path = tmp_path / "too-many-blocks.bgcode"
+        empty_unknown = struct.pack("<HHI", _UNKNOWN_BLOCK, 0, 0)
+        path.write_bytes(_container(*(empty_unknown for _ in range(4096))))
+
+        assert is_valid_container(path) is False
+
     def test_rejects_an_unknown_compression_scheme(self, tmp_path: Path) -> None:
         path = tmp_path / "weird.bgcode"
         metadata = _block(
@@ -215,25 +265,30 @@ class TestIsValidContainerFraming:
         # decompression bomb, so the two are compared after decoding.
         assert is_valid_container(path) is False
 
-    def test_skips_a_checksum_between_blocks(self, tmp_path: Path) -> None:
+    def test_accepts_valid_checksums_between_blocks(self, tmp_path: Path) -> None:
         path = tmp_path / "crc.bgcode"
-        metadata = (
+        metadata = _checksummed(
             _block(
                 _FILE_METADATA,
                 struct.pack("<H", 0),
                 b"Producer=PrusaSlicer 2.8.0\n",
                 compression=1,
             )
-            + b"\x00\x00\x00\x00"
         )
-        gcode = _block(_GCODE, struct.pack("<H", 2), b"body", compression=0)
-        gcode += b"\x00\x00\x00\x00"
+        gcode = _checksummed(
+            _block(_GCODE, struct.pack("<H", 2), b"body", compression=0)
+        )
         # checksum_type 1 means every block carries a trailing CRC32.
         path.write_bytes(b"GCDE" + struct.pack("<IH", 1, 1) + metadata + gcode)
 
-        # A parser that ignored the checksum length would read it as the next
-        # block header and reject a perfectly valid file.
         assert is_valid_container(path) is True
+
+    def test_rejects_a_checksum_mismatch(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad-crc.bgcode"
+        gcode = _gcode_block() + b"\x00\x00\x00\x00"
+        path.write_bytes(b"GCDE" + struct.pack("<IH", 1, 1) + gcode)
+
+        assert is_valid_container(path) is False
 
     def test_reports_an_unreadable_path_as_invalid(self, tmp_path: Path) -> None:
         assert is_valid_container(tmp_path / "missing.bgcode") is False

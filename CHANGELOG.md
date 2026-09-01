@@ -8,6 +8,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
+- **Part alternatives for multi-part Models.** Artifacts can now be grouped as
+  interchangeable options for one logical part, with one default choice per
+  group, portable import/export support, unified search, and a focused Model
+  detail workflow for creating, changing, and removing those alternatives.
+
 - **Quick restart from Settings.** Administrators on supervised deployments
   can now gracefully restart the PrintStash API without opening container
   details. Official Compose stacks enable the action through their existing

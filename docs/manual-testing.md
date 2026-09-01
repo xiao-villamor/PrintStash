@@ -177,6 +177,12 @@ must never be copied as production identity configuration.
 - [ ] Create, rename, nest, move, and delete Collections; breadcrumbs stay correct.
 - [ ] Drag one Model and batch-move several Models between Collections.
 - [ ] Create, apply, remove, and filter tags; repeated tags use AND semantics.
+- [ ] In a Model with at least two source files, create a Part Group, rename its
+      choices, change the default, save, reload, search by the group/choice name,
+      and confirm a viewer cannot edit it.
+- [ ] Trash one Part Option and confirm the incomplete group is hidden; restore
+      it and confirm the group returns. Purging a choice must either promote a
+      surviving default or remove a group that would have only one choice.
 - [ ] Favorite, bulk tag/move/trash, and partial failures report accurately.
 - [ ] Every facet restores from its URL: Artifact type, material, slicer,
       printer model, Revision status, printed state, outcome, vault/external
@@ -363,6 +369,10 @@ Standalone fakes validate wiring, not firmware.
 - [ ] **E:** Test legacy API-key and, where emulated, Digest modes.
 - [ ] **E:** Verify status/temperatures, inventory, upload-only, explicit start,
       delete, controls, restart, credential failure, and reconnect.
+- [ ] **E:** Upload a valid `.bgcode` without starting it; verify the remote
+      suffix, byte size, binary content type, and that no job starts implicitly.
+- [ ] **E:** Corrupt a `.bgcode` checksum and verify PrintStash rejects it before
+      the emulator receives an upload.
 
 ### Bambu LAN and Elegoo Centauri — beta
 

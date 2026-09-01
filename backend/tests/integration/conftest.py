@@ -49,6 +49,8 @@ from tests.factories.protocols import (
     MakeShareLink,
     MakeSystemConfig,
     MakeUser,
+    TagCollection,
+    TagFile,
     UserHeaders,
 )
 
@@ -156,6 +158,18 @@ def make_tag(db_session: Session) -> Any:
 def tag_model(db_session: Session) -> Any:
     """Attach an existing tag to a model."""
     return _bound(factories.tag_model, db_session)
+
+
+@pytest.fixture
+def tag_collection(db_session: Session) -> TagCollection:
+    """Attach an existing tag directly to a collection."""
+    return _bound(factories.tag_collection, db_session)
+
+
+@pytest.fixture
+def tag_file(db_session: Session) -> TagFile:
+    """Attach an existing tag directly to an artifact."""
+    return _bound(factories.tag_file, db_session)
 
 
 # --------------------------------------------------------------------------- #
@@ -384,5 +398,7 @@ __all__ = [
     "make_tag",
     "make_user",
     "tag_model",
+    "tag_collection",
+    "tag_file",
     "user_headers",
 ]

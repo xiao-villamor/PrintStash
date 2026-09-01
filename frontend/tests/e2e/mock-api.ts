@@ -101,6 +101,7 @@ const printer = {
     support_level: "stable",
     support_notes: [],
     unsupported_actions: [],
+    accepted_print_formats: ["gcode_text"],
   },
   access: {
     role: "admin",

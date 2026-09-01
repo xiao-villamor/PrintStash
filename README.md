@@ -60,7 +60,12 @@ are welcome in
   logs in with username + API key, then uploads under a JWT Bearer token.
 - Content-hash dedup groups files into logical models and keeps version history
   in one place rather than scattered across folders.
-- Nested collections, flat tags, search, filters, thumbnails, grid/list views,
+- Part Groups turn interchangeable source Artifacts into named choices (for
+  example, short/long handles) with one explicit default, while keeping every
+  STL/3MF/OBJ/STEP file independently downloadable and sliceable.
+- Nested collections; direct Model, Collection, and Artifact tags; unified search
+  across names, files, collection paths, effective tags, and provenance; filters,
+  thumbnails, grid/list views,
   sorting, breadcrumbs, and drag-and-drop between collections.
 
 **Library sources (mounted folders, NAS, and remote protocols)**
@@ -360,8 +365,8 @@ deliberately not a full manufacturing platform. Set expectations accordingly:
 - **Bambu LAN is beta** with local status, plain-text G-code upload, explicit
   start, and pause/resume/cancel. Remote inventory/deletion is not implemented.
 - **PrusaLink is beta** for local FDM printers, with Digest or legacy API-key
-  authentication, status, upload/start, files, and print controls. Prusa
-  Connect cloud is not used.
+  authentication, status, streamed plain-text G-code and validated `.bgcode`
+  upload/start, files, and print controls. Prusa Connect cloud is not used.
 - **Elegoo support covers Neptune 4, Pro, Plus, and Max** through Moonraker;
   Centauri Carbon and Carbon 2 additionally have beta local status/control
   support through native SDCP/MQTT, plus beta G-code upload since 0.11.3.

@@ -32,13 +32,17 @@ from typing import Any
 from printstash_core.printers import (
     ArtifactCaptureClient,
     Capability,
+    PrintArtifactFormat,
     PrinterClient,
     PrinterSnapshot,
     ProviderCapabilities,
     SnapshotCallback,
 )
 
-CAPABILITIES = ProviderCapabilities(frozenset(Capability))
+CAPABILITIES = ProviderCapabilities(
+    frozenset(Capability),
+    accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+)
 
 
 class CompleteClient:

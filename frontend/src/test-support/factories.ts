@@ -84,6 +84,7 @@ export function printerCapabilities(override?: Partial<PrinterCapabilities>): Pr
     support_level: "stable",
     support_notes: [],
     unsupported_actions: [],
+    accepted_print_formats: ["gcode_text"],
     ...override,
   };
 }
@@ -175,6 +176,7 @@ export function aCollection(override?: Partial<CollectionRead>): CollectionRead 
     parent_id: null,
     model_count: 2,
     effective_role: "admin",
+    tags: [],
     ...override,
   };
 }

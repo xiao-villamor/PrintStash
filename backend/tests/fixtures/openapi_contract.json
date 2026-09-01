@@ -1589,6 +1589,14 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           }
         },
         "required": [
@@ -2551,6 +2559,14 @@
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "uploaded_at": {
             "format": "date-time",
@@ -6297,6 +6313,14 @@
             "title": "Name",
             "type": "string"
           },
+          "part_groups": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PartGroupRead"
+            },
+            "title": "Part Groups",
+            "type": "array"
+          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -6675,6 +6699,139 @@
         ],
         "title": "OutlinerModelRead",
         "type": "object"
+      },
+      "PartGroupRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/PartOptionRead"
+            },
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "options"
+        ],
+        "title": "PartGroupRead",
+        "type": "object"
+      },
+      "PartGroupWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/PartOptionWrite"
+            },
+            "maxItems": 100,
+            "minItems": 2,
+            "title": "Options",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "options"
+        ],
+        "title": "PartGroupWrite",
+        "type": "object"
+      },
+      "PartGroupsReplace": {
+        "additionalProperties": false,
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/PartGroupWrite"
+            },
+            "maxItems": 50,
+            "title": "Groups",
+            "type": "array"
+          }
+        },
+        "required": [
+          "groups"
+        ],
+        "title": "PartGroupsReplace",
+        "type": "object"
+      },
+      "PartOptionRead": {
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "file_id",
+          "name",
+          "is_default"
+        ],
+        "title": "PartOptionRead",
+        "type": "object"
+      },
+      "PartOptionWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_id",
+          "name"
+        ],
+        "title": "PartOptionWrite",
+        "type": "object"
+      },
+      "PrintArtifactFormat": {
+        "description": "Stored print formats a provider can accept without conversion.",
+        "enum": [
+          "gcode_text",
+          "bgcode_binary"
+        ],
+        "title": "PrintArtifactFormat",
+        "type": "string"
       },
       "PrintBatchRead": {
         "properties": {
@@ -7689,6 +7846,13 @@
       },
       "PrinterCapabilities": {
         "properties": {
+          "accepted_print_formats": {
+            "items": {
+              "$ref": "#/components/schemas/PrintArtifactFormat"
+            },
+            "title": "Accepted Print Formats",
+            "type": "array"
+          },
           "can_cancel": {
             "title": "Can Cancel",
             "type": "boolean"
@@ -11396,6 +11560,21 @@
           "slug"
         ],
         "title": "TagRead",
+        "type": "object"
+      },
+      "TagSetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "title": "TagSetUpdate",
         "type": "object"
       },
       "TimeBucketRead": {
@@ -15260,6 +15439,63 @@
         ]
       }
     },
+    "/api/v1/collections/{collection_id}/tags": {
+      "put": {
+        "operationId": "replace_collection_tags_api_v1_collections__collection_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace a collection's direct tags",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
     "/api/v1/config": {
       "get": {
         "description": "Returns the effective configuration (env + DB overlay). Secret values are masked.",
@@ -18720,6 +18956,19 @@
               "title": "Terminal Limit",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "tracked_job_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Tracked Job Id",
+              "type": "array"
+            }
           }
         ],
         "responses": {
@@ -21931,6 +22180,72 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/files/{file_id}/tags": {
+      "put": {
+        "operationId": "replace_file_tags_api_v1_models__model_id__files__file_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace an artifact's direct tags",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/gcode-revisions": {
       "post": {
         "description": "Uploads a new sliced G-code artifact directly onto the target model. Manual revisions default to needs_test unless another status is provided.",
@@ -21984,6 +22299,64 @@
           }
         ],
         "summary": "Add a G-code revision to an existing model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/part-options": {
+      "put": {
+        "description": "Atomically replaces every Part Group. Each group must contain at least two source Artifacts and exactly one default option.",
+        "operationId": "replace_part_options_api_v1_models__model_id__part_options_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartGroupsReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace a model's Part Groups and choices",
         "tags": [
           "models"
         ]
@@ -24477,7 +24850,7 @@
     },
     "/api/v1/printers/{printer_id}/send": {
       "post": {
-        "description": "Streams the chosen vault File to the configured provider. The File must be a .gcode artifact. If start_print is true, the provider is asked to start the print immediately after upload.",
+        "description": "Streams the chosen vault File to the configured provider. The File must be a printable G-code artifact accepted by the provider. If start_print is true, the provider is asked to start the print immediately after upload.",
         "operationId": "send_to_printer_api_v1_printers__printer_id__send_post",
         "parameters": [
           {

@@ -58,7 +58,7 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
 def build_traceable_remote_filename(file: File) -> str:
     """Return a Moonraker-safe filename with a Vault revision marker."""
     suffix = PurePosixPath(file.original_filename).suffix
-    if suffix.lower() not in {".gcode", ".g", ".gco"}:
+    if suffix.lower() not in {".gcode", ".bgcode", ".g", ".gco"}:
         suffix = ".gcode"
     stem = PurePosixPath(file.original_filename).stem or "print"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"

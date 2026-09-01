@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import struct
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from printstash_core.printers import Capability, PrintArtifactFormat
 from sqlmodel import Session
 
 from app.db.models import (
@@ -163,6 +165,10 @@ class TestTransferArtifact:
             sha256="a" * 64,
         )
         provider = AsyncMock()
+        provider.capabilities = ProviderCapabilities(
+            supported=frozenset({Capability.START, Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+        )
         provider.upload.side_effect = ProviderError(
             "timed out", code="provider_timeout"
         )
@@ -204,6 +210,11 @@ class TestTransferArtifact:
         uploaded: list[bytes] = []
 
         class Provider:
+            capabilities = ProviderCapabilities(
+                supported=frozenset({Capability.START, Capability.UPLOAD}),
+                accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+            )
+
             async def upload(self, local: Path, _remote: str) -> None:
                 uploaded.append(local.read_bytes())
 
@@ -221,6 +232,81 @@ class TestTransferArtifact:
         )
 
         assert uploaded == [payload]
+
+    def test_invalid_bgcode_is_rejected_before_provider_io(
+        self, tmp_path: Path
+    ) -> None:
+        class Backend:
+            def exists(self, _key: str) -> bool:
+                return True
+
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "broken.bgcode"
+                target.write_bytes(b"GCDE-broken")
+                yield target
+
+        artifact = detached_file(
+            id=1,
+            path="vault-data/broken.bgcode",
+            original_filename="broken.bgcode",
+            file_type=FileType.GCODE,
+        )
+        provider = AsyncMock()
+        provider.capabilities = ProviderCapabilities(
+            supported=frozenset({Capability.START, Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.BGCODE_BINARY}),
+        )
+
+        with pytest.raises(PrinterJobError, match="invalid_binary_gcode"):
+            asyncio.run(
+                transfer_artifact(
+                    Backend(), provider, artifact, "broken.bgcode", start_print=False
+                )
+            )
+
+        provider.upload.assert_not_awaited()
+
+    def test_valid_bgcode_reaches_a_compatible_provider(self, tmp_path: Path) -> None:
+        body = b"G1 X1\n"
+        payload = (
+            b"GCDE"
+            + struct.pack("<IH", 1, 0)
+            + struct.pack("<HHI", 1, 0, len(body))
+            + struct.pack("<H", 2)
+            + body
+        )
+
+        class Backend:
+            def exists(self, _key: str) -> bool:
+                return True
+
+            @contextmanager
+            def local_path(self, _key: str):
+                target = tmp_path / "valid.bgcode"
+                target.write_bytes(payload)
+                yield target
+
+        artifact = detached_file(
+            id=1,
+            path="vault-data/valid.bgcode",
+            original_filename="valid.bgcode",
+            file_type=FileType.GCODE,
+        )
+        provider = AsyncMock()
+        provider.capabilities = ProviderCapabilities(
+            supported=frozenset({Capability.START, Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.BGCODE_BINARY}),
+        )
+
+        asyncio.run(
+            transfer_artifact(
+                Backend(), provider, artifact, "valid.bgcode", start_print=False
+            )
+        )
+
+        provider.upload.assert_awaited_once()
+        provider.start.assert_not_awaited()
 
 
 class TestDispatchClaimed:
@@ -313,6 +399,7 @@ class TestDispatchClaimed:
 
         provider.capabilities = ProviderCapabilities(
             supported=frozenset({Capability.START, Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
             requires_ready_before_send=True,
         )
         provider.query_status.return_value = {
@@ -333,6 +420,7 @@ class TestDispatchClaimed:
 
         provider.capabilities = ProviderCapabilities(
             supported=frozenset({Capability.START, Capability.UPLOAD}),
+            accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
             requires_ready_before_send=True,
         )
         provider.query_status.return_value = {

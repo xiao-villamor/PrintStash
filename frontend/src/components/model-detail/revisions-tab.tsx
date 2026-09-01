@@ -18,7 +18,9 @@ import {
   downloadAuthenticatedFile,
   getArtifactOutcomes,
   getModel,
+  replaceFileTags,
 } from "@/lib/api";
+import { useTags } from "@/lib/queries";
 import { formatBytes, formatDuration, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
@@ -38,6 +40,7 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 
 const NO_OUTCOMES: ArtifactOutcomeRead[] = [];
 
@@ -58,6 +61,7 @@ export function RevisionsTab({
   printerFilesByFileId,
   onModel,
   onAddRevision,
+  canEdit,
 }: {
   modelId: number;
   gcodeFiles: FileRead[];
@@ -65,8 +69,10 @@ export function RevisionsTab({
   printerFilesByFileId: Map<number, ModelPrinterFileRead[]>;
   onModel: (model: ModelRead) => void;
   onAddRevision: () => void;
+  canEdit: boolean;
 }) {
   const { auth, saving, update, remove } = useRevisionUpdater(modelId, onModel);
+  const { data: availableTags = [] } = useTags();
 
   // Revision edit form — local to this tab.
   const [editingRevisionId, setEditingRevisionId] = useState<number | null>(null);
@@ -163,6 +169,16 @@ export function RevisionsTab({
       toast.error(error);
     } finally {
       setBatchBusy(false);
+    }
+  }
+
+  async function saveArtifactTags(file: FileRead, tags: string[]) {
+    try {
+      onModel(await replaceFileTags(modelId, file.id, tags));
+      toast.success(`Tags updated for ${file.original_filename}`);
+    } catch (error) {
+      toast.error(error);
+      throw error;
     }
   }
 
@@ -304,6 +320,16 @@ export function RevisionsTab({
                           ? ` · ${formatDuration(fileMeta.estimated_time_s)}`
                           : ""}
                       </p>
+                      <div className="mt-1.5">
+                        <EntityTagsDialog
+                          entityLabel={f.original_filename}
+                          tags={f.tags}
+                          availableTags={availableTags}
+                          canEdit={canEdit}
+                          help="Artifact tags make the owning Model discoverable without changing the Model’s direct tags."
+                          onSave={(tags) => saveArtifactTags(f, tags)}
+                        />
+                      </div>
                       {f.revision_notes && !isEditingRevision && (
                         <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
                           {f.revision_notes}

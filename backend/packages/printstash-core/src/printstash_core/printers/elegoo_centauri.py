@@ -16,6 +16,7 @@ from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     Capability,
     ElegooCentauriConfig,
+    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
@@ -43,6 +44,7 @@ ELEGOO_CENTAURI_CAPABILITIES = ProviderCapabilities(
         }
     ),
     support_level="beta",
+    accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
     support_notes=(
         "Centauri Carbon uses local SDCP; Carbon 2 uses local authenticated MQTT.",
         "Upload runs over plain HTTP, independent of the SDCP/MQTT control channel.",

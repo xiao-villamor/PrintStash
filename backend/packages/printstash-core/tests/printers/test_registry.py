@@ -28,6 +28,7 @@ from printstash_core.printers import (
     Capability,
     MoonrakerConfig,
     OctoPrintConfig,
+    PrintArtifactFormat,
     PrinterClient,
     PrinterConfig,
     ProviderCapabilities,
@@ -38,7 +39,10 @@ from printstash_core.printers import (
 
 from .test_contracts import CompleteClient
 
-CAPABILITIES = ProviderCapabilities(frozenset(Capability))
+CAPABILITIES = ProviderCapabilities(
+    frozenset(Capability),
+    accepted_print_formats=frozenset({PrintArtifactFormat.GCODE_TEXT}),
+)
 
 
 class FakeFactory:

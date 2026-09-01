@@ -25,6 +25,8 @@ import {
   starModel,
   unstarModel,
   updateFileRevision,
+  replaceFileTags,
+  replacePartOptions,
   updateModel,
 } from "@/lib/api/models";
 import { invalidateApiCache } from "@/lib/api/request";
@@ -131,6 +133,46 @@ describe("updateFileRevision", () => {
     await updateFileRevision(4, 9, { revision_status: "known_good" });
 
     expectRequest("/api/v1/models/4/files/9/revision", "PATCH");
+  });
+});
+
+describe("replaceFileTags", () => {
+  it("PUTs the complete direct artifact tag set", async () => {
+    respondWith({ id: 4, files: [] });
+
+    await replaceFileTags(4, 9, ["Painted"]);
+
+    expectRequest("/api/v1/models/4/files/9/tags", "PUT");
+    expect(lastBody()).toEqual({ tags: ["Painted"] });
+  });
+});
+
+describe("replacePartOptions", () => {
+  it("PUTs the complete part option set", async () => {
+    respondWith({ id: 4, files: [], part_groups: [] });
+
+    await replacePartOptions(4, [
+      {
+        name: "Handle",
+        options: [
+          { file_id: 9, name: "Short", is_default: true },
+          { file_id: 10, name: "Long" },
+        ],
+      },
+    ]);
+
+    expectRequest("/api/v1/models/4/part-options", "PUT");
+    expect(lastBody()).toEqual({
+      groups: [
+        {
+          name: "Handle",
+          options: [
+            { file_id: 9, name: "Short", is_default: true },
+            { file_id: 10, name: "Long" },
+          ],
+        },
+      ],
+    });
   });
 });
 

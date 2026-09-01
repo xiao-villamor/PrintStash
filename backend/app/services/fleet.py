@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
-from pathlib import Path
 
+from printstash_core.gcode import declared_print_artifact_format
+from printstash_core.printers import PrintArtifactFormat
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -72,6 +74,9 @@ class RoutingSnapshot:
     tools_by_printer: dict[int, tuple[PrinterTool, ...]]
     requirements_by_file: dict[int, tuple[ArtifactMaterialRequirement, ...]]
     nozzle_by_file: dict[int, float | None]
+    artifact_formats_by_file: dict[int, PrintArtifactFormat] = dataclass_field(
+        default_factory=dict
+    )
 
 
 def build_routing_snapshot(
@@ -138,7 +143,17 @@ def build_routing_snapshot(
             tools_by_printer.setdefault(row.printer_id, []).append(row)
     requirements_by_file: dict[int, list[ArtifactMaterialRequirement]] = {}
     nozzle_by_file: dict[int, float | None] = {}
+    artifact_formats_by_file: dict[int, PrintArtifactFormat] = {}
     if file_ids:
+        for file_id, filename in session.exec(
+            select(File.id, File.original_filename).where(
+                File.id.in_(file_ids),  # type: ignore[union-attr]
+                live(File),
+            )
+        ).all():
+            artifact_formats_by_file[int(file_id)] = declared_print_artifact_format(
+                filename
+            )
         for row in session.exec(
             select(ArtifactMaterialRequirement).where(
                 ArtifactMaterialRequirement.file_id.in_(file_ids)  # type: ignore[union-attr]
@@ -162,6 +177,7 @@ def build_routing_snapshot(
             key: tuple(value) for key, value in requirements_by_file.items()
         },
         nozzle_by_file=nozzle_by_file,
+        artifact_formats_by_file=artifact_formats_by_file,
     )
 
 
@@ -372,6 +388,31 @@ def _active_counts(session: Session) -> dict[int, int]:
     }
 
 
+def _artifact_format(
+    session: Session,
+    file_id: int | None,
+    snapshot: RoutingSnapshot | None,
+) -> PrintArtifactFormat | None:
+    if file_id is None:
+        return None
+    if snapshot is not None:
+        snapshotted = snapshot.artifact_formats_by_file.get(file_id)
+        if snapshotted is not None:
+            return snapshotted
+    artifact = session.get(File, file_id)
+    if artifact is None or artifact.deleted_at is not None:
+        return None
+    return declared_print_artifact_format(artifact.original_filename)
+
+
+def _accepts_artifact(
+    printer: Printer, artifact_format: PrintArtifactFormat | None
+) -> bool:
+    return artifact_format is None or capabilities_for_provider(
+        printer.provider
+    ).accepts_format(artifact_format)
+
+
 def choose_printer(
     session: Session,
     strategy: RoutingStrategy,
@@ -391,12 +432,15 @@ def choose_printer(
     )
     if target_group is not None:
         printers = [row for row in printers if row.group == target_group]
+    artifact_format = _artifact_format(session, file_id, snapshot)
     if strategy == RoutingStrategy.MANUAL:
         printer = next(
             (row for row in printers if row.id == requested_printer_id), None
         )
         if printer is None:
             raise FleetError("printer_not_found")
+        if not _accepts_artifact(printer, artifact_format):
+            raise FleetError("artifact_format_not_supported")
         rank = _compatibility_rank(printer, file_id, snapshot)
         if rank == 2 and compatibility_policy == CompatibilityPolicy.SAFE:
             return printer, "material_mismatch_confirmation_required"
@@ -408,6 +452,8 @@ def choose_printer(
         printer = next((row for row in printers if row.is_default), None)
         if printer is None:
             return None, "default_printer_missing"
+        if not _accepts_artifact(printer, artifact_format):
+            return None, "no_format_compatible_printer"
         if (
             _compatibility_rank(printer, file_id, snapshot) == 2
             and compatibility_policy == CompatibilityPolicy.SAFE
@@ -423,6 +469,9 @@ def choose_printer(
     eligible = [row for row in printers if _eligible(session, row, snapshot)]
     if not eligible:
         return None, "no_eligible_printer"
+    eligible = [row for row in eligible if _accepts_artifact(row, artifact_format)]
+    if not eligible:
+        return None, "no_format_compatible_printer"
     if compatibility_policy == CompatibilityPolicy.SAFE:
         eligible = [
             row for row in eligible if _compatibility_rank(row, file_id, snapshot) < 2
@@ -452,9 +501,6 @@ def enqueue_job(
         raise FleetError("file_not_found")
     if artifact.file_type != FileType.GCODE:
         raise FleetError("file_not_gcode")
-    if Path(artifact.original_filename).suffix.lower() == ".bgcode":
-        raise FleetError("binary_gcode_not_printable")
-
     snapshot = build_routing_snapshot(session, {int(artifact.id)})
     printer, blocked_reason = choose_printer(
         session,
@@ -523,9 +569,6 @@ def create_batch(
         raise FleetError("file_not_found")
     if artifact.file_type != FileType.GCODE:
         raise FleetError("file_not_gcode")
-    if Path(artifact.original_filename).suffix.lower() == ".bgcode":
-        raise FleetError("binary_gcode_not_printable")
-
     now = utcnow()
     batch = PrintBatch(
         file_id=int(artifact.id),

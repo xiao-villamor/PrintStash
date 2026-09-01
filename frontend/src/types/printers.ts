@@ -119,7 +119,10 @@ export interface PrinterCapabilities {
   support_level: "stable" | "beta" | string;
   support_notes: string[];
   unsupported_actions: string[];
+  accepted_print_formats: PrintArtifactFormat[];
 }
+
+export type PrintArtifactFormat = SharedPrintArtifactFormat;
 
 export interface PrinterDiagnosticCheck {
   name: string;
@@ -539,3 +542,4 @@ export interface MaintenanceLog {
   created_at: string;
   updated_at: string;
 }
+import type { SharedPrintArtifactFormat } from "@/generated/printer-contracts";

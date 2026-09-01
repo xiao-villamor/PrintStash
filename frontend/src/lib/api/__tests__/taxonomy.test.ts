@@ -26,6 +26,7 @@ import {
   listTags,
   moveCollection,
   renameCollection,
+  replaceCollectionTags,
   setCollectionReadme,
   updateCollectionPermission,
   uploadCollectionImage,
@@ -104,6 +105,15 @@ describe("collections", () => {
     // A separate call from the move: a rename re-computes every descendant's
     // path and a move must not pay for that.
     expect(lastBody()).toEqual({ name: "Renamed" });
+  });
+
+  it("replaces direct collection tags", async () => {
+    respondWith({ id: 1, tags: ["Workshop"] });
+
+    await replaceCollectionTags(1, ["Workshop"]);
+
+    expectRequest("/api/v1/collections/1/tags", "PUT");
+    expect(lastBody()).toEqual({ tags: ["Workshop"] });
   });
 });
 

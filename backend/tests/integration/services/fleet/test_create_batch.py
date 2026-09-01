@@ -144,16 +144,21 @@ class TestCreateBatch:
                 db_session, BatchCreate(file_id=int(artifact.id), quantity=1), operator
             )
 
-    def test_refuses_binary_gcode(
+    def test_blocks_binary_gcode_without_a_compatible_printer(
         self, db_session: Session, operator: User, artifact: File
     ) -> None:
         artifact.original_filename = "binary.bgcode"
         db_session.add(artifact)
         db_session.commit()
+        build_printer(
+            db_session,
+            name="Text-only batch printer",
+            moonraker_url="http://text-only-batch",
+            status=PrinterStatus.READY,
+        )
 
-        # `.bgcode` is a G-code file by type and unstreamable by every provider,
-        # so it passes the type check and fails at dispatch without this.
-        with pytest.raises(fleet.FleetError, match="binary_gcode_not_printable"):
-            fleet.create_batch(
-                db_session, BatchCreate(file_id=int(artifact.id), quantity=1), operator
-            )
+        _batch, jobs = fleet.create_batch(
+            db_session, BatchCreate(file_id=int(artifact.id), quantity=1), operator
+        )
+
+        assert [job.blocked_reason for job in jobs] == ["no_format_compatible_printer"]

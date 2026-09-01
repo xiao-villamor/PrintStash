@@ -13,10 +13,15 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
+- Part Groups currently describe interchangeable source Artifacts within one
+  Model. They do not encode assemblies, quantities, compatibility rules between
+  groups, or selectable G-code revisions. An incomplete group is hidden while
+  any of its source Artifacts is in trash and reappears after restore.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
-  status, upload/start, file inventory/deletion, and pause/resume/cancel are
-  implemented; Prusa Connect cloud, SLA printers, raw G-code controls, and
-  measured filament consumption are not.
+  status, streamed plain-text G-code and validated `.bgcode` upload/start, file
+  inventory/deletion, and pause/resume/cancel are implemented. BGCODE preview,
+  Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
+  consumption are not.
 - Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
   Carbon 2 have beta local status/control support and beta chunked HTTP
   upload, but no file inventory, deletion, or print-history import. Neptune

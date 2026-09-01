@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
+from printstash_core.printers import PrintArtifactFormat
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import (
@@ -45,6 +46,7 @@ class PrinterCapabilities(BaseModel):
     support_level: str = "stable"
     support_notes: list[str] = Field(default_factory=list)
     unsupported_actions: list[str] = Field(default_factory=list)
+    accepted_print_formats: list[PrintArtifactFormat] = Field(default_factory=list)
 
 
 class PrintJobIdentityRead(BaseModel):

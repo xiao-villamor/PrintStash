@@ -21,10 +21,12 @@ from app.core.time import utcnow
 from app.db.models import (
     ArtifactMaterialRequirement,
     Collection,
+    CollectionTagLink,
     Document,
     ExternalLibrary,
     ExternalLibraryTombstone,
     File,
+    FileTagLink,
     FileType,
     InboxItem,
     Metadata,
@@ -45,6 +47,7 @@ from app.db.models import (
 )
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
+from app.services import part_options
 from app.services.storage_backend import StorageTier, get_backend
 from app.services.storage_deletion import (
     enqueue_owned_key,
@@ -454,6 +457,8 @@ def hard_delete_file(
     # child left behind is a failed purge rather than a dangling id — and the two
     # rows the ownership ledger cares about are already gone by this point.
     session.exec(delete(PrinterFile).where(PrinterFile.file_id == file_id))
+    part_options.remove_file_from_groups(session, file_id)
+    session.exec(delete(FileTagLink).where(FileTagLink.file_id == file_id))
     session.exec(delete(PrintJob).where(PrintJob.file_id == file_id))
     session.exec(delete(Metadata).where(Metadata.file_id == file_id))
     session.exec(delete(PrintBatch).where(PrintBatch.file_id == file_id))
@@ -544,6 +549,11 @@ def hard_delete_collection(
                 resource_id=collection.id,
                 allow_unverified=confirm_storage_risk,
             )
+    session.exec(
+        delete(CollectionTagLink).where(
+            CollectionTagLink.collection_id == collection.id
+        )
+    )
     session.delete(collection)
 
 

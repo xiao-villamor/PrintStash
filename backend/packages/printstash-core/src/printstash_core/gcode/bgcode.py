@@ -51,7 +51,7 @@ def is_valid_container(path: Path) -> bool:
         file_size = path.stat().st_size
         with path.open("rb") as file:
             checksum_type = _parse_file_header(file)
-            if checksum_type is None:
+            if checksum_type not in {0, 1}:
                 return False
 
             saw_block = False
@@ -67,17 +67,21 @@ def is_valid_container(path: Path) -> bool:
                 block_type, compression, uncompressed_size = struct.unpack(
                     "<HHI", block_header
                 )
+                checksum = zlib.crc32(block_header)
                 if compression == _COMP_NONE:
                     data_len = uncompressed_size
                 else:
-                    compressed_size = file.read(4)
-                    if len(compressed_size) != 4:
+                    compressed_size_raw = file.read(4)
+                    if len(compressed_size_raw) != 4:
                         return False
-                    (data_len,) = struct.unpack("<I", compressed_size)
+                    checksum = zlib.crc32(compressed_size_raw, checksum)
+                    (data_len,) = struct.unpack("<I", compressed_size_raw)
 
                 param_len = _block_param_len(block_type)
-                if len(file.read(param_len)) != param_len:
+                params = file.read(param_len)
+                if len(params) != param_len:
                     return False
+                checksum = zlib.crc32(params, checksum)
                 checksum_len = 4 if checksum_type != 0 else 0
                 if file.tell() + data_len + checksum_len > file_size:
                     return False
@@ -90,6 +94,9 @@ def is_valid_container(path: Path) -> bool:
                     if data_len > _MAX_BLOCK_DATA or uncompressed_size > output_limit:
                         return False
                     data = file.read(data_len)
+                    if len(data) != data_len:
+                        return False
+                    checksum = zlib.crc32(data, checksum)
                     if compression not in {_COMP_NONE, _COMP_DEFLATE}:
                         return False
                     decoded = _decompress(
@@ -100,13 +107,36 @@ def is_valid_container(path: Path) -> bool:
                     if decoded is None or len(decoded) != uncompressed_size:
                         return False
                 else:
-                    file.seek(data_len, 1)
+                    if checksum_len:
+                        consumed_checksum = _consume_crc(file, data_len, checksum)
+                        if consumed_checksum is None:
+                            return False
+                        checksum = consumed_checksum
+                    else:
+                        file.seek(data_len, 1)
 
                 if checksum_len:
-                    file.seek(checksum_len, 1)
+                    checksum_raw = file.read(checksum_len)
+                    if len(checksum_raw) != checksum_len:
+                        return False
+                    (expected_checksum,) = struct.unpack("<I", checksum_raw)
+                    if expected_checksum != (checksum & 0xFFFFFFFF):
+                        return False
             return False
     except (OSError, struct.error, ValueError):
         return False
+
+
+def _consume_crc(file: BinaryIO, length: int, checksum: int) -> int | None:
+    """Read a block body in bounded chunks while extending its CRC32."""
+    remaining = length
+    while remaining:
+        chunk = file.read(min(remaining, 1024 * 1024))
+        if not chunk:
+            return None
+        checksum = zlib.crc32(chunk, checksum)
+        remaining -= len(chunk)
+    return checksum
 
 
 def _output_limit(block_type: int) -> int | None:

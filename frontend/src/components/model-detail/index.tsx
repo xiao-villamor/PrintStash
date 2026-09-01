@@ -408,12 +408,6 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
     () => sortedFiles.filter((f) => f.file_type !== "gcode"),
     [sortedFiles],
   );
-  // Binary G-code (.bgcode) is indexed for metadata but can't be printed by the
-  // Moonraker/Bambu providers, so it's excluded from the "send to printer" list.
-  const printableGcodeFiles = useMemo(
-    () => gcodeFiles.filter((f) => !f.original_filename.toLowerCase().endsWith(".bgcode")),
-    [gcodeFiles],
-  );
   const recommendedGcode = gcodeFiles.find((f) => f.is_recommended) ?? null;
   const latestFile =
     recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1] ?? sortedFiles[sortedFiles.length - 1];
@@ -909,10 +903,19 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                   printerFilesByFileId={printerFilesByFileId}
                   onModel={setModel}
                   onAddRevision={requestAddRevision}
+                  canEdit={canEditModel}
                 />
               )}
 
-              {activeTab === "files" && <FilesTab sourceFiles={sourceFiles} />}
+              {activeTab === "files" && (
+                <FilesTab
+                  modelId={model.id}
+                  sourceFiles={sourceFiles}
+                  partGroups={model.part_groups ?? []}
+                  canEdit={canEditModel}
+                  onModel={setModel}
+                />
+              )}
 
               {activeTab === "history" && canViewPrinters && (
                 <PrintHistorySection
@@ -926,9 +929,9 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
 
             {/* Klipper Sync Panel */}
             <div className="p-4 md:p-6 border-t border-outline-variant bg-surface-container-low shrink-0 space-y-3">
-              {printableGcodeFiles.length > 0 && canViewPrinters && (
+              {gcodeFiles.length > 0 && canViewPrinters && (
                 <SendToButtons
-                  gcodeFiles={printableGcodeFiles}
+                  gcodeFiles={gcodeFiles}
                   printerFiles={printerFiles}
                   open={sendOpen}
                   onOpenChange={setSendOpen}
