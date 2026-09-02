@@ -313,7 +313,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         name: editName.trim() || undefined,
         description: editDescription.trim() || undefined,
         source_url: editSourceUrl.trim() || null,
-        collection: editCollection || undefined,
+        collection: editCollection,
         tags: editTags.length ? editTags : undefined,
       });
       setModel(updated);

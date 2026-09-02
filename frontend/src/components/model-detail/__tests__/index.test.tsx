@@ -332,6 +332,26 @@ describe("ModelDetail", () => {
       );
     });
 
+    it("sends the root collection when the user chooses None", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json(aModel({ collection: null, collection_id: null })),
+        },
+      });
+      await openEdit(user);
+
+      await user.click(screen.getByRole("button", { name: "parts" }));
+      await user.click(screen.getByRole("option", { name: "None" }));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
+          collection: "",
+        }),
+      );
+    });
+
     it("carries the source URL the user typed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderDetail({

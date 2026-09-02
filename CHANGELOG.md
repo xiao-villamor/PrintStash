@@ -161,6 +161,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Selecting **None** while editing a Model now removes its Collection
+  assignment instead of leaving the Model in its previous Collection
+  ([#110](https://github.com/xiao-villamor/PrintStash/issues/110)).
 - PDF guides recover from browsers that cached the pdf.js worker before its
   production MIME type was corrected; module-worker responses now revalidate
   instead of preserving stale headers for a year.
