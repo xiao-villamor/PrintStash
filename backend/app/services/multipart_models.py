@@ -17,6 +17,7 @@ from app.db.models import (
     SENTINEL_MODEL_HASH,
     Collection,
     CollectionRole,
+    Document,
     File,
     FileType,
     Model,
@@ -26,6 +27,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.schemas.documents import DocumentListItem
 from app.schemas.multipart_models import (
     MultipartChoiceWrite,
     MultipartMemberRead,
@@ -50,6 +52,33 @@ def _collection_path(session: Session, collection_id: int | None) -> str | None:
         return None
     collection = session.get(Collection, collection_id)
     return collection.path if collection is not None else None
+
+
+def _guides(
+    session: Session, user: User, multipart_model_id: int
+) -> list[DocumentListItem]:
+    rows = session.exec(
+        select(Document)
+        .where(Document.multipart_model_id == multipart_model_id, live(Document))
+        .order_by(Document.updated_at.desc(), Document.id.desc())  # type: ignore[attr-defined]
+    ).all()
+    return [
+        DocumentListItem(
+            id=int(row.id),
+            name=row.name,
+            kind=row.kind,
+            collection=_collection_path(session, row.collection_id),
+            collection_id=row.collection_id,
+            multipart_model_id=row.multipart_model_id,
+            filename=row.filename,
+            effective_role=rbac.effective_collection_role(
+                session, user, row.collection_id
+            ),
+            updated_at=row.updated_at,
+        )
+        for row in rows
+        if row.id is not None
+    ]
 
 
 def _file_counts(
@@ -190,6 +219,7 @@ def _list_item(
         ),
         None,
     )
+    guides = _guides(session, user, int(aggregate.id))
     return MultipartModelListItem(
         id=int(aggregate.id),
         name=aggregate.name,
@@ -199,6 +229,7 @@ def _list_item(
         collection_id=aggregate.collection_id,
         part_count=len(parts),
         model_count=model_count,
+        guide_count=len(guides),
         cover_thumbnail_url=cover,
         effective_role=rbac.effective_collection_role(
             session, user, aggregate.collection_id
@@ -214,6 +245,7 @@ def read(session: Session, user: User, aggregate: MultipartModel) -> MultipartMo
         **item.model_dump(),
         created_at=aggregate.created_at,
         parts=parts,
+        guides=_guides(session, user, int(aggregate.id)),
     )
 
 

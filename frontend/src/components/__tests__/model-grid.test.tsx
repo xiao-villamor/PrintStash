@@ -335,17 +335,19 @@ describe("ModelBrowser", () => {
   });
 
   describe("the multipart models tab", () => {
-    it("shows only the multipart workspace chrome", async () => {
+    it("keeps the library sidebar stable in the multipart workspace", async () => {
       renderVault({ at: "/?v=multipart", models: [aModelListItem({ name: "Handle" })] });
 
-      expect(await screen.findByRole("heading", { name: "Multipart models" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Multipart sets" })).toBeInTheDocument();
       expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
       expect(screen.getByRole("tablist")).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Multipart models" })).toHaveAttribute(
+      expect(screen.getByRole("tab", { name: "Multipart sets" })).toHaveAttribute(
         "aria-selected",
         "true",
       );
-      expect(screen.getAllByRole("button", { name: "New multipart model" })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
+      expect(screen.getByText("Printer")).toBeInTheDocument();
+      expect(screen.getByText(/Model filters/i)).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Search existing models" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "All Models" })).not.toBeInTheDocument();
       expect(screen.queryByText(/models? total/)).not.toBeInTheDocument();

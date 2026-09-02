@@ -1551,13 +1551,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <FilterSidebar
           collections={collections}
-          models={isMultipartView ? [] : outlinerModels}
-          tags={isMultipartView ? [] : tags}
-          printers={isMultipartView ? [] : printers}
+          models={outlinerModels}
+          tags={tags}
+          printers={printers}
           selectedCollection={selectedCollection}
-          selectedTags={isMultipartView ? [] : selectedTags}
-          selectedPrinterId={isMultipartView ? null : selectedPrinterId}
-          selectedPrinterPresence={isMultipartView ? null : selectedPrinterPresence}
+          selectedTags={selectedTags}
+          selectedPrinterId={selectedPrinterId}
+          selectedPrinterPresence={selectedPrinterPresence}
           onCollectionChange={handleCollectionChange}
           onTagsChange={setSelectedTags}
           onPrinterChange={setSelectedPrinterId}
@@ -1566,27 +1566,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onMoveModel={handleMoveModel}
           onMoveCollection={handleMoveCollection}
           onDeleteCollection={handleDeleteCollection}
-          canViewPrinters={isMultipartView ? false : canViewPrinters}
+          canViewPrinters={canViewPrinters}
           loading={facetsLoading || facetQuery.isLoading}
           structuredFilters={
-            isMultipartView ? undefined : (
-              <StructuredFilters
-                facets={facetQuery.data}
-                loading={facetQuery.isLoading}
-                error={facetQuery.isError}
-                active={structured}
-                onChange={setStructuredFilter}
-                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                onDateChange={(key, value) => {
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (value) params.set(key, value);
-                  else params.delete(key);
-                  router.replace(params.size ? `/?${params}` : "/", { scroll: false });
-                }}
-                onClearAll={clearStructuredFilters}
-              />
-            )
+            <StructuredFilters
+              facets={facetQuery.data}
+              loading={facetQuery.isLoading}
+              error={facetQuery.isError}
+              active={structured}
+              onChange={setStructuredFilter}
+              uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
+              uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+              onDateChange={(key, value) => {
+                const params = new URLSearchParams(searchParams.toString());
+                if (value) params.set(key, value);
+                else params.delete(key);
+                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+              }}
+              onClearAll={clearStructuredFilters}
+            />
           }
         />
 

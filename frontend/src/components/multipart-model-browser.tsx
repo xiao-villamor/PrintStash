@@ -1,7 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Plus, Search, Boxes, Trash2, ChevronRight } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Boxes,
+  ChevronRight,
+  FileText,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -11,7 +21,13 @@ import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useI18n } from "@/lib/i18n";
 import { useMultipartModels } from "@/lib/queries";
-import { createMultipartModel, deleteMultipartModel, saveMultipartModel } from "@/lib/api";
+import {
+  createMultipartModel,
+  deleteDocument,
+  deleteMultipartModel,
+  saveMultipartModel,
+  uploadDocument,
+} from "@/lib/api";
 import { useMultipartModel, useMultipartModelCandidates } from "@/lib/queries";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useAuth } from "@/lib/auth-context";
@@ -178,6 +194,7 @@ export function MultipartModelBrowser({
   const { t } = useI18n();
   const { user } = useAuth();
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"updated" | "name" | "parts">("updated");
   const [createOpen, setCreateOpen] = useState(false);
   const collectionId = collections.find((item) => item.path === collection)?.id ?? null;
   const {
@@ -191,6 +208,12 @@ export function MultipartModelBrowser({
     limit: 100,
   });
   const canWrite = canCreate || !!user?.is_superuser;
+  const sortedItems = useMemo(() => {
+    const rows = [...items];
+    if (sort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
+    if (sort === "parts") return rows.sort((a, b) => b.part_count - a.part_count);
+    return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }, [items, sort]);
 
   return (
     <section className="flex-1 px-4 py-5 sm:px-6 sm:py-7">
@@ -199,7 +222,7 @@ export function MultipartModelBrowser({
         onClose={() => setCreateOpen(false)}
         collectionId={collectionId}
       />
-      <div className="mx-auto max-w-screen-2xl space-y-6">
+      <div className="w-full space-y-6">
         <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">
@@ -217,14 +240,33 @@ export function MultipartModelBrowser({
             <Plus className="h-4 w-4" /> {t("multipart.new")}
           </Button>
         </header>
-        <div className="flex max-w-xl items-center gap-2">
-          <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <Input
-            aria-label={t("multipart.searchModels")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("multipart.searchModels")}
-          />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex w-full max-w-xl items-center gap-2">
+            <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <Input
+              aria-label={t("multipart.searchModels")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t("multipart.searchModels")}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>{t("multipart.sort")}</span>
+            <select
+              value={sort}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (value === "updated" || value === "name" || value === "parts") {
+                  setSort(value);
+                }
+              }}
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="updated">{t("multipart.sortUpdated")}</option>
+              <option value="name">{t("multipart.sortName")}</option>
+              <option value="parts">{t("multipart.sortParts")}</option>
+            </select>
+          </label>
         </div>
         {error && (
           <p
@@ -235,9 +277,9 @@ export function MultipartModelBrowser({
           </p>
         )}
         {isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-busy="true">
+          <div className="space-y-3" aria-busy="true">
             {[1, 2, 3].map((item) => (
-              <Card key={item} className="h-64 animate-pulse bg-muted/40" />
+              <Card key={item} className="h-32 animate-pulse bg-muted/40" />
             ))}
           </div>
         ) : items.length === 0 ? (
@@ -251,17 +293,17 @@ export function MultipartModelBrowser({
             }
           />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {items.map((item) => (
+          <div className="space-y-3">
+            {sortedItems.map((item) => (
               <Link
                 key={item.id}
                 href={`/multipart-models/${item.id}`}
-                className="group overflow-hidden rounded-lg border border-border bg-card text-card-foreground transition-[border-color,transform] duration-press hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="group flex min-h-32 overflow-hidden rounded-lg border border-border bg-card text-card-foreground transition-[border-color,transform] duration-press hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <div className="h-44 border-b border-border bg-muted/40">
+                <div className="w-28 shrink-0 border-r border-border bg-muted/40 sm:w-40">
                   <Cover src={item.cover_thumbnail_url} alt="" />
                 </div>
-                <div className="space-y-2 p-4">
+                <div className="flex min-w-0 flex-1 flex-col justify-center space-y-2 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="min-w-0 break-words font-semibold">{item.name}</h3>
                     <ChevronRight
@@ -281,6 +323,13 @@ export function MultipartModelBrowser({
                       one={t("multipart.model")}
                       many={t("multipart.models")}
                     />
+                    {item.guide_count > 0 && (
+                      <>
+                        {" "}
+                        · {item.guide_count}{" "}
+                        {item.guide_count === 1 ? t("multipart.guide") : t("multipart.guides")}
+                      </>
+                    )}
                   </p>
                   {item.collection && (
                     <p className="truncate text-xs text-muted-foreground">{item.collection}</p>
@@ -449,6 +498,9 @@ function PartEditorRow({
   onRemoveModel,
   onRemovePart,
   onOpenPicker,
+  onMoveUp,
+  onMoveDown,
+  canMoveDown,
 }: {
   part: MultipartPartRead;
   index: number;
@@ -456,14 +508,21 @@ function PartEditorRow({
   onRemoveModel: (choiceId: number | undefined, modelId: number) => void;
   onRemovePart: () => void;
   onOpenPicker: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  canMoveDown: boolean;
 }) {
   const { t } = useI18n();
   return (
     <fieldset
-      className="space-y-3 rounded-lg border border-border bg-card p-4"
+      className="overflow-hidden rounded-lg border border-border bg-card"
       aria-labelledby={`multipart-part-${part.id}`}
     >
-      <div className="flex items-start gap-3">
+      <legend className="sr-only">{part.name}</legend>
+      <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-3">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          {index + 1}
+        </span>
         <div className="min-w-0 flex-1">
           <label
             htmlFor={`multipart-part-${part.id}`}
@@ -479,20 +538,52 @@ function PartEditorRow({
             className="mt-1"
           />
         </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={onRemovePart}
-          aria-label={`${t("multipart.removePart")}: ${index + 1}`}
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onMoveUp}
+            disabled={index === 0}
+            aria-label={`${t("multipart.moveUp")}: ${part.name}`}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            aria-label={`${t("multipart.moveDown")}: ${part.name}`}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRemovePart}
+            aria-label={`${t("multipart.removePart")}: ${index + 1}`}
+          >
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 pt-4">
+        <div>
+          <h3 className="text-sm font-semibold">
+            {part.models.length > 1 ? t("multipart.variants") : t("multipart.fixedModel")}
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            {part.models.length > 1 ? t("multipart.chooseOne") : t("multipart.fixedModelHelp")}
+          </p>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onOpenPicker}>
+          <Plus className="h-4 w-4" /> {t("multipart.addVariant")}
         </Button>
       </div>
-      {part.models.length > 1 && (
-        <p className="text-xs font-medium text-primary">{t("multipart.chooseOne")}</p>
-      )}
-      <div className="divide-y divide-border rounded-md border border-border">
+      <div className="mx-4 my-3 divide-y divide-border rounded-md border border-border">
         {part.models.map((model) => (
           <div
             key={model.choice_id ?? `${model.id}-${model.source_file_id ?? "new"}`}
@@ -510,11 +601,6 @@ function PartEditorRow({
             </Button>
           </div>
         ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onOpenPicker}>
-          <Plus className="h-4 w-4" /> {t("multipart.addAlternative")}
-        </Button>
       </div>
     </fieldset>
   );
@@ -537,6 +623,8 @@ export function MultipartModelDetailPage() {
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [guideBusy, setGuideBusy] = useState(false);
+  const guideInput = useRef<HTMLInputElement>(null);
   const model = draft ?? serverModel ?? null;
   const canEdit =
     !!user?.is_superuser || model?.effective_role === "edit" || model?.effective_role === "admin";
@@ -575,6 +663,50 @@ export function MultipartModelDetailPage() {
   function addAlternative(candidate: MultipartModelCandidate) {
     if (pickerPart === null) return;
     updatePart(pickerPart, (part) => ({ ...part, models: [...part.models, candidate] }));
+  }
+  function movePart(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (!model || target < 0 || target >= model.parts.length) return;
+    const parts = [...model.parts];
+    [parts[index], parts[target]] = [parts[target], parts[index]];
+    setDraft({
+      ...model,
+      parts: parts.map((part, sort_order) => ({ ...part, sort_order })),
+    });
+  }
+  async function uploadGuide(file: File) {
+    if (!model || !canEdit || guideBusy) return;
+    setGuideBusy(true);
+    setSaveError(null);
+    try {
+      const guide = await uploadDocument(file, model.collection_id, undefined, model.id);
+      setDraft({
+        ...model,
+        guides: [guide, ...model.guides],
+        guide_count: model.guide_count + 1,
+      });
+      toast.success(t("multipart.guideUploaded"));
+    } catch (cause) {
+      setSaveError(multipartError(cause, t, "multipart.guideUploadError"));
+    } finally {
+      setGuideBusy(false);
+    }
+  }
+  async function removeGuide(guideId: number) {
+    if (!model || !canEdit || guideBusy) return;
+    setGuideBusy(true);
+    try {
+      await deleteDocument(guideId);
+      setDraft({
+        ...model,
+        guides: model.guides.filter((guide) => guide.id !== guideId),
+        guide_count: Math.max(0, model.guide_count - 1),
+      });
+    } catch (cause) {
+      setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
+    } finally {
+      setGuideBusy(false);
+    }
   }
   async function save() {
     if (!model || !canEdit || busy) return;
@@ -632,7 +764,7 @@ export function MultipartModelDetailPage() {
       </PageContainer>
     );
   return (
-    <PageContainer width="prose">
+    <PageContainer>
       <ConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -655,7 +787,7 @@ export function MultipartModelDetailPage() {
       </nav>
       <PageHeader
         title={model.name}
-        description={t("multipart.linkedNotice")}
+        description={t("multipart.workspaceHelp")}
         actions={
           <Button
             type="button"
@@ -667,42 +799,12 @@ export function MultipartModelDetailPage() {
           </Button>
         }
       />
-      <div className="space-y-6">
-        <section className="space-y-3">
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{t("multipart.name")}</span>
-            <Input
-              value={model.name}
-              onChange={(event) => setDraft({ ...model, name: event.target.value })}
-              disabled={!canEdit}
-            />
-          </label>
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
-            <textarea
-              value={model.description ?? ""}
-              onChange={(event) => setDraft({ ...model, description: event.target.value })}
-              disabled={!canEdit}
-              rows={3}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            />
-          </label>
-        </section>
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <section className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold">
-                <Count
-                  count={model.parts.length}
-                  one={t("multipart.part")}
-                  many={t("multipart.parts")}
-                />
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                {model.parts.length === 0
-                  ? t("multipart.emptyDescription")
-                  : t("multipart.description")}
-              </p>
+              <h2 className="text-lg font-semibold">{t("multipart.partsHeading")}</h2>
+              <p className="mt-1 text-sm text-muted-foreground">{t("multipart.partsHelp")}</p>
             </div>
             <Button type="button" onClick={() => setPickerPart(-1)} disabled={!canEdit}>
               <Plus className="h-4 w-4" />{" "}
@@ -711,7 +813,8 @@ export function MultipartModelDetailPage() {
           </div>
           {model.parts.length === 0 && (
             <EmptyState
-              title={t("multipart.empty")}
+              title={t("multipart.noParts")}
+              description={t("multipart.noPartsHelp")}
               action={
                 canEdit ? (
                   <Button onClick={() => setPickerPart(-1)}>{t("multipart.addFirst")}</Button>
@@ -725,6 +828,9 @@ export function MultipartModelDetailPage() {
               part={part}
               index={index}
               onName={(name) => updatePart(index, (current) => ({ ...current, name }))}
+              onMoveUp={() => movePart(index, -1)}
+              onMoveDown={() => movePart(index, 1)}
+              canMoveDown={index < model.parts.length - 1}
               onRemovePart={() =>
                 setDraft({
                   ...model,
@@ -755,35 +861,123 @@ export function MultipartModelDetailPage() {
             />
           ))}
         </section>
-        {saveError && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {saveError}
-          </p>
-        )}
-        <div className="flex justify-end border-t border-border pt-4">
-          <Button
-            type="button"
-            onClick={() => void save()}
-            loading={busy}
-            disabled={!canEdit || !model.name.trim()}
-          >
-            {t("multipart.save")}
-          </Button>
-        </div>
-        <ModelPicker
-          open={pickerPart !== null}
-          onClose={() => setPickerPart(null)}
-          aggregateId={model.id}
-          usedIds={usedIds}
-          onSelect={(candidate) => {
-            if (pickerPart === -1) addPart(candidate);
-            else addAlternative(candidate);
-          }}
-        />
+        <aside className="space-y-4 xl:sticky xl:top-0">
+          <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <div>
+              <h2 className="font-semibold">{t("multipart.detailsHeading")}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">{t("multipart.linkedNotice")}</p>
+            </div>
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">{t("multipart.name")}</span>
+              <Input
+                value={model.name}
+                onChange={(event) => setDraft({ ...model, name: event.target.value })}
+                disabled={!canEdit}
+              />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
+              <textarea
+                value={model.description ?? ""}
+                onChange={(event) => setDraft({ ...model, description: event.target.value })}
+                disabled={!canEdit}
+                rows={3}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              />
+            </label>
+          </section>
+          <section className="space-y-3 rounded-lg border border-border bg-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">{t("multipart.guidesHeading")}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{t("multipart.guidesHelp")}</p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => guideInput.current?.click()}
+                disabled={!canEdit || guideBusy}
+                loading={guideBusy}
+              >
+                <Upload className="h-4 w-4" /> {t("multipart.uploadGuide")}
+              </Button>
+              <input
+                ref={guideInput}
+                type="file"
+                accept=".pdf,.md,.markdown,.txt,.png,.jpg,.jpeg,.gif,.webp"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void uploadGuide(file);
+                }}
+              />
+            </div>
+            {model.guides.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border p-5 text-center">
+                <FileText className="mx-auto h-6 w-6 text-muted-foreground" aria-hidden />
+                <p className="mt-2 text-sm font-medium">{t("multipart.noGuides")}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{t("multipart.guideFormats")}</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-border rounded-md border border-border">
+                {model.guides.map((guide) => (
+                  <li key={guide.id} className="flex items-center gap-3 p-3">
+                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                    <Link
+                      href={`/documents/${guide.id}`}
+                      className="min-w-0 flex-1 truncate text-sm font-medium hover:text-primary"
+                    >
+                      {guide.name}
+                    </Link>
+                    <span className="text-xs uppercase text-muted-foreground">{guide.kind}</span>
+                    {canEdit && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void removeGuide(guide.id)}
+                        aria-label={`${t("multipart.removeGuide")}: ${guide.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </aside>
       </div>
+      {saveError && (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          {saveError}
+        </p>
+      )}
+      <div className="sticky bottom-16 flex justify-end border-t border-border bg-background/95 py-3 md:bottom-0">
+        <Button
+          type="button"
+          onClick={() => void save()}
+          loading={busy}
+          disabled={!canEdit || !model.name.trim()}
+        >
+          {t("multipart.save")}
+        </Button>
+      </div>
+      <ModelPicker
+        open={pickerPart !== null}
+        onClose={() => setPickerPart(null)}
+        aggregateId={model.id}
+        usedIds={usedIds}
+        onSelect={(candidate) => {
+          if (pickerPart === -1) addPart(candidate);
+          else addAlternative(candidate);
+        }}
+      />
     </PageContainer>
   );
 }

@@ -33,6 +33,7 @@ function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
     kind: "markdown",
     collection: "parts",
     collection_id: 1,
+    multipart_model_id: null,
     filename: null,
     effective_role: "edit",
     updated_at: "2026-01-01T00:00:00Z",
@@ -200,6 +201,28 @@ describe("DocumentDetailPage", () => {
 
       expect(await screen.findByRole("button", { name: /Download/ })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Edit/ })).toBeNull();
+    });
+
+    it("previews an uploaded guide image", async () => {
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:guide-image");
+      renderDocument({
+        document: aDocument({
+          name: "Exploded view",
+          kind: "other",
+          filename: "exploded.png",
+          body: null,
+        }),
+        routes: {
+          "GET /api/v1/documents/3/file": new Response("png", {
+            headers: { "content-type": "image/png" },
+          }),
+        },
+      });
+
+      expect(await screen.findByRole("img", { name: "Exploded view" })).toHaveAttribute(
+        "src",
+        "blob:guide-image",
+      );
     });
   });
 

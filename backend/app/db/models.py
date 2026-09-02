@@ -1189,6 +1189,15 @@ class Document(SQLModel, table=True):
     collection_id: Optional[int] = Field(
         default=None, foreign_key="collections.id", index=True
     )
+    multipart_model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
 
     body: Optional[str] = Field(default=None, sa_column=Column(Text))  # markdown
     filename: Optional[str] = Field(default=None, max_length=255)  # binary

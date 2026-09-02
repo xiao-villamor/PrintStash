@@ -15,23 +15,26 @@ test.describe("multipart models", () => {
     await uploadModel(page, long, { mesh: true, gcode: true });
 
     await page.goto("/?v=multipart");
-    await page.getByRole("button", { name: "New multipart model" }).first().click();
+    await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill(group);
-    await page.getByRole("button", { name: "Create multipart model" }).click();
+    await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await page.getByRole("button", { name: "Add a part" }).first().click();
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
     await page.getByRole("button", { name: new RegExp(short) }).click();
-    await page
-      .locator("fieldset")
-      .nth(1)
-      .getByRole("button", { name: "Add an alternative" })
-      .click();
+    await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: new RegExp(long) }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Changes saved")).toBeVisible();
     await expect(page.getByText("Choose one").first()).toBeVisible();
+
+    await page.locator('input[type="file"][accept*=".pdf"]').setInputFiles({
+      name: "assembly.md",
+      mimeType: "text/markdown",
+      buffer: Buffer.from("# Assembly\n\nFit the base before the handle."),
+    });
+    await expect(page.getByRole("link", { name: "assembly" })).toBeVisible();
 
     await page.goto("/?v=multipart");
     await page.getByRole("tab", { name: "Models", exact: true }).click();
@@ -48,9 +51,9 @@ test.describe("multipart models", () => {
     await expect(page.getByText("Recommended", { exact: true }).first()).toBeVisible();
 
     await page.goto(aggregateUrl);
-    await page.getByRole("button", { name: "Delete multipart model" }).click();
+    await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
-    await page.getByRole("button", { name: "Delete grouping" }).click();
+    await page.getByRole("button", { name: "Delete set" }).click();
     await expect(page).toHaveURL(/\?v=multipart/);
     await page.getByRole("tab", { name: "Models", exact: true }).click();
     await expect(modelCard(page, base)).toBeVisible();

@@ -34,11 +34,19 @@ by any number of Multipart Models and keeps its own Artifacts, preview, G-code
 Revisions and print history.
 _Avoid_: Part Option, source file option, revision
 
+**Multipart Guide**:
+A Document linked to one Multipart Model for assembly or printing guidance.
+Guides may be Markdown, PDF or raster images, remain visible in Documents, and
+survive deletion of the grouping as ordinary Documents.
+_Avoid_: Model file, Artifact, attachment
+
 Multipart Models are created and edited from their own Vault view. Adding a
 piece or alternative references an existing Model; it never transfers or
 duplicates that Model's files. Removing a piece or deleting the grouping only
 removes the reference, leaving the Model and all of its Artifacts and
-Revisions available in the main Models view.
+Revisions available in the main Models view. Multipart Parts have an explicit
+order; every part is required, while its Model Choices are alternatives where
+exactly one is selected for a build.
 
 **Artifact persistence**:
 The invariant-heavy sequence `version → canonical publication → File row +

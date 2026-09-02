@@ -773,6 +773,17 @@
             "title": "File",
             "type": "string"
           },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
           "name": {
             "anyOf": [
               {
@@ -1910,6 +1921,17 @@
             ],
             "title": "Collection Id"
           },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
           "name": {
             "maxLength": 255,
             "minLength": 1,
@@ -1997,6 +2019,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -2078,6 +2111,17 @@
           },
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
+          },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
           },
           "name": {
             "title": "Name",
@@ -6792,6 +6836,11 @@
               }
             ]
           },
+          "guide_count": {
+            "default": 0,
+            "title": "Guide Count",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "integer"
@@ -6889,6 +6938,18 @@
                 "type": "null"
               }
             ]
+          },
+          "guide_count": {
+            "default": 0,
+            "title": "Guide Count",
+            "type": "integer"
+          },
+          "guides": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentListItem"
+            },
+            "title": "Guides",
+            "type": "array"
           },
           "id": {
             "title": "Id",

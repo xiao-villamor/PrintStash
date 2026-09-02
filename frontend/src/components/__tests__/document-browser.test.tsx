@@ -34,6 +34,7 @@ function aDocument(over: Partial<DocumentListItem> = {}): DocumentListItem {
     kind: "markdown",
     collection: "parts",
     collection_id: 1,
+    multipart_model_id: null,
     filename: null,
     effective_role: "admin",
     updated_at: FROZEN_NOW,

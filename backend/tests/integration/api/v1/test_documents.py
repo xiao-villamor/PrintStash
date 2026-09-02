@@ -31,6 +31,7 @@ from app.services.storage_backend import get_backend
 from tests._env import use_local_storage
 from tests.factories import (
     bearer,
+    build_multipart_model,
     build_user,
     grant_collection_role,
     store_owned_bytes,
@@ -244,6 +245,65 @@ class TestCreateDocument:
 
 
 class TestUploadDocument:
+    def test_linked_guide_inherits_its_multipart_models_collection(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        collection = taxonomy.resolve_or_create_collection(db_session, "Projects")
+        aggregate = build_multipart_model(db_session, "Lamp", collection=collection)
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            data={"multipart_model_id": str(aggregate.id)},
+            files={"file": ("assembly.md", b"# Assembly", "text/markdown")},
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["collection_id"] == collection.id
+        assert response.json()["multipart_model_id"] == aggregate.id
+        detail = client.get(
+            f"/api/v1/multipart-models/{aggregate.id}", headers=admin_headers
+        ).json()
+        assert detail["guide_count"] == 1
+        assert [guide["name"] for guide in detail["guides"]] == ["assembly"]
+
+    def test_requires_edit_access_to_add_a_multipart_guide(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        collection = taxonomy.resolve_or_create_collection(db_session, "Shared")
+        aggregate = build_multipart_model(db_session, "Lamp", collection=collection)
+        viewer = build_user(db_session, "guide-viewer")
+        _grant(db_session, viewer, collection.id, CollectionRole.VIEW)
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            data={"multipart_model_id": str(aggregate.id)},
+            files={"file": ("assembly.pdf", PDF_BYTES, "application/pdf")},
+            headers=bearer(viewer),
+        )
+
+        assert response.status_code == 403
+
+    def test_rejects_a_collection_that_differs_from_the_multipart_model(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        project = taxonomy.resolve_or_create_collection(db_session, "Project")
+        other = taxonomy.resolve_or_create_collection(db_session, "Other")
+        aggregate = build_multipart_model(db_session, "Lamp", collection=project)
+
+        response = client.post(
+            "/api/v1/documents/upload",
+            data={
+                "multipart_model_id": str(aggregate.id),
+                "collection_id": str(other.id),
+            },
+            files={"file": ("assembly.pdf", PDF_BYTES, "application/pdf")},
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "multipart_guide_collection_mismatch"
+
     def test_returns_the_uploaded_document(
         self, client: TestClient, uploaded_pdf
     ) -> None:
@@ -333,6 +393,7 @@ class TestUploadDocument:
                 file=oversized,
                 name=None,
                 collection_id=None,
+                multipart_model_id=None,
                 current_user=admin,
                 session=db_session,
             )
@@ -355,6 +416,7 @@ class TestUploadDocument:
                 file=oversized,
                 name=None,
                 collection_id=None,
+                multipart_model_id=None,
                 current_user=admin,
                 session=db_session,
             )
@@ -378,6 +440,7 @@ class TestUploadDocument:
                 file=oversized,
                 name=None,
                 collection_id=None,
+                multipart_model_id=None,
                 current_user=admin,
                 session=db_session,
             )
@@ -833,6 +896,25 @@ class TestPermanentlyDeleteDocument:
 
 
 class TestGetDocumentFile:
+    def test_serves_an_uploaded_guide_image_with_its_image_type(
+        self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
+    ) -> None:
+        aggregate = build_multipart_model(db_session, "Lamp")
+        uploaded = client.post(
+            "/api/v1/documents/upload",
+            data={"multipart_model_id": str(aggregate.id)},
+            files={"file": ("diagram.png", _PNG, "image/png")},
+            headers=admin_headers,
+        ).json()
+
+        response = client.get(
+            f"/api/v1/documents/{uploaded['id']}/file", headers=admin_headers
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert response.content == _PNG
+
     def test_serves_the_stored_blob(
         self, client: TestClient, admin_headers: dict[str, str], uploaded_pdf
     ) -> None:

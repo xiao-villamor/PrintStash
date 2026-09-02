@@ -57,6 +57,7 @@ export default function DocumentDetailPage() {
       kind: "markdown",
       collection: collectionParam,
       collection_id: collectionId,
+      multipart_model_id: null,
       filename: null,
       effective_role: "edit",
       updated_at: "",
@@ -71,7 +72,7 @@ export default function DocumentDetailPage() {
   const [modeChoice, setModeChoice] = useState<ViewMode | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [binaryUrl, setBinaryUrl] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Tagging the fetch results with their document id makes every derived value
@@ -123,23 +124,26 @@ export default function DocumentDetailPage() {
     };
   }, [docId, isNew, invalidId]);
 
-  // Fetch the PDF blob for inline viewing (auth header can't ride a raw iframe src).
+  const isImage = !!doc?.filename && /\.(png|jpe?g|gif|webp)$/i.test(doc.filename);
+
+  // Fetch protected previews as blobs because an ordinary image/iframe URL
+  // cannot carry the API authorization header.
   useEffect(() => {
-    if (!doc || doc.kind !== "pdf") return;
+    if (!doc || (doc.kind !== "pdf" && !isImage)) return;
     let alive = true;
     let url: string | null = null;
     getAuthenticatedBlob(`/api/v1/documents/${doc.id}/file`)
       .then((blob) => {
         if (!alive) return;
         url = URL.createObjectURL(blob);
-        setPdfUrl(url);
+        setBinaryUrl(url);
       })
       .catch(() => alive && toast.error("Could not load PDF"));
     return () => {
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [doc]);
+  }, [doc, isImage]);
 
   function insertAtCursor(text: string) {
     const el = textareaRef.current;
@@ -324,7 +328,7 @@ export default function DocumentDetailPage() {
 
           {/* PDF: themed inline viewer (pdf.js) */}
           {doc.kind === "pdf" &&
-            (pdfUrl ? (
+            (binaryUrl ? (
               <Suspense
                 fallback={
                   <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -332,7 +336,7 @@ export default function DocumentDetailPage() {
                   </div>
                 }
               >
-                <PdfViewer file={pdfUrl} />
+                <PdfViewer file={binaryUrl} />
               </Suspense>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -340,8 +344,16 @@ export default function DocumentDetailPage() {
               </div>
             ))}
 
+          {doc.kind === "other" && isImage && binaryUrl && (
+            <img
+              src={binaryUrl}
+              alt={doc.name}
+              className="mx-auto max-h-full max-w-full rounded-lg border border-border object-contain"
+            />
+          )}
+
           {/* Other binary: download only */}
-          {doc.kind === "other" && (
+          {doc.kind === "other" && !isImage && (
             <p className="text-sm text-muted-foreground">
               {doc.filename ?? "File"} — use Download to open it.
             </p>

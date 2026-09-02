@@ -61,11 +61,13 @@ test.describe("multipart models", () => {
       collection_id: null,
       part_count: 0,
       model_count: 0,
+      guide_count: 0,
       cover_thumbnail_url: null,
       effective_role: "admin",
       created_at: "2026-06-04T00:24:22.000000",
       updated_at: "2026-06-04T00:24:22.000000",
       parts: [],
+      guides: [],
     };
 
     await page.route("**/api/v1/multipart-models**", async (route) => {
@@ -130,22 +132,18 @@ test.describe("multipart models", () => {
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
-    await page.getByRole("tab", { name: "Multipart models" }).click();
-    await page.getByRole("button", { name: "New multipart model" }).first().click();
+    await page.getByRole("tab", { name: "Multipart sets" }).click();
+    await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
-    await page.getByRole("button", { name: "Create multipart model" }).click();
+    await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
     await page.getByRole("button", { name: "Add a part" }).first().click();
     await page.getByRole("button", { name: /Desk base/ }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
     await page.getByRole("button", { name: /Short handle/ }).click();
-    await page
-      .locator("fieldset")
-      .nth(1)
-      .getByRole("button", { name: "Add an alternative" })
-      .click();
+    await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: /Long handle/ }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
 
@@ -157,15 +155,15 @@ test.describe("multipart models", () => {
       ],
     });
     await expect(page.getByText("Choose one").first()).toBeVisible();
-
     await page.goto("/?v=multipart");
+    await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
     await page.getByRole("tab", { name: "Models", exact: true }).click();
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 
     await page.goto("/multipart-models/90");
-    await page.getByRole("button", { name: "Delete multipart model" }).click();
+    await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
-    await page.getByRole("button", { name: "Delete grouping" }).click();
+    await page.getByRole("button", { name: "Delete set" }).click();
     await expect(page).toHaveURL(/\?v=multipart/);
     await page.getByRole("tab", { name: "Models", exact: true }).click();
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();

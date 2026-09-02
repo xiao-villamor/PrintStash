@@ -14,6 +14,7 @@ class DocumentListItem(BaseModel):
     kind: DocumentKind
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    multipart_model_id: Optional[int] = None
     filename: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime
@@ -30,6 +31,7 @@ class DocumentCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     collection_id: Optional[int] = None
+    multipart_model_id: Optional[int] = None
     body: Optional[str] = Field(default=None, max_length=1_000_000)
 
 

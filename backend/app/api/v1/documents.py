@@ -34,7 +34,14 @@ from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
-from app.db.models import Collection, CollectionRole, Document, DocumentKind, User
+from app.db.models import (
+    Collection,
+    CollectionRole,
+    Document,
+    DocumentKind,
+    MultipartModel,
+    User,
+)
 from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.schemas.documents import (
@@ -44,7 +51,7 @@ from app.schemas.documents import (
     DocumentRead,
     DocumentUpdate,
 )
-from app.services import rbac
+from app.services import multipart_models, rbac
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_deletion import process_storage_delete_intents
 from app.services.storage_ownership import (
@@ -71,7 +78,7 @@ _IMAGE_TYPES = {
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 
 _MARKDOWN_EXTS = {".md", ".markdown", ".txt"}
-_BINARY_TYPES = {".pdf": "application/pdf"}
+_BINARY_TYPES = {".pdf": "application/pdf", **_IMAGE_TYPES}
 
 
 def _kind_for(ext: str) -> DocumentKind:
@@ -103,6 +110,7 @@ def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
         kind=doc.kind,
         collection=_collection_path(session, doc.collection_id),
         collection_id=doc.collection_id,
+        multipart_model_id=doc.multipart_model_id,
         filename=doc.filename,
         effective_role=rbac.effective_collection_role(session, user, doc.collection_id),
         updated_at=doc.updated_at,
@@ -132,6 +140,25 @@ def _require_collection_edit(
     if collection_id is not None:
         get_or_404(session, Collection, collection_id, "collection_not_found")
     rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
+
+
+def _guide_collection(
+    session: Session,
+    user: User,
+    multipart_model_id: int | None,
+    collection_id: int | None,
+) -> tuple[int | None, MultipartModel | None]:
+    if multipart_model_id is None:
+        _require_collection_edit(session, user, collection_id)
+        return collection_id, None
+    aggregate = multipart_models.require(
+        session, user, multipart_model_id, CollectionRole.EDIT
+    )
+    if collection_id is not None and collection_id != aggregate.collection_id:
+        raise HTTPException(
+            status_code=400, detail="multipart_guide_collection_mismatch"
+        )
+    return aggregate.collection_id, aggregate
 
 
 @router.get("", response_model=List[DocumentListItem], summary="List documents")
@@ -185,11 +212,17 @@ def create_document(
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_collection_edit(session, current_user, payload.collection_id)
+    collection_id, _aggregate = _guide_collection(
+        session,
+        current_user,
+        payload.multipart_model_id,
+        payload.collection_id,
+    )
     doc = Document(
         name=payload.name.strip(),
         kind=DocumentKind.MARKDOWN,
-        collection_id=payload.collection_id,
+        collection_id=collection_id,
+        multipart_model_id=payload.multipart_model_id,
         body=payload.body or "",
         created_by=current_user.id,
         updated_by=current_user.id,
@@ -287,11 +320,14 @@ async def upload_document(
     file: UploadFile = FileParam(...),
     name: Optional[str] = Form(None),
     collection_id: Optional[int] = Form(None),
+    multipart_model_id: Optional[int] = Form(None),
     current_user: User = Depends(require_user),
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_collection_edit(session, current_user, collection_id)
+    collection_id, aggregate = _guide_collection(
+        session, current_user, multipart_model_id, collection_id
+    )
     raw = file.filename or "document"
     ext = ("." + raw.rsplit(".", 1)[-1].lower()) if "." in raw else ""
     kind = _kind_for(ext)
@@ -304,6 +340,7 @@ async def upload_document(
         name=display,
         kind=kind,
         collection_id=collection_id,
+        multipart_model_id=multipart_model_id,
         created_by=current_user.id,
         updated_by=current_user.id,
     )
@@ -317,6 +354,11 @@ async def upload_document(
         session.add(doc)
         session.commit()
         session.refresh(doc)
+        if aggregate is not None:
+            aggregate.updated_at = utcnow()
+            aggregate.updated_by = current_user.id
+            session.add(aggregate)
+            session.commit()
         return _read(session, current_user, doc)
 
     # Binary docs need their row id in the storage key. Persist that small,
@@ -345,6 +387,10 @@ async def upload_document(
         doc.filename = safe
         doc.size_bytes = receipt.size
         session.add(doc)
+        if aggregate is not None:
+            aggregate.updated_at = utcnow()
+            aggregate.updated_by = current_user.id
+            session.add(aggregate)
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()

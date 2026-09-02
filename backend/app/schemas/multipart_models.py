@@ -8,6 +8,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import CollectionRole
+from app.schemas.documents import DocumentListItem
 
 
 class MultipartModelListItem(BaseModel):
@@ -19,6 +20,7 @@ class MultipartModelListItem(BaseModel):
     collection_id: Optional[int] = None
     part_count: int = 0
     model_count: int = 0
+    guide_count: int = 0
     cover_thumbnail_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime
@@ -64,6 +66,7 @@ class MultipartPartRead(BaseModel):
 class MultipartModelRead(MultipartModelListItem):
     created_at: datetime
     parts: list[MultipartPartRead] = Field(default_factory=list)
+    guides: list[DocumentListItem] = Field(default_factory=list)
 
 
 class MultipartPartWrite(BaseModel):

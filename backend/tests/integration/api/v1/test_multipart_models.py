@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import CollectionRole, File, FileType, MultipartModelChoice
+from app.db.models import CollectionRole, Document, File, FileType, MultipartModelChoice
 from app.services import multipart_models
 
 
@@ -1012,3 +1012,34 @@ class TestMultipartModels:
             item["id"]
             for item in client.get("/api/v1/models", headers=auth_headers).json()
         }
+
+    def test_delete_preserves_guides_as_detached_documents(
+        self, client, auth_headers, db_session
+    ) -> None:
+        aggregate_id = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Documented grouping"},
+        ).json()["id"]
+        guide = client.post(
+            "/api/v1/documents/upload",
+            data={"multipart_model_id": str(aggregate_id)},
+            files={"file": ("assembly.md", b"# Assembly", "text/markdown")},
+            headers=auth_headers,
+        ).json()
+
+        response = client.delete(
+            f"/api/v1/multipart-models/{aggregate_id}", headers=auth_headers
+        )
+
+        assert response.status_code == 204
+        db_session.expire_all()
+        preserved = db_session.get(Document, guide["id"])
+        assert preserved is not None
+        assert preserved.multipart_model_id is None
+        assert (
+            client.get(
+                f"/api/v1/documents/{guide['id']}", headers=auth_headers
+            ).status_code
+            == 200
+        )

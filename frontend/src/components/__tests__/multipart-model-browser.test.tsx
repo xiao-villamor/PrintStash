@@ -23,11 +23,13 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     collection_id: null,
     part_count: 0,
     model_count: 0,
+    guide_count: 0,
     cover_thumbnail_url: null,
     effective_role: "admin",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     parts: [],
+    guides: [],
     ...over,
   };
 }
@@ -75,6 +77,7 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     collection_id: 3,
     part_count: 2,
     model_count: 3,
+    guide_count: 0,
     cover_thumbnail_url: null,
     effective_role: "admin",
     updated_at: "2026-01-01T00:00:00Z",
@@ -100,11 +103,12 @@ function LocationProbe() {
 
 describe("MultipartModelBrowser", () => {
   it("lists grouping counts", async () => {
-    renderBrowser();
+    renderBrowser([aListItem({ guide_count: 2 })]);
 
     expect(await screen.findByRole("link", { name: /Desk organiser/ })).toBeVisible();
     expect(screen.getByText("2 parts")).toBeVisible();
     expect(screen.getByText("3 models")).toBeVisible();
+    expect(screen.getByText(/2 guides/)).toBeVisible();
   });
 
   it("requests the typed search filter", async () => {
@@ -119,11 +123,29 @@ describe("MultipartModelBrowser", () => {
     });
   });
 
+  it("sorts sets by name", async () => {
+    const user = userEvent.setup();
+    renderBrowser([
+      aListItem({ id: 8, name: "Zebra stand" }),
+      aListItem({ id: 9, name: "Adapter kit" }),
+    ]);
+
+    await screen.findByRole("link", { name: /Zebra stand/ });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Sort" }), "name");
+
+    expect(
+      screen
+        .getAllByRole("link")
+        .filter((link) => link.getAttribute("href")?.startsWith("/multipart-models/"))
+        .map((link) => link.textContent),
+    ).toEqual([expect.stringContaining("Adapter kit"), expect.stringContaining("Zebra stand")]);
+  });
+
   it("shows the empty list action", async () => {
     renderBrowser([]);
 
     expect(await screen.findByText("No multipart models yet")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "New multipart model" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "New multipart set" })).toHaveLength(2);
   });
 
   it("surfaces a list request error", async () => {
@@ -182,9 +204,9 @@ describe("MultipartModelBrowser", () => {
     const user = userEvent.setup();
     renderBrowser([]);
 
-    await user.click(screen.getAllByRole("button", { name: "New multipart model" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
 
-    expect(screen.getByRole("button", { name: "Create multipart model" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create multipart set" })).toBeDisabled();
   });
 
   it("creates a grouping then opens its editor", async () => {
@@ -203,10 +225,10 @@ describe("MultipartModelBrowser", () => {
       },
     );
 
-    await user.click(screen.getAllByRole("button", { name: "New multipart model" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
     await user.type(screen.getByRole("textbox", { name: "Name" }), "New organiser");
     await user.type(screen.getByRole("textbox", { name: "Description" }), "Desk accessories");
-    await user.click(screen.getByRole("button", { name: "Create multipart model" }));
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
 
     await waitFor(() => {
       expect(requests().some((request) => request.url.endsWith("/api/v1/multipart-models"))).toBe(
@@ -231,10 +253,10 @@ describe("MultipartModelBrowser", () => {
       },
     });
 
-    await user.click(screen.getAllByRole("button", { name: "New multipart model" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
     const name = screen.getByRole("textbox", { name: "Name" });
     await user.type(name, "My organiser");
-    await user.click(screen.getByRole("button", { name: "Create multipart model" }));
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Couldn't create this multipart model. Check the name and try again.",
@@ -244,6 +266,98 @@ describe("MultipartModelBrowser", () => {
 });
 
 describe("MultipartModelDetailPage", () => {
+  it("persists the reordered pieces", async () => {
+    const user = userEvent.setup();
+    const detail = aMultipart({
+      part_count: 2,
+      model_count: 2,
+      parts: [
+        { id: 1, name: "Base", sort_order: 0, models: [model] },
+        { id: 2, name: "Lid", sort_order: 1, models: [alternative] },
+      ],
+    });
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json(detail),
+      },
+    });
+
+    await screen.findByDisplayValue("Lid");
+    await user.click(screen.getByRole("button", { name: "Move piece up: Lid" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
+    expect(
+      JSON.parse(requestsWithMethod("PUT")[0].body).parts.map(
+        (part: { name: string }) => part.name,
+      ),
+    ).toEqual(["Lid", "Base"]);
+  });
+
+  it("uploads a guide into the multipart set", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(aMultipart()),
+        "POST /api/v1/documents/upload": json({
+          id: 44,
+          name: "Assembly",
+          kind: "pdf",
+          collection: null,
+          collection_id: null,
+          multipart_model_id: 7,
+          filename: "assembly.pdf",
+          effective_role: "admin",
+          updated_at: "2026-01-02T00:00:00Z",
+          body: null,
+        }),
+      },
+    });
+
+    await screen.findByText("No guides yet");
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File(["pdf"], "assembly.pdf", { type: "application/pdf" }));
+
+    expect(await screen.findByRole("link", { name: "Assembly" })).toHaveAttribute(
+      "href",
+      "/documents/44",
+    );
+  });
+
+  it("removes a guide from the set", async () => {
+    const user = userEvent.setup();
+    const guide = {
+      id: 44,
+      name: "Assembly",
+      kind: "pdf" as const,
+      collection: null,
+      collection_id: null,
+      multipart_model_id: 7,
+      filename: "assembly.pdf",
+      effective_role: "admin" as const,
+      updated_at: "2026-01-02T00:00:00Z",
+    };
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(aMultipart({ guide_count: 1, guides: [guide] })),
+        "DELETE /api/v1/documents/44": new Response(null, { status: 204 }),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Remove guide: Assembly" }));
+
+    await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(1));
+    expect(screen.queryByRole("link", { name: "Assembly" })).not.toBeInTheDocument();
+  });
+
   it("shows an empty editor with a first-part action", async () => {
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -292,7 +406,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    await screen.findByText("No multipart models yet");
+    await screen.findByText("No pieces added yet");
     await user.click(screen.getAllByRole("button", { name: /Add (the first part|a part)/i })[0]);
     await user.click(await screen.findByRole("button", { name: /Desk base/ }));
 
@@ -318,7 +432,7 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await screen.findByDisplayValue("Base");
-    await user.click(screen.getByRole("button", { name: /Add an alternative|Add alternative/ }));
+    await user.click(screen.getByRole("button", { name: "Add variant" }));
     const options = await screen.findAllByRole("listitem");
     expect(options[0].querySelector("button")).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /Desk base compact/ }));
@@ -365,7 +479,7 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await screen.findByRole("heading", { name: "Desk organiser" });
-    await user.click(screen.getByRole("button", { name: "Delete multipart model" }));
+    await user.click(screen.getByRole("button", { name: "Delete multipart set" }));
     expect(screen.getByText(/Models, files and revisions stay in your library/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -513,7 +627,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    await screen.findByText("No multipart models yet");
+    await screen.findByText("No pieces added yet");
     await user.click(screen.getAllByRole("button", { name: /Add (the first part|a part)/i })[0]);
     const picker = await screen.findByRole("list", { name: "Choose an existing model" });
     expect(picker).toBeVisible();

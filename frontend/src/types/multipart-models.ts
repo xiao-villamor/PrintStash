@@ -1,4 +1,5 @@
 import type { CollectionRole } from "./models";
+import type { DocumentListItem } from "./documents";
 
 export interface MultipartModelReference {
   id: number;
@@ -25,6 +26,7 @@ export interface MultipartModelListItem {
   collection_id: number | null;
   part_count: number;
   model_count: number;
+  guide_count: number;
   cover_thumbnail_url: string | null;
   effective_role: CollectionRole | null;
   updated_at: string;
@@ -40,6 +42,7 @@ export interface MultipartPartRead {
 export interface MultipartModelRead extends MultipartModelListItem {
   created_at: string;
   parts: MultipartPartRead[];
+  guides: DocumentListItem[];
 }
 
 export interface MultipartModelCreate {
