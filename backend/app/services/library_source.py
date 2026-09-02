@@ -347,7 +347,7 @@ def source_from_connection(
 ) -> LibrarySource:
     if not connection.enabled:
         raise LibrarySourceError("storage_connection_disabled")
-    if connection.purpose != StorageConnectionPurpose.LIBRARY:
+    if not connection.purpose.allows(StorageConnectionPurpose.LIBRARY):
         raise LibrarySourceError("storage_connection_not_library")
     if connection.kind == LibrarySourceKind.MOUNTED:
         raise LibrarySourceError("storage_connection_kind_invalid")

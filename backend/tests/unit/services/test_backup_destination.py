@@ -145,6 +145,33 @@ def test_destination_identity_is_bound_to_the_saved_profile(
     assert len(first.provider_ref) == 64
 
 
+def test_shared_connection_is_accepted_as_a_backup_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        backup_destination,
+        "OpenDALStorageBackend",
+        lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
+    )
+    monkeypatch.setattr(
+        backup_destination,
+        "provider_ref_for_backend",
+        lambda _backend, *, namespace: f"transport:{namespace}",
+    )
+    connection = StorageConnection(
+        id=9,
+        name="Shared Drive",
+        kind=LibrarySourceKind.GDRIVE,
+        purpose=StorageConnectionPurpose.BOTH,
+        config_json=json.dumps({"client_id": "client", "root": "PrintStash"}),
+        secret_json=json.dumps({"client_secret": "secret", "refresh_token": "refresh"}),
+    )
+
+    destination = backup_destination.destination_from_connection(connection)
+
+    assert destination.connection_id == 9
+
+
 def test_one_invalid_profile_does_not_hide_other_backup_destinations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

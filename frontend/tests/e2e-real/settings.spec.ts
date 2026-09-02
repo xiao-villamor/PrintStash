@@ -71,7 +71,7 @@ test.describe("settings", () => {
 
   test("create a manual backup", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Storage" }).click();
+    await page.getByRole("button", { name: "Storage", exact: true }).click();
 
     await Promise.all([
       page.waitForResponse(
@@ -82,6 +82,36 @@ test.describe("settings", () => {
 
     // The new backup shows up in the Restore-backup list with a Download action.
     await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
+  });
+
+  test("create one remote connection for backups and Library sources", async ({ page }) => {
+    const connectionName = `e2e-remote-${Date.now()}`;
+    await page.goto("/settings?section=remote-storage");
+
+    await page.getByLabel("Connection name").fill(connectionName);
+    await page.getByLabel("Bucket").fill("printstash-e2e");
+    await page.getByLabel("Access key").fill("e2e-access");
+    await page.getByLabel("Secret key").fill("e2e-secret");
+    const created = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/storage-connections") &&
+        response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Save connection" }).click();
+    expect((await created).status()).toBe(201);
+
+    const row = page.getByRole("listitem").filter({ hasText: connectionName });
+    await expect(row).toBeVisible();
+    await expect(row.getByRole("combobox", { name: `Use ${connectionName} for` })).toHaveValue(
+      "both",
+    );
+
+    await row.getByRole("button", { name: "Remove" }).click();
+    await page
+      .getByRole("dialog", { name: "Remove remote connection?" })
+      .getByRole("button", { name: "Remove connection" })
+      .click();
+    await expect(row).toHaveCount(0);
   });
 
   test("uses the exact source reference for a backup download", async ({ page }) => {

@@ -16,6 +16,7 @@ const connection = {
   id: 4,
   name: "TrueNAS MinIO",
   kind: "s3",
+  purpose: "both",
   configuration: {
     provider: "s3_self_hosted",
     bucket: "models",
@@ -85,6 +86,15 @@ describe("updateStorageConnection", () => {
 
     expectRequest("/api/v1/storage-connections/4", "PATCH");
     expect(lastBody()).toEqual({ enabled: false });
+  });
+
+  it("changes the workflows allowed to reuse one profile", async () => {
+    respondWith({ ...connection, purpose: "library" });
+
+    await updateStorageConnection(connection.id, { purpose: "library" });
+
+    expectRequest("/api/v1/storage-connections/4", "PATCH");
+    expect(lastBody()).toEqual({ purpose: "library" });
   });
 });
 

@@ -16,8 +16,9 @@ write-back.
 
 This is separate from the **Storage provider** setting. A Storage provider holds
 bytes PrintStash owns. A Library source indexes bytes you own elsewhere. The
-same S3 service can be used for either purpose, but the configuration and delete
-authority are intentionally separate.
+same remote connection can be enabled for Library sources, backup replicas, or
+both. Library bytes remain externally owned and read-only even when the profile
+also stores PrintStash-owned backup archives under its reserved backup folder.
 
 ## Choose A Connection Method
 
@@ -35,13 +36,13 @@ host mount is undesirable or unavailable.
 
 ## Create A Remote Connection
 
-1. Open **Settings > Library sources** and enable the feature.
-2. Under **Remote source connections**, create an S3, WebDAV, SFTP or Google Drive
-   connection. Credentials are encrypted in the database and never returned by the
-   API after creation.
-3. Verify the connection. A failed verification does not create a source or change files.
-4. Add a library source, select the connection and enter an optional source path.
-5. Run **Scan now**, then open and download a representative linked Artifact.
+1. Open **Settings > Remote storage** and create an S3, WebDAV, SFTP or Google
+   Drive connection whose use includes **Library sources**. Credentials are
+   encrypted in the database and never returned by the API after creation.
+2. Test the connection. A failed test does not create a source or change files.
+3. Open **Settings > Library sources**, enable the feature, add a source, select
+   the connection and enter an optional source path.
+4. Run **Scan now**, then open and download a representative linked Artifact.
 
 For Amazon S3, enter the real AWS region and leave the endpoint empty. For a
 self-hosted S3 endpoint, enter its URL; path-style addressing is selected by

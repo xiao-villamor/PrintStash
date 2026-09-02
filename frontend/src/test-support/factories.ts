@@ -42,6 +42,7 @@ import type {
   PrinterCapabilities,
   PrinterRead,
   PrintJobRead,
+  StorageConnection,
   StorageUsageRead,
   TagRead,
   VaultStatsRead,
@@ -194,6 +195,20 @@ export function storageUsage(override?: Partial<StorageUsageRead>): StorageUsage
     total_size_bytes: 1024,
     ok: true,
     error: null,
+    ...override,
+  };
+}
+
+/** One enabled S3 location that may be reused by backup and library workflows. */
+export function aStorageConnection(override?: Partial<StorageConnection>): StorageConnection {
+  return {
+    id: 1,
+    name: "Workshop storage",
+    kind: "s3",
+    purpose: "both",
+    configuration: { bucket: "printstash", root: "PrintStash" },
+    secret_fields_set: ["access_key", "secret_key"],
+    enabled: true,
     ...override,
   };
 }

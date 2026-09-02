@@ -213,7 +213,7 @@ export type ExternalLibraryCollectionMode = "mirror" | "single";
 // auto: watch only on local filesystems; events: always watch; off: never watch.
 export type ExternalLibraryWatchMode = "auto" | "events" | "off";
 export type LibrarySourceKind = "mounted" | "s3" | "webdav" | "sftp" | "gdrive";
-export type StorageConnectionPurpose = "library" | "backup";
+export type StorageConnectionPurpose = "library" | "backup" | "both";
 export type StorageConnectionConfigurationValue = string | number | boolean | null;
 export type StorageConnectionConfiguration = Record<string, StorageConnectionConfigurationValue>;
 

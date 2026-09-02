@@ -12,14 +12,15 @@ A PrintStash backup archive contains:
 - thumbnails
 - a manifest with backup id, timestamp, and app version
 
-Backup archives are written and committed locally first. The legacy S3/R2
-settings remain supported. Purpose-scoped OpenDAL backup connections can also
-replicate each archive independently to S3, WebDAV, SFTP, or Google Drive; one
-remote failure never discards the local archive or prevents another destination
-from receiving its copy.
+Backup archives are written and committed locally first. Legacy S3/R2 settings
+remain readable for upgrades but are no longer configured in the UI. Reusable
+remote connections can replicate each archive independently to S3, WebDAV, SFTP,
+or Google Drive; one remote failure never discards the local archive or prevents
+another destination from receiving its copy.
 
-Add those destinations under **Settings → Storage → Remote backup replicas**.
-Use a dedicated folder that is not also indexed as a Library source. Remote
+Add those connections under **Settings → Remote storage** and allow **Backup
+replicas** (or both uses). Backup archives use the reserved
+`printstash-backups` folder; do not select that path as a Library source. Remote
 restores are accepted only when the saved ownership receipt, provider profile,
 object identity, size, and SHA-256 still agree. Google Drive is beta: restore is
 hash-verified, but automatic retention is disabled because the provider cannot

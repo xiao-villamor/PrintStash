@@ -1,5 +1,5 @@
 /*
- * The settings screen: thirteen sections, one page, and the deployment's whole
+ * The settings screen: fourteen sections, one page, and the deployment's whole
  * configuration surface.
  *
  * The open section lives in `?section=`, which makes every section a shareable
@@ -149,6 +149,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/backups": json([]),
       "GET /api/v1/backups/sources": json([]),
       "GET /api/v1/backups/unowned-local": json([]),
+      "GET /api/v1/storage-connections": json([]),
       "GET /api/v1/models/stats": json(VAULT_STATS),
       ...routes,
     },
@@ -172,16 +173,18 @@ describe("SettingsPanel", () => {
       expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
     });
 
-    it("names the external storage section Library sources", async () => {
+    it("separates remote connections from Library sources", async () => {
       renderSettings();
 
       const nav = await screen.findByRole("navigation", { name: "Settings sections" });
       expect(within(nav).getByRole("button", { name: "Library sources" })).toBeVisible();
+      expect(within(nav).getByRole("button", { name: "Remote storage" })).toBeVisible();
     });
 
     it.each([
       "access",
       "storage",
+      "remote-storage",
       "imports",
       "maintenance",
       "libraries",

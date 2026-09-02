@@ -12,15 +12,12 @@ import {
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
   createExternalLibrary,
-  createStorageConnection,
   deleteExternalLibrary,
-  deleteStorageConnection,
   getJobStatus,
   getVaultConfig,
   enrollExternalLibraryRoot,
   listExternalLibraries,
   listStorageConnections,
-  probeStorageConnection,
   scanExternalLibrary,
   updateExternalLibrary,
   updateVaultConfig,
@@ -28,7 +25,6 @@ import {
 import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
 import { trackImportJob } from "@/lib/task-center";
-import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
 import type {
   ExternalLibrary,
   ExternalLibraryCollectionMode,
@@ -206,10 +202,6 @@ function isLibrarySourceKind(value: string): value is LibrarySourceKind {
   );
 }
 
-function isRemoteLibrarySourceKind(value: string): value is Exclude<LibrarySourceKind, "mounted"> {
-  return value === "s3" || value === "webdav" || value === "sftp" || value === "gdrive";
-}
-
 /**
  * The API this panel drives. Declared as a port so a test can render the panel
  * against a stub; production callers get {@link VAULT_API}, which wires the real
@@ -227,9 +219,6 @@ export interface ExternalLibrariesApi {
   scan: typeof scanExternalLibrary;
   jobStatus: typeof getJobStatus;
   listConnections?: typeof listStorageConnections;
-  createConnection?: typeof createStorageConnection;
-  probeConnection?: typeof probeStorageConnection;
-  deleteConnection?: typeof deleteStorageConnection;
 }
 
 const VAULT_API: ExternalLibrariesApi = {
@@ -245,9 +234,6 @@ const VAULT_API: ExternalLibrariesApi = {
   scan: scanExternalLibrary,
   jobStatus: getJobStatus,
   listConnections: listStorageConnections,
-  createConnection: createStorageConnection,
-  probeConnection: probeStorageConnection,
-  deleteConnection: deleteStorageConnection,
 };
 
 async function pollScanJob(
@@ -293,27 +279,6 @@ export function ExternalLibrariesPanel({
   const [scanSchedule, setScanSchedule] = useState("0 * * * *");
   const [watchMode, setWatchMode] = useState<ExternalLibraryWatchMode>("auto");
   const [mode, setMode] = useState<ExternalLibraryCollectionMode>("mirror");
-
-  // Reusable encrypted remote-source profile draft. Secret fields are sent
-  // once and never returned by the API.
-  const [profileName, setProfileName] = useState("");
-  const [profileKind, setProfileKind] = useState<Exclude<LibrarySourceKind, "mounted">>("s3");
-  const [profileEndpoint, setProfileEndpoint] = useState("");
-  const [profileBucket, setProfileBucket] = useState("");
-  const [profileRegion, setProfileRegion] = useState("us-east-1");
-  const [profileUsername, setProfileUsername] = useState("");
-  const [profilePassword, setProfilePassword] = useState("");
-  const [profilePrivateKeyPath, setProfilePrivateKeyPath] = useState("");
-  const [profilePassphrase, setProfilePassphrase] = useState("");
-  const [profileAccessKey, setProfileAccessKey] = useState("");
-  const [profileSecretKey, setProfileSecretKey] = useState("");
-  const [profileClientId, setProfileClientId] = useState("");
-  const [profileClientSecret, setProfileClientSecret] = useState("");
-  const [profileRefreshToken, setProfileRefreshToken] = useState("");
-  const [profileHostKey, setProfileHostKey] = useState("");
-  const [profilePort, setProfilePort] = useState(22);
-  const [profileRoot, setProfileRoot] = useState("models");
-  const [profileBusy, setProfileBusy] = useState<number | "create" | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -393,110 +358,6 @@ export function ExternalLibrariesPanel({
       toast.error(e);
     } finally {
       setBusyId(null);
-    }
-  }
-
-  async function handleCreateConnection() {
-    if (!api.createConnection || !api.probeConnection || !profileName.trim()) return;
-    setProfileBusy("create");
-    try {
-      const body: StorageConnectionCreate =
-        profileKind === "s3"
-          ? {
-              name: profileName.trim(),
-              kind: profileKind,
-              purpose: "library",
-              configuration: {
-                provider: profileEndpoint.trim() ? "s3_self_hosted" : "s3",
-                bucket: profileBucket.trim(),
-                endpoint_url: profileEndpoint.trim(),
-                region: profileRegion.trim(),
-                addressing_style: profileEndpoint.trim() ? "path" : "auto",
-                root: profileRoot.trim(),
-              },
-              secrets: {
-                access_key: profileAccessKey,
-                secret_key: profileSecretKey,
-              },
-            }
-          : profileKind === "webdav"
-            ? {
-                name: profileName.trim(),
-                kind: profileKind,
-                purpose: "library",
-                configuration: {
-                  provider: "webdav",
-                  endpoint_url: profileEndpoint.trim(),
-                  username: profileUsername.trim(),
-                  root: profileRoot.trim(),
-                },
-                secrets: { password: profilePassword },
-              }
-            : profileKind === "gdrive"
-              ? {
-                  name: profileName.trim(),
-                  kind: profileKind,
-                  purpose: "library",
-                  configuration: {
-                    client_id: profileClientId.trim(),
-                    root: profileRoot.trim(),
-                  },
-                  secrets: {
-                    client_secret: profileClientSecret,
-                    refresh_token: profileRefreshToken,
-                  },
-                }
-              : {
-                  name: profileName.trim(),
-                  kind: profileKind,
-                  purpose: "library",
-                  configuration: {
-                    host: profileEndpoint.trim(),
-                    port: profilePort,
-                    username: profileUsername.trim(),
-                    host_key: profileHostKey.trim(),
-                    private_key_path: profilePrivateKeyPath.trim(),
-                    root: profileRoot.trim(),
-                  },
-                  secrets: {
-                    password: profilePassword,
-                    passphrase: profilePassphrase,
-                  },
-                };
-      const created = await api.createConnection(body);
-      setConnections((current) => [...current, created]);
-      setProfileName("");
-      setProfilePassword("");
-      setProfilePrivateKeyPath("");
-      setProfilePassphrase("");
-      setProfileAccessKey("");
-      setProfileSecretKey("");
-      setProfileClientSecret("");
-      setProfileRefreshToken("");
-      try {
-        await api.probeConnection(created.id);
-        toast.success("Remote source connection saved and verified.");
-      } catch (e) {
-        toast.error(e);
-      }
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setProfileBusy(null);
-    }
-  }
-
-  async function handleDeleteConnection(connection: StorageConnection) {
-    if (!api.deleteConnection) return;
-    setProfileBusy(connection.id);
-    try {
-      await api.deleteConnection(connection.id);
-      setConnections((current) => current.filter((item) => item.id !== connection.id));
-      toast.success(`Removed remote source connection "${connection.name}".`);
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setProfileBusy(null);
     }
   }
 
@@ -801,288 +662,10 @@ export function ExternalLibrariesPanel({
               </ul>
             )}
 
-            {api.createConnection && api.probeConnection && api.deleteConnection && (
-              <div className="rounded border border-border bg-muted/20 p-3 sm:p-4 space-y-3">
-                <div>
-                  <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                    Remote source connections
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Create reusable connections for read-only S3, WebDAV, SFTP, and Google Drive
-                    sources. Credentials stay encrypted on the PrintStash server.
-                  </p>
-                </div>
-                {connections.length > 0 && (
-                  <ul className="divide-y divide-border rounded border border-border bg-background">
-                    {connections
-                      .filter((connection) => (connection.purpose ?? "library") === "library")
-                      .map((connection) => (
-                        <li
-                          key={connection.id}
-                          className="flex flex-col items-stretch gap-3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-xs font-medium text-foreground">
-                              {connection.name}
-                            </p>
-                            <p className="text-2xs text-muted-foreground">
-                              {connection.kind.toUpperCase()} · credentials stored:{" "}
-                              {connection.secret_fields_set.join(", ") || "none"}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            className={BTN_SECONDARY}
-                            disabled={!canEdit || profileBusy !== null}
-                            onClick={() => handleDeleteConnection(connection)}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            Remove connection
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
-                )}
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    Connection name
-                    <input
-                      className={INPUT}
-                      aria-label="Connection name"
-                      placeholder="e.g. Workshop NAS"
-                      value={profileName}
-                      disabled={!canEdit}
-                      onChange={(event) => setProfileName(event.target.value)}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    Source protocol
-                    <select
-                      className={INPUT}
-                      aria-label="Source protocol"
-                      value={profileKind}
-                      disabled={!canEdit}
-                      onChange={(event) => {
-                        if (isRemoteLibrarySourceKind(event.target.value)) {
-                          setProfileKind(event.target.value);
-                        }
-                      }}
-                    >
-                      <option value="s3">S3 / compatible</option>
-                      <option value="webdav">WebDAV</option>
-                      <option value="sftp">SFTP</option>
-                      <option value="gdrive">Google Drive (beta)</option>
-                    </select>
-                  </label>
-                  {profileKind === "s3" ? (
-                    <>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        S3 endpoint
-                        <input
-                          className={INPUT}
-                          aria-label="S3 endpoint"
-                          placeholder="Blank for AWS S3"
-                          value={profileEndpoint}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileEndpoint(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        S3 bucket
-                        <input
-                          className={INPUT}
-                          aria-label="S3 bucket"
-                          placeholder="e.g. print-models"
-                          value={profileBucket}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileBucket(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        S3 region
-                        <input
-                          className={INPUT}
-                          aria-label="S3 region"
-                          placeholder="e.g. us-east-1"
-                          value={profileRegion}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileRegion(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        S3 access key
-                        <input
-                          className={INPUT}
-                          aria-label="S3 access key"
-                          placeholder="Access key"
-                          value={profileAccessKey}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileAccessKey(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        S3 secret key
-                        <input
-                          className={INPUT}
-                          type="password"
-                          aria-label="S3 secret key"
-                          placeholder="Secret key"
-                          value={profileSecretKey}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileSecretKey(event.target.value)}
-                        />
-                      </label>
-                    </>
-                  ) : profileKind === "gdrive" ? (
-                    <>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        OAuth client ID
-                        <input
-                          className={INPUT}
-                          aria-label="Google Drive client ID"
-                          value={profileClientId}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileClientId(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        OAuth client secret
-                        <input
-                          className={INPUT}
-                          type="password"
-                          aria-label="Google Drive client secret"
-                          value={profileClientSecret}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileClientSecret(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
-                        Offline refresh token
-                        <input
-                          className={INPUT}
-                          type="password"
-                          aria-label="Google Drive refresh token"
-                          value={profileRefreshToken}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileRefreshToken(event.target.value)}
-                        />
-                      </label>
-                    </>
-                  ) : (
-                    <>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        {profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
-                        <input
-                          className={INPUT}
-                          aria-label={profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
-                          placeholder={
-                            profileKind === "sftp" ? "e.g. nas.local" : "https://cloud.example/dav"
-                          }
-                          value={profileEndpoint}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileEndpoint(event.target.value)}
-                        />
-                      </label>
-                      {profileKind === "sftp" && (
-                        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                          SFTP port
-                          <input
-                            className={INPUT}
-                            type="number"
-                            aria-label="SFTP port"
-                            value={profilePort}
-                            disabled={!canEdit}
-                            onChange={(event) => setProfilePort(Number(event.target.value))}
-                          />
-                        </label>
-                      )}
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        Username
-                        <input
-                          className={INPUT}
-                          aria-label="Connection username"
-                          placeholder="Username"
-                          value={profileUsername}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfileUsername(event.target.value)}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                        Password
-                        <input
-                          className={INPUT}
-                          type="password"
-                          aria-label="Connection password"
-                          placeholder="Password"
-                          value={profilePassword}
-                          disabled={!canEdit}
-                          onChange={(event) => setProfilePassword(event.target.value)}
-                        />
-                      </label>
-                      {profileKind === "sftp" && (
-                        <>
-                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                            Pinned SFTP host key
-                            <textarea
-                              className={INPUT}
-                              aria-label="SFTP host key"
-                              placeholder="OpenSSH known_hosts entry"
-                              value={profileHostKey}
-                              disabled={!canEdit}
-                              onChange={(event) => setProfileHostKey(event.target.value)}
-                            />
-                          </label>
-                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                            Mounted private key path
-                            <input
-                              className={INPUT}
-                              aria-label="SFTP private key path"
-                              placeholder="Use this or a password"
-                              value={profilePrivateKeyPath}
-                              disabled={!canEdit}
-                              onChange={(event) => setProfilePrivateKeyPath(event.target.value)}
-                            />
-                          </label>
-                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                            Private key passphrase
-                            <input
-                              className={INPUT}
-                              type="password"
-                              aria-label="SFTP private key passphrase"
-                              value={profilePassphrase}
-                              disabled={!canEdit}
-                              onChange={(event) => setProfilePassphrase(event.target.value)}
-                            />
-                          </label>
-                        </>
-                      )}
-                    </>
-                  )}
-                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                    Connection base path
-                    <input
-                      className={INPUT}
-                      aria-label="Connection base path"
-                      placeholder="e.g. models"
-                      value={profileRoot}
-                      disabled={!canEdit}
-                      onChange={(event) => setProfileRoot(event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    className={BTN_PRIMARY}
-                    disabled={!canEdit || profileBusy !== null || !profileName.trim()}
-                    onClick={handleCreateConnection}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {profileBusy === "create" ? "Saving" : "Save and verify connection"}
-                  </button>
-                </div>
-              </div>
-            )}
+            <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
+              Remote connection profiles are managed in Settings → Remote storage. Create one there,
+              allow Library sources, then select it below.
+            </p>
 
             {/* Add a library source */}
             <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
@@ -1152,7 +735,7 @@ export function ExternalLibrariesPanel({
                             (connection) =>
                               connection.kind === sourceKind &&
                               connection.enabled &&
-                              (connection.purpose ?? "library") === "library",
+                              ["library", "both"].includes(connection.purpose ?? "library"),
                           )
                           .map((connection) => (
                             <option key={connection.id} value={connection.id}>

@@ -29,6 +29,7 @@ import {
   ExternalLibrariesPanel,
   type ExternalLibrariesApi,
 } from "@/components/external-libraries-panel";
+import { aStorageConnection } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
 import type {
   ExternalLibrary,
@@ -544,16 +545,12 @@ describe("ExternalLibrariesPanel", () => {
       expect(sourceType).toHaveTextContent("Google Drive");
     });
 
-    it("explains remote connections are reusable read-only sources", async () => {
+    it("directs remote connection setup to its settings section", async () => {
       renderPanel({
         listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
-        createConnection: vi.fn<NonNullable<ExternalLibrariesApi["createConnection"]>>(),
-        probeConnection: vi.fn<NonNullable<ExternalLibrariesApi["probeConnection"]>>(),
-        deleteConnection: vi.fn<NonNullable<ExternalLibrariesApi["deleteConnection"]>>(),
       });
 
-      expect(await screen.findByText("Remote source connections")).toBeInTheDocument();
-      expect(screen.getByText(/reusable connections for read-only S3/)).toBeInTheDocument();
+      expect(await screen.findByText(/managed in Settings → Remote storage/)).toBeInTheDocument();
     });
 
     it("refuses a folder with no name", async () => {
@@ -600,15 +597,12 @@ describe("ExternalLibrariesPanel", () => {
 
     it("adds a read-only remote S3 source through a reusable profile", async () => {
       const user = userEvent.setup();
-      const profile: StorageConnection = {
+      const profile = aStorageConnection({
         id: 41,
         name: "TrueNAS MinIO",
-        kind: "s3",
-        purpose: "library",
+        purpose: "both",
         configuration: { bucket: "models" },
-        secret_fields_set: ["access_key", "secret_key"],
-        enabled: true,
-      };
+      });
       const { api } = renderPanel({
         listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([profile]),
       });
@@ -632,54 +626,6 @@ describe("ExternalLibrariesPanel", () => {
           source_prefix: "production",
         }),
       );
-    });
-
-    it("keeps secrets write-only across remote profile verification", async () => {
-      const user = userEvent.setup();
-      const profile: StorageConnection = {
-        id: 42,
-        name: "AWS archive",
-        kind: "s3",
-        purpose: "library",
-        configuration: { bucket: "archive" },
-        secret_fields_set: ["access_key", "secret_key"],
-        enabled: true,
-      };
-      const createConnection = vi
-        .fn<NonNullable<ExternalLibrariesApi["createConnection"]>>()
-        .mockResolvedValue(profile);
-      const probeConnection = vi
-        .fn<NonNullable<ExternalLibrariesApi["probeConnection"]>>()
-        .mockResolvedValue({ ok: true });
-      renderPanel({
-        listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
-        createConnection,
-        probeConnection,
-        deleteConnection: vi
-          .fn<NonNullable<ExternalLibrariesApi["deleteConnection"]>>()
-          .mockResolvedValue(undefined),
-      });
-      await screen.findByText("Remote source connections");
-      await user.type(screen.getByLabelText("Connection name"), "AWS archive");
-      await user.type(screen.getByLabelText("S3 bucket"), "archive");
-      await user.type(screen.getByLabelText("S3 access key"), "ACCESS");
-      await user.type(screen.getByLabelText("S3 secret key"), "SECRET");
-
-      await user.click(screen.getByRole("button", { name: "Save and verify connection" }));
-
-      await waitFor(() =>
-        expect(createConnection).toHaveBeenCalledWith(
-          expect.objectContaining({
-            name: "AWS archive",
-            kind: "s3",
-            purpose: "library",
-            secrets: { access_key: "ACCESS", secret_key: "SECRET" },
-          }),
-        ),
-      );
-      expect(probeConnection).toHaveBeenCalledWith(42);
-      expect(await screen.findByText(/credentials stored: access_key, secret_key/)).toBeVisible();
-      expect(screen.queryByDisplayValue("SECRET")).toBeNull();
     });
 
     it("trims a path the operator pasted with whitespace", async () => {

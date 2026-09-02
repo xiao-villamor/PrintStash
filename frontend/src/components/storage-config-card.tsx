@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Cloud, Key, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, RefreshCw, Save } from "lucide-react";
 import {
   enrollStorageRoot,
   getStorageProviders,
@@ -25,7 +25,6 @@ import {
   StorageProviderPicker,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
-import { BackupDestinations } from "@/components/backup-destinations";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -38,11 +37,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
   const [providerId, setProviderId] = useState("local");
   const [providerValues, setProviderValues] = useState<ProviderValues>({});
   const [backupDays, setBackupDays] = useState(30);
-  const [bkS3Bucket, setBkS3Bucket] = useState("");
-  const [bkS3Endpoint, setBkS3Endpoint] = useState("");
-  const [bkS3Region, setBkS3Region] = useState("auto");
-  const [bkS3AccessKey, setBkS3AccessKey] = useState("");
-  const [bkS3SecretKey, setBkS3SecretKey] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [enrollRole, setEnrollRole] = useState<StorageRootRole | null>(null);
@@ -56,11 +50,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       setProviderId(c.storage_provider || (c.storage_backend === "s3" ? "s3" : "local"));
       setProviderValues(c.storage_provider_config ?? {});
       setBackupDays(c.backup_retention_days ?? 30);
-      setBkS3Bucket(c.backup_s3_bucket);
-      setBkS3Endpoint(c.backup_s3_endpoint_url);
-      setBkS3Region(c.backup_s3_region || "auto");
-      setBkS3AccessKey(c.backup_s3_access_key);
-      setBkS3SecretKey(c.backup_s3_secret_key);
     } catch {
       // ignore — show empty form
     } finally {
@@ -88,17 +77,7 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
           ),
         },
         backup_retention_days: backupDays,
-        backup_s3_bucket: bkS3Bucket || "",
-        backup_s3_endpoint_url: bkS3Endpoint || "",
-        backup_s3_region: bkS3Region || "",
       };
-
-      if (bkS3AccessKey && !bkS3AccessKey.includes("*")) {
-        body.backup_s3_access_key = bkS3AccessKey;
-      }
-      if (bkS3SecretKey && !bkS3SecretKey.includes("*")) {
-        body.backup_s3_secret_key = bkS3SecretKey;
-      }
 
       await updateVaultConfig(body);
       setSaveState("saved");
@@ -109,17 +88,7 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       setSaveState("error");
       setErrorMsg(e?.message || "Save failed");
     }
-  }, [
-    providerId,
-    providerValues,
-    backupDays,
-    bkS3Bucket,
-    bkS3Endpoint,
-    bkS3Region,
-    bkS3AccessKey,
-    bkS3SecretKey,
-    load,
-  ]);
+  }, [providerId, providerValues, backupDays, load]);
 
   if (loading) {
     return (
@@ -293,92 +262,10 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
               </p>
             </div>
 
-            <div className="border-t border-border pt-3">
-              <p className="text-xs font-medium text-foreground flex items-center gap-1.5 mb-2">
-                <Cloud className="h-3 w-3" /> Legacy S3 backup destination
-              </p>
-              <p className="text-3xs text-muted-foreground mb-3">
-                Existing S3 settings remain supported. For new S3, WebDAV, SFTP, or Google Drive
-                replicas, use the OpenDAL destinations below.
-              </p>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Bucket</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={bkS3Bucket}
-                    onChange={(e) => setBkS3Bucket(e.target.value)}
-                    placeholder="my-backup-bucket"
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Endpoint URL</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={bkS3Endpoint}
-                    onChange={(e) => setBkS3Endpoint(e.target.value)}
-                    placeholder="https://&lt;id&gt;.r2.cloudflarestorage.com"
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                  <p className="text-3xs text-muted-foreground mt-0.5">Leave empty for AWS S3.</p>
-                </div>
-                <div>
-                  <label className="block text-2xs text-muted-foreground mb-1">Region</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={bkS3Region}
-                    onChange={(e) => setBkS3Region(e.target.value)}
-                    placeholder="auto"
-                    className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                  />
-                </div>
-
-                <div className="border-t border-border pt-2 mt-2 sm:col-span-2">
-                  <p className="text-xs font-medium text-foreground flex items-center gap-1.5 mb-2">
-                    <Key className="h-3 w-3" /> Credentials
-                  </p>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-2xs text-muted-foreground mb-1">
-                        Access key
-                      </label>
-                      <input
-                        type="text"
-                        disabled={!canEdit}
-                        value={bkS3AccessKey}
-                        onChange={(e) => setBkS3AccessKey(e.target.value)}
-                        placeholder={
-                          cfg?.has_backup_s3_access_key ? "(stored)" : "backup-access-key"
-                        }
-                        className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-2xs text-muted-foreground mb-1">
-                        Secret key
-                      </label>
-                      <input
-                        type="password"
-                        disabled={!canEdit}
-                        value={bkS3SecretKey}
-                        onChange={(e) => setBkS3SecretKey(e.target.value)}
-                        placeholder={
-                          cfg?.has_backup_s3_secret_key ? "(stored)" : "backup-secret-key"
-                        }
-                        className="w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50 font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <BackupDestinations disabled={!canEdit} />
+            <p className="border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
+              Configure off-site S3, WebDAV, SFTP, or Google Drive replicas in Remote storage.
+              Connections can also be reused by Library sources.
+            </p>
           </div>
 
           {/* Save row */}

@@ -28,10 +28,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 - **OpenDAL Library sources and remote backup replicas.** S3 Library sources
   now use the shared OpenDAL adapter, Google Drive joins S3 and WebDAV as a beta
-  read-only source, and purpose-scoped backup connections can replicate every
-  locally committed archive to S3, WebDAV, SFTP, or Google Drive. Remote restore
-  verifies provider identity and SHA-256; providers without immutable delete
-  identity are excluded from automatic retention and Vault-GC evidence.
+  read-only source, and reusable remote connections can serve Library sources,
+  replicate locally committed archives, or do both. Settings keeps these S3,
+  WebDAV, SFTP and Google Drive profiles together under Remote storage. Remote
+  restore verifies provider identity and SHA-256; providers without immutable
+  delete identity are excluded from automatic retention and Vault-GC evidence.
 
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.
@@ -91,6 +92,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 - **External storage is now presented as Library sources.** Settings uses one
   ownership-aware flow for mounted folders and read-only S3, WebDAV, and SFTP
   connections, with explicit no-copy and no-delete guarantees throughout the UI.
+- **Legacy S3 backup fields leave Settings.** Storage now contains only managed
+  Vault storage and local backup retention. Existing legacy configuration remains
+  readable for upgrades, while new remote profiles live under Remote storage.
 - **Multipart sets now live in the main Models library.** The default Organized
   view shows a set once without duplicating its member cards; Everything,
   Multipart sets only and Parts only make every reusable Model accessible without a

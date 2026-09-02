@@ -11878,10 +11878,11 @@
         "type": "object"
       },
       "StorageConnectionPurpose": {
-        "description": "Authority granted to one reusable remote-storage connection.",
+        "description": "Product workflows allowed to reuse one remote-storage connection.",
         "enum": [
           "library",
-          "backup"
+          "backup",
+          "both"
         ],
         "title": "StorageConnectionPurpose",
         "type": "string"
@@ -11935,13 +11936,27 @@
         "additionalProperties": false,
         "properties": {
           "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorageConnectionPurpose"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
-        "required": [
-          "enabled"
-        ],
         "title": "StorageConnectionUpdate",
         "type": "object"
       },

@@ -28,6 +28,7 @@ from app.db.models import (
     ExternalLibraryWatchMode,
     LibrarySourceKind,
     StorageConnection,
+    StorageConnectionPurpose,
     User,
 )
 from app.db.session import SessionFactory, get_session, get_session_factory
@@ -253,7 +254,7 @@ def _require_source_connection(
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
     if connection.kind != kind or not connection.enabled:
         raise HTTPException(status_code=409, detail="storage_connection_incompatible")
-    if connection.purpose.value != "library":
+    if not connection.purpose.allows(StorageConnectionPurpose.LIBRARY):
         raise HTTPException(status_code=409, detail="storage_connection_incompatible")
     return connection
 
@@ -282,7 +283,9 @@ def create_library(
         watch_mode = body.watch_mode
     else:
         _require_source_connection(session, body.source_kind, body.connection_id)
-        canonical_root = f"source://{body.connection_id}/{body.source_prefix.strip('/')}"
+        canonical_root = (
+            f"source://{body.connection_id}/{body.source_prefix.strip('/')}"
+        )
         connection_id = body.connection_id
         source_prefix = body.source_prefix.strip("/")
         watch_mode = ExternalLibraryWatchMode.OFF

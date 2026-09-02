@@ -377,6 +377,120 @@ class TestStorageConnections:
         ]
         assert "google-secret" not in paused.text
 
+    def test_connection_can_be_expanded_to_both_uses(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "shared-profile-admin", superuser=True)
+        created = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Shared remote storage",
+                "kind": "s3",
+                "configuration": {"bucket": "printstash", "root": "PrintStash"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        ).json()
+
+        updated = client.patch(
+            f"/api/v1/storage-connections/{created['id']}",
+            headers=_headers(admin),
+            json={"purpose": "both"},
+        )
+
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["purpose"] == "both"
+
+    def test_shared_connection_can_be_attached_as_a_library(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "shared-library-admin", superuser=True)
+        enable_feature(db_session)
+        connection = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Shared source",
+                "kind": "s3",
+                "purpose": "both",
+                "configuration": {"bucket": "printstash", "root": "PrintStash"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        ).json()
+
+        library = client.post(
+            "/api/v1/libraries",
+            headers=_headers(admin),
+            json={
+                "name": "Shared catalogue",
+                "source_kind": "s3",
+                "connection_id": connection["id"],
+                "source_prefix": "models",
+            },
+        )
+
+        assert library.status_code == 201, library.text
+
+    def test_library_use_cannot_be_removed_while_referenced(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "referenced-shared-admin", superuser=True)
+        enable_feature(db_session)
+        connection = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Referenced shared source",
+                "kind": "s3",
+                "purpose": "both",
+                "configuration": {"bucket": "printstash", "root": "PrintStash"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        ).json()
+        library = client.post(
+            "/api/v1/libraries",
+            headers=_headers(admin),
+            json={
+                "name": "Protected catalogue",
+                "source_kind": "s3",
+                "connection_id": connection["id"],
+            },
+        )
+        assert library.status_code == 201, library.text
+
+        blocked = client.patch(
+            f"/api/v1/storage-connections/{connection['id']}",
+            headers=_headers(admin),
+            json={"purpose": "backup"},
+        )
+
+        assert blocked.status_code == 409
+        assert blocked.json()["detail"] == "storage_connection_in_use"
+
+    def test_empty_connection_update_is_rejected(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "empty-profile-update-admin", superuser=True)
+        created = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "No-op profile",
+                "kind": "s3",
+                "configuration": {"bucket": "models"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        ).json()
+
+        response = client.patch(
+            f"/api/v1/storage-connections/{created['id']}",
+            headers=_headers(admin),
+            json={},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "storage_connection_update_empty"
+
     def test_delete_is_blocked_in_use_then_succeeds_when_detached(
         self, client: TestClient, db_session: Session
     ) -> None:

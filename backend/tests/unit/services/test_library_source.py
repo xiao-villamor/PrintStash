@@ -544,6 +544,25 @@ class TestConnectionResolution:
         with pytest.raises(LibrarySourceError, match="storage_connection_not_library"):
             library_source.source_from_connection(connection)
 
+    def test_shared_connection_is_accepted_as_a_library(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        connection = self._connection(
+            LibrarySourceKind.S3,
+            {"bucket": "models", "root": "library"},
+            {"access_key": "access", "secret_key": "secret"},
+        )
+        connection.purpose = StorageConnectionPurpose.BOTH
+        monkeypatch.setattr(
+            library_source,
+            "OpenDALStorageBackend",
+            lambda _spec: SimpleNamespace(),
+        )
+
+        source = library_source.source_from_connection(connection)
+
+        assert isinstance(source, OpenDalLibrarySource)
+
     def test_source_guards_precede_any_remote_read(self) -> None:
         mounted = ExternalLibrary(
             id=1,

@@ -17,7 +17,6 @@ import { useEffect, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 import {
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   HardDrive,
@@ -125,11 +124,6 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   const [storageProvider, setStorageProvider] = useState("local");
   const [providerValues, setProviderValues] = useState<ProviderValues>({});
   const [backupDays, setBackupDays] = useState(30);
-  const [backupS3Bucket, setBackupS3Bucket] = useState("");
-  const [backupS3Endpoint, setBackupS3Endpoint] = useState("");
-  const [backupS3Region, setBackupS3Region] = useState("auto");
-  const [backupS3AccessKey, setBackupS3AccessKey] = useState("");
-  const [backupS3SecretKey, setBackupS3SecretKey] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,9 +158,6 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
         Object.assign(initialValues, legacyValues, s.current_storage_provider_config);
         setProviderValues(initialValues);
         setBackupDays(s.current_backup_retention_days ?? 30);
-        setBackupS3Bucket(s.current_backup_s3_bucket ?? "");
-        setBackupS3Endpoint(s.current_backup_s3_endpoint_url ?? "");
-        setBackupS3Region(s.current_backup_s3_region || "auto");
       })
       .catch((err) => {
         if (cancelled) return;
@@ -238,11 +229,6 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
         storage_provider: storageProvider,
         storage_provider_config: { provider: storageProvider, ...config },
         backup_retention_days: backupDays,
-        backup_s3_bucket: backupS3Bucket.trim() || undefined,
-        backup_s3_endpoint_url: backupS3Endpoint.trim() || undefined,
-        backup_s3_region: backupS3Region.trim() || "auto",
-        backup_s3_access_key: backupS3AccessKey.trim() || undefined,
-        backup_s3_secret_key: backupS3SecretKey || undefined,
       });
       const stored: StoredUser = {
         id: res.user_id,
@@ -375,16 +361,6 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
                 }
                 backupDays={backupDays}
                 setBackupDays={setBackupDays}
-                backupS3Bucket={backupS3Bucket}
-                setBackupS3Bucket={setBackupS3Bucket}
-                backupS3Endpoint={backupS3Endpoint}
-                setBackupS3Endpoint={setBackupS3Endpoint}
-                backupS3Region={backupS3Region}
-                setBackupS3Region={setBackupS3Region}
-                backupS3AccessKey={backupS3AccessKey}
-                setBackupS3AccessKey={setBackupS3AccessKey}
-                backupS3SecretKey={backupS3SecretKey}
-                setBackupS3SecretKey={setBackupS3SecretKey}
               />
             )}
           </div>
@@ -524,16 +500,6 @@ function StorageStep(props: {
   setProviderValue: (name: string, value: string | number) => void;
   backupDays: number;
   setBackupDays: (v: number) => void;
-  backupS3Bucket: string;
-  setBackupS3Bucket: (v: string) => void;
-  backupS3Endpoint: string;
-  setBackupS3Endpoint: (v: string) => void;
-  backupS3Region: string;
-  setBackupS3Region: (v: string) => void;
-  backupS3AccessKey: string;
-  setBackupS3AccessKey: (v: string) => void;
-  backupS3SecretKey: string;
-  setBackupS3SecretKey: (v: string) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -580,63 +546,10 @@ function StorageStep(props: {
           />
         </div>
 
-        <details className="group rounded-md border border-outline-variant bg-surface-container-low">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md px-4 py-3 text-sm font-medium text-on-surface transition-colors duration-press hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
-            <span>
-              Legacy S3 off-site backup{" "}
-              <span className="font-normal text-muted-foreground">(optional)</span>
-            </span>
-            <ChevronDown
-              className="h-4 w-4 text-muted-foreground transition-transform duration-fast group-open:rotate-180"
-              aria-hidden
-            />
-          </summary>
-          <div className="grid gap-4 border-t border-outline-variant p-4 sm:grid-cols-2">
-            <Field
-              label="Backup bucket"
-              id="setup-backup-bucket"
-              value={props.backupS3Bucket}
-              onChange={props.setBackupS3Bucket}
-              mono
-            />
-            <Field
-              label="Backup endpoint"
-              id="setup-backup-endpoint"
-              value={props.backupS3Endpoint}
-              onChange={props.setBackupS3Endpoint}
-              mono
-            />
-            <Field
-              label="Backup region"
-              id="setup-backup-region"
-              value={props.backupS3Region}
-              onChange={props.setBackupS3Region}
-              mono
-            />
-            <div className="hidden sm:block" aria-hidden />
-            <Field
-              label="Backup access key"
-              optional
-              id="setup-backup-access-key"
-              value={props.backupS3AccessKey}
-              onChange={props.setBackupS3AccessKey}
-              mono
-            />
-            <Field
-              label="Backup secret key"
-              optional
-              id="setup-backup-secret-key"
-              value={props.backupS3SecretKey}
-              onChange={props.setBackupS3SecretKey}
-              type="password"
-              mono
-            />
-            <p className="text-xs text-muted-foreground sm:col-span-2">
-              Credentials can stay empty when your runtime provides them. After setup, add new S3,
-              WebDAV, SFTP, or Google Drive destinations in Settings → Storage.
-            </p>
-          </div>
-        </details>
+        <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
+          After setup, connect S3, WebDAV, SFTP, or Google Drive under Settings → Remote storage,
+          then choose whether each connection serves backups, Library sources, or both.
+        </p>
       </section>
     </div>
   );

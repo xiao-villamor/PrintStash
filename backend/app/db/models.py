@@ -2034,14 +2034,19 @@ class LibrarySourceKind(str, Enum):
 
 
 class StorageConnectionPurpose(str, Enum):
-    """Authority granted to one reusable remote-storage connection."""
+    """Product workflows allowed to reuse one remote-storage connection."""
 
     LIBRARY = "library"
     BACKUP = "backup"
+    BOTH = "both"
+
+    def allows(self, required: "StorageConnectionPurpose") -> bool:
+        """Return whether this profile may serve the requested workflow."""
+        return self in {required, StorageConnectionPurpose.BOTH}
 
 
 class StorageConnection(SQLModel, table=True):
-    """Reusable encrypted credentials for one bounded remote-storage role."""
+    """Reusable encrypted credentials for one bounded remote location."""
 
     __tablename__ = "storage_connections"
 

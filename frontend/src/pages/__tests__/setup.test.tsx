@@ -293,12 +293,11 @@ describe("SetupPage", () => {
     resolve(setupResponse);
   });
 
-  it("keeps optional off-site backup settings collapsed until requested", async () => {
-    const user = await reachStorage();
+  it("moves off-site backup setup to Remote storage", async () => {
+    await reachStorage();
 
-    expect(screen.getByLabelText("Backup bucket")).not.toBeVisible();
-    await user.click(screen.getByText(/Legacy S3 off-site backup/));
-    expect(screen.getByLabelText("Backup bucket")).toBeVisible();
+    expect(screen.getByText(/Settings → Remote storage/)).toBeVisible();
+    expect(screen.queryByLabelText("Backup bucket")).toBeNull();
   });
   it("refuses S3 storage with no bucket named", async () => {
     // The wizard is the only chance to get this right: a vault that boots

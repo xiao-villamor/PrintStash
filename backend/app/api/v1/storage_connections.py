@@ -1,4 +1,4 @@
-"""Purpose-scoped, encrypted connection profiles for remote storage."""
+"""Reusable encrypted connection profiles for remote storage."""
 
 from __future__ import annotations
 
@@ -58,7 +58,8 @@ class StorageConnectionRead(BaseModel):
 class StorageConnectionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
+    enabled: bool | None = None
+    purpose: StorageConnectionPurpose | None = None
 
 
 _SECRET_FIELDS = {
@@ -145,7 +146,7 @@ def probe_connection(
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
     try:
-        if row.purpose == StorageConnectionPurpose.BACKUP:
+        if row.purpose.allows(StorageConnectionPurpose.BACKUP):
             return destination_from_connection(row).probe()
         page = source_from_connection(row, scan_limits=True).list_page(
             "", cursor=None, limit=1
@@ -168,7 +169,13 @@ def update_connection(
     row = session.get(StorageConnection, connection_id)
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
-    row.enabled = body.enabled
+    if body.enabled is None and body.purpose is None:
+        raise HTTPException(status_code=400, detail="storage_connection_update_empty")
+    if body.purpose is not None and body.purpose != row.purpose:
+        _assert_removed_uses_are_free(row, body.purpose, session)
+        row.purpose = body.purpose
+    if body.enabled is not None:
+        row.enabled = body.enabled
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -182,28 +189,56 @@ def delete_connection(
     row = session.get(StorageConnection, connection_id)
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
-    if (
-        session.exec(
-            select(ExternalLibrary.id).where(
-                ExternalLibrary.connection_id == connection_id
-            )
-        ).first()
-        is not None
-    ):
+    if _has_library_references(row, session):
         raise HTTPException(status_code=409, detail="storage_connection_in_use")
-    if row.purpose == StorageConnectionPurpose.BACKUP:
-        destination = destination_from_connection(row)
-        if (
-            session.exec(
-                select(OwnedStorageObject.id).where(
-                    OwnedStorageObject.backend == destination.backend.backend_name,
-                    OwnedStorageObject.namespace == destination.namespace,
-                    OwnedStorageObject.provider_ref == destination.provider_ref,
-                )
-            ).first()
-            is not None
-        ):
-            raise HTTPException(status_code=409, detail="storage_connection_in_use")
+    if _has_backup_objects(row, session):
+        raise HTTPException(status_code=409, detail="storage_connection_in_use")
     session.delete(row)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _has_library_references(row: StorageConnection, session: Session) -> bool:
+    if row.id is None or not row.purpose.allows(StorageConnectionPurpose.LIBRARY):
+        return False
+    return (
+        session.exec(
+            select(ExternalLibrary.id).where(ExternalLibrary.connection_id == row.id)
+        ).first()
+        is not None
+    )
+
+
+def _has_backup_objects(row: StorageConnection, session: Session) -> bool:
+    if not row.purpose.allows(StorageConnectionPurpose.BACKUP):
+        return False
+    destination = destination_from_connection(row, require_enabled=False)
+    return (
+        session.exec(
+            select(OwnedStorageObject.id).where(
+                OwnedStorageObject.backend == destination.backend.backend_name,
+                OwnedStorageObject.namespace == destination.namespace,
+                OwnedStorageObject.provider_ref == destination.provider_ref,
+            )
+        ).first()
+        is not None
+    )
+
+
+def _assert_removed_uses_are_free(
+    row: StorageConnection,
+    next_purpose: StorageConnectionPurpose,
+    session: Session,
+) -> None:
+    if (
+        row.purpose.allows(StorageConnectionPurpose.LIBRARY)
+        and not next_purpose.allows(StorageConnectionPurpose.LIBRARY)
+        and _has_library_references(row, session)
+    ):
+        raise HTTPException(status_code=409, detail="storage_connection_in_use")
+    if (
+        row.purpose.allows(StorageConnectionPurpose.BACKUP)
+        and not next_purpose.allows(StorageConnectionPurpose.BACKUP)
+        and _has_backup_objects(row, session)
+    ):
+        raise HTTPException(status_code=409, detail="storage_connection_in_use")

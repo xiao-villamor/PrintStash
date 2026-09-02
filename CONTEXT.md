@@ -173,9 +173,10 @@ thumbnails and metadata are stored by the Vault. Opt-in and OFF by default
 `services/external_library`. The UI calls these **Library sources**.
 
 **Storage connection**:
-A reusable remote-source profile. Non-secret configuration is stored separately
+A reusable remote-location profile. Non-secret configuration is stored separately
 from encrypted credentials, and API reads never return secret values. A
-connection can serve more than one library source.
+connection may be enabled for Library sources, off-site backup replicas, or both;
+one connection can serve more than one Library source.
 
 **Linked file**:
 An Artifact with `File.is_external = true`: its bytes live on a library source,

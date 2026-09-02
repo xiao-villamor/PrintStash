@@ -536,12 +536,20 @@ describe("StorageConfigCard", () => {
   });
 
   describe("a configuration that cannot be read", () => {
-    it("still renders the backup form", async () => {
+    it("still renders local backup retention", async () => {
       // This card is where an operator goes when storage is misbehaving; an
       // error page instead of a form takes away the fix.
       renderCard({ routes: { "GET /api/v1/config": json({ detail: "boom" }, 500) } });
 
-      expect(await screen.findByPlaceholderText("my-backup-bucket")).toBeInTheDocument();
+      expect(await screen.findByText("Retention (days)")).toBeInTheDocument();
+    });
+
+    it("does not expose the legacy S3 backup destination", async () => {
+      renderCard();
+      await screen.findByDisplayValue("/data/files");
+
+      expect(screen.queryByText("Legacy S3 backup destination")).toBeNull();
+      expect(screen.queryByPlaceholderText("my-backup-bucket")).toBeNull();
     });
   });
 });

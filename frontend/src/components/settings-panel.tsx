@@ -6,6 +6,7 @@ import {
   Boxes,
   Check,
   CircleArrowUp,
+  Cloud,
   Database,
   Download,
   Eraser,
@@ -46,6 +47,7 @@ import { useRouter, useSearchParams } from "@/lib/navigation";
 import { CURRENCY_OPTIONS } from "@/lib/currency";
 import { ExternalLibrariesPanel } from "@/components/external-libraries-panel";
 import { StorageConfigCard } from "@/components/storage-config-card";
+import { RemoteStorageConnections } from "@/components/remote-storage-connections";
 import { MakerWorldConnectCard } from "@/components/makerworld-connect-card";
 import { ProviderConnectionsPanel } from "@/components/provider-connections-panel";
 import { NotificationsPanel } from "@/components/notifications-panel";
@@ -156,6 +158,7 @@ type SettingsSection =
   | "overview"
   | "access"
   | "storage"
+  | "remote-storage"
   | "imports"
   | "maintenance"
   | "libraries"
@@ -175,6 +178,7 @@ const SETTINGS_SECTIONS: {
   { id: "overview", labelKey: "settings.overview", icon: Server },
   { id: "access", labelKey: "settings.access", icon: Users },
   { id: "storage", labelKey: "settings.storage", icon: HardDrive },
+  { id: "remote-storage", labelKey: "settings.remoteStorage", icon: Cloud },
   { id: "imports", labelKey: "settings.imports", icon: Download },
   { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
   { id: "libraries", labelKey: "settings.libraries", icon: FolderSync },
@@ -2573,6 +2577,12 @@ export function SettingsPanel() {
                     )}
                   </div>
                 </SettingsCard>
+              </div>
+            )}
+
+            {activeSection === "remote-storage" && (
+              <div className="animate-panel-in">
+                <RemoteStorageConnections disabled={!user?.is_superuser} />
               </div>
             )}
 

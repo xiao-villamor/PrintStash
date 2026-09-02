@@ -37,6 +37,7 @@ class TestStorageProviders:
             "nextcloud",
             "webdav",
             "sftp",
+            "gdrive",
         }
         assert {provider.category for provider in providers} == set(ProviderCategory)
         assert all(provider.fields for provider in providers)

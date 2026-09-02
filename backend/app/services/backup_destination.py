@@ -1,4 +1,4 @@
-"""Remote backup replicas backed by purpose-scoped storage connections."""
+"""Remote backup replicas backed by reusable storage connections."""
 
 from __future__ import annotations
 
@@ -129,11 +129,11 @@ class RemoteBackupDestination:
 
 
 def destination_from_connection(
-    connection: StorageConnection,
+    connection: StorageConnection, *, require_enabled: bool = True
 ) -> RemoteBackupDestination:
-    if not connection.enabled:
+    if require_enabled and not connection.enabled:
         raise BackupDestinationError("storage_connection_disabled")
-    if connection.purpose != StorageConnectionPurpose.BACKUP:
+    if not connection.purpose.allows(StorageConnectionPurpose.BACKUP):
         raise BackupDestinationError("storage_connection_not_backup")
     try:
         parsed = load_connection_config(connection)
@@ -171,7 +171,12 @@ def configured_destinations() -> list[RemoteBackupDestination]:
         rows = session.exec(
             select(StorageConnection)
             .where(
-                StorageConnection.purpose == StorageConnectionPurpose.BACKUP,
+                StorageConnection.purpose.in_(
+                    [
+                        StorageConnectionPurpose.BACKUP,
+                        StorageConnectionPurpose.BOTH,
+                    ]
+                ),
                 StorageConnection.enabled.is_(True),
             )
             .order_by(StorageConnection.id.asc())  # type: ignore[attr-defined]
