@@ -107,10 +107,13 @@ interface ExternalLibraryBindingStatus {
 }
 
 function bindingStatus(lib: ExternalLibrary): ExternalLibraryBindingStatus {
+  const isMounted = (lib.source_kind ?? "mounted") === "mounted";
   if (lib.binding_state === "bound") {
     return {
-      label: "Bound",
-      description: "This root is verified for this PrintStash installation.",
+      label: "Source verified",
+      description: isMounted
+        ? "This mounted root is verified for this PrintStash installation."
+        : "This remote location is verified through its encrypted connection.",
       tone: "bound",
     };
   }
@@ -331,7 +334,7 @@ export function ExternalLibrariesPanel({
     setEnabled(next);
     try {
       await api.setFeatureEnabled(next);
-      toast.success(next ? "Shared volumes enabled." : "Shared volumes disabled.");
+      toast.success(next ? "Library sources enabled." : "Library sources disabled.");
       if (next) await refresh();
     } catch (e) {
       setEnabled(!next);
@@ -346,7 +349,7 @@ export function ExternalLibrariesPanel({
       toast.error(
         sourceKind === "mounted"
           ? "Name and folder path are required."
-          : "Name and a compatible connection profile are required.",
+          : "Name and a compatible remote connection are required.",
       );
       return;
     }
@@ -373,7 +376,7 @@ export function ExternalLibrariesPanel({
       setScanSchedule("0 * * * *");
       setWatchMode("auto");
       setMode("mirror");
-      toast.success("Library added.");
+      toast.success("Library source added.");
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -436,7 +439,7 @@ export function ExternalLibrariesPanel({
       setProfileSecretKey("");
       try {
         await api.probeConnection(created.id);
-        toast.success("Encrypted connection profile saved and verified.");
+        toast.success("Remote source connection saved and verified.");
       } catch (e) {
         toast.error(e);
       }
@@ -453,7 +456,7 @@ export function ExternalLibrariesPanel({
     try {
       await api.deleteConnection(connection.id);
       setConnections((current) => current.filter((item) => item.id !== connection.id));
-      toast.success(`Removed connection profile "${connection.name}".`);
+      toast.success(`Removed remote source connection "${connection.name}".`);
     } catch (e) {
       toast.error(e);
     } finally {
@@ -522,7 +525,7 @@ export function ExternalLibrariesPanel({
     setBusyId(lib.id);
     try {
       await api.remove(lib.id);
-      toast.success(`Removed "${lib.name}". Files on the volume were not touched.`);
+      toast.success(`Removed "${lib.name}". Source files were not touched.`);
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -543,17 +546,18 @@ export function ExternalLibrariesPanel({
               <FolderSync className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">Shared volumes</h3>
+              <h3 className="text-sm font-semibold text-foreground">Library sources</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Mirror a folder — on the server or a NAS — in place: files are indexed where they
-                live, never copied. Local folders can be watched in real time; all folders support
-                scheduled and manual scans. Off by default.
+                Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them
+                into Vault storage. Source files stay externally owned and are never deleted by
+                PrintStash. Off by default.
               </p>
             </div>
           </div>
           <button
             type="button"
             role="switch"
+            aria-label="Library sources enabled"
             aria-checked={enabled}
             disabled={!canEdit || enableBusy}
             onClick={() => toggleFeature(!enabled)}
@@ -575,9 +579,10 @@ export function ExternalLibrariesPanel({
             {libraries.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                 <FolderSync className="h-7 w-7 text-muted-foreground/50" />
-                <p className="text-sm font-medium text-foreground">No shared volumes yet</p>
+                <p className="text-sm font-medium text-foreground">No library sources yet</p>
                 <p className="text-xs text-muted-foreground">
-                  Add a folder below to start mirroring it into your vault.
+                  Add a mounted folder or connect remote storage to index existing models without
+                  copying them into the Vault.
                 </p>
               </div>
             ) : (
@@ -592,8 +597,8 @@ export function ExternalLibrariesPanel({
                       key={lib.id}
                       className="rounded border border-border bg-background p-3 sm:p-4"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 w-full">
                           <div className="flex items-center gap-2">
                             <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
                             <span className="text-sm font-medium text-foreground truncate">
@@ -610,8 +615,8 @@ export function ExternalLibrariesPanel({
                           </p>
                           {(lib.source_kind ?? "mounted") !== "mounted" && (
                             <p className="mt-1 text-2xs text-muted-foreground">
-                              {(lib.source_kind ?? "mounted").toUpperCase()} · read-only · remote
-                              writes disabled
+                              {(lib.source_kind ?? "mounted").toUpperCase()} · remote source ·
+                              read-only
                             </p>
                           )}
                           <div
@@ -715,12 +720,12 @@ export function ExternalLibrariesPanel({
                             </p>
                           )}
                         </div>
-                        <div className="flex flex-shrink-0 items-center gap-1.5">
+                        <div className="flex flex-shrink-0 items-center gap-1.5 self-end sm:self-auto">
                           <button
                             type="button"
                             disabled={!canEdit || busy || !rootBound}
                             onClick={() => handleScan(lib)}
-                            title={rootBound ? undefined : "Verify the root before scanning."}
+                            title={rootBound ? undefined : "Verify the source before scanning."}
                             className={BTN_SECONDARY}
                           >
                             <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
@@ -748,7 +753,7 @@ export function ExternalLibrariesPanel({
                             disabled={!canEdit || busy}
                             onClick={() => setDeleteTarget(lib)}
                             className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
-                            aria-label="Remove library"
+                            aria-label="Remove library source"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
@@ -764,11 +769,11 @@ export function ExternalLibrariesPanel({
               <div className="rounded border border-border bg-muted/20 p-3 sm:p-4 space-y-3">
                 <div>
                   <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                    Encrypted remote connections
+                    Remote source connections
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Credentials stay encrypted on the PrintStash server. Remote sources are
-                    read-only and are scanned with bounded requests and bandwidth.
+                    Create reusable connections for read-only S3, WebDAV, and SFTP sources.
+                    Credentials stay encrypted on the PrintStash server.
                   </p>
                 </div>
                 {connections.length > 0 && (
@@ -776,14 +781,14 @@ export function ExternalLibrariesPanel({
                     {connections.map((connection) => (
                       <li
                         key={connection.id}
-                        className="flex items-center justify-between gap-3 px-3 py-2"
+                        className="flex flex-col items-stretch gap-3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="min-w-0">
                           <p className="truncate text-xs font-medium text-foreground">
                             {connection.name}
                           </p>
                           <p className="text-2xs text-muted-foreground">
-                            {connection.kind.toUpperCase()} · secrets stored:{" "}
+                            {connection.kind.toUpperCase()} · credentials stored:{" "}
                             {connection.secret_fields_set.join(", ") || "none"}
                           </p>
                         </div>
@@ -794,137 +799,178 @@ export function ExternalLibrariesPanel({
                           onClick={() => handleDeleteConnection(connection)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
-                          Remove profile
+                          Remove connection
                         </button>
                       </li>
                     ))}
                   </ul>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <input
-                    className={INPUT}
-                    aria-label="Connection profile name"
-                    placeholder="Profile name"
-                    value={profileName}
-                    disabled={!canEdit}
-                    onChange={(event) => setProfileName(event.target.value)}
-                  />
-                  <select
-                    className={INPUT}
-                    aria-label="Connection protocol"
-                    value={profileKind}
-                    disabled={!canEdit}
-                    onChange={(event) => {
-                      if (isRemoteLibrarySourceKind(event.target.value)) {
-                        setProfileKind(event.target.value);
-                      }
-                    }}
-                  >
-                    <option value="s3">S3 / compatible</option>
-                    <option value="webdav">WebDAV</option>
-                    <option value="sftp">SFTP</option>
-                  </select>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Connection name
+                    <input
+                      className={INPUT}
+                      aria-label="Connection name"
+                      placeholder="e.g. Workshop NAS"
+                      value={profileName}
+                      disabled={!canEdit}
+                      onChange={(event) => setProfileName(event.target.value)}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Source protocol
+                    <select
+                      className={INPUT}
+                      aria-label="Source protocol"
+                      value={profileKind}
+                      disabled={!canEdit}
+                      onChange={(event) => {
+                        if (isRemoteLibrarySourceKind(event.target.value)) {
+                          setProfileKind(event.target.value);
+                        }
+                      }}
+                    >
+                      <option value="s3">S3 / compatible</option>
+                      <option value="webdav">WebDAV</option>
+                      <option value="sftp">SFTP</option>
+                    </select>
+                  </label>
                   {profileKind === "s3" ? (
                     <>
-                      <input
-                        className={INPUT}
-                        aria-label="S3 endpoint"
-                        placeholder="Endpoint (blank for AWS S3)"
-                        value={profileEndpoint}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileEndpoint(event.target.value)}
-                      />
-                      <input
-                        className={INPUT}
-                        aria-label="S3 bucket"
-                        placeholder="Bucket"
-                        value={profileBucket}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileBucket(event.target.value)}
-                      />
-                      <input
-                        className={INPUT}
-                        aria-label="S3 region"
-                        placeholder="Region"
-                        value={profileRegion}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileRegion(event.target.value)}
-                      />
-                      <input
-                        className={INPUT}
-                        aria-label="S3 access key"
-                        placeholder="Access key"
-                        value={profileAccessKey}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileAccessKey(event.target.value)}
-                      />
-                      <input
-                        className={INPUT}
-                        type="password"
-                        aria-label="S3 secret key"
-                        placeholder="Secret key"
-                        value={profileSecretKey}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileSecretKey(event.target.value)}
-                      />
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        S3 endpoint
+                        <input
+                          className={INPUT}
+                          aria-label="S3 endpoint"
+                          placeholder="Blank for AWS S3"
+                          value={profileEndpoint}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileEndpoint(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        S3 bucket
+                        <input
+                          className={INPUT}
+                          aria-label="S3 bucket"
+                          placeholder="e.g. print-models"
+                          value={profileBucket}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileBucket(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        S3 region
+                        <input
+                          className={INPUT}
+                          aria-label="S3 region"
+                          placeholder="e.g. us-east-1"
+                          value={profileRegion}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileRegion(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        S3 access key
+                        <input
+                          className={INPUT}
+                          aria-label="S3 access key"
+                          placeholder="Access key"
+                          value={profileAccessKey}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileAccessKey(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        S3 secret key
+                        <input
+                          className={INPUT}
+                          type="password"
+                          aria-label="S3 secret key"
+                          placeholder="Secret key"
+                          value={profileSecretKey}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileSecretKey(event.target.value)}
+                        />
+                      </label>
                     </>
                   ) : (
                     <>
-                      <input
-                        className={INPUT}
-                        aria-label={profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
-                        placeholder={profileKind === "sftp" ? "Host" : "WebDAV endpoint"}
-                        value={profileEndpoint}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileEndpoint(event.target.value)}
-                      />
-                      {profileKind === "sftp" && (
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        {profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
                         <input
                           className={INPUT}
-                          type="number"
-                          aria-label="SFTP port"
-                          value={profilePort}
+                          aria-label={profileKind === "sftp" ? "SFTP host" : "WebDAV endpoint"}
+                          placeholder={
+                            profileKind === "sftp" ? "e.g. nas.local" : "https://cloud.example/dav"
+                          }
+                          value={profileEndpoint}
                           disabled={!canEdit}
-                          onChange={(event) => setProfilePort(Number(event.target.value))}
+                          onChange={(event) => setProfileEndpoint(event.target.value)}
                         />
-                      )}
-                      <input
-                        className={INPUT}
-                        aria-label="Connection username"
-                        placeholder="Username"
-                        value={profileUsername}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfileUsername(event.target.value)}
-                      />
-                      <input
-                        className={INPUT}
-                        type="password"
-                        aria-label="Connection password"
-                        placeholder="Password"
-                        value={profilePassword}
-                        disabled={!canEdit}
-                        onChange={(event) => setProfilePassword(event.target.value)}
-                      />
+                      </label>
                       {profileKind === "sftp" && (
-                        <textarea
+                        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                          SFTP port
+                          <input
+                            className={INPUT}
+                            type="number"
+                            aria-label="SFTP port"
+                            value={profilePort}
+                            disabled={!canEdit}
+                            onChange={(event) => setProfilePort(Number(event.target.value))}
+                          />
+                        </label>
+                      )}
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        Username
+                        <input
                           className={INPUT}
-                          aria-label="SFTP host key"
-                          placeholder="Pinned OpenSSH known_hosts entry"
-                          value={profileHostKey}
+                          aria-label="Connection username"
+                          placeholder="Username"
+                          value={profileUsername}
                           disabled={!canEdit}
-                          onChange={(event) => setProfileHostKey(event.target.value)}
+                          onChange={(event) => setProfileUsername(event.target.value)}
                         />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        Password
+                        <input
+                          className={INPUT}
+                          type="password"
+                          aria-label="Connection password"
+                          placeholder="Password"
+                          value={profilePassword}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfilePassword(event.target.value)}
+                        />
+                      </label>
+                      {profileKind === "sftp" && (
+                        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                          Pinned SFTP host key
+                          <textarea
+                            className={INPUT}
+                            aria-label="SFTP host key"
+                            placeholder="OpenSSH known_hosts entry"
+                            value={profileHostKey}
+                            disabled={!canEdit}
+                            onChange={(event) => setProfileHostKey(event.target.value)}
+                          />
+                        </label>
                       )}
                     </>
                   )}
-                  <input
-                    className={INPUT}
-                    aria-label="Connection root"
-                    placeholder="Remote root"
-                    value={profileRoot}
-                    disabled={!canEdit}
-                    onChange={(event) => setProfileRoot(event.target.value)}
-                  />
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Connection base path
+                    <input
+                      className={INPUT}
+                      aria-label="Connection base path"
+                      placeholder="e.g. models"
+                      value={profileRoot}
+                      disabled={!canEdit}
+                      onChange={(event) => setProfileRoot(event.target.value)}
+                    />
+                  </label>
                 </div>
                 <div className="flex justify-end">
                   <button
@@ -934,26 +980,31 @@ export function ExternalLibrariesPanel({
                     onClick={handleCreateConnection}
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    {profileBusy === "create" ? "Saving" : "Save and test profile"}
+                    {profileBusy === "create" ? "Saving" : "Save and verify connection"}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Add a library */}
+            {/* Add a library source */}
             <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
               <p className="text-2xs font-mono uppercase tracking-wider text-primary">
                 Add a library source
               </p>
               <div className="grid gap-3 sm:grid-cols-2">
-                <input
-                  className={INPUT}
-                  placeholder="Name (e.g. NAS models)"
-                  value={name}
-                  disabled={!canEdit}
-                  onChange={(e) => setName(e.target.value)}
-                />
-                {connections.length > 0 && (
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Source name
+                  <input
+                    className={INPUT}
+                    aria-label="Source name"
+                    placeholder="e.g. Workshop NAS"
+                    value={name}
+                    disabled={!canEdit}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Source type
                   <select
                     className={INPUT}
                     aria-label="Library source type"
@@ -970,44 +1021,55 @@ export function ExternalLibrariesPanel({
                     <option value="webdav">WebDAV / Nextcloud</option>
                     <option value="sftp">SFTP</option>
                   </select>
-                )}
+                </label>
                 {sourceKind === "mounted" ? (
-                  <input
-                    className={INPUT}
-                    placeholder="Absolute folder path (e.g. /mnt/nas/3d)"
-                    value={rootPath}
-                    disabled={!canEdit}
-                    onChange={(e) => setRootPath(e.target.value)}
-                  />
-                ) : (
-                  <>
-                    <select
-                      className={INPUT}
-                      aria-label="Library connection profile"
-                      value={connectionId}
-                      disabled={!canEdit}
-                      onChange={(event) =>
-                        setConnectionId(event.target.value ? Number(event.target.value) : "")
-                      }
-                    >
-                      <option value="">Choose a connection profile</option>
-                      {connections
-                        .filter(
-                          (connection) => connection.kind === sourceKind && connection.enabled,
-                        )
-                        .map((connection) => (
-                          <option key={connection.id} value={connection.id}>
-                            {connection.name}
-                          </option>
-                        ))}
-                    </select>
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                    Mounted folder path
                     <input
                       className={INPUT}
-                      placeholder="Remote prefix (optional)"
-                      value={sourcePrefix}
+                      aria-label="Mounted folder path"
+                      placeholder="e.g. /mnt/nas/3d"
+                      value={rootPath}
                       disabled={!canEdit}
-                      onChange={(event) => setSourcePrefix(event.target.value)}
+                      onChange={(e) => setRootPath(e.target.value)}
                     />
+                  </label>
+                ) : (
+                  <>
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      Remote connection
+                      <select
+                        className={INPUT}
+                        aria-label="Remote source connection"
+                        value={connectionId}
+                        disabled={!canEdit}
+                        onChange={(event) =>
+                          setConnectionId(event.target.value ? Number(event.target.value) : "")
+                        }
+                      >
+                        <option value="">Choose an enabled connection</option>
+                        {connections
+                          .filter(
+                            (connection) => connection.kind === sourceKind && connection.enabled,
+                          )
+                          .map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      Path within connection (optional)
+                      <input
+                        className={INPUT}
+                        aria-label="Source path within connection"
+                        placeholder="e.g. production/models"
+                        value={sourcePrefix}
+                        disabled={!canEdit}
+                        onChange={(event) => setSourcePrefix(event.target.value)}
+                      />
+                    </label>
                   </>
                 )}
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -1036,19 +1098,26 @@ export function ExternalLibrariesPanel({
                     </select>
                   </label>
                 )}
-                <select
-                  className={INPUT}
-                  value={mode}
-                  disabled={!canEdit}
-                  onChange={(e) => setMode(parseCollectionMode(e.target.value))}
-                >
-                  <option value="mirror">Mirror subfolders as collections</option>
-                  <option value="single">Single collection (flat)</option>
-                </select>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Collection layout
+                  <select
+                    className={INPUT}
+                    aria-label="Collection layout"
+                    value={mode}
+                    disabled={!canEdit}
+                    onChange={(e) => setMode(parseCollectionMode(e.target.value))}
+                  >
+                    <option value="mirror">Map subfolders to collections</option>
+                    <option value="single">Single collection (flat)</option>
+                  </select>
+                </label>
               </div>
               <p className="text-2xs text-muted-foreground">
-                Mounted local folders can be watched. SMB/NFS and remote sources use conservative
-                scheduled scans; S3/WebDAV/SFTP sources are always read-only.
+                PrintStash stores catalog metadata and thumbnails only; source files stay in their
+                original location.{" "}
+                {sourceKind === "mounted"
+                  ? "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back."
+                  : "Remote sources use bounded manual or scheduled scans and are always read-only."}
               </p>
               <div className="flex justify-end">
                 <button
@@ -1058,7 +1127,7 @@ export function ExternalLibrariesPanel({
                   className={BTN_PRIMARY}
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  {busyId === "create" ? "Adding" : "Add library"}
+                  {busyId === "create" ? "Adding" : "Add source"}
                 </button>
               </div>
             </div>
@@ -1068,10 +1137,10 @@ export function ExternalLibrariesPanel({
         <ConfirmModal
           open={deleteTarget !== null}
           onClose={() => setDeleteTarget(null)}
-          title="Remove external library?"
+          title="Remove library source?"
           description={
             deleteTarget
-              ? `"${deleteTarget.name}" will be removed and its indexed models moved to trash. The files on the shared volume are never touched.`
+              ? `"${deleteTarget.name}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.`
               : ""
           }
           confirmLabel="Remove"
@@ -1083,7 +1152,7 @@ export function ExternalLibrariesPanel({
           onClose={() => {
             if (busyId === null) setEnrollTarget(null);
           }}
-          title="Enroll shared volume root?"
+          title="Enroll mounted source root?"
           description={
             enrollTarget
               ? `Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ${enrollTarget.root_path}. This re-enables safe scans, watching, and writeback.`

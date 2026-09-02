@@ -32,6 +32,17 @@ function Probe() {
   return <p>{t("auth.welcome")}</p>;
 }
 
+function LibrarySourcesProbe() {
+  const { t } = useI18n();
+  return (
+    <Localized>
+      <section aria-label={t("settings.libraries")}>
+        <p>Library sources</p>
+      </section>
+    </Localized>
+  );
+}
+
 describe("I18nProvider", () => {
   it("defaults a new browser to English regardless of browser language", async () => {
     localStorage.clear();
@@ -85,6 +96,30 @@ describe("I18nProvider", () => {
       "title",
       "Nueva colección",
     );
+  });
+
+  it("translates Library sources terminology into Spanish", () => {
+    localStorage.setItem("printstash.locale", "es");
+    render(
+      <I18nProvider>
+        <LibrarySourcesProbe />
+      </I18nProvider>,
+    );
+
+    expect(screen.getByRole("region", { name: "Fuentes de biblioteca" })).toBeInTheDocument();
+    expect(screen.getByText("Fuentes de biblioteca")).toBeInTheDocument();
+    expect(
+      translateUiText(
+        "es",
+        '"Workshop NAS" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
+      ),
+    ).toContain('"Workshop NAS" se quitará');
+    expect(
+      translateUiText(
+        "es",
+        "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: /mnt/models. This re-enables safe scans, watching, and writeback.",
+      ),
+    ).toContain("Verifica que esta ruta montada exacta");
   });
 
   it("only translates complete UI messages and preserves user content", () => {

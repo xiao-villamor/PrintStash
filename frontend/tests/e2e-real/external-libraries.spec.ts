@@ -16,7 +16,7 @@ import { test, expect } from "./helpers";
 const externalRoot = process.env.PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT;
 const markerName = ".printstash-external-root.json";
 
-test.describe("external library root recovery", () => {
+test.describe("mounted library source root recovery", () => {
   test("enrolls an unbound root before external write-back", async ({ page }) => {
     if (!externalRoot) {
       test.skip(
@@ -56,11 +56,11 @@ test.describe("external library root recovery", () => {
       await page.goto("/settings?section=libraries");
       await expect(page.getByText("Needs enrollment")).toBeVisible();
       await page.getByRole("button", { name: "Review and enroll" }).click();
-      const confirmation = page.getByRole("dialog", { name: "Enroll shared volume root?" });
+      const confirmation = page.getByRole("dialog", { name: "Enroll mounted source root?" });
       await expect(confirmation).toBeVisible();
       await expect(confirmation).toContainText(root);
       await confirmation.getByRole("button", { name: "Enroll root" }).click();
-      await expect(page.getByText("Bound")).toBeVisible();
+      await expect(page.getByText("Source verified")).toBeVisible();
 
       await page.goto("/");
       await page.getByRole("button", { name: "Upload", exact: true }).click();

@@ -170,8 +170,7 @@ A user-managed mounted folder or read-only S3, WebDAV, or SFTP namespace that
 PrintStash indexes in place. The source remains authoritative; only generated
 thumbnails and metadata are stored by the Vault. Opt-in and OFF by default
 (`SystemConfig.external_libraries_enabled`). Owned by
-`services/external_library`. The UI calls these **Library sources** or
-**Shared volumes**.
+`services/external_library`. The UI calls these **Library sources**.
 
 **Storage connection**:
 A reusable remote-source profile. Non-secret configuration is stored separately

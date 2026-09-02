@@ -81,6 +81,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
+- **External storage is now presented as Library sources.** Settings uses one
+  ownership-aware flow for mounted folders and read-only S3, WebDAV, and SFTP
+  connections, with explicit no-copy and no-delete guarantees throughout the UI.
 - **Multipart sets now live in the main Models library.** The default Organized
   view shows a set once without duplicating its member cards; Everything,
   Multipart sets only and Parts only make every reusable Model accessible without a

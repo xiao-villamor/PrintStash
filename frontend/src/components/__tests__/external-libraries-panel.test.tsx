@@ -2,15 +2,15 @@
  * Mirroring a folder that PrintStash does not own.
  *
  * Everything here is qualified by one fact: the files live somewhere else — a
- * server directory, a NAS — and PrintStash only indexes them in place. So the
- * feature is off until an operator turns it on, and removing a volume must say
+ * mounted folder or remote namespace — and PrintStash only indexes them in place. So the
+ * feature is off until an operator turns it on, and removing a source must say
  * out loud that the files were not touched. A "Remove" that reads like a delete
  * is how somebody loses a NAS they spent a weekend organising.
  *
  * Real-time watching is a property of the filesystem, not a preference. A local
  * folder delivers file events; an NFS/SMB mount does not, and asking for events
- * there would leave the volume looking watched while it silently went stale. The
- * panel has to report which of the two a volume actually got.
+ * there would leave the source looking watched while it silently went stale. The
+ * panel has to report which of the two a mounted source actually got.
  *
  * A scan is long-running, so the button that starts one only tells the truth
  * once the job terminates. Reporting "Scan complete" on the 202 would call a
@@ -136,7 +136,7 @@ describe("ExternalLibrariesPanel", () => {
   describe("turning the feature on", () => {
     it("shows nothing until it knows whether the feature is on", () => {
       // Rendering the "off" state first and correcting it makes an enabled
-      // vault flicker through a screen saying it has no shared volumes.
+      // vault flicker through a screen saying it has no library sources.
       renderPanel({
         isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockReturnValue(new Promise(() => {})),
       });
@@ -151,6 +151,16 @@ describe("ExternalLibrariesPanel", () => {
 
       const toggle = await screen.findByRole("switch");
       expect(toggle).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("presents sources as externally owned indexes", async () => {
+      renderPanel({
+        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      });
+
+      expect(await screen.findByText("Library sources")).toBeInTheDocument();
+      expect(screen.getByText(/without copying them into Vault storage/)).toBeInTheDocument();
+      expect(screen.getByText(/never deleted by PrintStash/)).toBeInTheDocument();
     });
 
     it("lists nothing while the feature is off", async () => {
@@ -194,7 +204,7 @@ describe("ExternalLibrariesPanel", () => {
     });
   });
 
-  describe("the volumes already mirrored", () => {
+  describe("the sources already indexed", () => {
     it("names each mirrored folder", async () => {
       renderPanel();
 
@@ -207,10 +217,11 @@ describe("ExternalLibrariesPanel", () => {
       expect(await screen.findByText("/mnt/nas/3d")).toBeInTheDocument();
     });
 
-    it("says so when no folder is mirrored yet", async () => {
+    it("explains how to add the first source", async () => {
       renderPanel({ list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([]) });
 
-      expect(await screen.findByText("No shared volumes yet")).toBeInTheDocument();
+      expect(await screen.findByText("No library sources yet")).toBeInTheDocument();
+      expect(screen.getByText(/mounted folder or connect remote storage/)).toBeInTheDocument();
     });
 
     it("marks a paused volume", async () => {
@@ -519,14 +530,38 @@ describe("ExternalLibrariesPanel", () => {
     });
   });
 
-  describe("adding a folder", () => {
+  describe("adding a library source", () => {
+    it("offers every source type before a connection exists", async () => {
+      renderPanel({
+        listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
+      });
+
+      const sourceType = await screen.findByLabelText("Library source type");
+      expect(sourceType).toHaveTextContent("Mounted folder (SMB/NFS/local)");
+      expect(sourceType).toHaveTextContent("S3 / compatible");
+      expect(sourceType).toHaveTextContent("WebDAV / Nextcloud");
+      expect(sourceType).toHaveTextContent("SFTP");
+    });
+
+    it("explains remote connections are reusable read-only sources", async () => {
+      renderPanel({
+        listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
+        createConnection: vi.fn<NonNullable<ExternalLibrariesApi["createConnection"]>>(),
+        probeConnection: vi.fn<NonNullable<ExternalLibrariesApi["probeConnection"]>>(),
+        deleteConnection: vi.fn<NonNullable<ExternalLibrariesApi["deleteConnection"]>>(),
+      });
+
+      expect(await screen.findByText("Remote source connections")).toBeInTheDocument();
+      expect(screen.getByText(/reusable connections for read-only S3/)).toBeInTheDocument();
+    });
+
     it("refuses a folder with no name", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "/mnt/x");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/x");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       expect(api.create).not.toHaveBeenCalled();
     });
@@ -535,9 +570,9 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "NAS");
+      await user.type(screen.getByLabelText("Source name"), "NAS");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       expect(api.create).not.toHaveBeenCalled();
     });
@@ -546,10 +581,10 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "Attic NAS");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "/mnt/attic");
+      await user.type(screen.getByLabelText("Source name"), "Attic NAS");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith({
@@ -577,11 +612,11 @@ describe("ExternalLibrariesPanel", () => {
       });
       await screen.findByText("NAS models");
       await user.selectOptions(await screen.findByLabelText("Library source type"), "s3");
-      await user.type(screen.getByPlaceholderText(/^Name/), "Remote catalogue");
-      await user.selectOptions(screen.getByLabelText("Library connection profile"), "41");
-      await user.type(screen.getByPlaceholderText(/Remote prefix/), "production");
+      await user.type(screen.getByLabelText("Source name"), "Remote catalogue");
+      await user.selectOptions(screen.getByLabelText("Remote source connection"), "41");
+      await user.type(screen.getByLabelText("Source path within connection"), "production");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith({
@@ -621,13 +656,13 @@ describe("ExternalLibrariesPanel", () => {
           .fn<NonNullable<ExternalLibrariesApi["deleteConnection"]>>()
           .mockResolvedValue(undefined),
       });
-      await screen.findByText("Encrypted remote connections");
-      await user.type(screen.getByLabelText("Connection profile name"), "AWS archive");
+      await screen.findByText("Remote source connections");
+      await user.type(screen.getByLabelText("Connection name"), "AWS archive");
       await user.type(screen.getByLabelText("S3 bucket"), "archive");
       await user.type(screen.getByLabelText("S3 access key"), "ACCESS");
       await user.type(screen.getByLabelText("S3 secret key"), "SECRET");
 
-      await user.click(screen.getByRole("button", { name: "Save and test profile" }));
+      await user.click(screen.getByRole("button", { name: "Save and verify connection" }));
 
       await waitFor(() =>
         expect(createConnection).toHaveBeenCalledWith(
@@ -639,7 +674,7 @@ describe("ExternalLibrariesPanel", () => {
         ),
       );
       expect(probeConnection).toHaveBeenCalledWith(42);
-      expect(await screen.findByText(/secrets stored: access_key, secret_key/)).toBeVisible();
+      expect(await screen.findByText(/credentials stored: access_key, secret_key/)).toBeVisible();
       expect(screen.queryByDisplayValue("SECRET")).toBeNull();
     });
 
@@ -649,10 +684,10 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "  Attic  ");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "  /mnt/attic  ");
+      await user.type(screen.getByLabelText("Source name"), "  Attic  ");
+      await user.type(screen.getByLabelText("Mounted folder path"), "  /mnt/attic  ");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -665,11 +700,11 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "Attic");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "/mnt/attic");
-      await user.selectOptions(screen.getByDisplayValue(/Mirror subfolders/), "single");
+      await user.type(screen.getByLabelText("Source name"), "Attic");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
+      await user.selectOptions(screen.getByLabelText("Collection layout"), "single");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -682,11 +717,11 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "Attic");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "/mnt/attic");
-      await user.selectOptions(screen.getAllByRole("combobox")[2], "__custom__");
+      await user.type(screen.getByLabelText("Source name"), "Attic");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
+      await user.selectOptions(screen.getByLabelText("Scan schedule"), "__custom__");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -703,36 +738,38 @@ describe("ExternalLibrariesPanel", () => {
           .mockRejectedValue(new Error("path_not_allowed")),
       });
       await screen.findByText("NAS models");
-      await user.type(screen.getByPlaceholderText(/^Name/), "Attic");
-      await user.type(screen.getByPlaceholderText(/Absolute folder path/), "/etc");
+      await user.type(screen.getByLabelText("Source name"), "Attic");
+      await user.type(screen.getByLabelText("Mounted folder path"), "/etc");
 
-      await user.click(screen.getByRole("button", { name: /Add library/ }));
+      await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       expect(await screen.findByText("Path not allowed.")).toBeInTheDocument();
     });
   });
 
-  describe("removing a volume", () => {
+  describe("removing a library source", () => {
     it("asks before removing", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
 
-      await user.click(screen.getByRole("button", { name: "Remove library" }));
+      await user.click(screen.getByRole("button", { name: "Remove library source" }));
 
       expect(api.remove).not.toHaveBeenCalled();
     });
 
-    it("promises the files on the volume are left alone", async () => {
+    it("promises the source files are left alone", async () => {
       // Without this the operator has to guess whether "Remove" deletes a NAS.
       const user = userEvent.setup();
       renderPanel();
       await screen.findByText("NAS models");
 
-      await user.click(screen.getByRole("button", { name: "Remove library" }));
+      await user.click(screen.getByRole("button", { name: "Remove library source" }));
 
       expect(
-        await screen.findByText(/files on the shared volume are never touched/),
+        await screen.findByText(
+          /Source files remain untouched in their mounted folder or remote storage/,
+        ),
       ).toBeInTheDocument();
     });
 
@@ -740,7 +777,7 @@ describe("ExternalLibrariesPanel", () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
       await screen.findByText("NAS models");
-      await user.click(screen.getByRole("button", { name: "Remove library" }));
+      await user.click(screen.getByRole("button", { name: "Remove library source" }));
 
       await user.click(await screen.findByRole("button", { name: "Remove" }));
 
@@ -765,7 +802,7 @@ describe("ExternalLibrariesPanel", () => {
     it("offers no way to remove one", async () => {
       renderPanel({}, false);
 
-      expect(await screen.findByRole("button", { name: "Remove library" })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: "Remove library source" })).toBeDisabled();
     });
 
     it("offers no per-volume schedule controls", async () => {
@@ -775,7 +812,7 @@ describe("ExternalLibrariesPanel", () => {
       renderPanel({}, false);
 
       await screen.findByText("NAS models");
-      expect(screen.getAllByRole("combobox")).toHaveLength(3);
+      expect(screen.getAllByRole("combobox")).toHaveLength(4);
     });
 
     it("still shows what each volume is doing", async () => {

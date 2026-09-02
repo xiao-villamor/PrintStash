@@ -172,6 +172,13 @@ describe("SettingsPanel", () => {
       expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
     });
 
+    it("names the external storage section Library sources", async () => {
+      renderSettings();
+
+      const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+      expect(within(nav).getByRole("button", { name: "Library sources" })).toBeVisible();
+    });
+
     it.each([
       "access",
       "storage",

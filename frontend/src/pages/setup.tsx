@@ -56,7 +56,7 @@ const SETUP_ERROR_MESSAGES = {
   data_dir_not_readable:
     "The backend cannot inspect the data directory. Check filesystem permissions.",
   data_dir_not_empty:
-    "The data directory must be a dedicated empty directory. To index existing NAS or Nextcloud files in place, finish setup with the default path, then add the folder under Settings → External Libraries.",
+    "The data directory must be a dedicated empty directory. To index existing files without copying them into Vault storage, finish setup with the default path, then add a mounted folder or remote connection under Settings → Library sources.",
   invalid_thumb_dir_path: "The thumbnail directory path is not valid.",
   thumb_dir_not_creatable:
     "The backend could not create the thumbnail directory. Check the path and container permissions.",

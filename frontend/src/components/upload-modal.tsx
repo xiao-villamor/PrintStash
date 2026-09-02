@@ -155,7 +155,8 @@ export function UploadModal({
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  // NAS write-back: when mirroring is enabled, new uploads can target a library
+  // Mounted-source write-back: when library sources are enabled, new uploads can target a
+  // writable mounted source.
   // instead of vault storage. Empty string = vault.
   const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
   const [targetLibraryId, setTargetLibraryId] = useState<number | "">("");
@@ -942,7 +943,7 @@ export function UploadModal({
             </DropdownMenu>
           </div>
 
-          {/* Destination (NAS write-back) — only when mirroring is enabled */}
+          {/* Destination (mounted-source write-back) — only when an eligible source exists */}
           {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
             <div>
               <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
@@ -958,13 +959,13 @@ export function UploadModal({
                 <option value="">Vault storage</option>
                 {libraries.map((lib) => (
                   <option key={lib.id} value={lib.id}>
-                    {lib.name} (shared volume)
+                    {lib.name} (library source)
                   </option>
                 ))}
               </select>
               <p className="mt-1 font-mono text-3xs text-on-surface-variant/70">
-                NAS libraries write the file into the folder; revisions to a linked model always
-                follow that model automatically.
+                Eligible mounted sources use create-only write-back. Revisions to a linked model
+                follow that source automatically.
               </p>
             </div>
           )}

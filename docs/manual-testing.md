@@ -293,7 +293,7 @@ Use disposable data.
 - [ ] Concurrent restore/purge or interrupted deletion gives a recoverable,
       audited result.
 
-## 12. External libraries, Documents, and sharing
+## 12. Library sources, Documents, and sharing
 
 Use PostgreSQL+S3 or SQLite+S3 to validate indexing without copying source
 bytes. Use the README's clean SQLite+local mode for upload/revision write-back;

@@ -124,7 +124,7 @@ manufacturing platform.
 - Full backup/restore is available separately for moving or recovering an
   install.
 - Full backups include the database and PrintStash-managed primary/thumbnail
-  objects. Files referenced through an External Library remain at their external
+  objects. Files referenced through a Library source remain at their external
   paths and must be backed up separately by the operator.
 - Backup manifests bind managed objects to the storage provider and namespace they
   came from. Restore does not silently retarget those objects to a different remote

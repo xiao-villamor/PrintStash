@@ -99,7 +99,7 @@ mover between providers in this release.
 Remote Library sources are new catalog views, not a migration of managed Vault
 storage. After the existing installation passes the compatibility boot:
 
-1. Open **Settings > Shared volumes**.
+1. Open **Settings > Library sources**.
 2. Create and probe an encrypted S3, WebDAV or SFTP connection.
 3. Add a source with an optional prefix and run a manual scan.
 4. Compare a downloaded linked Artifact's SHA-256 with the source.

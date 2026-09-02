@@ -151,7 +151,7 @@ Run the integration and end-to-end cases that prove:
 - blocked cleanup retains uncertain bytes and never falls back to a storage walk
 
 The upgrade gate must also start from the literal released v0.12.1 schema and
-data shapes: linked External Library rows and bytes, pending deletion intents,
+data shapes: linked library-source rows and bytes, pending deletion intents,
 legacy `vault-data/` S3 objects, and v1 backup/restore journals. Reconstructing a
 legacy-looking object on the current schema is not equivalent upgrade evidence.
 

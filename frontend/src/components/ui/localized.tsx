@@ -434,8 +434,8 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Measured", "Medido"],
   ["measured", "medido"],
   [
-    "Stored in a linked shared volume; synced both ways",
-    "Guardado en un volumen compartido vinculado; sincronizado en ambos sentidos",
+    "Indexed from a library source; original bytes stay in external storage",
+    "Indexado desde una fuente de biblioteca; los bytes originales permanecen en el almacenamiento externo",
   ],
   ["Model filters", "Filtros de modelos"],
   ["Filter values could not be loaded.", "No se pudieron cargar los valores de los filtros."],
@@ -488,16 +488,16 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
     "Recupera la base de datos y los archivos desde una copia anterior.",
   ],
   [
-    "Mirror a folder — on the server or a NAS — in place: files are indexed where they live, never copied. Local folders can be watched in real time; all folders support scheduled and manual scans. Off by default.",
-    "Refleja una carpeta del servidor o NAS sin copiarla: los archivos se indexan donde están. Las carpetas locales admiten vigilancia en tiempo real y todas admiten análisis programados o manuales. Desactivado por defecto.",
+    "Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them into Vault storage. Source files stay externally owned and are never deleted by PrintStash. Off by default.",
+    "Indexa modelos existentes desde carpetas montadas, S3, WebDAV o SFTP sin copiarlos al almacenamiento de la bóveda. Los archivos de origen siguen siendo externos y PrintStash nunca los elimina. Desactivado por defecto.",
   ],
   [
     "Watching gives near-real-time updates on local folders. Network folders (NAS over NFS/SMB) don't deliver file events, so they fall back to the schedule above.",
     "La vigilancia actualiza casi en tiempo real las carpetas locales. Las carpetas de red no emiten eventos y usan la programación indicada.",
   ],
   [
-    "Add a folder below to start mirroring it into your vault.",
-    "Añade una carpeta para empezar a reflejarla en tu bóveda.",
+    "Add a mounted folder or connect remote storage to index existing models without copying them into the Vault.",
+    "Añade una carpeta montada o conecta almacenamiento remoto para indexar modelos existentes sin copiarlos a la bóveda.",
   ],
   [
     "Add a channel to start receiving print and printer alerts.",
@@ -587,7 +587,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["No backups found.", "No se encontraron copias."],
   ["No notification channels yet", "Aún no hay canales de notificación"],
   ["No printers configured.", "No hay impresoras configuradas."],
-  ["No shared volumes yet", "Aún no hay volúmenes compartidos"],
+  ["No library sources yet", "Aún no hay fuentes de biblioteca"],
   ["No users.", "No hay usuarios."],
   ["Trash is empty.", "La papelera está vacía."],
   ["Collection access", "Acceso a colecciones"],
@@ -621,44 +621,74 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Refresh backups", "Actualizar copias"],
   ["Restore backup", "Restaurar copia"],
   ["Restore backup?", "¿Restaurar copia?"],
-  ["Shared volumes", "Volúmenes compartidos"],
-  ["· read-only · remote writes disabled", "· solo lectura · escritura remota desactivada"],
-  ["Encrypted remote connections", "Conexiones remotas cifradas"],
+  ["Library sources", "Fuentes de biblioteca"],
+  ["Library sources enabled", "Fuentes de biblioteca activadas"],
+  ["Library sources enabled.", "Fuentes de biblioteca activadas."],
+  ["Library sources disabled.", "Fuentes de biblioteca desactivadas."],
+  ["Library source added.", "Fuente de biblioteca añadida."],
+  ["Name and folder path are required.", "El nombre y la ruta de la carpeta son obligatorios."],
   [
-    "Credentials stay encrypted on the PrintStash server. Remote sources are read-only and are scanned with bounded requests and bandwidth.",
-    "Las credenciales permanecen cifradas en el servidor de PrintStash. Las fuentes remotas son de solo lectura y se analizan con solicitudes y ancho de banda limitados.",
+    "Name and a compatible remote connection are required.",
+    "El nombre y una conexión remota compatible son obligatorios.",
   ],
-  ["· secrets stored:", "· secretos guardados:"],
-  ["Remove profile", "Eliminar perfil"],
-  ["Connection profile name", "Nombre del perfil de conexión"],
-  ["Profile name", "Nombre del perfil"],
-  ["Connection protocol", "Protocolo de conexión"],
+  [
+    "Remote source connection saved and verified.",
+    "Conexión de fuente remota guardada y verificada.",
+  ],
+  ["· remote source · read-only", "· fuente remota · solo lectura"],
+  ["Remote source connections", "Conexiones de fuentes remotas"],
+  [
+    "Create reusable connections for read-only S3, WebDAV, and SFTP sources. Credentials stay encrypted on the PrintStash server.",
+    "Crea conexiones reutilizables para fuentes S3, WebDAV y SFTP de solo lectura. Las credenciales permanecen cifradas en el servidor de PrintStash.",
+  ],
+  ["· credentials stored:", "· credenciales guardadas:"],
+  ["Remove connection", "Eliminar conexión"],
+  ["Connection name", "Nombre de la conexión"],
+  ["Source protocol", "Protocolo de origen"],
   ["S3 / compatible", "S3 / compatible"],
   ["WebDAV", "WebDAV"],
   ["SFTP", "SFTP"],
   ["S3 endpoint", "Endpoint S3"],
-  ["Endpoint (blank for AWS S3)", "Endpoint (vacío para AWS S3)"],
+  ["Blank for AWS S3", "Vacío para AWS S3"],
   ["S3 bucket", "Bucket S3"],
   ["S3 region", "Región S3"],
   ["S3 access key", "Clave de acceso S3"],
   ["S3 secret key", "Clave secreta S3"],
   ["SFTP port", "Puerto SFTP"],
+  ["SFTP host", "Host SFTP"],
+  ["WebDAV endpoint", "Endpoint WebDAV"],
   ["Connection username", "Usuario de la conexión"],
   ["Connection password", "Contraseña de la conexión"],
   ["SFTP host key", "Clave de host SFTP"],
-  ["Pinned OpenSSH known_hosts entry", "Entrada fija de known_hosts de OpenSSH"],
-  ["Connection root", "Raíz de la conexión"],
-  ["Remote root", "Raíz remota"],
+  ["Pinned SFTP host key", "Clave de host SFTP fijada"],
+  ["OpenSSH known_hosts entry", "Entrada known_hosts de OpenSSH"],
+  ["Connection base path", "Ruta base de la conexión"],
+  ["Save and verify connection", "Guardar y verificar conexión"],
   ["Add a library source", "Añadir una fuente de biblioteca"],
   ["Library source type", "Tipo de fuente de biblioteca"],
+  ["Source name", "Nombre de la fuente"],
+  ["Source type", "Tipo de fuente"],
   ["Mounted folder (SMB/NFS/local)", "Carpeta montada (SMB/NFS/local)"],
+  ["Mounted folder path", "Ruta de la carpeta montada"],
   ["WebDAV / Nextcloud", "WebDAV / Nextcloud"],
-  ["Library connection profile", "Perfil de conexión de biblioteca"],
-  ["Choose a connection profile", "Elige un perfil de conexión"],
-  ["Remote prefix (optional)", "Prefijo remoto (opcional)"],
+  ["Remote connection", "Conexión remota"],
+  ["Remote source connection", "Conexión de la fuente remota"],
+  ["Choose an enabled connection", "Elige una conexión activada"],
+  ["Path within connection (optional)", "Ruta dentro de la conexión (opcional)"],
+  ["Source path within connection", "Ruta de la fuente dentro de la conexión"],
+  ["Collection layout", "Organización en colecciones"],
+  ["Map subfolders to collections", "Convertir subcarpetas en colecciones"],
   [
-    "Mounted local folders can be watched. SMB/NFS and remote sources use conservative scheduled scans; S3/WebDAV/SFTP sources are always read-only.",
-    "Las carpetas locales montadas se pueden supervisar. SMB/NFS y las fuentes remotas usan análisis programados conservadores; las fuentes S3/WebDAV/SFTP son siempre de solo lectura.",
+    "PrintStash stores catalog metadata and thumbnails only; source files stay in their original location.",
+    "PrintStash solo almacena metadatos del catálogo y miniaturas; los archivos de origen permanecen en su ubicación original.",
+  ],
+  [
+    "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back.",
+    "Las fuentes montadas admiten análisis manuales y programados. Las carpetas locales también se pueden supervisar y pueden aceptar escritura de solo creación.",
+  ],
+  [
+    "Remote sources use bounded manual or scheduled scans and are always read-only.",
+    "Las fuentes remotas usan análisis manuales o programados limitados y siempre son de solo lectura.",
   ],
   ["Create a safe GC preview?", "¿Crear una vista previa segura del recolector?"],
   [
@@ -685,13 +715,17 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Reverify and finalize", "Volver a verificar y finalizar"],
   ["Abort plan", "Abortar plan"],
   ["Add a folder", "Añadir carpeta"],
-  ["Bound", "Vinculado"],
+  ["Source verified", "Fuente verificada"],
   ["Needs enrollment", "Necesita inscripción"],
   ["Root proof unavailable", "Prueba de raíz no disponible"],
   ["Root binding blocked", "Vinculación de raíz bloqueada"],
   [
-    "This root is verified for this PrintStash installation.",
-    "Esta raíz está verificada para esta instalación de PrintStash.",
+    "This mounted root is verified for this PrintStash installation.",
+    "Esta raíz montada está verificada para esta instalación de PrintStash.",
+  ],
+  [
+    "This remote location is verified through its encrypted connection.",
+    "Esta ubicación remota está verificada mediante su conexión cifrada.",
   ],
   [
     "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
@@ -706,7 +740,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
     "Esta raíz no se puede usar de forma segura. Los escaneos, la supervisión y la escritura permanecen pausados; verifica el montaje previsto y resuelve el problema de vinculación antes de continuar.",
   ],
   ["Review and enroll", "Revisar e inscribir"],
-  ["Enroll shared volume root?", "¿Inscribir la raíz del volumen compartido?"],
+  ["Enroll mounted source root?", "¿Inscribir la raíz de la fuente montada?"],
   [
     "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ",
     "Verifica que esta ruta montada exacta pertenece a esta instalación de PrintStash antes de inscribirla: ",
@@ -720,15 +754,15 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
     "Root verified. Rescan to resume indexing.",
     "Raíz verificada. Vuelve a escanear para reanudar la indexación.",
   ],
-  ["Verify the root before scanning.", "Verifica la raíz antes de escanear."],
-  ["Remove external library?", "¿Quitar biblioteca externa?"],
-  ["Remove library", "Quitar biblioteca"],
-  ["Mirror subfolders as collections", "Reflejar subcarpetas como colecciones"],
+  ["Verify the source before scanning.", "Verifica la fuente antes de escanear."],
+  ["Remove library source?", "¿Quitar la fuente de biblioteca?"],
+  ["Remove library source", "Quitar fuente de biblioteca"],
   ["Real-time watching", "Vigilancia en tiempo real"],
   ["Scan schedule", "Programación de análisis"],
   ["Auto-scan enabled", "Análisis automático activado"],
   ["Single collection (flat)", "Una colección (plana)"],
   ["Some files could not be indexed", "Algunos archivos no pudieron indexarse"],
+  ["Add source", "Añadir fuente"],
   ["Recent deliveries", "Entregas recientes"],
   ["Send a test notification", "Enviar notificación de prueba"],
   ["Create channel", "Crear canal"],
@@ -1676,13 +1710,13 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ["(optional)", "(opcional)"],
   ["(recommended)", "(recomendado)"],
-  ["(shared volume)", "(volumen compartido)"],
+  ["(library source)", "(fuente de biblioteca)"],
   ["A model page, a", "Una página de modelo, una"],
   [
     "A short description of this collection. Markdown — paste or drop images.",
     "Una breve descripción de esta colección. Markdown: pega o suelta imágenes.",
   ],
-  ["Absolute folder path (e.g. /mnt/nas/3d)", "Ruta absoluta de carpeta (p. ej., /mnt/nas/3d)"],
+  ["e.g. /mnt/nas/3d", "p. ej., /mnt/nas/3d"],
   ["Add a description for this collection", "Añade una descripción para esta colección"],
   [
     "Add G-code from a model’s Send dialog to start building the fleet queue.",
@@ -1718,10 +1752,16 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
     "Moonraker's native Spoolman integration is already decrementing the active spool, so PrintStash automatically skips its own write-back to avoid double-counting. Only override this if you have disabled Moonraker's hook and want PrintStash to count consumption.",
     "La integración nativa de Spoolman de Moonraker ya descuenta el carrete activo, por lo que PrintStash omite automáticamente su propia escritura para evitar el doble recuento. Anula este comportamiento solo si has desactivado el hook de Moonraker y quieres que PrintStash contabilice el consumo.",
   ],
-  ["Name (e.g. NAS models)", "Nombre (p. ej., modelos NAS)"],
+  ["e.g. Workshop NAS", "p. ej., NAS del taller"],
+  ["e.g. print-models", "p. ej., modelos-impresion"],
+  ["e.g. us-east-1", "p. ej., us-east-1"],
+  ["e.g. nas.local", "p. ej., nas.local"],
+  ["https://cloud.example/dav", "https://cloud.example/dav"],
+  ["e.g. models", "p. ej., modelos"],
+  ["e.g. production/models", "p. ej., produccion/modelos"],
   [
-    "NAS libraries write the file into the folder; revisions to a linked model always follow that model automatically.",
-    "Las bibliotecas NAS escriben el archivo en la carpeta; las revisiones de un modelo vinculado siempre siguen automáticamente ese modelo.",
+    "Eligible mounted sources use create-only write-back. Revisions to a linked model follow that source automatically.",
+    "Las fuentes montadas aptas usan escritura de solo creación. Las revisiones de un modelo vinculado siguen automáticamente esa fuente.",
   ],
   ["online", "conectada"],
   ["Pick a known model or type your own", "Elige un modelo conocido o escribe uno propio"],
@@ -1746,8 +1786,8 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ],
   ["tags, comma separated", "etiquetas separadas por comas"],
   [
-    "These are private PrintStash storage and must be empty. Add existing NAS or Nextcloud folders later under Settings → External Libraries; those files stay in place.",
-    "Estos directorios son almacenamiento privado de PrintStash y deben estar vacíos. Añade después las carpetas NAS o Nextcloud existentes en Configuración → Bibliotecas externas; esos archivos permanecerán en su ubicación.",
+    "These are private PrintStash storage and must be empty. Add existing NAS or Nextcloud folders later under Settings → Library sources; those files stay in place.",
+    "Estos directorios son almacenamiento privado de PrintStash y deben estar vacíos. Añade después las carpetas NAS o Nextcloud existentes en Configuración → Fuentes de biblioteca; esos archivos permanecerán en su ubicación.",
   ],
   ["Use your username with this API key on", "Usa tu nombre de usuario con esta clave API en"],
   [
@@ -1905,6 +1945,32 @@ export function translateUiText(locale: Locale, value: string): string {
 
   const removedPrinter = message.match(/^Printer "(.+)" removed$/i)?.[1];
   if (removedPrinter) return `${leading}Impresora "${removedPrinter}" eliminada${trailing}`;
+
+  const removeLibrarySource = message.match(
+    /^"(.+)" will be removed and its indexed models moved to trash\. Source files remain untouched in their mounted folder or remote storage\.$/,
+  )?.[1];
+  if (removeLibrarySource) {
+    return `${leading}"${removeLibrarySource}" se quitará y sus modelos indexados se moverán a la papelera. Los archivos de origen permanecerán intactos en su carpeta montada o almacenamiento remoto.${trailing}`;
+  }
+
+  const enrollMountedSource = message.match(
+    /^Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: (.+)\. This re-enables safe scans, watching, and writeback\.$/,
+  )?.[1];
+  if (enrollMountedSource) {
+    return `${leading}Verifica que esta ruta montada exacta pertenece a esta instalación de PrintStash antes de inscribirla: ${enrollMountedSource}. Esto vuelve a activar los análisis, la supervisión y la escritura de forma segura.${trailing}`;
+  }
+
+  const removedLibrarySource = message.match(
+    /^Removed "(.+)"\. Source files were not touched\.$/,
+  )?.[1];
+  if (removedLibrarySource) {
+    return `${leading}Se quitó "${removedLibrarySource}". Los archivos de origen no se modificaron.${trailing}`;
+  }
+
+  const removedSourceConnection = message.match(/^Removed remote source connection "(.+)"\.$/)?.[1];
+  if (removedSourceConnection) {
+    return `${leading}Se eliminó la conexión de fuente remota "${removedSourceConnection}".${trailing}`;
+  }
 
   return value;
 }

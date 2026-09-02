@@ -32,12 +32,12 @@ host mount is undesirable or unavailable.
 
 ## Create A Remote Connection
 
-1. Open **Settings > Shared volumes** and enable the feature.
-2. Under **Encrypted remote connections**, create an S3, WebDAV or SFTP
-   profile. Credentials are encrypted in the database and never returned by the
+1. Open **Settings > Library sources** and enable the feature.
+2. Under **Remote source connections**, create an S3, WebDAV or SFTP
+   connection. Credentials are encrypted in the database and never returned by the
    API after creation.
-3. Probe the profile. A failed probe does not create a library or change files.
-4. Add a library source, select the profile and enter an optional source prefix.
+3. Verify the connection. A failed verification does not create a source or change files.
+4. Add a library source, select the connection and enter an optional source path.
 5. Run **Scan now**, then open and download a representative linked Artifact.
 
 For Amazon S3, enter the real AWS region and leave the endpoint empty. For a

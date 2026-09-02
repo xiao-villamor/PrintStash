@@ -36,7 +36,7 @@ const FINDING_LABELS = new Map([
   ["owned_blob_size_mismatch", "Artifact size differs from database"],
   ["owned_blob_hash_mismatch", "Artifact checksum differs from database"],
   ["unowned_blob_detected", "Unclaimed storage object"],
-  ["external_root_unavailable", "External Library is unavailable"],
+  ["external_root_unavailable", "Library source is unavailable"],
   ["linked_file_missing", "Linked file is missing"],
   ["thumbnail_missing", "Thumbnail is missing"],
   ["thumbnail_unreadable", "Thumbnail cannot be decoded"],

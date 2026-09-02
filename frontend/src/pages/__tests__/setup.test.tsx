@@ -276,7 +276,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Complete setup" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("dedicated empty directory");
-    expect(screen.getByRole("alert")).toHaveTextContent("External Libraries");
+    expect(screen.getByRole("alert")).toHaveTextContent("Library sources");
   });
 
   it("blocks duplicate completion submissions while request is active", async () => {

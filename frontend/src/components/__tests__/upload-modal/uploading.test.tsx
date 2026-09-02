@@ -157,7 +157,7 @@ afterEach(() => {
 });
 
 describe("UploadModal ingestion", () => {
-  describe("shared-volume destinations", () => {
+  describe("library-source destinations", () => {
     it("offers only enabled roots with a bound identity", async () => {
       const safe = aLibrary({ id: 4, name: "Safe NAS" });
       const disabled = aLibrary({ id: 5, name: "Paused NAS", enabled: false });
@@ -170,10 +170,10 @@ describe("UploadModal ingestion", () => {
       });
 
       expect(
-        await screen.findByRole("option", { name: "Safe NAS (shared volume)" }),
+        await screen.findByRole("option", { name: "Safe NAS (library source)" }),
       ).toBeInTheDocument();
-      expect(screen.queryByRole("option", { name: "Paused NAS (shared volume)" })).toBeNull();
-      expect(screen.queryByRole("option", { name: "Legacy NAS (shared volume)" })).toBeNull();
+      expect(screen.queryByRole("option", { name: "Paused NAS (library source)" })).toBeNull();
+      expect(screen.queryByRole("option", { name: "Legacy NAS (library source)" })).toBeNull();
     });
 
     it.each([
