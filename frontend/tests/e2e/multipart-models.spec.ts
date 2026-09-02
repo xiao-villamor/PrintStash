@@ -1,4 +1,4 @@
-/** Standalone multipart composition stays understandable without hiding source Models. */
+/** Unified library groups multipart compositions without taking ownership of source Models. */
 import { expect, test } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
@@ -66,6 +66,8 @@ test.describe("multipart models", () => {
       guide_count: 0,
       cover_model_id: null,
       cover_thumbnail_url: null,
+      member_model_ids: [],
+      tags: [],
       effective_role: "admin",
       created_at: "2026-06-04T00:24:22.000000",
       updated_at: "2026-06-04T00:24:22.000000",
@@ -136,6 +138,11 @@ test.describe("multipart models", () => {
           })),
           part_count: payload.parts.length,
           model_count: payload.parts.reduce((count, part) => count + part.choices.length, 0),
+          member_model_ids: [
+            ...new Set(
+              payload.parts.flatMap((part) => part.choices.map((choice) => choice.model_id)),
+            ),
+          ],
         };
         await route.fulfill({ json: detail });
         return;
@@ -150,7 +157,6 @@ test.describe("multipart models", () => {
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
-    await page.getByRole("tab", { name: "Multipart sets" }).click();
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
@@ -199,9 +205,11 @@ test.describe("multipart models", () => {
     await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Desk base/ })).toBeVisible();
     await page.setViewportSize({ width: 1280, height: 720 });
-    await page.goto("/?v=multipart");
-    await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
-    await page.getByRole("checkbox", { name: "With variants" }).click();
+    await page.goto("/?c=maraio&type=multipart");
+    await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Multipart sets only", exact: true }).first(),
+    ).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("link", { name: /Desk organiser/ })).toBeVisible();
     const setCardDimensions = await page
       .getByRole("link", { name: /Desk organiser/ })
@@ -211,7 +219,7 @@ test.describe("multipart models", () => {
       });
     expect(Math.abs(setCardDimensions.width - setCardDimensions.height)).toBeLessThanOrEqual(1);
     expect(setCardDimensions.width).toBeLessThanOrEqual(340);
-    await page.getByRole("tab", { name: "Models", exact: true }).click();
+    await page.getByRole("button", { name: "Everything", exact: true }).first().click();
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 
     await page.goto("/multipart-models/90");
@@ -219,8 +227,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();
-    await expect(page).toHaveURL(/\?v=multipart/);
-    await page.getByRole("tab", { name: "Models", exact: true }).click();
+    await expect(page).toHaveURL(/\?c=maraio$/);
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
   });
 });

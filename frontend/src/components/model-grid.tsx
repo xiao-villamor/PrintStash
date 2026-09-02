@@ -10,6 +10,7 @@ import {
   ModelBatchResult,
   ModelListItem,
   ModelSort,
+  MultipartModelListItem,
   PrintJobState,
   PrinterRead,
   SavedViewRead,
@@ -21,15 +22,10 @@ import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
-import {
-  MultipartModelBrowser,
-  NewMultipartModelModal,
-  type MultipartStructureFilter,
-} from "@/components/multipart-model-browser";
-import { MultipartFilterSidebar } from "@/components/multipart-filter-sidebar";
+import { MultipartModelCard, NewMultipartModelModal } from "@/components/multipart-model-browser";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
-import { FilterSidebar } from "@/components/filter-sidebar";
+import { FilterSidebar, type LibraryViewMode } from "@/components/filter-sidebar";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
 import { UploadModal, UploadMode } from "@/components/upload-modal";
@@ -61,6 +57,7 @@ import {
   Check,
   ChevronDown,
   MoreHorizontal,
+  Boxes,
 } from "lucide-react";
 import {
   createCollection,
@@ -91,10 +88,10 @@ import {
   useCollections,
   useModelFacets,
   useModelList,
+  useMultipartModels,
   useOutlinerModels,
   usePrinters,
   useTags,
-  useVaultStats,
   type ModelListFilters,
 } from "@/lib/queries";
 import { queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
@@ -111,6 +108,9 @@ import { TabBar } from "@/components/ui/tabs";
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
+type LibraryItem =
+  | { kind: "model"; value: ModelListItem }
+  | { kind: "multipart"; value: MultipartModelListItem };
 
 const PAGE_SIZE = 60;
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
@@ -124,6 +124,25 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: "filament-asc", label: "Least filament" },
   { value: "cost-asc", label: "Lowest cost" },
 ];
+
+/** Sort the two card types as one library whenever they share a meaningful key. */
+function sortLibraryItems(items: LibraryItem[], sortKey: SortKey): LibraryItem[] {
+  return [...items].sort((left, right) => {
+    if (sortKey === "name-asc" || sortKey === "name-desc") {
+      const order = left.value.name.localeCompare(right.value.name);
+      return sortKey === "name-asc" ? order : -order;
+    }
+    if (sortKey === "date-asc" || sortKey === "date-desc") {
+      const order = Date.parse(left.value.updated_at) - Date.parse(right.value.updated_at);
+      return sortKey === "date-asc" ? order : -order;
+    }
+    // Print-result sorts have no aggregate equivalent yet. Preserve the API's
+    // Model order and put sets after it instead of implying a fabricated score.
+    if (left.kind !== right.kind) return left.kind === "model" ? -1 : 1;
+    if (left.kind === "model") return 0;
+    return Date.parse(right.value.updated_at) - Date.parse(left.value.updated_at);
+  });
+}
 
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
@@ -449,10 +468,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // collection/tag mutation (the api layer invalidates the query cache).
   const collectionsQuery = useCollections();
   const tagsQuery = useTags();
-  // Library-wide totals (access-scoped, excludes trashed + sentinel models).
-  // Used to label the "All Models" root, where the grid only fetches the models
-  // sitting directly at the root (see #30).
-  const vaultStatsQuery = useVaultStats();
   // Stable empty-array fallback: `data ?? []` would allocate a new array every
   // render, which cascaded into the useMemo hooks below re-running on every
   // render even when the underlying query data hadn't changed.
@@ -496,14 +511,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // returning from a document (Back or the logo) lands on the Documents tab
   // instead of resetting to Models.
   const requestedVaultView = searchParams.get("v");
-  const initialVaultView =
-    requestedVaultView === "docs" || requestedVaultView === "multipart"
-      ? requestedVaultView
-      : readLastView();
-  const [docView, setDocView] = useState<"models" | "docs" | "multipart">(initialVaultView);
-  const isMultipartView = docView === "multipart";
-  const [multipartStructures, setMultipartStructures] = useState<MultipartStructureFilter[]>([]);
-  const [multipartGuidesOnly, setMultipartGuidesOnly] = useState(false);
+  const initialVaultView = requestedVaultView === "docs" ? "docs" : readLastView();
+  const [docView, setDocView] = useState<"models" | "docs">(
+    initialVaultView === "docs" ? "docs" : "models",
+  );
+  const requestedLibraryView = searchParams.get("type");
+  const [libraryView, setLibraryView] = useState<LibraryViewMode>(() => {
+    if (
+      requestedLibraryView === "all" ||
+      requestedLibraryView === "multipart" ||
+      requestedLibraryView === "components"
+    ) {
+      return requestedLibraryView;
+    }
+    return requestedVaultView === "multipart" ? "multipart" : "organized";
+  });
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
@@ -554,19 +576,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function onMainDragEnter(e: React.DragEvent) {
-    if (isMultipartView) return;
     if (!isFileDrag(e)) return; // model drags are handled by the folder drop targets
     e.preventDefault();
     if (++dragEnterCount.current === 1) setIsDragging(true);
   }
   function onMainDragOver(e: React.DragEvent) {
-    if (isMultipartView) return;
     if (!isFileDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   }
   function onMainDragLeave(e: React.DragEvent) {
-    if (isMultipartView) return;
     if (!isFileDrag(e)) return;
     e.preventDefault();
     if (--dragEnterCount.current <= 0) {
@@ -575,7 +594,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
   async function onMainDrop(e: React.DragEvent) {
-    if (isMultipartView) return;
     if (!isFileDrag(e)) return; // a model dropped on empty space is a no-op
     e.preventDefault();
     dragEnterCount.current = 0;
@@ -615,6 +633,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const presence = params.get("printer_presence");
       setSelectedPrinterPresence(presence === "any" || presence === "none" ? presence : null);
       setFavoritesOnly(params.get("favorites") === "true");
+      const nextLibraryView = params.get("type");
+      setLibraryView(
+        nextLibraryView === "all" ||
+          nextLibraryView === "multipart" ||
+          nextLibraryView === "components"
+          ? nextLibraryView
+          : params.get("v") === "multipart"
+            ? "multipart"
+            : "organized",
+      );
     }
     window.addEventListener("popstate", restoreFiltersFromHistory);
     return () => window.removeEventListener("popstate", restoreFiltersFromHistory);
@@ -686,6 +714,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     else params.delete("c");
     const qs = params.toString();
     router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+  }
+
+  function handleLibraryViewChange(view: LibraryViewMode) {
+    setLibraryView(view);
+    setDocView("models");
+    setSelectedIds(new Set());
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("v");
+    if (view === "organized") params.delete("type");
+    else params.set("type", view);
+    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
   }
 
   useEffect(() => {
@@ -888,6 +927,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     PAGE_SIZE,
     sortKey,
   );
+  const multipartQuery = useMultipartModels(
+    {
+      collection: selectedCollection ?? undefined,
+      direct: !searchQuery,
+      q: searchQuery,
+      tag: selectedTags.length ? selectedTags : undefined,
+      limit: 500,
+    },
+    { enabled: libraryView !== "components" },
+  );
+  const multipartMembershipQuery = useMultipartModels(
+    { limit: 500 },
+    { enabled: libraryView === "components" },
+  );
   const outlinerQuery = useOutlinerModels(baseFilters, 500, {
     enabled: desktopOutliner,
   });
@@ -896,15 +949,46 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [modelQuery.data],
   );
+  const multipartModels = useMemo(() => multipartQuery.data ?? [], [multipartQuery.data]);
+  const multipartMembership = useMemo(
+    () => multipartMembershipQuery.data ?? [],
+    [multipartMembershipQuery.data],
+  );
+  const memberModelIds = useMemo(
+    () => new Set(multipartMembership.flatMap((item) => item.member_model_ids)),
+    [multipartMembership],
+  );
+  const groupedModelIds = useMemo(
+    () => new Set(multipartModels.flatMap((item) => item.member_model_ids)),
+    [multipartModels],
+  );
+  const visibleMultipartModels = libraryView === "components" ? [] : multipartModels;
+  const visibleModels = (() => {
+    if (libraryView === "multipart") return [];
+    if (libraryView === "components") {
+      return models.filter((model) => memberModelIds.has(model.id));
+    }
+    if (libraryView === "organized" && !searchQuery) {
+      return models.filter((model) => !groupedModelIds.has(model.id));
+    }
+    return models;
+  })();
   const outlinerModels = outlinerQuery.data ?? [];
   // First load shows skeletons; a filter change keeps the previous page visible
   // and just flags `refreshing` for the subtle "Updating…" hint.
-  const loading = modelQuery.isLoading;
+  const loading =
+    modelQuery.isLoading ||
+    multipartQuery.isLoading ||
+    (libraryView === "components" && multipartMembershipQuery.isLoading);
   const refreshing = modelQuery.isFetching && !modelQuery.isFetchingNextPage && !loading;
   const loadingMore = modelQuery.isFetchingNextPage;
   const hasMore = modelQuery.hasNextPage ?? false;
   const fetchNextPage = modelQuery.fetchNextPage;
-  const error = modelQuery.error?.message ?? null;
+  const error =
+    modelQuery.error?.message ??
+    multipartQuery.error?.message ??
+    multipartMembershipQuery.error?.message ??
+    null;
   function loadMore() {
     if (hasMore && !loadingMore) fetchNextPage();
   }
@@ -923,7 +1007,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [selectingAll, setSelectingAll] = useState(false);
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
-  const sortedModels = models;
+  const sortedModels = visibleModels;
+  const libraryItems = sortLibraryItems(
+    [
+      ...visibleModels.map((value) => ({ kind: "model" as const, value })),
+      ...visibleMultipartModels.map((value) => ({ kind: "multipart" as const, value })),
+    ],
+    sortKey,
+  );
 
   const openTagEditor = useCallback((model: ModelListItem) => {
     setTagTarget(model);
@@ -1193,11 +1284,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       setBatchBusy(false);
     }
   }
-  // "All Models" is a folder explorer: at the root the grid shows collection
-  // cards plus only the models sitting directly at the root, so models.length is
-  // the uncollected handful — 0 for a fully-foldered NAS library. When we're at
-  // the root with no filter narrowing the view, label it with the real library
-  // total instead of that root-only count (#30).
   const hasActiveFilters =
     !!selectedCollection ||
     selectedTags.length > 0 ||
@@ -1207,9 +1293,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     Object.values(structured).some((values) => values.length > 0) ||
     searchParams.has("uploaded_after") ||
     searchParams.has("uploaded_before");
-  const totalLibraryCount = vaultStatsQuery.data?.model_count ?? null;
-  const showLibraryTotal = !selectedCollection && !hasActiveFilters && totalLibraryCount !== null;
-  const displayCount = showLibraryTotal ? totalLibraryCount : models.length;
+  const displayCount = libraryItems.length;
+  // Build the return target from the selected view as well as the router
+  // snapshot. `router.replace()` is asynchronous, so a card clicked directly
+  // after changing Library view must not capture the previous URL.
+  const returnParams = new URLSearchParams(searchParams.toString());
+  returnParams.delete("v");
+  if (libraryView === "organized") returnParams.delete("type");
+  else returnParams.set("type", libraryView);
+  const currentLibraryHref = returnParams.size ? `/?${returnParams.toString()}` : "/";
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
@@ -1505,7 +1597,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </form>
         </Modal>
         <UploadModal
-          open={uploadOpen && !isMultipartView}
+          open={uploadOpen}
           onClose={() => {
             setUploadOpen(false);
             setDropPreload(null);
@@ -1523,97 +1615,88 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onClose={() => setMultipartCreateOpen(false)}
           collectionId={selectedCollectionRow?.id ?? null}
           collections={collections}
+          returnTo={currentLibraryHref}
         />
-        {!isMultipartView && (
-          <MobileFilterDrawer
-            open={filterDrawerOpen}
-            onClose={closeDrawer}
-            collections={collections}
-            tags={tags}
-            printers={printers}
-            selectedCollection={selectedCollection}
-            selectedTags={selectedTags}
-            selectedPrinterId={selectedPrinterId}
-            selectedPrinterPresence={selectedPrinterPresence}
-            onCollectionChange={handleCollectionChange}
-            onTagsChange={setSelectedTags}
-            onPrinterChange={setSelectedPrinterId}
-            onPrinterPresenceChange={setSelectedPrinterPresence}
-            onCreateCollection={handleOpenCreateCollection}
-            canViewPrinters={canViewPrinters}
-            loading={facetsLoading || facetQuery.isLoading}
-            structuredFilters={
-              <StructuredFilters
-                facets={facetQuery.data}
-                loading={facetQuery.isLoading}
-                error={facetQuery.isError}
-                active={structured}
-                onChange={setStructuredFilter}
-                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                onDateChange={(key, value) => {
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (value) params.set(key, value);
-                  else params.delete(key);
-                  router.replace(params.size ? `/?${params}` : "/", { scroll: false });
-                }}
-                onClearAll={clearStructuredFilters}
-              />
-            }
-          />
-        )}
+        <MobileFilterDrawer
+          open={filterDrawerOpen}
+          onClose={closeDrawer}
+          collections={collections}
+          tags={tags}
+          printers={printers}
+          selectedCollection={selectedCollection}
+          selectedTags={selectedTags}
+          selectedPrinterId={selectedPrinterId}
+          selectedPrinterPresence={selectedPrinterPresence}
+          onCollectionChange={handleCollectionChange}
+          onTagsChange={setSelectedTags}
+          onPrinterChange={setSelectedPrinterId}
+          onPrinterPresenceChange={setSelectedPrinterPresence}
+          onCreateCollection={handleOpenCreateCollection}
+          canViewPrinters={canViewPrinters}
+          loading={facetsLoading || facetQuery.isLoading}
+          structuredFilters={
+            <StructuredFilters
+              facets={facetQuery.data}
+              loading={facetQuery.isLoading}
+              error={facetQuery.isError}
+              active={structured}
+              onChange={setStructuredFilter}
+              uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
+              uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+              onDateChange={(key, value) => {
+                const params = new URLSearchParams(searchParams.toString());
+                if (value) params.set(key, value);
+                else params.delete(key);
+                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+              }}
+              onClearAll={clearStructuredFilters}
+            />
+          }
+          libraryView={libraryView}
+          onLibraryViewChange={handleLibraryViewChange}
+        />
 
         {/* Stitch layout: filter sidebar + main content */}
-        {isMultipartView ? (
-          <MultipartFilterSidebar
-            collections={collections}
-            selectedCollection={selectedCollection}
-            structures={multipartStructures}
-            guidesOnly={multipartGuidesOnly}
-            onCollectionChange={handleCollectionChange}
-            onStructuresChange={setMultipartStructures}
-            onGuidesOnlyChange={setMultipartGuidesOnly}
-          />
-        ) : (
-          <FilterSidebar
-            collections={collections}
-            models={outlinerModels}
-            tags={tags}
-            printers={printers}
-            selectedCollection={selectedCollection}
-            selectedTags={selectedTags}
-            selectedPrinterId={selectedPrinterId}
-            selectedPrinterPresence={selectedPrinterPresence}
-            onCollectionChange={handleCollectionChange}
-            onTagsChange={setSelectedTags}
-            onPrinterChange={setSelectedPrinterId}
-            onPrinterPresenceChange={setSelectedPrinterPresence}
-            onCreateCollection={handleOpenCreateCollection}
-            onMoveModel={handleMoveModel}
-            onMoveCollection={handleMoveCollection}
-            onDeleteCollection={handleDeleteCollection}
-            canViewPrinters={canViewPrinters}
-            loading={facetsLoading || facetQuery.isLoading}
-            structuredFilters={
-              <StructuredFilters
-                facets={facetQuery.data}
-                loading={facetQuery.isLoading}
-                error={facetQuery.isError}
-                active={structured}
-                onChange={setStructuredFilter}
-                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-                onDateChange={(key, value) => {
-                  const params = new URLSearchParams(searchParams.toString());
-                  if (value) params.set(key, value);
-                  else params.delete(key);
-                  router.replace(params.size ? `/?${params}` : "/", { scroll: false });
-                }}
-                onClearAll={clearStructuredFilters}
-              />
-            }
-          />
-        )}
+        <FilterSidebar
+          collections={collections}
+          models={outlinerModels}
+          tags={tags}
+          printers={printers}
+          selectedCollection={selectedCollection}
+          selectedTags={selectedTags}
+          selectedPrinterId={selectedPrinterId}
+          selectedPrinterPresence={selectedPrinterPresence}
+          onCollectionChange={handleCollectionChange}
+          onTagsChange={setSelectedTags}
+          onPrinterChange={setSelectedPrinterId}
+          onPrinterPresenceChange={setSelectedPrinterPresence}
+          onCreateCollection={handleOpenCreateCollection}
+          onMoveModel={handleMoveModel}
+          onMoveCollection={handleMoveCollection}
+          onDeleteCollection={handleDeleteCollection}
+          canViewPrinters={canViewPrinters}
+          loading={facetsLoading || facetQuery.isLoading}
+          structuredFilters={
+            <StructuredFilters
+              facets={facetQuery.data}
+              loading={facetQuery.isLoading}
+              error={facetQuery.isError}
+              active={structured}
+              onChange={setStructuredFilter}
+              uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
+              uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+              onDateChange={(key, value) => {
+                const params = new URLSearchParams(searchParams.toString());
+                if (value) params.set(key, value);
+                else params.delete(key);
+                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+              }}
+              onClearAll={clearStructuredFilters}
+            />
+          }
+          libraryView={libraryView}
+          onLibraryViewChange={handleLibraryViewChange}
+        />
 
         <main
           className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
@@ -1622,7 +1705,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onDragLeave={onMainDragLeave}
           onDrop={onMainDrop}
         >
-          {!isMultipartView && isDragging && canUploadToVault && (
+          {isDragging && canUploadToVault && (
             <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-primary bg-primary/5">
               <span className="bg-background border border-border rounded px-4 py-2 font-mono text-xs uppercase tracking-widest shadow">
                 Drop to upload
@@ -1637,7 +1720,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   onClick={() => handleCollectionChange(null)}
                   className="text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isMultipartView ? t("multipart.title") : "All Models"}
+                  All Models
                 </button>
                 {breadcrumbs.map((crumb) => (
                   <span key={crumb.id} className="flex items-center space-x-2">
@@ -1656,7 +1739,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 onClick={() => handleCollectionChange(null)}
                 className="text-foreground font-medium"
               >
-                {isMultipartView ? t("multipart.title") : "All Models"}
+                All Models
               </button>
             )}
             {availableRecentFolders.length > 0 && (
@@ -1712,54 +1795,203 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </nav>
 
           {/* Content Top Bar */}
-          {isMultipartView && (
-            <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <div className="min-w-0 space-y-1">
+          <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="flex min-w-0 items-start justify-between gap-3 sm:block">
+                <div className="min-w-0 flex-1 space-y-1">
                   <h1 className="break-words text-lg font-bold tracking-tight text-foreground sm:truncate sm:text-2xl">
-                    {selectedName ?? t("multipart.title")}
+                    {selectedName ?? "All Models"}
                   </h1>
-                  <p className="max-w-3xl text-sm text-muted-foreground">
-                    {t("multipart.description")}
+                  <p className="text-sm text-muted-foreground">
+                    {loading
+                      ? "Loading..."
+                      : `${displayCount} item${displayCount !== 1 ? "s" : ""} shown${selectedName ? ` in this collection` : ""}`}
+                    {refreshing && (
+                      <span className="ml-2 font-mono text-xs text-muted-foreground">
+                        Updating...
+                      </span>
+                    )}
                   </p>
                 </div>
                 <Button
-                  type="button"
-                  size="xs"
-                  onClick={() => setMultipartCreateOpen(true)}
-                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  onClick={() => {
+                    setDropPreload(null);
+                    setDropCollection(null);
+                    setUploadOpen(true);
+                  }}
+                  disabled={!canUploadToVault}
                   title={
-                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
-                      ? undefined
-                      : t("multipart.editAccess")
+                    canUploadToVault ? "Upload artifacts" : "Sign in and get edit access to upload"
                   }
-                  className="h-10 shrink-0 sm:h-8"
+                  className="shrink-0 sm:hidden"
                 >
-                  <Plus className="h-4 w-4" /> {t("multipart.new")}
+                  Upload
                 </Button>
               </div>
-            </div>
-          )}
-          {!isMultipartView && (
-            <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-                <div className="flex min-w-0 items-start justify-between gap-3 sm:block">
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <h1 className="break-words text-lg font-bold tracking-tight text-foreground sm:truncate sm:text-2xl">
-                      {selectedName ?? "All Models"}
-                    </h1>
-                    <p className="text-sm text-muted-foreground">
-                      {loading
-                        ? "Loading..."
-                        : `${displayCount} model${displayCount !== 1 ? "s" : ""} total${selectedName ? ` in this collection` : ""}`}
-                      {refreshing && (
-                        <span className="ml-2 font-mono text-xs text-muted-foreground">
-                          Updating...
-                        </span>
-                      )}
-                    </p>
-                  </div>
+
+              <div className="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
+                <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:hidden">
                   <Button
+                    type="button"
+                    variant="outline"
+                    onClick={openDrawer}
+                    className="w-full min-w-0 px-2"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                    <span className="min-w-0 truncate">Filters</span>
+                  </Button>
+                  <SortMenu
+                    open={sortOpen}
+                    onOpenChange={setSortOpen}
+                    sortKey={sortKey}
+                    onSelect={selectSort}
+                    labelFor={ui}
+                    triggerSize="sm"
+                    triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
+                    wrapperClassName="min-w-0"
+                  />
+                  <DropdownMenu
+                    open={moreOpen}
+                    onOpenChange={setMoreOpen}
+                    align="end"
+                    className="min-w-0"
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="outline"
+                        data-menu-trigger
+                        aria-haspopup="menu"
+                        aria-expanded={moreOpen}
+                        aria-label={t("nav.more")}
+                        onClick={() => setMoreOpen(!moreOpen)}
+                        className="w-full min-w-0 px-2"
+                      >
+                        <MoreHorizontal className="h-4 w-4 shrink-0" />
+                        <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      </Button>
+                    }
+                    contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+                  >
+                    {auth.isAuthenticated && (
+                      <>
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={favoritesOnly}
+                          onClick={() => {
+                            toggleFavorites();
+                            setMoreOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
+                        >
+                          <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
+                          <span className="flex-1">Favorites</span>
+                          {favoritesOnly && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                        <SavedViewSelector
+                          views={savedViews}
+                          activeId={activeSavedViewId}
+                          modified={savedViewModified}
+                          onSelect={(view) => {
+                            applySavedView(view);
+                            setMoreOpen(false);
+                          }}
+                          onCreate={() => {
+                            setMoreOpen(false);
+                            setSaveViewOpen(true);
+                          }}
+                          onUpdate={(view) =>
+                            manageSavedView(
+                              () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                              "Saved view updated",
+                            )
+                          }
+                          onRename={(view, name) =>
+                            manageSavedView(
+                              () => updateSavedView(view.id, { name }),
+                              "Saved view renamed",
+                            )
+                          }
+                          onDuplicate={(view) =>
+                            manageSavedView(
+                              () => createSavedView(duplicateViewName(view.name), view.filters),
+                              "Saved view duplicated",
+                            )
+                          }
+                          onDelete={(view) =>
+                            manageSavedView(async () => {
+                              await deleteSavedView(view.id);
+                              if (activeSavedViewId === view.id) setActiveSavedViewId(null);
+                            }, "Saved view deleted")
+                          }
+                          triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
+                          triggerRole="menuitem"
+                          triggerSize="sm"
+                          triggerVariant="ghost"
+                        />
+                        <button
+                          type="button"
+                          role="menuitemcheckbox"
+                          aria-checked={selectMode}
+                          title="Select Models and folders (S)"
+                          onClick={() => {
+                            toggleSelectMode();
+                            setMoreOpen(false);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectMode ? "bg-accent text-accent-foreground" : ""}`}
+                        >
+                          <CheckSquare className="h-4 w-4" />
+                          <span className="flex-1">{selectMode ? "Done" : "Select"}</span>
+                          {selectMode && <Check className="h-3.5 w-3.5" />}
+                        </button>
+                      </>
+                    )}
+                    <DisplayMenu
+                      open={displayOpen}
+                      onOpenChange={setDisplayOpen}
+                      viewMode={viewMode}
+                      compact={compact}
+                      onSelectMode={selectViewMode}
+                      onSelectDensity={selectDensity}
+                      labelFor={ui}
+                      triggerSize="sm"
+                      triggerVariant="ghost"
+                      triggerRole="menuitem"
+                      triggerClassName="w-full justify-start"
+                      onSelectComplete={() => setMoreOpen(false)}
+                    />
+                  </DropdownMenu>
+                </div>
+
+                <div className="hidden w-full flex-wrap items-center gap-2 sm:flex sm:w-auto">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={openDrawer}
+                    className="h-10 md:hidden sm:h-8"
+                  >
+                    <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                    Filters
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    onClick={handleOpenCreateCollection}
+                    disabled={!canAdminSelectedCollection}
+                    title={
+                      canAdminSelectedCollection
+                        ? "Create a collection"
+                        : "Admin access required for this collection"
+                    }
+                    className="hidden md:inline-flex"
+                  >
+                    <Plus className="w-4 h-4 text-muted-foreground" />
+                    New collection
+                  </Button>
+                  <Button
+                    size="xs"
                     onClick={() => {
                       setDropPreload(null);
                       setDropCollection(null);
@@ -1771,275 +2003,109 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         ? "Upload artifacts"
                         : "Sign in and get edit access to upload"
                     }
-                    className="shrink-0 sm:hidden"
+                    className="h-10 sm:h-8"
                   >
                     Upload
                   </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => setMultipartCreateOpen(true)}
+                    disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                    title={
+                      user?.is_superuser || canWriteCollection(selectedCollectionRow)
+                        ? undefined
+                        : t("multipart.editAccess")
+                    }
+                    className="h-10 sm:h-8"
+                  >
+                    <Plus className="h-4 w-4" /> {t("multipart.new")}
+                  </Button>
                 </div>
-
-                <div className="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-                  <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:hidden">
+                {auth.isAuthenticated && (
+                  <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
                     <Button
-                      type="button"
-                      variant="outline"
-                      onClick={openDrawer}
-                      className="w-full min-w-0 px-2"
-                    >
-                      <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                      <span className="min-w-0 truncate">Filters</span>
-                    </Button>
-                    <SortMenu
-                      open={sortOpen}
-                      onOpenChange={setSortOpen}
-                      sortKey={sortKey}
-                      onSelect={selectSort}
-                      labelFor={ui}
-                      triggerSize="sm"
-                      triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-                      wrapperClassName="min-w-0"
-                    />
-                    <DropdownMenu
-                      open={moreOpen}
-                      onOpenChange={setMoreOpen}
-                      align="end"
-                      className="min-w-0"
-                      trigger={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          data-menu-trigger
-                          aria-haspopup="menu"
-                          aria-expanded={moreOpen}
-                          aria-label={t("nav.more")}
-                          onClick={() => setMoreOpen(!moreOpen)}
-                          className="w-full min-w-0 px-2"
-                        >
-                          <MoreHorizontal className="h-4 w-4 shrink-0" />
-                          <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
-                          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        </Button>
-                      }
-                      contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                    >
-                      {auth.isAuthenticated && (
-                        <>
-                          <button
-                            type="button"
-                            role="menuitemcheckbox"
-                            aria-checked={favoritesOnly}
-                            onClick={() => {
-                              toggleFavorites();
-                              setMoreOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
-                          >
-                            <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
-                            <span className="flex-1">Favorites</span>
-                            {favoritesOnly && <Check className="h-3.5 w-3.5" />}
-                          </button>
-                          <SavedViewSelector
-                            views={savedViews}
-                            activeId={activeSavedViewId}
-                            modified={savedViewModified}
-                            onSelect={(view) => {
-                              applySavedView(view);
-                              setMoreOpen(false);
-                            }}
-                            onCreate={() => {
-                              setMoreOpen(false);
-                              setSaveViewOpen(true);
-                            }}
-                            onUpdate={(view) =>
-                              manageSavedView(
-                                () => updateSavedView(view.id, { filters: currentViewFilters() }),
-                                "Saved view updated",
-                              )
-                            }
-                            onRename={(view, name) =>
-                              manageSavedView(
-                                () => updateSavedView(view.id, { name }),
-                                "Saved view renamed",
-                              )
-                            }
-                            onDuplicate={(view) =>
-                              manageSavedView(
-                                () => createSavedView(duplicateViewName(view.name), view.filters),
-                                "Saved view duplicated",
-                              )
-                            }
-                            onDelete={(view) =>
-                              manageSavedView(async () => {
-                                await deleteSavedView(view.id);
-                                if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                              }, "Saved view deleted")
-                            }
-                            triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
-                            triggerRole="menuitem"
-                            triggerSize="sm"
-                            triggerVariant="ghost"
-                          />
-                          <button
-                            type="button"
-                            role="menuitemcheckbox"
-                            aria-checked={selectMode}
-                            title="Select Models and folders (S)"
-                            onClick={() => {
-                              toggleSelectMode();
-                              setMoreOpen(false);
-                            }}
-                            className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectMode ? "bg-accent text-accent-foreground" : ""}`}
-                          >
-                            <CheckSquare className="h-4 w-4" />
-                            <span className="flex-1">{selectMode ? "Done" : "Select"}</span>
-                            {selectMode && <Check className="h-3.5 w-3.5" />}
-                          </button>
-                        </>
-                      )}
-                      <DisplayMenu
-                        open={displayOpen}
-                        onOpenChange={setDisplayOpen}
-                        viewMode={viewMode}
-                        compact={compact}
-                        onSelectMode={selectViewMode}
-                        onSelectDensity={selectDensity}
-                        labelFor={ui}
-                        triggerSize="sm"
-                        triggerVariant="ghost"
-                        triggerRole="menuitem"
-                        triggerClassName="w-full justify-start"
-                        onSelectComplete={() => setMoreOpen(false)}
-                      />
-                    </DropdownMenu>
-                  </div>
-
-                  <div className="hidden w-full flex-wrap items-center gap-2 sm:flex sm:w-auto">
-                    <Button
-                      type="button"
-                      variant="outline"
+                      variant={favoritesOnly ? "secondary" : "outline"}
                       size="xs"
-                      onClick={openDrawer}
-                      className="h-10 md:hidden sm:h-8"
-                    >
-                      <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                      Filters
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="xs"
-                      onClick={handleOpenCreateCollection}
-                      disabled={!canAdminSelectedCollection}
-                      title={
-                        canAdminSelectedCollection
-                          ? "Create a collection"
-                          : "Admin access required for this collection"
-                      }
-                      className="hidden md:inline-flex"
-                    >
-                      <Plus className="w-4 h-4 text-muted-foreground" />
-                      New collection
-                    </Button>
-                    <Button
-                      size="xs"
-                      onClick={() => {
-                        setDropPreload(null);
-                        setDropCollection(null);
-                        setUploadOpen(true);
-                      }}
-                      disabled={!canUploadToVault}
-                      title={
-                        canUploadToVault
-                          ? "Upload artifacts"
-                          : "Sign in and get edit access to upload"
-                      }
+                      aria-pressed={favoritesOnly}
+                      onClick={toggleFavorites}
                       className="h-10 sm:h-8"
                     >
-                      Upload
+                      <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />{" "}
+                      Favorites
+                    </Button>
+                    <SavedViewSelector
+                      views={savedViews}
+                      activeId={activeSavedViewId}
+                      modified={savedViewModified}
+                      onSelect={applySavedView}
+                      onCreate={() => setSaveViewOpen(true)}
+                      onUpdate={(view) =>
+                        manageSavedView(
+                          () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                          "Saved view updated",
+                        )
+                      }
+                      onRename={(view, name) =>
+                        manageSavedView(
+                          () => updateSavedView(view.id, { name }),
+                          "Saved view renamed",
+                        )
+                      }
+                      onDuplicate={(view) =>
+                        manageSavedView(
+                          () => createSavedView(duplicateViewName(view.name), view.filters),
+                          "Saved view duplicated",
+                        )
+                      }
+                      onDelete={(view) =>
+                        manageSavedView(async () => {
+                          await deleteSavedView(view.id);
+                          if (activeSavedViewId === view.id) setActiveSavedViewId(null);
+                        }, "Saved view deleted")
+                      }
+                      triggerClassName="h-10 sm:h-8"
+                    />
+                    <Button
+                      variant={selectMode ? "secondary" : "outline"}
+                      size="xs"
+                      aria-pressed={selectMode}
+                      title="Select Models and folders (S)"
+                      onClick={toggleSelectMode}
+                      className="h-10 sm:h-8"
+                    >
+                      <CheckSquare className="w-4 h-4" />
+                      {selectMode ? "Done" : "Select"}
                     </Button>
                   </div>
-                  {auth.isAuthenticated && (
-                    <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
-                      <Button
-                        variant={favoritesOnly ? "secondary" : "outline"}
-                        size="xs"
-                        aria-pressed={favoritesOnly}
-                        onClick={toggleFavorites}
-                        className="h-10 sm:h-8"
-                      >
-                        <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />{" "}
-                        Favorites
-                      </Button>
-                      <SavedViewSelector
-                        views={savedViews}
-                        activeId={activeSavedViewId}
-                        modified={savedViewModified}
-                        onSelect={applySavedView}
-                        onCreate={() => setSaveViewOpen(true)}
-                        onUpdate={(view) =>
-                          manageSavedView(
-                            () => updateSavedView(view.id, { filters: currentViewFilters() }),
-                            "Saved view updated",
-                          )
-                        }
-                        onRename={(view, name) =>
-                          manageSavedView(
-                            () => updateSavedView(view.id, { name }),
-                            "Saved view renamed",
-                          )
-                        }
-                        onDuplicate={(view) =>
-                          manageSavedView(
-                            () => createSavedView(duplicateViewName(view.name), view.filters),
-                            "Saved view duplicated",
-                          )
-                        }
-                        onDelete={(view) =>
-                          manageSavedView(async () => {
-                            await deleteSavedView(view.id);
-                            if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                          }, "Saved view deleted")
-                        }
-                        triggerClassName="h-10 sm:h-8"
-                      />
-                      <Button
-                        variant={selectMode ? "secondary" : "outline"}
-                        size="xs"
-                        aria-pressed={selectMode}
-                        title="Select Models and folders (S)"
-                        onClick={toggleSelectMode}
-                        className="h-10 sm:h-8"
-                      >
-                        <CheckSquare className="w-4 h-4" />
-                        {selectMode ? "Done" : "Select"}
-                      </Button>
-                    </div>
-                  )}
-                  <div className="hidden h-6 w-px bg-muted mx-1 md:block" />
-                  <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
-                    <SortMenu
-                      open={sortOpen}
-                      onOpenChange={setSortOpen}
-                      sortKey={sortKey}
-                      onSelect={selectSort}
-                      labelFor={ui}
-                      triggerSize="xs"
-                      triggerClassName="h-10 sm:h-8"
-                    />
-                    <DisplayMenu
-                      open={displayOpen}
-                      onOpenChange={setDisplayOpen}
-                      viewMode={viewMode}
-                      compact={compact}
-                      onSelectMode={selectViewMode}
-                      onSelectDensity={selectDensity}
-                      labelFor={ui}
-                      triggerSize="xs"
-                      triggerClassName="h-10 sm:h-8"
-                    />
-                  </div>
+                )}
+                <div className="hidden h-6 w-px bg-muted mx-1 md:block" />
+                <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
+                  <SortMenu
+                    open={sortOpen}
+                    onOpenChange={setSortOpen}
+                    sortKey={sortKey}
+                    onSelect={selectSort}
+                    labelFor={ui}
+                    triggerSize="xs"
+                    triggerClassName="h-10 sm:h-8"
+                  />
+                  <DisplayMenu
+                    open={displayOpen}
+                    onOpenChange={setDisplayOpen}
+                    viewMode={viewMode}
+                    compact={compact}
+                    onSelectMode={selectViewMode}
+                    onSelectDensity={selectDensity}
+                    labelFor={ui}
+                    triggerSize="xs"
+                    triggerClassName="h-10 sm:h-8"
+                  />
                 </div>
               </div>
             </div>
-          )}
+          </div>
 
           {selectedCollectionRow && (
             <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
@@ -2059,7 +2125,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {!isMultipartView && activeFilterItems.length > 0 && (
+          {activeFilterItems.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-6">
               <span className="text-3xs font-mono uppercase tracking-wider text-muted-foreground">
                 Filters
@@ -2084,11 +2150,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {/* Models / Multipart models / Documents tabs */}
+          {/* Models / Documents tabs */}
           <TabBar
             tabs={[
               { key: "models", label: t("vault.models") },
-              { key: "multipart", label: t("vault.multipart") },
               { key: "docs", label: t("vault.documents") },
             ]}
             active={docView}
@@ -2148,7 +2213,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
 
-          {!isMultipartView && selectMode && (
+          {docView === "models" && selectMode && (
             <div className="px-4 sm:px-6 py-2 bg-muted border-b border-border flex items-center gap-3 text-xs">
               <span className="font-mono text-muted-foreground">{selectionCount} selected</span>
               <button
@@ -2182,17 +2247,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
 
           {/* Content */}
-          {docView === "multipart" ? (
-            <MultipartModelBrowser
-              collection={selectedCollection}
-              structures={multipartStructures}
-              guidesOnly={multipartGuidesOnly}
-              canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
-              onCreate={() => setMultipartCreateOpen(true)}
-              onStructuresChange={setMultipartStructures}
-              onGuidesOnlyChange={setMultipartGuidesOnly}
-            />
-          ) : docView === "docs" ? (
+          {docView === "docs" ? (
             <DocumentBrowser
               collectionId={selectedCollectionRow?.id ?? null}
               collectionPath={selectedCollection}
@@ -2212,7 +2267,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 ) : (
                   <ModelListSkeleton />
                 )
-              ) : sortedModels.length === 0 && visibleCollections.length === 0 ? (
+              ) : sortedModels.length === 0 &&
+                visibleMultipartModels.length === 0 &&
+                visibleCollections.length === 0 ? (
                 <EmptyState
                   title="No models found"
                   description={
@@ -2280,17 +2337,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
-                    {sortedModels.map((model) => (
-                      <ModelCard
-                        key={model.id}
-                        model={model}
-                        selectable={selectMode}
-                        selected={selectedIds.has(model.id)}
-                        onToggleSelect={toggleSelect}
-                        draggable={canUploadToVault && !selectMode}
-                        onEditTags={openTagEditor}
-                      />
-                    ))}
+                    {libraryItems.map((item) =>
+                      item.kind === "multipart" ? (
+                        <MultipartModelCard
+                          key={`multipart-${item.value.id}`}
+                          item={item.value}
+                          returnTo={currentLibraryHref}
+                        />
+                      ) : (
+                        <ModelCard
+                          key={item.value.id}
+                          model={item.value}
+                          selectable={selectMode}
+                          selected={selectedIds.has(item.value.id)}
+                          onToggleSelect={toggleSelect}
+                          draggable={canUploadToVault && !selectMode}
+                          onEditTags={openTagEditor}
+                        />
+                      ),
+                    )}
                   </div>
                   <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
                 </div>
@@ -2301,7 +2366,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <span className="w-10 flex-shrink-0">Thumb</span>
                       <span className="flex-1">Name</span>
                       <span className="w-24 text-right hidden sm:block">Collection</span>
-                      <span className="w-20 text-right">Files</span>
+                      <span className="w-20 text-right">Contents</span>
                       <span className="w-24 text-right hidden md:block">Updated</span>
                     </div>
                     {visibleCollections.map((collection) => (
@@ -2315,16 +2380,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
-                    {sortedModels.map((model) => (
-                      <ModelListRow
-                        key={model.id}
-                        model={model}
-                        selectable={selectMode}
-                        selected={selectedIds.has(model.id)}
-                        onToggleSelect={toggleSelect}
-                        draggable={canUploadToVault && !selectMode}
-                      />
-                    ))}
+                    {libraryItems.map((item) =>
+                      item.kind === "multipart" ? (
+                        <MultipartModelListRow
+                          key={`multipart-${item.value.id}`}
+                          item={item.value}
+                          returnTo={currentLibraryHref}
+                        />
+                      ) : (
+                        <ModelListRow
+                          key={item.value.id}
+                          model={item.value}
+                          selectable={selectMode}
+                          selected={selectedIds.has(item.value.id)}
+                          onToggleSelect={toggleSelect}
+                          draggable={canUploadToVault && !selectMode}
+                        />
+                      ),
+                    )}
                   </div>
                   <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
                 </div>
@@ -2333,7 +2406,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
         </main>
 
-        {!isMultipartView && (
+        {docView === "models" && (
           <BatchToolbar
             modelCount={selectedIds.size}
             selectedCollections={selectedCollections}
@@ -2533,6 +2606,47 @@ function CollectionListRow({
         </span>
       </div>
     </Localized>
+  );
+}
+
+function MultipartModelListRow({
+  item,
+  returnTo,
+}: {
+  item: MultipartModelListItem;
+  returnTo: string;
+}) {
+  const { t } = useI18n();
+  const thumb = useAuthenticatedAssetUrl(item.cover_thumbnail_url);
+  return (
+    <Link
+      href={`/multipart-models/${item.id}?${new URLSearchParams({ return: returnTo }).toString()}`}
+      aria-label={item.name}
+      className="group flex items-center gap-2 border-b border-border px-4 py-3 transition-colors hover:bg-muted active:bg-muted md:gap-3"
+    >
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/30 bg-muted md:h-10 md:w-10">
+        {thumb ? (
+          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
+        ) : (
+          <Boxes className="h-4 w-4 text-primary" aria-hidden />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-foreground">{item.name}</span>
+        <span className="mt-0.5 inline-flex rounded border border-primary/30 bg-card px-1.5 py-px font-mono text-3xs font-semibold uppercase tracking-wider text-primary">
+          {t("multipart.badge")}
+        </span>
+      </span>
+      <span className="hidden w-24 truncate text-right font-mono text-xs text-muted-foreground sm:block">
+        {item.collection || "—"}
+      </span>
+      <span className="w-20 text-right font-mono text-xs text-muted-foreground">
+        {item.model_count}
+      </span>
+      <span className="hidden w-24 text-right font-mono text-xs text-muted-foreground md:block">
+        {timeAgo(item.updated_at)}
+      </span>
+    </Link>
   );
 }
 

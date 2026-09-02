@@ -607,6 +607,28 @@ class ModelTagLink(SQLModel, table=True):
     tag_id: Optional[int] = Field(default=None, foreign_key="tags.id", primary_key=True)
 
 
+class MultipartModelTagLink(SQLModel, table=True):
+    """Association table for MultipartModel <-> Tag."""
+
+    __tablename__ = "multipart_model_tags"
+
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            primary_key=True,
+        )
+    )
+    tag_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("tags.id", ondelete="CASCADE"),
+            primary_key=True,
+            index=True,
+        )
+    )
+
+
 class CollectionTagLink(SQLModel, table=True):
     """Association table for Collection <-> Tag."""
 
@@ -812,9 +834,10 @@ class Model(SQLModel, table=True):
 class MultipartModel(SQLModel, table=True):
     """A named composition of printable Models.
 
-    This is deliberately separate from ``Model``: composing models never moves,
-    hides, or owns their files and revisions.  A model may be used by many
-    multipart models.
+    This is deliberately separate from ``Model``: composing models never moves
+    or owns their files and revisions. The organised library may group member
+    cards under this entity, while their identity and direct routes remain
+    intact. A model may be used by many multipart models.
     """
 
     __tablename__ = "multipart_models"
@@ -840,7 +863,6 @@ class MultipartModel(SQLModel, table=True):
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
-
 
 class MultipartPart(SQLModel, table=True):
     """A named physical part in a ``MultipartModel``."""

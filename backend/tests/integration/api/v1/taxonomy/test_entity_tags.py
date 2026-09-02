@@ -11,18 +11,21 @@ from app.db.models import (
     FileTagLink,
     FileType,
     ModelTagLink,
+    MultipartModelTagLink,
 )
 from tests.factories import (
     bearer,
     build_collection,
     build_file,
     build_model,
+    build_multipart_model,
     build_tag,
     build_user,
     grant_collection_role,
     tag_collection,
     tag_file,
     tag_model,
+    tag_multipart_model,
 )
 
 
@@ -127,12 +130,20 @@ def _assert_tag_count_is_access_scoped(client: TestClient, db_session: Session) 
     hidden_collection = build_collection(db_session, "Hidden")
     visible = build_model(db_session, "Visible", collection=visible_collection)
     hidden = build_model(db_session, "Hidden", collection=hidden_collection)
+    visible_set = build_multipart_model(
+        db_session, "Visible set", collection=visible_collection
+    )
+    hidden_set = build_multipart_model(
+        db_session, "Hidden set", collection=hidden_collection
+    )
     visible_file = build_file(db_session, visible, filename="visible.stl")
     tag = build_tag(db_session, "Workshop")
     tag_model(db_session, visible, tag)
     tag_collection(db_session, visible_collection, tag)
     tag_file(db_session, visible_file, tag)
     tag_model(db_session, hidden, tag)
+    tag_multipart_model(db_session, visible_set, tag)
+    tag_multipart_model(db_session, hidden_set, tag)
     viewer = build_user(db_session, "tag-counter")
     grant_collection_role(db_session, viewer, visible_collection, CollectionRole.VIEW)
 
@@ -141,6 +152,7 @@ def _assert_tag_count_is_access_scoped(client: TestClient, db_session: Session) 
     assert response.status_code == 200
     workshop = next(row for row in response.json() if row["slug"] == "workshop")
     assert workshop["model_count"] == 1
+    assert workshop["multipart_model_count"] == 1
 
 
 def _assert_delete_tag_cleans_every_link_table(
@@ -150,11 +162,15 @@ def _assert_delete_tag_cleans_every_link_table(
 ) -> None:
     collection = build_collection(db_session, "Cleanup")
     model = build_model(db_session, "Cleanup model", collection=collection)
+    multipart_model = build_multipart_model(
+        db_session, "Cleanup set", collection=collection
+    )
     artifact = build_file(db_session, model, filename="cleanup.stl")
     tag = build_tag(db_session, "Disposable")
     tag_model(db_session, model, tag)
     tag_collection(db_session, collection, tag)
     tag_file(db_session, artifact, tag)
+    tag_multipart_model(db_session, multipart_model, tag)
 
     response = client.delete(f"/api/v1/tags/{tag.id}", headers=auth_headers)
 
@@ -162,6 +178,7 @@ def _assert_delete_tag_cleans_every_link_table(
     assert db_session.exec(select(ModelTagLink)).all() == []
     assert db_session.exec(select(CollectionTagLink)).all() == []
     assert db_session.exec(select(FileTagLink)).all() == []
+    assert db_session.exec(select(MultipartModelTagLink)).all() == []
 
 
 class TestEntityTagEndpoints:

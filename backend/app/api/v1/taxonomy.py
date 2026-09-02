@@ -40,6 +40,7 @@ from app.db.models import (
     Model,
     ModelTagLink,
     MultipartModel,
+    MultipartModelTagLink,
     Tag,
     User,
 )
@@ -623,15 +624,19 @@ def list_tags(
     ).all()
     if current_user.is_superuser:
         accessible_model_ids = select(Model.id).where(live(Model))
+        accessible_multipart_ids = select(MultipartModel.id)
         counts = dict(
             session.exec(
                 library_search.accessible_tag_counts_stmt(accessible_model_ids)
             ).all()
         )
+        has_accessible_multipart_models = True
     else:
         accessible_ids = rbac.accessible_collection_ids(session, current_user)
         if not accessible_ids:
             counts = {}
+            multipart_counts = {}
+            has_accessible_multipart_models = False
         else:
             accessible_model_ids = select(Model.id).where(
                 live(Model),
@@ -642,12 +647,32 @@ def list_tags(
                     library_search.accessible_tag_counts_stmt(accessible_model_ids)
                 ).all()
             )
+            accessible_multipart_ids = select(MultipartModel.id).where(
+                MultipartModel.collection_id.in_(accessible_ids)  # type: ignore[union-attr]
+            )
+            has_accessible_multipart_models = True
+    if has_accessible_multipart_models:
+        multipart_counts = dict(
+            session.exec(
+                select(
+                    MultipartModelTagLink.tag_id,
+                    func.count(func.distinct(MultipartModelTagLink.multipart_model_id)),
+                )
+                .where(
+                    MultipartModelTagLink.multipart_model_id.in_(
+                        accessible_multipart_ids
+                    )
+                )  # type: ignore[union-attr]
+                .group_by(MultipartModelTagLink.tag_id)
+            ).all()
+        )
     return [
         TagRead(
             id=t.id,
             name=t.name,
             slug=t.slug,
             model_count=counts.get(t.id, 0),
+            multipart_model_count=multipart_counts.get(t.id, 0),
         )
         for t in tags
     ]
@@ -692,6 +717,9 @@ def delete_tag(
     session.exec(delete(ModelTagLink).where(ModelTagLink.tag_id == tag_id))  # type: ignore[call-overload]
     session.exec(delete(CollectionTagLink).where(CollectionTagLink.tag_id == tag_id))
     session.exec(delete(FileTagLink).where(FileTagLink.tag_id == tag_id))
+    session.exec(
+        delete(MultipartModelTagLink).where(MultipartModelTagLink.tag_id == tag_id)
+    )
     tag.deleted_at = utcnow()
     session.add(tag)
     session.commit()

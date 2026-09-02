@@ -14,7 +14,7 @@ test.describe("multipart models", () => {
     await uploadModel(page, short, { mesh: true, gcode: true });
     await uploadModel(page, long, { mesh: true, gcode: true });
 
-    await page.goto("/?v=multipart");
+    await page.goto("/");
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();
@@ -38,13 +38,14 @@ test.describe("multipart models", () => {
     });
     await expect(page.getByRole("link", { name: "assembly" })).toBeVisible();
 
-    await page.goto("/?v=multipart");
-    await page.getByRole("tab", { name: "Models", exact: true }).click();
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: group })).toBeVisible();
+    await expect(modelCard(page, base)).toHaveCount(0);
+    await page.getByRole("button", { name: "Everything", exact: true }).first().click();
     await expect(modelCard(page, base)).toBeVisible();
     await expect(modelCard(page, short)).toBeVisible();
     await expect(modelCard(page, long)).toBeVisible();
 
-    await page.goto("/?v=multipart");
     await page.getByRole("link", { name: group }).click();
     const aggregateUrl = page.url();
     await page.getByRole("link", { name: new RegExp(short) }).click();
@@ -57,8 +58,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();
-    await expect(page).toHaveURL(/\?v=multipart/);
-    await page.getByRole("tab", { name: "Models", exact: true }).click();
+    await expect(page).toHaveURL(/\?type=all/);
     await expect(modelCard(page, base)).toBeVisible();
     await expect(modelCard(page, short)).toBeVisible();
     await expect(modelCard(page, long)).toBeVisible();

@@ -549,6 +549,144 @@ class TestMultipartModels:
         assert {item["id"] for item in listed.json()} == {root["id"]}
         assert nested["id"] not in {item["id"] for item in listed.json()}
 
+    def test_list_reports_only_readable_member_ids(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_model,
+        make_user,
+        headers_for,
+        grant_role,
+    ) -> None:
+        visible = make_collection("Readable multipart members")
+        hidden = make_collection("Hidden multipart members")
+        body = make_model("Readable body", collection=visible)
+        accessory = make_model("Hidden accessory", collection=hidden)
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Scoped figure", "collection_id": visible.id},
+        ).json()
+        client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/parts",
+            headers=auth_headers,
+            json={
+                "parts": [
+                    {"name": "Body", "model_ids": [body.id]},
+                    {"name": "Accessory", "model_ids": [accessory.id]},
+                ]
+            },
+        )
+        viewer = make_user("multipart-member-list-viewer")
+        grant_role(viewer, visible, CollectionRole.VIEW)
+
+        response = client.get("/api/v1/multipart-models", headers=headers_for(viewer))
+
+        assert response.status_code == 200, response.text
+        assert response.json()[0]["member_model_ids"] == [body.id]
+
+    def test_replace_tags_is_idempotent(self, client, auth_headers) -> None:
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Tagged figure"},
+        ).json()
+
+        client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/tags",
+            headers=auth_headers,
+            json={"tags": ["Fantasy", "fantasy", " Display "]},
+        )
+        response = client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/tags",
+            headers=auth_headers,
+            json={"tags": ["Display", "Fantasy"]},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["tags"] == ["Display", "Fantasy"]
+
+    def test_tag_filter_matches_multipart_tags(self, client, auth_headers) -> None:
+        matched = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Tagged display piece"},
+        ).json()
+        client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Untagged tool"},
+        )
+        client.put(
+            f"/api/v1/multipart-models/{matched['id']}/tags",
+            headers=auth_headers,
+            json={"tags": ["Display"]},
+        )
+
+        response = client.get(
+            "/api/v1/multipart-models?tag=display", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert [item["id"] for item in response.json()] == [matched["id"]]
+
+    def test_tags_on_a_set_do_not_change_its_members(
+        self, client, auth_headers, make_model, make_tag, tag_model
+    ) -> None:
+        member = make_model("Independently tagged component")
+        component_tag = make_tag("Component")
+        tag_model(member, component_tag)
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Independently tagged set"},
+        ).json()
+        client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/parts",
+            headers=auth_headers,
+            json={"parts": [{"name": "Body", "model_ids": [member.id]}]},
+        )
+
+        tagged_set = client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/tags",
+            headers=auth_headers,
+            json={"tags": ["Display"]},
+        )
+        tagged_member = client.get(f"/api/v1/models/{member.id}", headers=auth_headers)
+
+        assert tagged_set.status_code == 200, tagged_set.text
+        assert tagged_set.json()["tags"] == ["Display"]
+        assert tagged_member.status_code == 200, tagged_member.text
+        assert tagged_member.json()["tags"] == ["Component"]
+
+    def test_tag_edit_rejects_viewer(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_user,
+        headers_for,
+        grant_role,
+    ) -> None:
+        collection = make_collection("Read-only multipart tags")
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Protected tags", "collection_id": collection.id},
+        ).json()
+        viewer = make_user("multipart-tag-viewer")
+        grant_role(viewer, collection, CollectionRole.VIEW)
+
+        response = client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/tags",
+            headers=headers_for(viewer),
+            json={"tags": ["Secret"]},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "collection_permission_denied"
+
     def test_user_without_collection_access_sees_no_aggregates_or_candidates(
         self, client, auth_headers, make_collection, make_user, headers_for
     ) -> None:

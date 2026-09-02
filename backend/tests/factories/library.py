@@ -36,6 +36,7 @@ from app.db.models import (
     Model,
     ModelTagLink,
     MultipartModel,
+    MultipartModelTagLink,
     Tag,
 )
 from tests.factories._support import nth, reject_aliases, save, unique_hash
@@ -267,6 +268,19 @@ def tag_model(session: Session, model: Model, tag: Tag) -> None:
     """Attach an existing tag to a model, the way the taxonomy service would."""
     session.add(ModelTagLink(model_id=model.id, tag_id=tag.id))
     session.commit()
+
+
+def tag_multipart_model(
+    session: Session, multipart_model: MultipartModel, tag: Tag
+) -> MultipartModelTagLink:
+    """Attach an existing tag directly to a multipart set."""
+    return save(
+        session,
+        MultipartModelTagLink(
+            multipart_model_id=multipart_model.id,
+            tag_id=tag.id,
+        ),
+    )
 
 
 def tag_collection(

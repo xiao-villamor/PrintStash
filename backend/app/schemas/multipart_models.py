@@ -23,6 +23,8 @@ class MultipartModelListItem(BaseModel):
     guide_count: int = 0
     cover_model_id: Optional[int] = None
     cover_thumbnail_url: Optional[str] = None
+    member_model_ids: list[int] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime
 

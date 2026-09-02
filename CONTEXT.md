@@ -10,7 +10,9 @@ retention. This file pins the project's domain language.
 
 **Model**:
 A printable logical asset deduplicated by source-mesh sha256; owns versioned
-Files and remains independently visible even when referenced by Multipart Models.
+Files and remains independently addressable and reusable even when referenced
+by Multipart Models. The Organized library view may group a referenced Model
+under its Multipart Model instead of duplicating both cards at the same level.
 _Avoid_: asset, item, part
 
 **Artifact** (File):
@@ -19,7 +21,9 @@ _Avoid_: upload, attachment
 
 **Multipart Model**:
 An independent library grouping that describes one object made from several
-printable Models. It references Models without moving, hiding or owning them.
+printable Models. It references Models without moving or owning them and has
+its own description, collection, cover, guides and tags. Its tags do not
+propagate to member Models, and member tags do not propagate to the grouping.
 _Avoid_: assembly Model, merged Model, collection
 
 **Multipart Part**:
@@ -40,13 +44,18 @@ Guides may be Markdown, PDF or raster images, remain visible in Documents, and
 survive deletion of the grouping as ordinary Documents.
 _Avoid_: Model file, Artifact, attachment
 
-Multipart Models are created and edited from their own Vault view. Adding a
-piece or alternative references an existing Model; it never transfers or
-duplicates that Model's files. Removing a piece or deleting the grouping only
-removes the reference, leaving the Model and all of its Artifacts and
-Revisions available in the main Models view. Multipart Parts have an explicit
-order; every part is required, while its Model Choices are alternatives where
-exactly one is selected for a build.
+Multipart Models and ordinary Models share one library. Organized is the
+default presentation: it shows each Multipart Model once and suppresses
+duplicate top-level cards for the Models it references. Everything shows both,
+Multipart sets only shows groupings, and Parts only shows referenced Models.
+Search always reveals a matching Model, including in Organized. This is a
+presentation rule, not ownership: adding a piece or alternative never transfers
+or duplicates that Model's Files, and removing a piece or deleting the grouping
+only removes the reference. The Model and all of its Artifacts and Revisions
+remain addressable from search, Everything, Parts only and any other Multipart
+Model that reuses it. Multipart Parts have an explicit order; every part is
+required, while its Model Choices are alternatives where exactly one is
+selected for a build.
 
 **Artifact persistence**:
 The invariant-heavy sequence `version → canonical publication → File row +

@@ -1,12 +1,12 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
   Boxes,
-  ChevronRight,
   FileText,
   Pencil,
   Plus,
@@ -22,12 +22,14 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Checkbox } from "@/components/ui/checkbox";
+import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
-import { useCollections, useMultipartModels } from "@/lib/queries";
+import { useCollections, useMultipartModels, useTags } from "@/lib/queries";
 import {
   createMultipartModel,
   deleteDocument,
   deleteMultipartModel,
+  replaceMultipartModelTags,
   saveMultipartModel,
   uploadDocument,
 } from "@/lib/api";
@@ -40,12 +42,14 @@ import { useParams } from "react-router-dom";
 import type {
   CollectionRead,
   MultipartModelCandidate,
+  MultipartModelListItem,
   MultipartModelRead,
   MultipartPartRead,
 } from "@/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { parseApiError } from "@/lib/errors";
+import { queryKeys } from "@/lib/query-client";
 
 /**
  * Keep server details behind the same error translation seam as the rest of
@@ -94,16 +98,81 @@ function Cover({ src, alt }: { src: string | null; alt: string }) {
   );
 }
 
+function detailHref(id: number, returnTo?: string): string {
+  if (!returnTo) return `/multipart-models/${id}`;
+  const search = new URLSearchParams({ return: returnTo });
+  return `/multipart-models/${id}?${search.toString()}`;
+}
+
+export function MultipartModelCard({
+  item,
+  returnTo,
+}: {
+  item: MultipartModelListItem;
+  returnTo?: string;
+}) {
+  const { t } = useI18n();
+  return (
+    <Link
+      href={detailHref(item.id, returnTo)}
+      aria-label={item.name}
+      className="animate-card-in group flex aspect-square h-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99]"
+    >
+      <div className="relative h-3/5 shrink-0 overflow-hidden border-b border-border bg-muted/40">
+        <Cover src={item.cover_thumbnail_url} alt="" />
+        <span className="absolute left-2 top-2 rounded border border-primary/30 bg-card/90 px-2 py-1 font-mono text-3xs font-semibold uppercase tracking-wider text-primary shadow-sm">
+          {t("multipart.badge")}
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col p-3">
+        <h3 className="line-clamp-2 text-sm font-bold uppercase tracking-tight">{item.name}</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          <Count count={item.part_count} one={t("multipart.part")} many={t("multipart.parts")} />
+          {" · "}
+          <Count count={item.model_count} one={t("multipart.model")} many={t("multipart.models")} />
+          {item.guide_count > 0 && (
+            <>
+              {" · "}
+              {item.guide_count}{" "}
+              {item.guide_count === 1 ? t("multipart.guide") : t("multipart.guides")}
+            </>
+          )}
+        </p>
+        <div className="mt-auto flex min-w-0 flex-wrap items-center gap-1 border-t border-border pt-2">
+          {item.tags.slice(0, 2).map((tag) => (
+            <span
+              key={tag}
+              className="max-w-24 truncate rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+          {item.tags.length > 2 && (
+            <span className="text-3xs text-muted-foreground">+{item.tags.length - 2}</span>
+          )}
+          {item.collection && (
+            <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">
+              {item.collection}
+            </span>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
 export function NewMultipartModelModal({
   open,
   onClose,
   collectionId,
   collections = [],
+  returnTo,
 }: {
   open: boolean;
   onClose: () => void;
   collectionId: number | null;
   collections?: CollectionRead[];
+  returnTo?: string;
 }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -141,7 +210,7 @@ export function NewMultipartModelModal({
         collection_id: targetCollectionId,
       });
       closeModal();
-      router.push(`/multipart-models/${created.id}`);
+      router.push(detailHref(created.id, returnTo));
     } catch (cause) {
       setError(multipartError(cause, t, "multipart.createError"));
     } finally {
@@ -389,60 +458,7 @@ export function MultipartModelBrowser({
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
             {sortedItems.map((item) => (
-              <Link
-                key={item.id}
-                href={`/multipart-models/${item.id}`}
-                className="group flex aspect-square flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,transform] duration-press hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="h-48 shrink-0 overflow-hidden border-b border-border bg-muted/40">
-                  <Cover src={item.cover_thumbnail_url} alt="" />
-                </div>
-                <div className="flex min-h-0 flex-1 flex-col p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="line-clamp-2 min-w-0 text-sm font-bold uppercase tracking-tight">
-                      {item.name}
-                    </h3>
-                    <ChevronRight
-                      className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-press group-hover:translate-x-0.5"
-                      aria-hidden
-                    />
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    <Count
-                      count={item.part_count}
-                      one={t("multipart.part")}
-                      many={t("multipart.parts")}
-                    />{" "}
-                    ·{" "}
-                    <Count
-                      count={item.model_count}
-                      one={t("multipart.model")}
-                      many={t("multipart.models")}
-                    />
-                    {item.guide_count > 0 && (
-                      <>
-                        {" "}
-                        · {item.guide_count}{" "}
-                        {item.guide_count === 1 ? t("multipart.guide") : t("multipart.guides")}
-                      </>
-                    )}
-                  </p>
-                  <div className="mt-auto flex min-w-0 items-center gap-2 border-t border-border pt-2">
-                    <span className="shrink-0 rounded border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                      {item.part_count === 0
-                        ? t("multipart.structure.empty")
-                        : item.model_count > item.part_count
-                          ? t("multipart.structure.variants")
-                          : t("multipart.structure.fixed")}
-                    </span>
-                    {item.collection && (
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">
-                        {item.collection}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </Link>
+              <MultipartModelCard key={item.id} item={item} />
             ))}
           </div>
         )}
@@ -706,6 +722,18 @@ function MultipartOverview({ model }: { model: MultipartModelRead }) {
                 </span>
               )}
             </div>
+            {model.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5" aria-label={t("multipart.tagsLabel")}>
+                {model.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-outline-variant bg-surface-container-low px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
             <dl className="divide-y divide-border rounded-md border border-border">
               <div className="px-3 py-3">
                 <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -910,6 +938,8 @@ export function MultipartModelDetailPage() {
   const { t } = useI18n();
   const { user } = useAuth();
   const { data: collections = [] } = useCollections();
+  const { data: availableTags = [] } = useTags();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const searchParams = useSearchParams();
   const {
@@ -1089,15 +1119,29 @@ export function MultipartModelDetailPage() {
       setBusy(false);
     }
   }
+  async function saveTags(nextTags: string[]) {
+    if (!model || !canEdit) return;
+    try {
+      const saved = await replaceMultipartModelTags(model.id, nextTags);
+      setPersistedModel(saved);
+      setDraft((current) => (current ? { ...current, tags: saved.tags } : current));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
+      ]);
+      toast.success(t("multipart.tagsSaved"));
+    } catch (cause) {
+      toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
+      throw cause;
+    }
+  }
   async function remove() {
     if (!model || busy) return;
     setBusy(true);
     try {
       await deleteMultipartModel(model.id);
       toast.success(t("multipart.deleted"));
-      router.push(
-        `/?v=multipart${searchParams.get("c") ? `&c=${encodeURIComponent(searchParams.get("c") ?? "")}` : ""}`,
-      );
+      router.push(backHref);
     } catch (cause) {
       setSaveError(multipartError(cause, t, "multipart.deleteError"));
     } finally {
@@ -1121,7 +1165,13 @@ export function MultipartModelDetailPage() {
         />
       </div>
     );
-  const backHref = `/?v=multipart${model.collection ? `&c=${encodeURIComponent(model.collection)}` : ""}`;
+  const requestedReturn = searchParams.get("return");
+  const backHref =
+    requestedReturn?.startsWith("/") && !requestedReturn.startsWith("//")
+      ? requestedReturn
+      : model.collection
+        ? `/?c=${encodeURIComponent(model.collection)}`
+        : "/";
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
       <ConfirmModal
@@ -1275,6 +1325,17 @@ export function MultipartModelDetailPage() {
                     disabled={!canEdit}
                   />
                 </label>
+                <div className="space-y-1.5">
+                  <span className="block text-sm font-medium">{t("multipart.tagsLabel")}</span>
+                  <EntityTagsDialog
+                    entityLabel={model.name}
+                    tags={model.tags}
+                    availableTags={availableTags}
+                    canEdit={canEdit}
+                    help={t("multipart.tagsHelp")}
+                    onSave={saveTags}
+                  />
+                </div>
                 <div className="space-y-1.5">
                   <label htmlFor="multipart-collection" className="block text-sm font-medium">
                     {t("multipart.collectionLabel")}

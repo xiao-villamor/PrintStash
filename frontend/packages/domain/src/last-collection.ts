@@ -2,7 +2,7 @@ export const LAST_COLLECTION_STORAGE_KEY = "printstash.last.collection";
 export const LAST_VIEW_STORAGE_KEY = "printstash.last.view";
 
 /** Which tab of the vault the user last had open. */
-export type LastView = "models" | "docs" | "multipart";
+export type LastView = "models" | "docs";
 
 /**
  * The store the remembered vault context lives in, or null when there is none:
@@ -19,7 +19,7 @@ function contextStore(): Storage | null {
 
 /** Decode a persisted view string; anything we did not write reads as the model grid. */
 function parseLastView(raw: string | null): LastView {
-  return raw === "docs" || raw === "multipart" ? raw : "models";
+  return raw === "docs" ? "docs" : "models";
 }
 
 export function rememberLastCollection(path: string | null): void {

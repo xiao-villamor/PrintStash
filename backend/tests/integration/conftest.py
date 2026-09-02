@@ -168,6 +168,12 @@ def tag_model(db_session: Session) -> Any:
 
 
 @pytest.fixture
+def tag_multipart_model(db_session: Session) -> Any:
+    """Attach an existing tag directly to a multipart set."""
+    return _bound(factories.tag_multipart_model, db_session)
+
+
+@pytest.fixture
 def tag_collection(db_session: Session) -> TagCollection:
     """Attach an existing tag directly to a collection."""
     return _bound(factories.tag_collection, db_session)

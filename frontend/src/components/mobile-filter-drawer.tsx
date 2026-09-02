@@ -2,7 +2,7 @@
 
 import { X } from "lucide-react";
 import { CollectionRead, PrinterRead, TagRead } from "@/types";
-import { FilterSidebarContent } from "@/components/filter-sidebar";
+import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-sidebar";
 import { Drawer } from "@/components/ui/drawer";
 
 interface MobileFilterDrawerProps {
@@ -23,6 +23,8 @@ interface MobileFilterDrawerProps {
   canViewPrinters?: boolean;
   loading?: boolean;
   structuredFilters?: React.ReactNode;
+  libraryView: LibraryViewMode;
+  onLibraryViewChange: (view: LibraryViewMode) => void;
 }
 
 export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilterDrawerProps) {

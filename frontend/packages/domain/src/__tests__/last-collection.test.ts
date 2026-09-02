@@ -137,6 +137,12 @@ describe("readLastView", () => {
     expect(readLastView()).toBe("models");
   });
 
+  it("migrates the removed multipart tab back to the unified model grid", () => {
+    window.localStorage.setItem(LAST_VIEW_STORAGE_KEY, "multipart");
+
+    expect(readLastView()).toBe("models");
+  });
+
   it("falls back to the model grid when the browser refuses to read", () => {
     vi.stubGlobal("localStorage", HOSTILE_STORAGE);
 

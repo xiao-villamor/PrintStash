@@ -26,6 +26,8 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     guide_count: 0,
     cover_model_id: null,
     cover_thumbnail_url: null,
+    member_model_ids: [],
+    tags: [],
     effective_role: "admin",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
@@ -81,6 +83,8 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     guide_count: 0,
     cover_model_id: null,
     cover_thumbnail_url: null,
+    member_model_ids: [],
+    tags: [],
     effective_role: "admin",
     updated_at: "2026-01-01T00:00:00Z",
     ...over,
@@ -350,6 +354,19 @@ describe("MultipartModelDetailPage", () => {
     expect(await screen.findByText("Vault only")).toBeVisible();
   });
 
+  it("returns to the exact unified-library view that opened the set", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7?return=%2F%3Ftype%3Dall%26tag%3Dfantasy",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+
+    expect(await screen.findByRole("link", { name: "Multipart sets" })).toHaveAttribute(
+      "href",
+      "/?type=all&tag=fantasy",
+    );
+  });
+
   it("opens as a visual overview", async () => {
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -412,6 +429,39 @@ describe("MultipartModelDetailPage", () => {
 
     expect(screen.getByRole("textbox", { name: "Description" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Collection" })).toBeVisible();
+  });
+
+  it("edits tags only from the multipart edit page", async () => {
+    const user = userEvent.setup();
+    const saved = aMultipart({ tags: ["Fantasy", "Display"] });
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(aMultipart({ tags: ["Fantasy"] })),
+        "GET /api/v1/tags": json([
+          { id: 1, name: "Fantasy", slug: "fantasy", model_count: 0 },
+          { id: 2, name: "Display", slug: "display", model_count: 0 },
+        ]),
+        "PUT /api/v1/multipart-models/7/tags": json(saved),
+      },
+    });
+
+    expect(await screen.findByText("Fantasy")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Edit tags" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Edit tags" }));
+    await user.click(screen.getByRole("button", { name: "Display" }));
+    await user.click(screen.getByRole("button", { name: "Save tags" }));
+
+    await waitFor(() =>
+      expect(
+        requestsWithMethod("PUT").find((request) => request.url.endsWith("/tags")),
+      ).toBeDefined(),
+    );
+    const request = requestsWithMethod("PUT").find((item) => item.url.endsWith("/tags"));
+    expect(JSON.parse(request?.body ?? "{}")).toEqual({ tags: ["Fantasy", "Display"] });
   });
 
   it("discards an unsaved draft when editing is cancelled", async () => {

@@ -8,10 +8,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
-- **Multipart Models.** The Vault now has a separate view for grouping existing
-  Models into named pieces and alternatives. Adding or deleting a grouping
-  never moves, hides, or deletes a Model, its files, or its revisions; Models
-  can be reused in multiple groupings.
+- **Multipart Models.** The Vault can group existing Models into named pieces
+  and alternatives, with independent tags and PDF, Markdown or image guides.
+  Adding or deleting a grouping never moves or deletes a Model, its files, or
+  its revisions; Models remain directly accessible and reusable in multiple
+  groupings.
 
 - **Quick restart from Settings.** Administrators on supervised deployments
   can now gracefully restart the PrintStash API without opening container
@@ -80,12 +81,13 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Changed
 
-- **Multipart sets now follow the Vault's library hierarchy.** Their browser
-  keeps the shared navigation shell, adds combinable checkbox filters, and uses
-  compact Model-style cards. Set details open in a read-only overview with
-  an explicit edit mode for the description and collection, an ordered
-  piece/variant hierarchy, and a user-selected member Model as the persistent
-  cover.
+- **Multipart sets now live in the main Models library.** The default Organized
+  view shows a set once without duplicating its member cards; Everything,
+  Multipart sets only and Parts only make every reusable Model accessible without a
+  second navigation mode. Search always reveals matching member Models, and
+  multipart cards use the same square visual language as ordinary Models. Set
+  details retain their read-only overview and explicit editor for metadata,
+  tags, cover, ordered pieces, variants and guides.
 - **Model tags are now discoverable from the library.** Editable model cards
   and detail headers expose a direct Add/Edit tags action, where users can find
   existing tags or create and assign a new one without entering full model edit.

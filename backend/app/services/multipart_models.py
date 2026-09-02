@@ -23,7 +23,9 @@ from app.db.models import (
     Model,
     MultipartModel,
     MultipartModelChoice,
+    MultipartModelTagLink,
     MultipartPart,
+    Tag,
     User,
 )
 from app.db.scopes import live
@@ -79,6 +81,20 @@ def _guides(
         for row in rows
         if row.id is not None
     ]
+
+
+def _tag_names(session: Session, multipart_model_id: int) -> list[str]:
+    return list(
+        session.exec(
+            select(Tag.name)
+            .join(MultipartModelTagLink, MultipartModelTagLink.tag_id == Tag.id)
+            .where(
+                MultipartModelTagLink.multipart_model_id == multipart_model_id,
+                live(Tag),
+            )
+            .order_by(Tag.name.asc())  # type: ignore[attr-defined]
+        ).all()
+    )
 
 
 def _file_counts(
@@ -242,6 +258,8 @@ def _list_item(
             if selected_cover is not None and selected_cover.thumbnail_url
             else fallback_cover
         ),
+        member_model_ids=sorted({member.id for member in readable_members}),
+        tags=_tag_names(session, int(aggregate.id)),
         effective_role=rbac.effective_collection_role(
             session, user, aggregate.collection_id
         ),
@@ -282,6 +300,7 @@ def list_visible(
     collection: str | None = None,
     direct: bool = False,
     query: str | None = None,
+    tag_slugs: list[str] | None = None,
     limit: int = 100,
     offset: int = 0,
 ) -> list[MultipartModelListItem]:
@@ -304,6 +323,13 @@ def list_visible(
         stmt = stmt.where(MultipartModel.collection_id.in_(ids))  # type: ignore[union-attr]
     if query and (needle := query.strip()):
         stmt = stmt.where(MultipartModel.name.ilike(f"%{needle}%"))  # type: ignore[union-attr]
+    for tag_slug in tag_slugs or []:
+        matching_ids = (
+            select(MultipartModelTagLink.multipart_model_id)
+            .join(Tag, Tag.id == MultipartModelTagLink.tag_id)
+            .where(Tag.slug == tag_slug, live(Tag))
+        )
+        stmt = stmt.where(MultipartModel.id.in_(matching_ids))  # type: ignore[union-attr]
     rows = session.exec(
         stmt.order_by(MultipartModel.updated_at.desc(), MultipartModel.id.desc())  # type: ignore[attr-defined]
         .offset(offset)

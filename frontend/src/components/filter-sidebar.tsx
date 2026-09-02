@@ -5,6 +5,7 @@ import { useRouter } from "@/lib/navigation";
 import { CollectionRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
+import { useI18n } from "@/lib/i18n";
 import { Box, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
 import {
   DndContext,
@@ -22,6 +23,10 @@ interface CollectionNode {
   cat: CollectionRead;
   children: CollectionNode[];
 }
+
+export type LibraryViewMode = "organized" | "all" | "multipart" | "components";
+
+const LIBRARY_VIEWS: LibraryViewMode[] = ["organized", "all", "multipart", "components"];
 
 type DragPayload =
   | { type: "model"; model: OutlinerModelRead }
@@ -522,7 +527,10 @@ export function FilterSidebarContent({
   outlinerFilter,
   canViewPrinters = true,
   structuredFilters,
+  libraryView,
+  onLibraryViewChange,
 }: FilterSidebarProps) {
+  const { t } = useI18n();
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
   // When a tag/printer filter is active the `models` list is already narrowed to
@@ -606,7 +614,16 @@ export function FilterSidebarContent({
 
   const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }));
 
-  const sortedTags = useMemo(() => [...tags].sort((a, b) => b.model_count - a.model_count), [tags]);
+  const sortedTags = useMemo(
+    () =>
+      [...tags].sort(
+        (a, b) =>
+          b.model_count +
+          (b.multipart_model_count ?? 0) -
+          (a.model_count + (a.multipart_model_count ?? 0)),
+      ),
+    [tags],
+  );
   const filteredTags = useMemo(() => {
     if (!tagFilter.trim()) return sortedTags;
     const q = tagFilter.toLowerCase();
@@ -736,6 +753,35 @@ export function FilterSidebarContent({
         onDragCancel={() => setDragging(null)}
       >
         <div className="flex-1 overflow-auto py-4 px-3 space-y-6">
+          <section>
+            <h3 className="mb-2 pl-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              {t("libraryView.title")}
+            </h3>
+            <div className="space-y-0.5">
+              {LIBRARY_VIEWS.map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={libraryView === view}
+                  onClick={() => onLibraryViewChange(view)}
+                  className={`w-full rounded px-2 py-1.5 text-left text-sm font-medium transition-colors ${
+                    libraryView === view
+                      ? "bg-accent text-accent-foreground"
+                      : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {view === "organized"
+                    ? t("libraryView.organized")
+                    : view === "all"
+                      ? t("libraryView.all")
+                      : view === "multipart"
+                        ? t("libraryView.multipart")
+                        : t("libraryView.components")}
+                </button>
+              ))}
+            </div>
+          </section>
+
           {/* Collections */}
           <section>
             <div className="flex items-center justify-between mb-2 pl-2 pr-1">
@@ -969,7 +1015,9 @@ export function FilterSidebarContent({
                         }`}
                       >
                         {t.name}
-                        <span className="opacity-60">{t.model_count}</span>
+                        <span className="opacity-60">
+                          {t.model_count + (t.multipart_model_count ?? 0)}
+                        </span>
                         {active && <X className="h-3 w-3 ml-0.5" />}
                       </button>
                     );
@@ -1014,6 +1062,8 @@ export interface FilterSidebarProps {
   loading?: boolean;
   outlinerFilter?: string;
   structuredFilters?: React.ReactNode;
+  libraryView: LibraryViewMode;
+  onLibraryViewChange: (view: LibraryViewMode) => void;
 }
 
 export function FilterSidebar(props: FilterSidebarProps) {

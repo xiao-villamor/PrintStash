@@ -10,12 +10,20 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.core.security import require_auth, require_user
-from app.db.models import Collection, CollectionRole, MultipartModel, User
+from app.core.time import utcnow
+from app.db.models import (
+    Collection,
+    CollectionRole,
+    MultipartModel,
+    MultipartModelTagLink,
+    User,
+)
 from app.db.scopes import live
 from app.db.session import get_session
+from app.schemas.models import TagSetUpdate
 from app.schemas.multipart_models import (
     MultipartMemberRead,
     MultipartModelCreate,
@@ -59,6 +67,7 @@ def list_multipart_models(
     collection: Optional[str] = Query(None),
     direct: bool = Query(False),
     q: Optional[str] = Query(None, max_length=128),
+    tag: Optional[list[str]] = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(require_user),
@@ -70,6 +79,7 @@ def list_multipart_models(
         collection=collection,
         direct=direct,
         query=q,
+        tag_slugs=tag or [],
         limit=limit,
         offset=offset,
     )
@@ -107,6 +117,42 @@ def create_multipart_model(
         raise HTTPException(
             status_code=409, detail="multipart_model_slug_exists"
         ) from exc
+    session.refresh(aggregate)
+    return multipart_models.read(session, current_user, aggregate)
+
+
+@router.put(
+    "/{multipart_model_id}/tags",
+    response_model=MultipartModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Replace a multipart model's direct tags",
+)
+def replace_multipart_model_tags(
+    multipart_model_id: int,
+    payload: TagSetUpdate,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MultipartModelRead:
+    aggregate = multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.EDIT
+    )
+    session.exec(
+        delete(MultipartModelTagLink).where(
+            MultipartModelTagLink.multipart_model_id == multipart_model_id
+        )
+    )
+    tags = taxonomy.resolve_or_create_tags_in_transaction(session, payload.tags)
+    for tag in tags:
+        session.add(
+            MultipartModelTagLink(
+                multipart_model_id=multipart_model_id,
+                tag_id=int(tag.id),
+            )
+        )
+    aggregate.updated_at = utcnow()
+    aggregate.updated_by = current_user.id
+    session.add(aggregate)
+    session.commit()
     session.refresh(aggregate)
     return multipart_models.read(session, current_user, aggregate)
 
@@ -152,8 +198,6 @@ def update_multipart_model(
     if "description" in payload.model_fields_set:
         aggregate.description = payload.description
     aggregate.updated_by = current_user.id
-    from app.core.time import utcnow
-
     aggregate.updated_at = utcnow()
     session.add(aggregate)
     try:

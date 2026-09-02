@@ -74,6 +74,7 @@ from tests.factories import (
     grant_collection_role,
     tag_collection,
     tag_file,
+    tag_multipart_model,
 )
 
 
@@ -157,6 +158,8 @@ class TestImportArchive:
             recommended=True,
         )
         aggregate = build_multipart_model(db_session, "Portable handle assembly")
+        assembly_tag = build_tag(db_session, "Display")
+        tag_multipart_model(db_session, aggregate, assembly_tag)
         multipart_models.replace_parts(
             db_session,
             user,
@@ -173,6 +176,7 @@ class TestImportArchive:
             portable = manifest["multipart_models"][0]
             assert portable["parts"][0]["choices"] == [{"model_source_id": member.id}]
             assert portable["cover_model_source_id"] == member.id
+            assert portable["tags"] == ["Display"]
             assert (
                 library_transfer.PortableManifest.model_validate(
                     {"format": library_transfer.FORMAT, "models": []}
@@ -189,6 +193,7 @@ class TestImportArchive:
             restored_part = multipart_models.read(db_session, user, restored).parts[0]
             assert restored_part.models[0].id == member.id
             assert restored.cover_model_id == member.id
+            assert multipart_models.read(db_session, user, restored).tags == ["Display"]
             assert db_session.get(File, mesh.id) is not None
             assert db_session.get(File, gcode.id).is_recommended is True
         finally:

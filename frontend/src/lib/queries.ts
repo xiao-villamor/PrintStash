@@ -195,15 +195,20 @@ export interface MultipartModelListFilters {
   collection?: string;
   direct?: boolean;
   q?: string;
+  tag?: string[];
   limit?: number;
   offset?: number;
 }
 
-export function useMultipartModels(filters?: MultipartModelListFilters) {
+export function useMultipartModels(
+  filters?: MultipartModelListFilters,
+  options?: { enabled?: boolean },
+) {
   const api = useQueryApi();
   return useQuery<MultipartModelListItem[]>({
     queryKey: [...queryKeys.multipartModels, "list", filters ?? {}],
     queryFn: () => api.listMultipartModels(filters),
+    enabled: options?.enabled,
   });
 }
 

@@ -583,6 +583,7 @@ class TagRead(BaseModel):
     name: str
     slug: str
     model_count: int = 0
+    multipart_model_count: int = 0
 
 
 class FilamentProfileBase(BaseModel):

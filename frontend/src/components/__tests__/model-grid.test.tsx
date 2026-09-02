@@ -26,7 +26,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelBrowser } from "@/components/model-grid";
 import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { queryKeys } from "@/lib/query-client";
-import type { CollectionRead, ModelListItem, SavedViewRead, TagRead } from "@/types";
+import type {
+  CollectionRead,
+  ModelListItem,
+  MultipartModelListItem,
+  SavedViewRead,
+  TagRead,
+} from "@/types";
 import { aModelListItem, aPrinter } from "@/test-support/factories";
 import {
   adminSession,
@@ -52,6 +58,27 @@ function aCollection(override: Partial<CollectionRead> = {}): CollectionRead {
 
 function aTag(override: Partial<TagRead> = {}): TagRead {
   return { id: 1, name: "functional", slug: "functional", model_count: 3, ...override };
+}
+
+function aMultipartSet(override: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
+  return {
+    id: 40,
+    name: "Dragon figure",
+    slug: "dragon-figure",
+    description: "A complete printable figure",
+    collection: null,
+    collection_id: null,
+    part_count: 2,
+    model_count: 2,
+    guide_count: 0,
+    cover_model_id: 1,
+    cover_thumbnail_url: null,
+    member_model_ids: [1],
+    tags: ["fantasy"],
+    effective_role: "admin",
+    updated_at: "2026-01-02T00:00:00Z",
+    ...override,
+  };
 }
 
 /** The filter set a view stores: every key present, nothing selected. */
@@ -104,11 +131,20 @@ const EMPTY_FACETS = {
 function renderVault(
   options: RenderAppOptions & {
     models?: ModelListItem[];
+    multipartModels?: MultipartModelListItem[];
     collections?: CollectionRead[];
     tags?: TagRead[];
   } = {},
 ) {
-  const { models = [], collections = [], tags = [], seed = [], routes = {}, ...rest } = options;
+  const {
+    models = [],
+    multipartModels = [],
+    collections = [],
+    tags = [],
+    seed = [],
+    routes = {},
+    ...rest
+  } = options;
   return renderApp(<ModelBrowser />, {
     seed: [
       [queryKeys.collections, collections],
@@ -123,7 +159,7 @@ function renderVault(
       "GET /api/v1/models": json(models),
       "GET /api/v1/saved-views": json([]),
       "GET /api/v1/documents": json([]),
-      "GET /api/v1/multipart-models": json([]),
+      "GET /api/v1/multipart-models": json(multipartModels),
       "GET /api/v1/collections": json(collections),
       "GET /api/v1/tags": json(tags),
       ...routes,
@@ -334,62 +370,95 @@ describe("ModelBrowser", () => {
     });
   });
 
-  describe("the multipart models tab", () => {
-    it("keeps the library sidebar stable in the multipart workspace", async () => {
-      renderVault({ at: "/?v=multipart", models: [aModelListItem({ name: "Handle" })] });
+  describe("the unified model library", () => {
+    it("groups component models below their multipart set by default", async () => {
+      renderVault({
+        models: [
+          aModelListItem({ id: 1, name: "Dragon body" }),
+          aModelListItem({ id: 2, name: "Calibration cube" }),
+        ],
+        multipartModels: [aMultipartSet()],
+      });
 
-      expect(await screen.findByRole("heading", { name: "Multipart sets" })).toBeInTheDocument();
-      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-      expect(screen.getByRole("tablist")).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Multipart sets" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
-      expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
-      const filters = within(screen.getByRole("complementary", { name: "Multipart set filters" }));
-      expect(filters.getByRole("checkbox", { name: "With variants" })).toBeInTheDocument();
-      expect(filters.getByRole("checkbox", { name: "Fixed pieces only" })).toBeInTheDocument();
-      expect(filters.getByRole("checkbox", { name: "Not organised yet" })).toBeInTheDocument();
-      expect(filters.getByRole("checkbox", { name: "With guides" })).toBeInTheDocument();
-      expect(screen.getByText("All multipart sets")).toBeInTheDocument();
-      expect(screen.queryByText("Printer")).not.toBeInTheDocument();
-      expect(screen.queryByText(/Model filters/i)).not.toBeInTheDocument();
-      expect(screen.getByRole("textbox", { name: "Search existing models" })).toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "All Models" })).not.toBeInTheDocument();
-      expect(screen.queryByText(/models? total/)).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Sort models" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Favorites" })).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /Select/ })).not.toBeInTheDocument();
+      expect(await screen.findByRole("link", { name: /Dragon figure/ })).toBeVisible();
+      expect(screen.getByText("Calibration cube")).toBeVisible();
+      expect(screen.queryByText("Dragon body")).not.toBeInTheDocument();
+      expect(screen.getByText("Multipart")).toBeVisible();
+      expect(screen.queryByRole("tab", { name: "Multipart sets" })).not.toBeInTheDocument();
     });
 
-    it("toggles multipart structure filters independently", async () => {
+    it("reveals reusable component models in the everything view", async () => {
       const user = userEvent.setup();
-      renderVault({ at: "/?v=multipart" });
+      renderVault({
+        models: [aModelListItem({ id: 1, name: "Dragon body" })],
+        multipartModels: [aMultipartSet()],
+      });
 
-      const filters = within(
-        await screen.findByRole("complementary", { name: "Multipart set filters" }),
+      await screen.findByRole("link", { name: /Dragon figure/ });
+      await user.click(screen.getAllByRole("button", { name: "Everything" })[0]);
+
+      expect(await screen.findByText("Dragon body")).toBeVisible();
+      expect(screen.getByRole("link", { name: /Dragon figure/ })).toHaveAttribute(
+        "href",
+        "/multipart-models/40?return=%2F%3Ftype%3Dall",
       );
-      const variants = filters.getByRole("checkbox", { name: "With variants" });
-      const empty = filters.getByRole("checkbox", { name: "Not organised yet" });
-      await user.click(variants);
-      await user.click(empty);
-
-      expect(variants).toBeChecked();
-      expect(empty).toBeChecked();
     });
 
-    it("keeps the model workspace chrome on the models tab", async () => {
-      renderVault({ models: [aModelListItem({ name: "Handle" })] });
+    it("sorts the unified library by name", async () => {
+      window.localStorage.setItem("ps-vault-sort", "name-asc");
+      renderVault({
+        models: [aModelListItem({ id: 2, name: "Alpha calibration" })],
+        multipartModels: [aMultipartSet({ name: "Zebra figure", member_model_ids: [] })],
+      });
+
+      const model = await screen.findByText("Alpha calibration");
+      const multipart = screen.getByRole("link", { name: /Zebra figure/ });
+
+      expect(model.compareDocumentPosition(multipart) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+        0,
+      );
+    });
+
+    it("shows only reusable pieces in the parts-only view", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        models: [
+          aModelListItem({ id: 1, name: "Dragon body" }),
+          aModelListItem({ id: 2, name: "Calibration cube" }),
+        ],
+        multipartModels: [aMultipartSet()],
+      });
+
+      await screen.findByRole("link", { name: /Dragon figure/ });
+      await user.click(screen.getAllByRole("button", { name: "Parts only" })[0]);
+
+      expect(await screen.findByText("Dragon body")).toBeVisible();
+      expect(screen.queryByText("Calibration cube")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Dragon figure/ })).not.toBeInTheDocument();
+    });
+
+    it("reveals a matching component model while searching the organised view", async () => {
+      renderVault({
+        at: "/?q=dragon",
+        models: [aModelListItem({ id: 1, name: "Dragon body" })],
+        multipartModels: [aMultipartSet()],
+      });
+
+      expect(await screen.findByText("Dragon body")).toBeVisible();
+    });
+
+    it("keeps the normal workspace chrome for multipart-only bookmarks", async () => {
+      renderVault({ at: "/?v=multipart", multipartModels: [aMultipartSet()] });
 
       expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
-      expect(screen.getByText(/models? total/)).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByText("Printer")).toBeInTheDocument();
       expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
-      expect(screen.getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
-      expect(screen.getAllByRole("button", { name: "Sort models" })).not.toHaveLength(0);
-      expect(screen.getAllByRole("button", { name: "Favorites" })).not.toHaveLength(0);
-      expect(screen.getAllByRole("button", { name: /Select/ })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
     });
   });
 

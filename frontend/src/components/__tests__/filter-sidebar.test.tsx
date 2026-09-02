@@ -49,6 +49,7 @@ function renderSidebar(over: Partial<FilterSidebarProps> = {}) {
     onMoveModel: vi.fn<NonNullable<FilterSidebarProps["onMoveModel"]>>(),
     onMoveCollection: vi.fn<NonNullable<FilterSidebarProps["onMoveCollection"]>>(),
     onDeleteCollection: vi.fn<NonNullable<FilterSidebarProps["onDeleteCollection"]>>(),
+    onLibraryViewChange: vi.fn<FilterSidebarProps["onLibraryViewChange"]>(),
   };
   // Model leaves are links into the vault, so the tree needs a router even
   // though nothing here navigates.
@@ -62,6 +63,7 @@ function renderSidebar(over: Partial<FilterSidebarProps> = {}) {
       selectedTags={[]}
       selectedPrinterId={null}
       selectedPrinterPresence={null}
+      libraryView="organized"
       {...handlers}
       {...over}
     />,
@@ -357,7 +359,27 @@ describe("FilterSidebar", () => {
       );
     });
   });
+
+  describe("library views", () => {
+    it("switches presentation without replacing the library sidebar", async () => {
+      const user = userEvent.setup();
+      const { onLibraryViewChange } = renderSidebar();
+
+      await user.click(screen.getByRole("button", { name: "Parts only" }));
+
+      expect(onLibraryViewChange).toHaveBeenCalledWith("components");
+    });
+  });
+
   describe("filtering by tag", () => {
+    it("includes multipart sets in shared tag counts", () => {
+      renderSidebar({
+        tags: [aTag({ model_count: 3, multipart_model_count: 2 })],
+      });
+
+      expect(screen.getByRole("button", { name: /functional/ })).toHaveTextContent("5");
+    });
+
     it("adds the tag the user clicked", async () => {
       const user = userEvent.setup();
       const { onTagsChange } = renderSidebar();

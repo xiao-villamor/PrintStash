@@ -36,6 +36,7 @@ from app.db.models import (
     ModelTagLink,
     MultipartModel,
     MultipartModelChoice,
+    MultipartModelTagLink,
     MultipartPart,
     PartGroup,
     PartOption,
@@ -224,6 +225,7 @@ class PortableMultipartModel(BaseModel):
     slug: str = PydanticField(min_length=1, max_length=255)
     description: str | None = None
     collection: str | None = PydanticField(default=None, max_length=512)
+    tags: list[str] = PydanticField(default_factory=list)
     cover_model_source_id: int | None = None
     parts: list[PortableMultipartPart] = PydanticField(default_factory=list)
 
@@ -536,6 +538,22 @@ def create_archive(session: Session, user: User) -> Path:
             )
         ).all()
     }
+    aggregate_ids = [
+        int(aggregate.id) for aggregate in aggregates if aggregate.id is not None
+    ]
+    tags_by_aggregate: dict[int, list[str]] = {}
+    if aggregate_ids:
+        aggregate_tag_rows = session.exec(
+            select(MultipartModelTagLink.multipart_model_id, Tag.name)
+            .join(Tag, Tag.id == MultipartModelTagLink.tag_id)
+            .where(
+                MultipartModelTagLink.multipart_model_id.in_(aggregate_ids),  # type: ignore[union-attr]
+                live(Tag),
+            )
+            .order_by(MultipartModelTagLink.multipart_model_id.asc(), Tag.name.asc())  # type: ignore[attr-defined]
+        ).all()
+        for aggregate_id, tag_name in aggregate_tag_rows:
+            tags_by_aggregate.setdefault(int(aggregate_id), []).append(tag_name)
     for aggregate in aggregates:
         if aggregate.id is None:
             continue
@@ -578,6 +596,7 @@ def create_archive(session: Session, user: User) -> Path:
             "slug": aggregate.slug,
             "description": aggregate.description,
             "collection": aggregate_collection_paths.get(aggregate.collection_id),
+            "tags": tags_by_aggregate.get(int(aggregate.id), []),
             "parts": portable_parts,
         }
         if aggregate.cover_model_id in visible_model_ids and any(
@@ -1961,6 +1980,15 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                     # transaction.  A malformed part must never leave an
                     # empty top-level row behind.
                     session.flush()
+                    aggregate_tags = taxonomy.resolve_or_create_tags_in_transaction(
+                        session, aggregate_data.get("tags", [])
+                    )
+                    for tag in aggregate_tags:
+                        session.add(
+                            MultipartModelTagLink(
+                                multipart_model_id=int(existing.id), tag_id=int(tag.id)
+                            )
+                        )
                 aggregate_id = int(existing.id)
                 session.exec(
                     delete(MultipartModelChoice).where(

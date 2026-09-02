@@ -753,6 +753,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
             parent_id: null,
             model_count: 0,
             effective_role: "admin",
+            tags: [],
           },
           201,
         );
@@ -768,6 +769,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         parent_id: null,
         model_count: 1,
         effective_role: "admin",
+        tags: [],
       },
     ];
     if (inboxCollectionId !== null) {
@@ -779,6 +781,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         parent_id: null,
         model_count: 0,
         effective_role: "admin",
+        tags: [],
       });
     }
     sendJson(res, collections);

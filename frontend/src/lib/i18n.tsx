@@ -311,6 +311,12 @@ const messages = {
     "settings.trashCleanupPartial":
       "Catalog purge completed partially; storage cleanup still has pending or retained objects.",
     "multipart.title": "Multipart sets",
+    "multipart.badge": "Multipart",
+    "libraryView.title": "Library view",
+    "libraryView.organized": "Organized",
+    "libraryView.all": "Everything",
+    "libraryView.multipart": "Multipart sets only",
+    "libraryView.components": "Parts only",
     "multipart.description":
       "Organise every printable piece of an object, including optional variants and assembly guides.",
     "multipart.filters": "Multipart set filters",
@@ -330,6 +336,11 @@ const messages = {
     "multipart.name": "Name",
     "multipart.namePlaceholder": "e.g. Desk organiser",
     "multipart.descriptionLabel": "Description",
+    "multipart.tagsLabel": "Tags",
+    "multipart.tagsHelp":
+      "These tags describe the complete multipart set. Part Models keep their own tags.",
+    "multipart.tagsSaved": "Multipart set tags saved",
+    "multipart.tagsSaveError": "Could not save multipart set tags",
     "multipart.descriptionPlaceholder": "What does this object include?",
     "multipart.noDescription": "No description yet",
     "multipart.collectionLabel": "Collection",
@@ -346,7 +357,7 @@ const messages = {
     "multipart.empty": "No multipart models yet",
     "multipart.emptyDescription": "Group existing Models when they print together.",
     "multipart.linkedNotice":
-      "Adding a part references an existing Model. It never moves, hides, or deletes its files.",
+      "Adding a part references an existing Model. It remains reusable and can always be found in Everything or Parts only.",
     "multipart.addFirst": "Add a part",
     "multipart.addAnother": "Add another part",
     "multipart.addAlternative": "Add a variant",
@@ -732,6 +743,12 @@ const messages = {
     "settings.trashCleanupPartial":
       "La purga del catálogo terminó parcialmente; aún hay objetos pendientes o conservados.",
     "multipart.title": "Conjuntos multiparte",
+    "multipart.badge": "Multiparte",
+    "libraryView.title": "Vista de biblioteca",
+    "libraryView.organized": "Organizado",
+    "libraryView.all": "Todo",
+    "libraryView.multipart": "Solo conjuntos multiparte",
+    "libraryView.components": "Solo piezas",
     "multipart.description":
       "Organiza todas las piezas imprimibles de un objeto, incluidas sus variantes y guías de montaje.",
     "multipart.filters": "Filtros de conjuntos multiparte",
@@ -751,6 +768,11 @@ const messages = {
     "multipart.name": "Nombre",
     "multipart.namePlaceholder": "p. ej., Organizador de escritorio",
     "multipart.descriptionLabel": "Descripción",
+    "multipart.tagsLabel": "Etiquetas",
+    "multipart.tagsHelp":
+      "Estas etiquetas describen el conjunto multiparte completo. Los modelos de sus piezas conservan las suyas.",
+    "multipart.tagsSaved": "Etiquetas del conjunto multiparte guardadas",
+    "multipart.tagsSaveError": "No se pudieron guardar las etiquetas del conjunto multiparte",
     "multipart.descriptionPlaceholder": "¿Qué incluye este objeto?",
     "multipart.noDescription": "Todavía no hay descripción",
     "multipart.collectionLabel": "Colección",
@@ -767,7 +789,7 @@ const messages = {
     "multipart.empty": "Aún no hay modelos multiparte",
     "multipart.emptyDescription": "Agrupa modelos existentes cuando se imprimen juntos.",
     "multipart.linkedNotice":
-      "Añadir una pieza enlaza un modelo existente. Nunca mueve, oculta ni elimina sus archivos.",
+      "Añadir una pieza enlaza un modelo existente. Sigue siendo reutilizable y siempre aparece en Todo o Solo piezas.",
     "multipart.addFirst": "Añadir una pieza",
     "multipart.addAnother": "Añadir otra pieza",
     "multipart.addAlternative": "Añadir una variante",

@@ -11,6 +11,7 @@ export interface ListMultipartModelsParams {
   collection?: string;
   direct?: boolean;
   q?: string;
+  tag?: string[];
   limit?: number;
   offset?: number;
 }
@@ -20,6 +21,7 @@ function multipartSearch(params?: ListMultipartModelsParams): string {
   if (params?.collection) search.set("collection", params.collection);
   if (params?.direct) search.set("direct", "true");
   if (params?.q) search.set("q", params.q);
+  params?.tag?.forEach((tag) => search.append("tag", tag));
   if (params?.limit != null) search.set("limit", String(params.limit));
   if (params?.offset != null) search.set("offset", String(params.offset));
   const query = search.toString();
@@ -52,6 +54,10 @@ export function saveMultipartModel(
 
 export function deleteMultipartModel(id: number): Promise<void> {
   return sendAction(`/api/v1/multipart-models/${id}`, "DELETE");
+}
+
+export function replaceMultipartModelTags(id: number, tags: string[]): Promise<MultipartModelRead> {
+  return sendJson<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, "PUT", { tags });
 }
 
 export function listMultipartModelCandidates(

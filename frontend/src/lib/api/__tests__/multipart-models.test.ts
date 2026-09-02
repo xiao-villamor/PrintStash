@@ -7,6 +7,7 @@ import {
   getMultipartModel,
   listMultipartModelCandidates,
   listMultipartModels,
+  replaceMultipartModelTags,
   saveMultipartModel,
 } from "@/lib/api/multipart-models";
 import { invalidateApiCache } from "@/lib/api/request";
@@ -27,11 +28,12 @@ describe("multipart model wire contract", () => {
       collection: "functional/brackets",
       direct: true,
       q: "desk",
+      tag: ["fantasy", "display"],
       limit: 20,
       offset: 40,
     });
     expectRequest(
-      "/api/v1/multipart-models?collection=functional%2Fbrackets&direct=true&q=desk&limit=20&offset=40",
+      "/api/v1/multipart-models?collection=functional%2Fbrackets&direct=true&q=desk&tag=fantasy&tag=display&limit=20&offset=40",
     );
   });
 
@@ -94,5 +96,12 @@ describe("multipart model wire contract", () => {
     respondWith(null, 204);
     await deleteMultipartModel(4);
     expectRequest("/api/v1/multipart-models/4", "DELETE");
+  });
+
+  it("replaces the grouping's own tags", async () => {
+    respondWith({ id: 4, tags: ["Display"] });
+    await replaceMultipartModelTags(4, ["Display"]);
+    expectRequest("/api/v1/multipart-models/4/tags", "PUT");
+    expect(lastBody()).toEqual({ tags: ["Display"] });
   });
 });

@@ -90,6 +90,7 @@ from tests.factories.library import (
     tag_collection,
     tag_file,
     tag_model,
+    tag_multipart_model,
 )
 from tests.factories.ops import (
     build_audit_finding,
@@ -189,6 +190,7 @@ __all__ = [
     "save",
     "store_owned_bytes",
     "tag_model",
+    "tag_multipart_model",
     "tag_collection",
     "tag_file",
     "unique_hash",

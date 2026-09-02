@@ -6856,6 +6856,13 @@
             "title": "Id",
             "type": "integer"
           },
+          "member_model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Model Ids",
+            "type": "array"
+          },
           "model_count": {
             "default": 0,
             "title": "Model Count",
@@ -6873,6 +6880,13 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "updated_at": {
             "format": "date-time",
@@ -6977,6 +6991,13 @@
             "title": "Id",
             "type": "integer"
           },
+          "member_model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Model Ids",
+            "type": "array"
+          },
           "model_count": {
             "default": 0,
             "title": "Model Count",
@@ -7001,6 +7022,13 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "updated_at": {
             "format": "date-time",
@@ -12046,6 +12074,11 @@
           "model_count": {
             "default": 0,
             "title": "Model Count",
+            "type": "integer"
+          },
+          "multipart_model_count": {
+            "default": 0,
+            "title": "Multipart Model Count",
             "type": "integer"
           },
           "name": {
@@ -23709,6 +23742,25 @@
           },
           {
             "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -24139,6 +24191,63 @@
           }
         ],
         "summary": "Replace multipart model composition",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/tags": {
+      "put": {
+        "operationId": "replace_multipart_model_tags_api_v1_multipart_models__multipart_model_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace a multipart model's direct tags",
         "tags": [
           "multipart-models"
         ]

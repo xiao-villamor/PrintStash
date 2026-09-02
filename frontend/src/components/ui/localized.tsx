@@ -406,6 +406,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Name", "Nombre"],
   ["Collection", "Colección"],
   ["Files", "Archivos"],
+  ["Contents", "Contenido"],
   ["Delete model?", "¿Eliminar modelo?"],
   ["Delete tag?", "¿Eliminar etiqueta?"],
   ["Model name", "Nombre del modelo"],

@@ -758,4 +758,5 @@ export interface TagRead {
   name: string;
   slug: string;
   model_count: number;
+  multipart_model_count?: number;
 }

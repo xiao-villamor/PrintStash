@@ -37,6 +37,7 @@ from app.db.models import (
     FileTagLink,
     FileType,
     Model,
+    MultipartModelTagLink,
     PrinterProvider,
     PrintJobState,
 )
@@ -196,11 +197,15 @@ class TestEntityTagBuilders:
     def test_entity_tag_links_are_persisted(self, db_session: Session) -> None:
         collection = factories.build_collection(db_session, "Tagged")
         model = factories.build_model(db_session, collection=collection)
+        multipart_model = factories.build_multipart_model(
+            db_session, collection=collection
+        )
         artifact = factories.build_file(db_session, model)
         tag = factories.build_tag(db_session, "Workshop")
 
         collection_link = factories.tag_collection(db_session, collection, tag)
         file_link = factories.tag_file(db_session, artifact, tag)
+        multipart_link = factories.tag_multipart_model(db_session, multipart_model, tag)
 
         assert (
             db_session.get(
@@ -211,6 +216,13 @@ class TestEntityTagBuilders:
         )
         assert (
             db_session.get(FileTagLink, (file_link.file_id, file_link.tag_id))
+            is not None
+        )
+        assert (
+            db_session.get(
+                MultipartModelTagLink,
+                (multipart_link.multipart_model_id, multipart_link.tag_id),
+            )
             is not None
         )
 
