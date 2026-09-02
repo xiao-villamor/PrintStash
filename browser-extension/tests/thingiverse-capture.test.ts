@@ -251,6 +251,120 @@ describe("Thingiverse browser capture", () => {
     ).resolves.toEqual({ ok: false, code: "contract_changed", reason: "files_missing" });
   });
 
+  it("keeps safe Thingiverse files when another entry is irrelevant", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            files: [
+              { id: 991000, name: "preview.png", public_url: "https://example.com/preview.png" },
+              {
+                id: 991001,
+                name: "ChestView-Main.stl",
+                download_url: "https://api.thingiverse.com/files/991001/download",
+              },
+            ],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7398551",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://api.thingiverse.com/files/991001/download",
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the dedicated file endpoint when complete entries are unusable", async () => {
+    const fetchImpl = vi.fn(
+      async (url: string) =>
+        new Response(
+          JSON.stringify(
+            url.endsWith("/complete")
+              ? {
+                  files: [
+                    {
+                      id: 991000,
+                      name: "preview.png",
+                      public_url: "https://example.com/preview.png",
+                    },
+                  ],
+                }
+              : [
+                  {
+                    id: 991001,
+                    name: "ChestView-Main.stl",
+                    download_url: "https://api.thingiverse.com/files/991001/download",
+                  },
+                ],
+          ),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      files: [{ id: "991001", filename: "ChestView-Main.stl" }],
+    });
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      "https://api.thingiverse.com/things/7398551/files",
+    ]);
+  });
+
+  it("reports unusable Thingiverse file entries without exposing their contents", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              files: [
+                {
+                  id: 991000,
+                  name: "private-model.stl",
+                  download_url: "https://attacker.example/private-model.stl?token=secret",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({ ok: false, code: "contract_changed", reason: "invalid_file_data" });
+    expect(JSON.stringify(result)).not.toContain("private-model");
+    expect(JSON.stringify(result)).not.toContain("secret");
+  });
+
   it("retries the current Thingiverse API with its public view token", async () => {
     document.body.innerHTML = `
       <button aria-label="Download LightFront.stl">Download</button>
@@ -579,7 +693,11 @@ describe("Thingiverse browser capture", () => {
         endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
         maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
       }),
-    ).resolves.toEqual({ ok: false, code: "contract_changed" });
+    ).resolves.toEqual({
+      ok: false,
+      code: "contract_changed",
+      reason: "invalid_file_data",
+    });
   });
 
   it("rejects an unsafe file DTO", () => {

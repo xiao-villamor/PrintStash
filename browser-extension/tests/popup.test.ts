@@ -1540,6 +1540,62 @@ describe("popup browser adapters", () => {
     );
   });
 
+  it("identifies unusable Thingiverse file data without exposing provider content", async () => {
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+      {
+        id: 42,
+        title: "Black Hole Lamp by NAM_3 - Thingiverse",
+        url: "https://www.thingiverse.com/thing:7398551/files",
+      },
+    ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [
+            {
+              frameId: 0,
+              result: { ok: false, code: "contract_changed", reason: "invalid_file_data" },
+            },
+          ]
+        : [
+            {
+              frameId: 0,
+              result: {
+                pageTitle: "Black Hole Lamp by NAM_3 - Thingiverse",
+                jsonLd: [],
+              },
+            },
+          ],
+    );
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_vault_secret",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+        throw new Error(`Unexpected Thingiverse request: ${url}`);
+      }),
+    );
+
+    await import("../popup.ts");
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 12; attempt += 1) await settle();
+
+    expect(element("#status").textContent).toContain(
+      "Thingiverse returned file entries without a safe download link",
+    );
+    expect(element("#status-code").textContent).toContain(
+      "thingiverse_links_failed · invalid_file_data",
+    );
+    expect(element("#status").textContent).not.toContain("private-model");
+    expect(element("#status").textContent).not.toContain("secret");
+  });
+
   it("explains a blocked Thingiverse file service without blaming the visible page", async () => {
     fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
       {

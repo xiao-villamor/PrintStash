@@ -30,7 +30,7 @@ export interface ThingiverseFilesPageResult {
   ok: boolean;
   files?: ThingiversePageFile[];
   code?: "challenge" | "contract_changed" | "request_failed" | "response_too_large";
-  reason?: "files_missing";
+  reason?: "files_missing" | "invalid_file_data";
 }
 
 export type ThingiverseFailureCode =
@@ -43,6 +43,8 @@ export function thingiverseFailureMessage(code?: ThingiverseFailureCode): string
       return "user_file_required: Thingiverse blocked access to its file list. Refresh this page and try again. If the files remain visible but PrintStash still cannot list them, download one and attach it in Pending Imports.";
     case "files_missing":
       return "user_file_required: Thingiverse did not expose its file list. Refresh the Files page, then try again. If it still fails, download one file and attach it in Pending Imports.";
+    case "invalid_file_data":
+      return "user_file_required: Thingiverse returned file entries without a safe download link. Refresh the Files page and try again, or attach a downloaded file in Pending Imports.";
     case "response_too_large":
       return "user_file_required: Thingiverse returned a file list that was too large to inspect safely. Download one file and attach it in Pending Imports.";
     case "request_failed":
@@ -370,64 +372,71 @@ export async function requestThingiverseFilesInMainWorld(args: {
       return { ok: true, files: rawFiles };
     };
     const completeFiles = findFiles(responseResult.value);
-    if (!completeFiles.ok) return completeFiles;
-    let rawFiles = completeFiles.files;
-    if (!rawFiles || rawFiles.length === 0) {
-      const filesEndpoint = `https://api.thingiverse.com/things/${args.sourceItemId}/files`;
-      const filesResult = await requestJson(filesEndpoint);
-      if (!filesResult.ok) return filesResult;
-      const dedicatedFiles = findFiles(filesResult.value);
-      if (!dedicatedFiles.ok) return dedicatedFiles;
-      rawFiles = dedicatedFiles.files;
-      if (!rawFiles || rawFiles.length === 0) {
-        return { ok: false, code: "contract_changed", reason: "files_missing" };
+    const collectSafeFiles = (rawFiles: unknown[] | undefined): boolean => {
+      if (!rawFiles || rawFiles.length === 0 || rawFiles.length > 256) return false;
+      for (const value of rawFiles) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+        const file = value as Record<string, unknown>;
+        const fileId =
+          typeof file.id === "number" && Number.isSafeInteger(file.id)
+            ? String(file.id)
+            : typeof file.id === "string"
+              ? file.id
+              : "";
+        const rawFilename =
+          typeof file.name === "string"
+            ? file.name.trim()
+            : typeof file.filename === "string"
+              ? file.filename.trim()
+              : undefined;
+        const filename = safeFilename(rawFilename);
+        if (
+          !/^\d{1,20}$/.test(fileId) ||
+          seen.has(fileId) ||
+          !filename ||
+          filename !== rawFilename
+        ) {
+          continue;
+        }
+        let parsedUrl: URL | undefined;
+        for (const value of [
+          file.direct_url,
+          file.download_url,
+          file.downloadUrl,
+          file.public_url,
+          file.url,
+        ]) {
+          parsedUrl = usableFileUrl(value, fileId);
+          if (parsedUrl) break;
+        }
+        if (!parsedUrl) continue;
+        seen.add(fileId);
+        files.push({
+          id: fileId,
+          filename,
+          fileType: typeFor(filename),
+          url: parsedUrl.toString(),
+        });
       }
-    }
-    if (rawFiles.length > 256) {
-      return { ok: false, code: "contract_changed" };
-    }
-    for (const value of rawFiles) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        return { ok: false, code: "contract_changed" };
-      }
-      const file = value as Record<string, unknown>;
-      const fileId =
-        typeof file.id === "number" && Number.isSafeInteger(file.id)
-          ? String(file.id)
-          : typeof file.id === "string"
-            ? file.id
-            : "";
-      const rawFilename =
-        typeof file.name === "string"
-          ? file.name.trim()
-          : typeof file.filename === "string"
-            ? file.filename.trim()
-            : undefined;
-      const filename = safeFilename(rawFilename);
-      if (!/^\d{1,20}$/.test(fileId) || seen.has(fileId) || !filename || filename !== rawFilename) {
-        return { ok: false, code: "contract_changed" };
-      }
-      let parsedUrl: URL | undefined;
-      for (const value of [
-        file.direct_url,
-        file.download_url,
-        file.downloadUrl,
-        file.public_url,
-        file.url,
-      ]) {
-        parsedUrl = usableFileUrl(value, fileId);
-        if (parsedUrl) break;
-      }
-      if (!parsedUrl) return { ok: false, code: "contract_changed" };
-      seen.add(fileId);
-      files.push({
-        id: fileId,
-        filename,
-        fileType: typeFor(filename),
-        url: parsedUrl.toString(),
-      });
-    }
-    return { ok: true, files };
+      return files.length > 0;
+    };
+    const completeRawFiles = completeFiles.ok ? completeFiles.files : undefined;
+    if (collectSafeFiles(completeRawFiles)) return { ok: true, files };
+
+    const filesEndpoint = `https://api.thingiverse.com/things/${args.sourceItemId}/files`;
+    const filesResult = await requestJson(filesEndpoint);
+    if (!filesResult.ok) return filesResult;
+    const dedicatedFiles = findFiles(filesResult.value);
+    const dedicatedRawFiles = dedicatedFiles.ok ? dedicatedFiles.files : undefined;
+    if (collectSafeFiles(dedicatedRawFiles)) return { ok: true, files };
+
+    const filesWerePresent =
+      (completeRawFiles?.length ?? 0) > 0 || (dedicatedRawFiles?.length ?? 0) > 0;
+    return {
+      ok: false,
+      code: "contract_changed",
+      reason: filesWerePresent ? "invalid_file_data" : "files_missing",
+    };
   } catch {
     return { ok: false, code: "request_failed" };
   }
