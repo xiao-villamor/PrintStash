@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   THINGIVERSE_MAX_FILE_SIZE_BYTES,
+  THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
   downloadThingiverseCandidate,
   requestThingiverseFilesInMainWorld,
   thingiverseCaptureFromPage,
@@ -13,7 +14,61 @@ afterEach(() => {
 });
 
 describe("Thingiverse browser capture", () => {
-  it("discovers individual model files and deduplicates repeated controls", () => {
+  it("lists individual files from the current page API without rendered links", async () => {
+    document.body.innerHTML = `<button aria-label="Download Cable Mount.stl">Download</button>`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              files: [
+                {
+                  id: 991001,
+                  name: "Cable Mount.stl",
+                  public_url: "https://www.thingiverse.com/download:991001",
+                },
+                {
+                  id: 991002,
+                  name: "Bracket.3mf",
+                  public_url: "https://www.thingiverse.com/download:991002",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    const isolated = new Function(
+      `return (${requestThingiverseFilesInMainWorld.toString()})`,
+    )() as typeof requestThingiverseFilesInMainWorld;
+
+    await expect(
+      isolated({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "Cable Mount.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+        {
+          id: "991002",
+          filename: "Bracket.3mf",
+          fileType: "other",
+          url: "https://www.thingiverse.com/download:991002",
+        },
+      ],
+    });
+  });
+
+  it("deduplicates legacy rendered download controls", async () => {
     document.body.innerHTML = `
       <section><h3>Cable Mount.stl</h3><a href="/download:991001">Download</a></section>
       <section><a href="https://www.thingiverse.com/download:991001" title="Cable Mount.stl">Download again</a></section>
@@ -25,7 +80,13 @@ describe("Thingiverse browser capture", () => {
       `return (${requestThingiverseFilesInMainWorld.toString()})`,
     )() as typeof requestThingiverseFilesInMainWorld;
 
-    expect(isolated({ sourceItemId: "7401604" })).toEqual({
+    await expect(
+      isolated({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
       ok: true,
       files: [
         {
@@ -77,9 +138,15 @@ describe("Thingiverse browser capture", () => {
     expect(JSON.stringify(capture)).not.toContain("/download:991001");
   });
 
-  it("discovers a later individual download control", () => {
+  it("discovers a later individual download control", async () => {
     document.body.innerHTML = `<a href="https://www.thingiverse.com/download:991002" title="Bracket.stl">Download</a>`;
-    expect(requestThingiverseFilesInMainWorld({ sourceItemId: "7401604" })).toEqual({
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
       ok: true,
       files: [
         {
@@ -90,6 +157,70 @@ describe("Thingiverse browser capture", () => {
         },
       ],
     });
+  });
+
+  it("rejects an oversized Thingiverse metadata response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("{}", {
+            headers: { "Content-Length": String(THINGIVERSE_MAX_METADATA_RESPONSE_BYTES + 1) },
+          }),
+      ),
+    );
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({ ok: false, code: "response_too_large" });
+  });
+
+  it("reports a Thingiverse page API challenge", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>Just a moment...</html>", { status: 403 })),
+    );
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({ ok: false, code: "challenge" });
+  });
+
+  it("rejects a malformed current Thingiverse file response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              files: [
+                {
+                  id: 991001,
+                  name: "../Cable Mount.stl",
+                  public_url: "https://www.thingiverse.com/download:991001",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7401604",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({ ok: false, code: "contract_changed" });
   });
 
   it("rejects an unsafe file DTO", () => {
@@ -153,7 +284,7 @@ describe("Thingiverse browser capture", () => {
     ]);
   });
 
-  it("rejects HTML, oversized files, and redirects outside official hosts", async () => {
+  it("rejects an HTML browser challenge instead of treating it as a model file", async () => {
     const candidate = {
       id: "thingiverse:7401604:file:991001",
       filename: "Cable Mount.stl",
@@ -173,7 +304,14 @@ describe("Thingiverse browser capture", () => {
         fetchImpl: vi.fn(async () => challenge),
       }),
     ).rejects.toThrow(/browser check/);
+  });
 
+  it("rejects an oversized selected model file", async () => {
+    const candidate = {
+      id: "thingiverse:7401604:file:991001",
+      filename: "Cable Mount.stl",
+      fileType: "stl" as const,
+    };
     const oversized = new Response("mesh", {
       headers: { "Content-Length": String(THINGIVERSE_MAX_FILE_SIZE_BYTES + 1) },
     });
@@ -188,7 +326,14 @@ describe("Thingiverse browser capture", () => {
         fetchImpl: vi.fn(async () => oversized),
       }),
     ).rejects.toThrow(/too large/);
+  });
 
+  it("rejects a selected model file redirected outside official hosts", async () => {
+    const candidate = {
+      id: "thingiverse:7401604:file:991001",
+      filename: "Cable Mount.stl",
+      fileType: "stl" as const,
+    };
     const unsafe = new Response("mesh");
     Object.defineProperty(unsafe, "url", {
       configurable: true,

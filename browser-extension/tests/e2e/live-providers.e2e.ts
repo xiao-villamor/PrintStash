@@ -8,7 +8,10 @@ import {
   requestMakerWorldLinksInMainWorld,
   requestMakerWorldMetadataInMainWorld,
 } from "../../makerworld-capture";
-import { requestThingiverseFilesInMainWorld } from "../../thingiverse-capture";
+import {
+  THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+  requestThingiverseFilesInMainWorld,
+} from "../../thingiverse-capture";
 
 interface LiveProviderBrowser {
   execute<Result, Argument>(
@@ -64,6 +67,8 @@ describeLive("live provider capture contracts", () => {
     await browser.url(thingiverseUrl);
     const result = await browser.execute(requestThingiverseFilesInMainWorld, {
       sourceItemId: "7401604",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
     });
 
     assert.equal(result.ok, true, `Thingiverse file discovery failed with ${result.code}`);

@@ -6,6 +6,7 @@ import {
   downloadMakerWorldCandidate,
   isAllowedMakerWorldDownloadUrl,
   makerWorldCaptureFromMetadata,
+  makerWorldFailureMessage,
   parseMakerWorldMetadataResponse,
   requestMakerWorldLinksInMainWorld,
   requestMakerWorldMetadataInExtensionContext,
@@ -477,13 +478,20 @@ describe("MakerWorld MAIN-world seams", () => {
       "https://makerworld.com/api/v1/design-service/instance/instance-default/f3mf?type=download",
     ]);
     expect(requestOptions[0]?.headers).toMatchObject({
-      Accept: "application/json",
+      Accept: "*/*",
+      "Content-Type": "application/json",
       "X-BBL-App-Source": "makerworld",
       "X-BBL-Client-Name": "MakerWorld",
       "X-BBL-Client-Type": "web",
       "X-BBL-Client-Version": "00.00.00.01",
     });
     expect(JSON.stringify(result)).toContain("signature=ephemeral");
+  });
+
+  it("explains how to complete a MakerWorld CAPTCHA before retrying", () => {
+    expect(makerWorldFailureMessage("challenge")).toContain("click Download 3MF");
+    expect(makerWorldFailureMessage("challenge")).toContain("complete the browser check");
+    expect(makerWorldFailureMessage("challenge")).toContain("retry PrintStash");
   });
 
   it("accepts the current root-level url response shape", async () => {

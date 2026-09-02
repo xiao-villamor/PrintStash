@@ -2,6 +2,7 @@ import { buildBrowserCaptureMessage, type BrowserCaptureMessage } from "./captur
 import type { BrowserCaptureFile } from "./capture-transport.ts";
 
 export const THINGIVERSE_MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
+export const THINGIVERSE_MAX_METADATA_RESPONSE_BYTES = 1024 * 1024;
 
 const THINGIVERSE_DOWNLOAD_HOSTS = new Set([
   "thingiverse.com",
@@ -28,7 +29,7 @@ export interface ThingiversePageFile {
 export interface ThingiverseFilesPageResult {
   ok: boolean;
   files?: ThingiversePageFile[];
-  code?: "contract_changed";
+  code?: "challenge" | "contract_changed" | "request_failed" | "response_too_large";
 }
 
 function candidateId(sourceItemId: string, fileId: string): string {
@@ -80,9 +81,11 @@ function fileTypeFor(filename: string): ThingiverseFileType {
 }
 
 /** Runs in the page's MAIN world. Keep this function closure-free. */
-export function requestThingiverseFilesInMainWorld(args: {
+export async function requestThingiverseFilesInMainWorld(args: {
   sourceItemId: string;
-}): ThingiverseFilesPageResult {
+  endpoint: string;
+  maxResponseBytes: number;
+}): Promise<ThingiverseFilesPageResult> {
   const supportedFilename =
     /([^\n<>:"/\\|?*]{1,240}\.(?:stl|3mf|obj|gcode|gco|bgcode|ctb|photon|pwmo|step|stp|scad|dxf|svg|amf|ply|zip|rar|7z|pdf|txt))/i;
   const safeFilename = (value: string | null | undefined): string | undefined => {
@@ -99,7 +102,27 @@ export function requestThingiverseFilesInMainWorld(args: {
     if (/\.(?:ctb|photon|pwmo)$/i.test(filename)) return "sla";
     return "other";
   };
-  if (!/^\d{1,20}$/.test(args.sourceItemId)) return { ok: false, code: "contract_changed" };
+  if (
+    !/^\d{1,20}$/.test(args.sourceItemId) ||
+    !Number.isSafeInteger(args.maxResponseBytes) ||
+    args.maxResponseBytes < 1 ||
+    args.maxResponseBytes > 1024 * 1024
+  ) {
+    return { ok: false, code: "contract_changed" };
+  }
+  try {
+    const endpoint = new URL(args.endpoint);
+    if (
+      !["https://thingiverse.com", "https://www.thingiverse.com"].includes(endpoint.origin) ||
+      endpoint.pathname !== `/api/v2/things/${args.sourceItemId}/complete` ||
+      endpoint.search ||
+      endpoint.hash
+    ) {
+      return { ok: false, code: "contract_changed" };
+    }
+  } catch {
+    return { ok: false, code: "contract_changed" };
+  }
   const files: ThingiversePageFile[] = [];
   const seen = new Set<string>();
   const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"));
@@ -145,7 +168,143 @@ export function requestThingiverseFilesInMainWorld(args: {
     files.push({ id: fileId, filename, fileType: typeFor(filename), url: parsed.toString() });
     if (files.length > 256) return { ok: false, code: "contract_changed" };
   }
-  return files.length > 0 ? { ok: true, files } : { ok: false, code: "contract_changed" };
+  if (files.length > 0) return { ok: true, files };
+
+  try {
+    const response = await fetch(args.endpoint, {
+      credentials: "include",
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+    });
+    if ([401, 403, 418, 429].includes(response.status)) {
+      return { ok: false, code: "challenge" };
+    }
+    if (!response.ok || !response.body) return { ok: false, code: "request_failed" };
+    const contentLengthValue = response.headers.get("Content-Length");
+    if (contentLengthValue !== null) {
+      const contentLength = Number(contentLengthValue);
+      if (
+        !Number.isSafeInteger(contentLength) ||
+        contentLength < 0 ||
+        contentLength > args.maxResponseBytes
+      ) {
+        return { ok: false, code: "response_too_large" };
+      }
+    }
+    const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+    if (contentType.includes("text/html")) return { ok: false, code: "challenge" };
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let total = 0;
+    let body = "";
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        total += next.value.byteLength;
+        if (total > args.maxResponseBytes) {
+          await reader.cancel();
+          return { ok: false, code: "response_too_large" };
+        }
+        body += decoder.decode(next.value, { stream: true });
+      }
+      body += decoder.decode();
+    } finally {
+      reader.releaseLock();
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { ok: false, code: "contract_changed" };
+    }
+    const queue: Array<{ value: unknown; depth: number }> = [{ value: parsed, depth: 0 }];
+    let nodes = 0;
+    let rawFiles: unknown[] | undefined;
+    while (queue.length > 0) {
+      const entry = queue.shift();
+      if (!entry || entry.depth > 6 || ++nodes > 2_048) {
+        return { ok: false, code: "contract_changed" };
+      }
+      if (!entry.value || typeof entry.value !== "object" || Array.isArray(entry.value)) continue;
+      const object = entry.value as Record<string, unknown>;
+      if (Array.isArray(object.files)) {
+        rawFiles = object.files;
+        break;
+      }
+      for (const value of Object.values(object)) {
+        if (value && typeof value === "object") {
+          queue.push({ value, depth: entry.depth + 1 });
+        }
+      }
+    }
+    if (!rawFiles || rawFiles.length === 0 || rawFiles.length > 256) {
+      return { ok: false, code: "contract_changed" };
+    }
+    for (const value of rawFiles) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ok: false, code: "contract_changed" };
+      }
+      const file = value as Record<string, unknown>;
+      const fileId =
+        typeof file.id === "number" && Number.isSafeInteger(file.id)
+          ? String(file.id)
+          : typeof file.id === "string"
+            ? file.id
+            : "";
+      const rawFilename =
+        typeof file.name === "string"
+          ? file.name.trim()
+          : typeof file.filename === "string"
+            ? file.filename.trim()
+            : undefined;
+      const filename = safeFilename(rawFilename);
+      const urlValue = file.public_url ?? file.download_url ?? file.downloadUrl ?? file.url;
+      if (
+        !/^\d{1,20}$/.test(fileId) ||
+        seen.has(fileId) ||
+        !filename ||
+        filename !== rawFilename ||
+        typeof urlValue !== "string"
+      ) {
+        return { ok: false, code: "contract_changed" };
+      }
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(urlValue, window.location.origin);
+      } catch {
+        return { ok: false, code: "contract_changed" };
+      }
+      if (
+        parsedUrl.protocol !== "https:" ||
+        parsedUrl.username ||
+        parsedUrl.password ||
+        parsedUrl.hash ||
+        ![
+          "thingiverse.com",
+          "www.thingiverse.com",
+          "api.thingiverse.com",
+          "cdn.thingiverse.com",
+        ].includes(parsedUrl.hostname.toLowerCase()) ||
+        !(
+          parsedUrl.pathname === `/download:${fileId}` ||
+          new RegExp(`^/files/${fileId}/download/?$`).test(parsedUrl.pathname)
+        )
+      ) {
+        return { ok: false, code: "contract_changed" };
+      }
+      seen.add(fileId);
+      files.push({
+        id: fileId,
+        filename,
+        fileType: typeFor(filename),
+        url: parsedUrl.toString(),
+      });
+    }
+    return { ok: true, files };
+  } catch {
+    return { ok: false, code: "request_failed" };
+  }
 }
 
 export function validateThingiverseFiles(result: unknown): ThingiversePageFile[] {

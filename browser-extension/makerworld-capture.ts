@@ -838,7 +838,8 @@ export async function requestMakerWorldLinksInMainWorld(args: {
         {
           credentials: "include",
           headers: {
-            Accept: "application/json",
+            Accept: "*/*",
+            "Content-Type": "application/json",
             "X-BBL-App-Source": "makerworld",
             "X-BBL-Client-Name": "MakerWorld",
             "X-BBL-Client-Type": "web",
@@ -913,7 +914,7 @@ export function makerWorldFailureMessage(code: MakerWorldFailureCode | undefined
     case "auth_required":
       return "user_file_required: Sign in to MakerWorld in this tab, or choose a downloaded MakerWorld package to attach it in Pending Imports.";
     case "challenge":
-      return "user_file_required: MakerWorld requires a browser check. Download the package normally, then attach it in Pending Imports.";
+      return "user_file_required: MakerWorld requires its CAPTCHA. In this tab, click Download 3MF and complete the browser check, then retry PrintStash; if it still appears, attach the downloaded package in Pending Imports.";
     case "contract_changed":
     case "response_too_large":
     case "response_too_deep":

@@ -1403,6 +1403,51 @@ describe("popup browser adapters", () => {
     expect(element("#status").textContent).toContain("Thingiverse file links could not be read");
   });
 
+  it("explains how to clear a Thingiverse browser challenge before retrying", async () => {
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+      {
+        id: 42,
+        title: "Cable Mount",
+        url: "https://www.thingiverse.com/thing:7401604/files",
+      },
+    ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [{ frameId: 0, result: { ok: false, code: "challenge" } }]
+        : [
+            {
+              frameId: 0,
+              result: {
+                pageTitle: "Cable Mount",
+                jsonLd: [JSON.stringify({ name: "Cable Mount", author: "INFINITY_D" })],
+              },
+            },
+          ],
+    );
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_vault_secret",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+        throw new Error(`Unexpected Thingiverse request: ${url}`);
+      }),
+    );
+
+    await import("../popup.ts");
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 12; attempt += 1) await settle();
+
+    expect(element("#manual-file-panel").hidden).toBe(false);
+    expect(element("#status").textContent).toContain("Complete it in this tab, then try again");
+  });
+
   it("uploads a user-selected Cults file through slots, PUT, and finalize without URL capture or retry", async () => {
     fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
       {

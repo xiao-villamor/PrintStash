@@ -54,10 +54,12 @@ import {
   type MakerWorldPackageFile,
 } from "./makerworld-capture.ts";
 import {
+  THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
   downloadThingiverseCandidate,
   requestThingiverseFilesInMainWorld,
   thingiverseCaptureFromPage,
   validateThingiverseFiles,
+  type ThingiverseFilesPageResult,
 } from "./thingiverse-capture.ts";
 import {
   createBrowserProviderAdapter,
@@ -913,23 +915,37 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         target: { tabId },
         world: "MAIN",
         func: requestThingiverseFilesInMainWorld,
-        args: [{ sourceItemId }],
+        args: [
+          {
+            sourceItemId,
+            endpoint: `${new URL(pageUrl).origin}/api/v2/things/${encodeURIComponent(sourceItemId)}/complete`,
+            maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+          },
+        ],
       });
+      const fileResult = fileResults[0]?.result as ThingiverseFilesPageResult | undefined;
       let files: ReturnType<typeof validateThingiverseFiles>;
       try {
-        files = validateThingiverseFiles(fileResults[0]?.result);
+        files = validateThingiverseFiles(fileResult);
       } catch {
         files = [];
       }
       pendingThingiverseLinks = new Map(
         files.map((file) => [`thingiverse:${sourceItemId}:file:${file.id}`, file.url]),
       );
-      return thingiverseCaptureFromPage({
+      const thingiverseCapture = thingiverseCaptureFromPage({
         pageUrl,
         pageTitle: visible.pageTitle || pageTitle,
         jsonLd: visible.jsonLd,
         files,
       });
+      return fileResult?.code === "challenge" && thingiverseCapture.state === "manual_file_required"
+        ? {
+            ...thingiverseCapture,
+            message:
+              "user_file_required: Thingiverse requires a browser check. Complete it in this tab, then try again, or attach a downloaded file in Pending Imports.",
+          }
+        : thingiverseCapture;
     }
     if (provider !== "Printables") return capture;
     if (visible.challengeDetected) {
