@@ -161,6 +161,26 @@ export async function requestThingiverseFilesInMainWorld(args: {
       ? parsed
       : undefined;
   };
+  const trustedFileMetadataUrl = (value: unknown): boolean => {
+    if (typeof value !== "string" || value.trim().length === 0) return true;
+    try {
+      const parsed = new URL(value, window.location.origin);
+      return (
+        parsed.protocol === "https:" &&
+        !parsed.username &&
+        !parsed.password &&
+        !parsed.hash &&
+        [
+          "thingiverse.com",
+          "www.thingiverse.com",
+          "api.thingiverse.com",
+          "cdn.thingiverse.com",
+        ].includes(parsed.hostname.toLowerCase())
+      );
+    } catch {
+      return false;
+    }
+  };
   if (
     !/^\d{1,20}$/.test(args.sourceItemId) ||
     !Number.isSafeInteger(args.maxResponseBytes) ||
@@ -398,16 +418,23 @@ export async function requestThingiverseFilesInMainWorld(args: {
         ) {
           continue;
         }
-        let parsedUrl: URL | undefined;
-        for (const value of [
+        const urlCandidates = [
           file.direct_url,
           file.download_url,
           file.downloadUrl,
           file.public_url,
           file.url,
-        ]) {
+        ];
+        let parsedUrl: URL | undefined;
+        for (const value of urlCandidates) {
           parsedUrl = usableFileUrl(value, fileId);
           if (parsedUrl) break;
+        }
+        const providerSuppliedUntrustedUrl = urlCandidates.some(
+          (value) => !trustedFileMetadataUrl(value),
+        );
+        if (!parsedUrl && !providerSuppliedUntrustedUrl) {
+          parsedUrl = new URL(`https://www.thingiverse.com/download:${fileId}`);
         }
         if (!parsedUrl) continue;
         seen.add(fileId);

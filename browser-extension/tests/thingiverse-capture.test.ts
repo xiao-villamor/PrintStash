@@ -334,6 +334,101 @@ describe("Thingiverse browser capture", () => {
     ]);
   });
 
+  it("derives canonical downloads when Thingiverse omits file URLs", async () => {
+    const fetchImpl = vi
+      .fn<(url: string) => Promise<Response>>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            files: [
+              { id: 991001, name: "LightFront.stl" },
+              { id: 991002, name: "LightBack.stl" },
+              { id: 991003, name: "BlackParts.stl" },
+              { id: 991004, name: "Stand.stl" },
+            ],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "LightFront.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+        {
+          id: "991002",
+          filename: "LightBack.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991002",
+        },
+        {
+          id: "991003",
+          filename: "BlackParts.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991003",
+        },
+        {
+          id: "991004",
+          filename: "Stand.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991004",
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("derives canonical downloads from non-download Thingiverse URLs", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            files: [
+              {
+                id: 991001,
+                name: "LightFront.stl",
+                public_url: "https://api.thingiverse.com/files/991001",
+              },
+            ],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7398551",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "LightFront.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("reports unusable Thingiverse file entries without exposing their contents", async () => {
     vi.stubGlobal(
       "fetch",
