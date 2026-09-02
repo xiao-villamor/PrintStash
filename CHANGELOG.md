@@ -153,6 +153,8 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Backup restore confirmations now keep long source identities, namespaces,
+  and checksums contained within the dialog at desktop and mobile widths.
 - Saved light and dark theme preferences now survive a page refresh under the
   production Content Security Policy.
 - MakerWorld package resolution accepts both current root-level and compatible

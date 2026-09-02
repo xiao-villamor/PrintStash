@@ -13,6 +13,8 @@
  * Preview settings queue image recreation rather than applying silently, since
  * changing quality invalidates every thumbnail in the library. And the release
  * warning is the only thing telling a self-hoster they are running something old.
+ * Backup source identities are deliberately opaque and may be wider than prose;
+ * the restore warning must keep them inside its confirmation dialog.
  */
 import { expect, test } from "@playwright/test";
 
@@ -57,6 +59,44 @@ test.describe("settings route", () => {
     await expect(page.getByRole("button", { name: "Adopt backup" })).toHaveCount(0);
     await expect(page.getByText("Provider: provider-legacy-…")).toBeVisible();
     await expect(page.getByText("Exact key: nexus3d-backups/legacy-2025.tar.gz")).toBeVisible();
+  });
+
+  test("contains long backup metadata within the restore dialog", async ({ page }) => {
+    await page.route("**/api/v1/backups/sources", async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            backup_id: "2026-01-01T000000Z",
+            created_at: "2026-01-01T00:00:00Z",
+            size_bytes: 4096,
+            file_count: 12,
+            storage_backend: "local",
+            app_version: "0.13.0",
+            location: "local",
+            source_ref: "9".repeat(64),
+            namespace: "backup/data/backups",
+            archive_sha256: "a".repeat(64),
+            canonical: true,
+            precedence: 1,
+          },
+        ],
+      });
+    });
+    await page.goto("/settings?section=storage");
+    await page.getByRole("button", { name: "Restore", exact: true }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Restore backup?" });
+    const description = dialog.getByText(/^This replaces the current database/);
+    await expect(description).toBeVisible();
+
+    const overflow = await dialog.evaluate((element) => element.scrollWidth - element.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(0);
+
+    await page.setViewportSize({ width: 360, height: 740 });
+    const narrowOverflow = await dialog.evaluate(
+      (element) => element.scrollWidth - element.clientWidth,
+    );
+    expect(narrowOverflow).toBeLessThanOrEqual(0);
   });
 
   test("expired trash requires a durable preview before approval", async ({ page }) => {

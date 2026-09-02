@@ -43,11 +43,11 @@ export function ConfirmModal({
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
           <AlertTriangle className="h-6 w-6 text-destructive" />
         </div>
-        <div className="space-y-1">
+        <div className="min-w-0 max-w-full space-y-1">
           <h3 id={titleId} className="text-base font-semibold text-foreground">
             {title}
           </h3>
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <p className="wrap-anywhere text-sm text-muted-foreground">{description}</p>
         </div>
       </div>
 
