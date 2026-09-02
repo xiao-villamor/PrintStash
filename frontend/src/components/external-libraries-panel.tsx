@@ -197,11 +197,17 @@ function formatDate(value: string | null | undefined): string {
 }
 
 function isLibrarySourceKind(value: string): value is LibrarySourceKind {
-  return value === "mounted" || value === "s3" || value === "webdav" || value === "sftp";
+  return (
+    value === "mounted" ||
+    value === "s3" ||
+    value === "webdav" ||
+    value === "sftp" ||
+    value === "gdrive"
+  );
 }
 
 function isRemoteLibrarySourceKind(value: string): value is Exclude<LibrarySourceKind, "mounted"> {
-  return value === "s3" || value === "webdav" || value === "sftp";
+  return value === "s3" || value === "webdav" || value === "sftp" || value === "gdrive";
 }
 
 /**
@@ -297,8 +303,13 @@ export function ExternalLibrariesPanel({
   const [profileRegion, setProfileRegion] = useState("us-east-1");
   const [profileUsername, setProfileUsername] = useState("");
   const [profilePassword, setProfilePassword] = useState("");
+  const [profilePrivateKeyPath, setProfilePrivateKeyPath] = useState("");
+  const [profilePassphrase, setProfilePassphrase] = useState("");
   const [profileAccessKey, setProfileAccessKey] = useState("");
   const [profileSecretKey, setProfileSecretKey] = useState("");
+  const [profileClientId, setProfileClientId] = useState("");
+  const [profileClientSecret, setProfileClientSecret] = useState("");
+  const [profileRefreshToken, setProfileRefreshToken] = useState("");
   const [profileHostKey, setProfileHostKey] = useState("");
   const [profilePort, setProfilePort] = useState(22);
   const [profileRoot, setProfileRoot] = useState("models");
@@ -394,6 +405,7 @@ export function ExternalLibrariesPanel({
           ? {
               name: profileName.trim(),
               kind: profileKind,
+              purpose: "library",
               configuration: {
                 provider: profileEndpoint.trim() ? "s3_self_hosted" : "s3",
                 bucket: profileBucket.trim(),
@@ -411,6 +423,7 @@ export function ExternalLibrariesPanel({
             ? {
                 name: profileName.trim(),
                 kind: profileKind,
+                purpose: "library",
                 configuration: {
                   provider: "webdav",
                   endpoint_url: profileEndpoint.trim(),
@@ -419,24 +432,47 @@ export function ExternalLibrariesPanel({
                 },
                 secrets: { password: profilePassword },
               }
-            : {
-                name: profileName.trim(),
-                kind: profileKind,
-                configuration: {
-                  host: profileEndpoint.trim(),
-                  port: profilePort,
-                  username: profileUsername.trim(),
-                  host_key: profileHostKey.trim(),
-                  root: profileRoot.trim(),
-                },
-                secrets: { password: profilePassword },
-              };
+            : profileKind === "gdrive"
+              ? {
+                  name: profileName.trim(),
+                  kind: profileKind,
+                  purpose: "library",
+                  configuration: {
+                    client_id: profileClientId.trim(),
+                    root: profileRoot.trim(),
+                  },
+                  secrets: {
+                    client_secret: profileClientSecret,
+                    refresh_token: profileRefreshToken,
+                  },
+                }
+              : {
+                  name: profileName.trim(),
+                  kind: profileKind,
+                  purpose: "library",
+                  configuration: {
+                    host: profileEndpoint.trim(),
+                    port: profilePort,
+                    username: profileUsername.trim(),
+                    host_key: profileHostKey.trim(),
+                    private_key_path: profilePrivateKeyPath.trim(),
+                    root: profileRoot.trim(),
+                  },
+                  secrets: {
+                    password: profilePassword,
+                    passphrase: profilePassphrase,
+                  },
+                };
       const created = await api.createConnection(body);
       setConnections((current) => [...current, created]);
       setProfileName("");
       setProfilePassword("");
+      setProfilePrivateKeyPath("");
+      setProfilePassphrase("");
       setProfileAccessKey("");
       setProfileSecretKey("");
+      setProfileClientSecret("");
+      setProfileRefreshToken("");
       try {
         await api.probeConnection(created.id);
         toast.success("Remote source connection saved and verified.");
@@ -772,37 +808,39 @@ export function ExternalLibrariesPanel({
                     Remote source connections
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Create reusable connections for read-only S3, WebDAV, and SFTP sources.
-                    Credentials stay encrypted on the PrintStash server.
+                    Create reusable connections for read-only S3, WebDAV, SFTP, and Google Drive
+                    sources. Credentials stay encrypted on the PrintStash server.
                   </p>
                 </div>
                 {connections.length > 0 && (
                   <ul className="divide-y divide-border rounded border border-border bg-background">
-                    {connections.map((connection) => (
-                      <li
-                        key={connection.id}
-                        className="flex flex-col items-stretch gap-3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-medium text-foreground">
-                            {connection.name}
-                          </p>
-                          <p className="text-2xs text-muted-foreground">
-                            {connection.kind.toUpperCase()} · credentials stored:{" "}
-                            {connection.secret_fields_set.join(", ") || "none"}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          className={BTN_SECONDARY}
-                          disabled={!canEdit || profileBusy !== null}
-                          onClick={() => handleDeleteConnection(connection)}
+                    {connections
+                      .filter((connection) => (connection.purpose ?? "library") === "library")
+                      .map((connection) => (
+                        <li
+                          key={connection.id}
+                          className="flex flex-col items-stretch gap-3 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Remove connection
-                        </button>
-                      </li>
-                    ))}
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-medium text-foreground">
+                              {connection.name}
+                            </p>
+                            <p className="text-2xs text-muted-foreground">
+                              {connection.kind.toUpperCase()} · credentials stored:{" "}
+                              {connection.secret_fields_set.join(", ") || "none"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className={BTN_SECONDARY}
+                            disabled={!canEdit || profileBusy !== null}
+                            onClick={() => handleDeleteConnection(connection)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove connection
+                          </button>
+                        </li>
+                      ))}
                   </ul>
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -833,6 +871,7 @@ export function ExternalLibrariesPanel({
                       <option value="s3">S3 / compatible</option>
                       <option value="webdav">WebDAV</option>
                       <option value="sftp">SFTP</option>
+                      <option value="gdrive">Google Drive (beta)</option>
                     </select>
                   </label>
                   {profileKind === "s3" ? (
@@ -894,6 +933,41 @@ export function ExternalLibrariesPanel({
                         />
                       </label>
                     </>
+                  ) : profileKind === "gdrive" ? (
+                    <>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        OAuth client ID
+                        <input
+                          className={INPUT}
+                          aria-label="Google Drive client ID"
+                          value={profileClientId}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileClientId(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        OAuth client secret
+                        <input
+                          className={INPUT}
+                          type="password"
+                          aria-label="Google Drive client secret"
+                          value={profileClientSecret}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileClientSecret(event.target.value)}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                        Offline refresh token
+                        <input
+                          className={INPUT}
+                          type="password"
+                          aria-label="Google Drive refresh token"
+                          value={profileRefreshToken}
+                          disabled={!canEdit}
+                          onChange={(event) => setProfileRefreshToken(event.target.value)}
+                        />
+                      </label>
+                    </>
                   ) : (
                     <>
                       <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -946,17 +1020,41 @@ export function ExternalLibrariesPanel({
                         />
                       </label>
                       {profileKind === "sftp" && (
-                        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                          Pinned SFTP host key
-                          <textarea
-                            className={INPUT}
-                            aria-label="SFTP host key"
-                            placeholder="OpenSSH known_hosts entry"
-                            value={profileHostKey}
-                            disabled={!canEdit}
-                            onChange={(event) => setProfileHostKey(event.target.value)}
-                          />
-                        </label>
+                        <>
+                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                            Pinned SFTP host key
+                            <textarea
+                              className={INPUT}
+                              aria-label="SFTP host key"
+                              placeholder="OpenSSH known_hosts entry"
+                              value={profileHostKey}
+                              disabled={!canEdit}
+                              onChange={(event) => setProfileHostKey(event.target.value)}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                            Mounted private key path
+                            <input
+                              className={INPUT}
+                              aria-label="SFTP private key path"
+                              placeholder="Use this or a password"
+                              value={profilePrivateKeyPath}
+                              disabled={!canEdit}
+                              onChange={(event) => setProfilePrivateKeyPath(event.target.value)}
+                            />
+                          </label>
+                          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                            Private key passphrase
+                            <input
+                              className={INPUT}
+                              type="password"
+                              aria-label="SFTP private key passphrase"
+                              value={profilePassphrase}
+                              disabled={!canEdit}
+                              onChange={(event) => setProfilePassphrase(event.target.value)}
+                            />
+                          </label>
+                        </>
                       )}
                     </>
                   )}
@@ -1020,6 +1118,7 @@ export function ExternalLibrariesPanel({
                     <option value="s3">S3 / compatible</option>
                     <option value="webdav">WebDAV / Nextcloud</option>
                     <option value="sftp">SFTP</option>
+                    <option value="gdrive">Google Drive</option>
                   </select>
                 </label>
                 {sourceKind === "mounted" ? (
@@ -1050,7 +1149,10 @@ export function ExternalLibrariesPanel({
                         <option value="">Choose an enabled connection</option>
                         {connections
                           .filter(
-                            (connection) => connection.kind === sourceKind && connection.enabled,
+                            (connection) =>
+                              connection.kind === sourceKind &&
+                              connection.enabled &&
+                              (connection.purpose ?? "library") === "library",
                           )
                           .map((connection) => (
                             <option key={connection.id} value={connection.id}>

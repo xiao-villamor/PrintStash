@@ -19,6 +19,7 @@ PrintStash probes the configured storage at startup. Support maturity and storag
 | [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
 | [WebDAV](#webdav) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
 | [SFTP](#sftp) | NAS over SFTP | Beta | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
+| [Google Drive](#gdrive) | Consumer cloud storage | Beta | Unguarded | `client_id`, `client_secret` (secret), `refresh_token` (secret), `root` |
 
 ## Safety tiers
 
@@ -92,6 +93,12 @@ Expected tier: **Guarded**. Publish uses WebDAV MOVE with `Overwrite: F`; purge 
 NAS storage over SSH File Transfer Protocol.
 
 Expected tier: **Guarded**. Publish uses SSH exclusive create (`x` mode); `host_key` is required and purge is manual and confirmed only.
+
+## gdrive
+
+Consumer cloud storage through Apache OpenDAL.
+
+Expected tier: **Unguarded**. Available for read-only Library sources and off-site backup replicas; not selectable as managed Vault storage.
 
 ## Credentials and upgrades
 

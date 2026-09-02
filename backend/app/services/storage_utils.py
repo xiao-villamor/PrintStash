@@ -21,6 +21,7 @@ from app.db.models import (
     Document,
     File,
     ModelSourceCover,
+    MultipartModel,
     ThumbnailGeneration,
 )
 from app.services.storage_backend import get_backend
@@ -187,6 +188,18 @@ def ownership_snapshot(
                 resource_id=row.id or 0,
                 expected_size=row.size_bytes,
                 display_name="source-cover.webp",
+            )
+        )
+    for row in session.exec(select(MultipartModel)).all():
+        if row.id is None or row.cover_filename is None:
+            continue
+        result.primary.append(
+            OwnedBlob(
+                key=backend.multipart_model_cover_key(row.id, row.cover_filename),
+                resource_type="multipart_model_cover",
+                resource_id=row.id,
+                expected_size=row.cover_size_bytes,
+                display_name="multipart-cover.webp",
             )
         )
     if discover:

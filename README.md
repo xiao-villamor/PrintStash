@@ -203,6 +203,7 @@ are welcome in
 
 Storage and migration guides:
 
+- [0.13.0 release and migration guide](./docs/0.13.0-release-guide.md)
 - [Library sources and NAS recipes](./docs/library-sources.md)
 - [Storage provider and protocol matrix](./docs/provider-support.md#storage-and-library-source-compatibility)
 - [Garbage collection safety and recovery](./docs/storage-data-safety.md)

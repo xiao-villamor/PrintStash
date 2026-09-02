@@ -130,6 +130,20 @@ class _ChunkOperator(_MemoryOperator):
         )
 
 
+class _OpenDALWriteOperator(_MemoryOperator):
+    def __init__(self, *, conditional_create: bool) -> None:
+        super().__init__()
+        self.conditional_create = conditional_create
+        self.open_options: list[dict[str, object]] = []
+
+    def capability(self):
+        return SimpleNamespace(write_with_if_not_exists=self.conditional_create)
+
+    def open(self, key: str, mode: str, **options: object) -> _Writer | _Reader:
+        self.open_options.append(options)
+        return super().open(key, mode)
+
+
 class _RenameFailureOperator(_MemoryOperator):
     def rename(self, source: str, destination: str) -> None:
         del source, destination
@@ -176,6 +190,10 @@ class TestOpenDALStorageBackend:
         assert (
             backend.document_image_key(11, "image.webp")
             == "vault/data/document-images/11/image.webp"
+        )
+        assert (
+            backend.multipart_model_cover_key(12, "cover.webp")
+            == "vault/data/multipart-covers/12/cover.webp"
         )
 
     @pytest.mark.parametrize(
@@ -226,6 +244,30 @@ class TestOpenDALStorageBackend:
         backend.create_stream(BytesIO(b"sftp"), backend.thumbnail_key(3))
 
         assert operator.objects["thumbs/3.webp"] == b"sftp"
+
+    def test_s3_requests_opendal_conditional_creation_when_available(self) -> None:
+        operator = _OpenDALWriteOperator(conditional_create=True)
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.S3), operator=operator
+        )
+
+        backend.create_stream(BytesIO(b"s3"), backend.thumbnail_key(40))
+
+        assert operator.objects["thumbs/40.webp"] == b"s3"
+        assert operator.open_options == [{"if_not_exists": True}]
+
+    def test_google_drive_never_overwrites_an_observed_existing_object(self) -> None:
+        operator = _OpenDALWriteOperator(conditional_create=False)
+        operator.objects["thumbs/41.webp"] = b"existing"
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.GDRIVE), operator=operator
+        )
+
+        with pytest.raises(StorageCollisionError):
+            backend.create_stream(BytesIO(b"replacement"), backend.thumbnail_key(41))
+
+        assert operator.objects["thumbs/41.webp"] == b"existing"
+        assert operator.open_options == []
 
     def test_uses_a_stream_writer_when_the_operator_exposes_one(self) -> None:
         operator = _StreamOperator()

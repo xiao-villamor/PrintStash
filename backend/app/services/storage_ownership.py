@@ -32,6 +32,7 @@ _SMALL_HASH_LIMIT = 16 * 1024 * 1024
 _SMALL_HASH_KINDS = {
     "thumbnail",
     "model_source_cover",
+    "multipart_model_cover",
     "source_cover",
     "collection_image",
     "document_image",
@@ -188,7 +189,17 @@ def provider_ref_for_backend(
     options = getattr(spec, "options", {})
     if not isinstance(options, dict):
         options = {}
-    if transport == "webdav" or name in {"webdav", "nextcloud"}:
+    if transport == "s3":
+        if options.get("endpoint_url") is not None:
+            payload["endpoint"] = _normalized_endpoint(options.get("endpoint_url"))
+        if options.get("region") is not None:
+            payload["region"] = str(options.get("region") or "").strip().lower()
+        if options.get("addressing_style") is not None:
+            payload["addressing_style"] = (
+                str(options.get("addressing_style")).strip().lower()
+            )
+        payload["namespace"] = str(resolved_namespace)
+    elif transport == "webdav" or name in {"webdav", "nextcloud"}:
         # OpenDAL's namespace is only the managed root. The endpoint is the
         # actual destination and must be included, while credentials remain
         # deliberately absent from the identity.
@@ -216,6 +227,14 @@ def provider_ref_for_backend(
             "username": str(
                 options.get("username", getattr(backend, "_username", ""))
             ).strip(),
+            "root": str(options.get("root") or resolved_namespace).strip().strip("/"),
+        }
+    elif transport == "gdrive" or name in {"gdrive", "backup-gdrive"}:
+        # The OAuth client id identifies the configured Google application but
+        # grants no access by itself. Refresh/access tokens and the client
+        # secret remain excluded from durable locators.
+        payload["gdrive"] = {
+            "client_id": str(options.get("client_id") or "").strip(),
             "root": str(options.get("root") or resolved_namespace).strip().strip("/"),
         }
     elif name not in {"s3", "backup-s3"}:
@@ -487,11 +506,13 @@ def publish_file(
     object_kind: str,
     sha256: str | None = None,
     move: bool = False,
+    provider_ref: str | None = None,
 ) -> CreationReceipt:
     """Publish a staged file with evidence known before storage mutation."""
     _require_publication_before_sqlite_dml(session)
-    provider_ref = provider_ref_for_backend(
-        backend, namespace=_namespace_for(backend, key)
+    effective_provider_ref = provider_ref or provider_ref_for_backend(
+        backend,
+        namespace=_namespace_for(backend, key),
     )
     digest = sha256
     if digest is None:
@@ -508,7 +529,7 @@ def publish_file(
         object_kind=object_kind,
         expected_size=size,
         sha256=digest,
-        provider_ref=provider_ref,
+        provider_ref=effective_provider_ref,
     )
     try:
         if move:
@@ -519,14 +540,14 @@ def publish_file(
     except Exception as exc:
         fail_publication(session, reservation_id, exc)
         raise
-    receipt = replace(receipt, provider_ref=provider_ref)
+    receipt = replace(receipt, provider_ref=effective_provider_ref)
     complete_publication(
         session,
         reservation_id,
         receipt,
         object_kind=object_kind,
         sha256=digest,
-        provider_ref=provider_ref,
+        provider_ref=effective_provider_ref,
     )
     return receipt
 

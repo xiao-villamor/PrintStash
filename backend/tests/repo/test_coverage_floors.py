@@ -50,7 +50,7 @@ MODULE_FLOOR = 90.0
 # Deleting an entry is the goal. See the module docstring for the ratchet.
 PINNED_BELOW_FLOOR = {
     "app/services/source_covers.py": 76.5,
-    "app/services/staging_leases.py": 76.0,
+    "app/services/staging_leases.py": 79.0,
     "app/services/inbox.py": 81.0,
     "app/services/provenance.py": 81.5,
     "app/services/library_transfer.py": 84.0,

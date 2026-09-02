@@ -8,8 +8,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import CollectionRole, Document, File, FileType, MultipartModelChoice
+from app.db.models import (
+    CollectionRole,
+    Document,
+    File,
+    FileType,
+    MultipartModel,
+    MultipartModelChoice,
+)
 from app.services import multipart_models
+from app.services.storage_backend import get_backend
+from tests.factories.content import png
 
 
 class TestMultipartModels:
@@ -111,6 +120,162 @@ class TestMultipartModels:
         )
 
         assert response.status_code == 422, response.text
+
+    def test_uploads_and_serves_a_private_cover_from_the_users_computer(
+        self, client, auth_headers
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Uploaded cover assembly"},
+        ).json()
+
+        uploaded = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("display.png", png(width=96, height=72), "image/png")},
+        )
+
+        assert uploaded.status_code == 200, uploaded.text
+        assert uploaded.json()["cover_image_uploaded"] is True
+        assert uploaded.json()["cover_image_url"] is None
+        assert uploaded.json()["cover_thumbnail_url"].startswith(
+            f"/api/v1/multipart-models/{created['id']}/cover/content?v="
+        )
+        assert client.get(uploaded.json()["cover_thumbnail_url"]).status_code == 401
+        content = client.get(
+            uploaded.json()["cover_thumbnail_url"], headers=auth_headers
+        )
+        assert content.status_code == 200, content.text
+        assert content.headers["content-type"] == "image/webp"
+        assert content.content.startswith(b"RIFF")
+
+    def test_upload_cover_rejects_bytes_that_are_not_a_supported_image(
+        self, client, auth_headers
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Invalid uploaded cover assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("not-an-image.png", b"not an image", "image/png")},
+        )
+
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "multipart_cover_invalid"
+        detail = client.get(
+            f"/api/v1/multipart-models/{created['id']}", headers=auth_headers
+        )
+        assert detail.json()["cover_image_uploaded"] is False
+
+    def test_replacing_an_uploaded_cover_removes_the_previous_owned_blob(
+        self, client, auth_headers, db_session
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Replace uploaded cover"},
+        ).json()
+        first = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("first.png", png(width=8, height=8), "image/png")},
+        )
+        assert first.status_code == 200, first.text
+        first_url = first.json()["cover_thumbnail_url"]
+        aggregate = db_session.get(MultipartModel, created["id"])
+        assert aggregate is not None
+        db_session.refresh(aggregate)
+        assert aggregate.cover_filename is not None
+        backend = get_backend()
+        first_key = backend.multipart_model_cover_key(
+            created["id"], aggregate.cover_filename
+        )
+        assert backend.exists(first_key)
+
+        second = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("second.png", png(width=9, height=9), "image/png")},
+        )
+
+        assert second.status_code == 200, second.text
+        assert second.json()["cover_image_uploaded"] is True
+        assert second.json()["cover_thumbnail_url"] != first_url
+        assert not backend.exists(first_key)
+
+    def test_removing_uploaded_cover_restores_the_member_thumbnail_fallback(
+        self, client, auth_headers, db_session, make_model, make_file
+    ) -> None:
+        member = make_model("Fallback cover member")
+        member_file = make_file(
+            member, file_type=FileType.STL, filename="fallback-cover.stl"
+        )
+        member.thumbnail_file_id = member_file.id
+        db_session.add(member)
+        db_session.commit()
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Removable uploaded cover"},
+        ).json()
+        saved = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "cover_model_id": member.id,
+                "parts": [{"name": "Body", "choices": [{"model_id": member.id}]}],
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        uploaded = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("custom.png", png(), "image/png")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+        removed = client.delete(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+        )
+
+        assert removed.status_code == 200, removed.text
+        assert removed.json()["cover_image_uploaded"] is False
+        assert removed.json()["cover_thumbnail_url"] == (
+            f"/api/v1/files/{member_file.id}/thumbnail"
+        )
+
+    def test_upload_cover_rejects_a_collection_viewer(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_user,
+        headers_for,
+        grant_role,
+    ) -> None:
+        collection = make_collection("Read-only uploaded cover")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Protected uploaded cover", "collection_id": collection.id},
+        ).json()
+        viewer = make_user("multipart-cover-viewer")
+        grant_role(viewer, collection, CollectionRole.VIEW)
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=headers_for(viewer),
+            files={"file": ("private.png", png(), "image/png")},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "collection_permission_denied"
 
     def test_full_save_rejects_cover_outside_composition(
         self, client, auth_headers, make_model

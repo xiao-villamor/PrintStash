@@ -159,6 +159,7 @@ def _copy_stream_create_only(src: BinaryIO, dest: Path) -> Path:
 class StorageObjectInfo:
     size: int
     etag: str | None = None
+    version_id: str | None = None
 
 
 class StorageCollisionError(FileExistsError):
@@ -308,6 +309,10 @@ class StorageBackend(ABC):
     def document_image_key(self, document_id: int, name: str) -> str:
         """Key for an image embedded in a markdown Document. ``name`` is a
         server-generated ``{sha256}.{ext}`` — never raw user input."""
+
+    @abstractmethod
+    def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
+        """Key for a normalized Multipart Model cover uploaded by its user."""
 
     @abstractmethod
     def exists(self, key: str) -> bool: ...
@@ -535,6 +540,10 @@ class UnavailableStorageBackend(StorageBackend):
 
     def document_image_key(self, document_id: int, name: str) -> str:
         del document_id, name
+        return self._fail()
+
+    def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
+        del multipart_model_id, name
         return self._fail()
 
     def exists(self, key: str) -> bool:
@@ -1143,6 +1152,11 @@ class LocalStorageBackend(StorageBackend):
 
     def document_image_key(self, document_id: int, name: str) -> str:
         return str(settings.thumb_dir / "document-images" / str(document_id) / name)
+
+    def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
+        return str(
+            settings.thumb_dir / "multipart-covers" / str(multipart_model_id) / name
+        )
 
     def exists(self, key: str) -> bool:
         return Path(key).exists()
@@ -2241,6 +2255,9 @@ class S3StorageBackend(StorageBackend):
 
     def document_image_key(self, document_id: int, name: str) -> str:
         return f"{self._prefix()}document-images/{document_id}/{name}"
+
+    def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
+        return f"{self._prefix()}multipart-covers/{multipart_model_id}/{name}"
 
     def exists(self, key: str) -> bool:
         return self.object_info(key) is not None

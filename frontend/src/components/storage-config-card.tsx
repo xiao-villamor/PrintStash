@@ -25,6 +25,7 @@ import {
   StorageProviderPicker,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
+import { BackupDestinations } from "@/components/backup-destinations";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -294,11 +295,11 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
 
             <div className="border-t border-border pt-3">
               <p className="text-xs font-medium text-foreground flex items-center gap-1.5 mb-2">
-                <Cloud className="h-3 w-3" /> Backup destination (optional)
+                <Cloud className="h-3 w-3" /> Legacy S3 backup destination
               </p>
               <p className="text-3xs text-muted-foreground mb-3">
-                Backups are always stored locally first. If configured here, they are also uploaded
-                to cloud storage for off-site durability.
+                Existing S3 settings remain supported. For new S3, WebDAV, SFTP, or Google Drive
+                replicas, use the OpenDAL destinations below.
               </p>
 
               <div className="grid gap-3 sm:grid-cols-2">
@@ -376,6 +377,8 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
                 </div>
               </div>
             </div>
+
+            <BackupDestinations disabled={!canEdit} />
           </div>
 
           {/* Save row */}

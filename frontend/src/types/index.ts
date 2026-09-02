@@ -170,6 +170,7 @@ export type {
   ExternalLibraryScanSummary,
   ExternalLibraryRootEnrollment,
   LibrarySourceKind,
+  StorageConnectionPurpose,
   StorageConnectionConfiguration,
   StorageConnectionConfigurationValue,
   StorageConnection,

@@ -583,7 +583,8 @@ function StorageStep(props: {
         <details className="group rounded-md border border-outline-variant bg-surface-container-low">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-md px-4 py-3 text-sm font-medium text-on-surface transition-colors duration-press hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 [&::-webkit-details-marker]:hidden">
             <span>
-              Off-site backup <span className="font-normal text-muted-foreground">(optional)</span>
+              Legacy S3 off-site backup{" "}
+              <span className="font-normal text-muted-foreground">(optional)</span>
             </span>
             <ChevronDown
               className="h-4 w-4 text-muted-foreground transition-transform duration-fast group-open:rotate-180"
@@ -631,7 +632,8 @@ function StorageStep(props: {
               mono
             />
             <p className="text-xs text-muted-foreground sm:col-span-2">
-              Credentials can stay empty when your runtime provides them.
+              Credentials can stay empty when your runtime provides them. After setup, add new S3,
+              WebDAV, SFTP, or Google Drive destinations in Settings → Storage.
             </p>
           </div>
         </details>

@@ -541,6 +541,7 @@ describe("ExternalLibrariesPanel", () => {
       expect(sourceType).toHaveTextContent("S3 / compatible");
       expect(sourceType).toHaveTextContent("WebDAV / Nextcloud");
       expect(sourceType).toHaveTextContent("SFTP");
+      expect(sourceType).toHaveTextContent("Google Drive");
     });
 
     it("explains remote connections are reusable read-only sources", async () => {
@@ -603,6 +604,7 @@ describe("ExternalLibrariesPanel", () => {
         id: 41,
         name: "TrueNAS MinIO",
         kind: "s3",
+        purpose: "library",
         configuration: { bucket: "models" },
         secret_fields_set: ["access_key", "secret_key"],
         enabled: true,
@@ -638,6 +640,7 @@ describe("ExternalLibrariesPanel", () => {
         id: 42,
         name: "AWS archive",
         kind: "s3",
+        purpose: "library",
         configuration: { bucket: "archive" },
         secret_fields_set: ["access_key", "secret_key"],
         enabled: true,
@@ -669,6 +672,7 @@ describe("ExternalLibrariesPanel", () => {
           expect.objectContaining({
             name: "AWS archive",
             kind: "s3",
+            purpose: "library",
             secrets: { access_key: "ACCESS", secret_key: "SECRET" },
           }),
         ),

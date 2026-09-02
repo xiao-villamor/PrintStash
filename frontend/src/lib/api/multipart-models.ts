@@ -66,6 +66,29 @@ export function deleteMultipartModel(id: number): Promise<void> {
   return sendAction(`/api/v1/multipart-models/${id}`, "DELETE");
 }
 
+export async function uploadMultipartModelCover(
+  id: number,
+  file: File,
+): Promise<MultipartModelRead> {
+  const path = `/api/v1/multipart-models/${id}/cover`;
+  const body = new FormData();
+  body.append("file", file);
+  const response = await fetch(getUrl(path), {
+    method: "PUT",
+    headers: authHeaders(),
+    body,
+  });
+  invalidateApiCache(path);
+  return handleResponse<MultipartModelRead>(response);
+}
+
+export async function deleteMultipartModelCover(id: number): Promise<MultipartModelRead> {
+  const path = `/api/v1/multipart-models/${id}/cover`;
+  const response = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
+  invalidateApiCache(path);
+  return handleResponse<MultipartModelRead>(response);
+}
+
 export function replaceMultipartModelTags(id: number, tags: string[]): Promise<MultipartModelRead> {
   return sendJson<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, "PUT", { tags });
 }

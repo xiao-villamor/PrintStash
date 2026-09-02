@@ -30,11 +30,13 @@ import {
   createMultipartModel,
   deleteDocument,
   deleteMultipartModel,
+  deleteMultipartModelCover,
   replaceMultipartModelTags,
   saveMultipartModel,
   starMultipartModel,
   unstarMultipartModel,
   uploadDocument,
+  uploadMultipartModelCover,
 } from "@/lib/api";
 import { useMultipartModel, useMultipartModelCandidates } from "@/lib/queries";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
@@ -796,11 +798,13 @@ function MultipartOverview({
         </div>
         <div className="absolute bottom-4 left-4 max-w-[calc(100%-2rem)] rounded border border-outline-variant bg-surface-container-lowest/95 px-3 py-2">
           <p className="truncate text-sm font-medium text-on-surface">
-            {model.cover_image_url
-              ? t("multipart.customCover")
-              : coverMember
-                ? modelLabel(coverMember, t("multipart.unavailable"))
-                : model.name}
+            {model.cover_image_uploaded
+              ? t("multipart.uploadedCover")
+              : model.cover_image_url
+                ? t("multipart.customCover")
+                : coverMember
+                  ? modelLabel(coverMember, t("multipart.unavailable"))
+                  : model.name}
           </p>
           <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
             {t("multipart.coverBadge")}
@@ -1078,7 +1082,9 @@ export function MultipartModelDetailPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [guideBusy, setGuideBusy] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
   const guideInput = useRef<HTMLInputElement>(null);
+  const coverInput = useRef<HTMLInputElement>(null);
   const savedModel = persistedModel ?? serverModel ?? null;
   const model = draft ?? savedModel;
   const canEdit =
@@ -1208,6 +1214,47 @@ export function MultipartModelDetailPage() {
       setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
     } finally {
       setGuideBusy(false);
+    }
+  }
+  function applySavedCover(saved: MultipartModelRead) {
+    setPersistedModel(saved);
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            cover_image_url: saved.cover_image_url,
+            cover_image_uploaded: saved.cover_image_uploaded,
+            cover_thumbnail_url: saved.cover_thumbnail_url,
+          }
+        : current,
+    );
+    void queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels });
+  }
+  async function uploadCover(file: File) {
+    if (!model || !canEdit || coverBusy) return;
+    setCoverBusy(true);
+    setSaveError(null);
+    try {
+      const saved = await uploadMultipartModelCover(model.id, file);
+      applySavedCover(saved);
+      toast.success(t("multipart.coverUploaded"));
+    } catch (cause) {
+      setSaveError(multipartError(cause, t, "multipart.coverUploadError"));
+    } finally {
+      setCoverBusy(false);
+    }
+  }
+  async function removeCover() {
+    if (!model || !canEdit || coverBusy) return;
+    setCoverBusy(true);
+    setSaveError(null);
+    try {
+      applySavedCover(await deleteMultipartModelCover(model.id));
+      toast.success(t("multipart.coverRemoved"));
+    } catch (cause) {
+      setSaveError(multipartError(cause, t, "multipart.coverRemoveError"));
+    } finally {
+      setCoverBusy(false);
     }
   }
   async function save() {
@@ -1503,30 +1550,84 @@ export function MultipartModelDetailPage() {
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   />
                 </label>
-                <div className="space-y-1.5">
-                  <label htmlFor="multipart-cover-image" className="block text-sm font-medium">
-                    {t("multipart.coverImage")}
-                  </label>
-                  <Input
-                    id="multipart-cover-image"
-                    type="url"
-                    aria-describedby="multipart-cover-image-help"
-                    value={model.cover_image_url ?? ""}
-                    onChange={(event) =>
-                      setDraft({
-                        ...model,
-                        cover_image_url: event.target.value || null,
-                      })
-                    }
-                    placeholder={t("multipart.coverImagePlaceholder")}
-                    disabled={!canEdit}
-                  />
-                  <span
-                    id="multipart-cover-image-help"
-                    className="block text-xs text-muted-foreground"
-                  >
-                    {t("multipart.coverImageHelp")}
-                  </span>
+                <div className="space-y-3">
+                  <div>
+                    <span className="block text-sm font-medium">{t("multipart.coverImage")}</span>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("multipart.coverUploadHelp")}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => coverInput.current?.click()}
+                      disabled={!canEdit || coverBusy}
+                      loading={coverBusy}
+                    >
+                      <Upload className="h-4 w-4" />
+                      {model.cover_image_uploaded
+                        ? t("multipart.replaceCover")
+                        : t("multipart.uploadCover")}
+                    </Button>
+                    {model.cover_image_uploaded && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void removeCover()}
+                        disabled={!canEdit || coverBusy}
+                        aria-label={t("multipart.removeUploadedCover")}
+                      >
+                        <Trash2 className="h-4 w-4" /> {t("multipart.removeCover")}
+                      </Button>
+                    )}
+                    <input
+                      ref={coverInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      aria-label={t("multipart.uploadCover")}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) void uploadCover(file);
+                      }}
+                    />
+                  </div>
+                  {model.cover_image_uploaded && (
+                    <p className="text-xs font-medium text-primary" role="status">
+                      {t("multipart.uploadedFromComputer")}
+                    </p>
+                  )}
+                  <div className="space-y-1.5 border-t border-border pt-3">
+                    <label htmlFor="multipart-cover-image" className="block text-sm font-medium">
+                      {t("multipart.coverImageUrl")}
+                    </label>
+                    <Input
+                      id="multipart-cover-image"
+                      type="url"
+                      aria-describedby="multipart-cover-image-help"
+                      value={model.cover_image_url ?? ""}
+                      onChange={(event) =>
+                        setDraft({
+                          ...model,
+                          cover_image_url: event.target.value || null,
+                        })
+                      }
+                      placeholder={t("multipart.coverImagePlaceholder")}
+                      disabled={!canEdit || model.cover_image_uploaded}
+                    />
+                    <span
+                      id="multipart-cover-image-help"
+                      className="block text-xs text-muted-foreground"
+                    >
+                      {model.cover_image_uploaded
+                        ? t("multipart.coverImageUrlDisabled")
+                        : t("multipart.coverImageHelp")}
+                    </span>
+                  </div>
                 </div>
               </section>
               <section className="space-y-3 rounded-lg border border-border bg-card p-4">

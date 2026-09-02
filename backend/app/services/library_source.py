@@ -16,16 +16,16 @@ from app.db.models import (
     File,
     LibrarySourceKind,
     StorageConnection,
+    StorageConnectionPurpose,
 )
 from app.db.session import get_session_factory
 from app.services.storage_backend import StorageConfigurationError
-from app.services.storage_opendal import OpenDALStorageBackend, SourceDirectoryEntry
-from app.services.storage_providers import (
-    S3ProviderConfig,
-    SFTPProviderConfig,
-    WebDAVProviderConfig,
-    resolve_transport,
+from app.services.storage_connections import (
+    StorageConnectionConfigError,
+    load_connection_config,
 )
+from app.services.storage_opendal import OpenDALStorageBackend, SourceDirectoryEntry
+from app.services.storage_providers import resolve_transport
 
 
 class LibrarySourceError(RuntimeError):
@@ -330,7 +330,12 @@ class OpenDalLibrarySource:
                         if remaining > 0:
                             time.sleep(remaining)
             after = self.backend.object_info(provider_key)
-            if after is None or after.size != before.size or after.etag != before.etag:
+            if (
+                after is None
+                or after.size != before.size
+                or after.etag != before.etag
+                or after.version_id != before.version_id
+            ):
                 raise LibrarySourceError("library_source_changed")
             yield path
         finally:
@@ -342,34 +347,18 @@ def source_from_connection(
 ) -> LibrarySource:
     if not connection.enabled:
         raise LibrarySourceError("storage_connection_disabled")
-    config = {
-        **_json_object(connection.config_json),
-        **_json_object(connection.secret_json),
-    }
+    if connection.purpose != StorageConnectionPurpose.LIBRARY:
+        raise LibrarySourceError("storage_connection_not_library")
+    if connection.kind == LibrarySourceKind.MOUNTED:
+        raise LibrarySourceError("storage_connection_kind_invalid")
     try:
-        if connection.kind == LibrarySourceKind.S3:
-            parsed = S3ProviderConfig.model_validate(
-                {"provider": config.pop("provider", "s3"), **config}
-            )
-            spec = resolve_transport(parsed)
-            return S3LibrarySource(
-                spec.options,
-                max_bytes_per_second=8 * 1024 * 1024 if scan_limits else None,
-            )
-        if connection.kind == LibrarySourceKind.WEBDAV:
-            parsed = WebDAVProviderConfig.model_validate(
-                {"provider": config.pop("provider", "webdav"), **config}
-            )
-        elif connection.kind == LibrarySourceKind.SFTP:
-            parsed = SFTPProviderConfig.model_validate({"provider": "sftp", **config})
-        else:
-            raise LibrarySourceError("storage_connection_kind_invalid")
+        parsed = load_connection_config(connection)
         return OpenDalLibrarySource(
             OpenDALStorageBackend(resolve_transport(parsed)),
             max_metadata_ops_per_second=4 if scan_limits else None,
             max_bytes_per_second=8 * 1024 * 1024 if scan_limits else None,
         )
-    except (ValueError, StorageConfigurationError) as exc:
+    except (StorageConnectionConfigError, StorageConfigurationError) as exc:
         raise LibrarySourceError("storage_connection_invalid") from exc
 
 

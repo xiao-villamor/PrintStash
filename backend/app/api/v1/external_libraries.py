@@ -253,6 +253,8 @@ def _require_source_connection(
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
     if connection.kind != kind or not connection.enabled:
         raise HTTPException(status_code=409, detail="storage_connection_incompatible")
+    if connection.purpose.value != "library":
+        raise HTTPException(status_code=409, detail="storage_connection_incompatible")
     return connection
 
 

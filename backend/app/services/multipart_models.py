@@ -275,8 +275,15 @@ def _list_item(
         guide_count=len(guides),
         cover_model_id=aggregate.cover_model_id,
         cover_image_url=aggregate.cover_image_url,
+        cover_image_uploaded=aggregate.cover_filename is not None,
         cover_thumbnail_url=(
-            aggregate.cover_image_url
+            (
+                f"/api/v1/multipart-models/{aggregate.id}/cover/content"
+                f"?v={aggregate.cover_filename}"
+                if aggregate.cover_filename is not None
+                else None
+            )
+            or aggregate.cover_image_url
             or (
                 selected_cover.thumbnail_url
                 if selected_cover is not None and selected_cover.thumbnail_url

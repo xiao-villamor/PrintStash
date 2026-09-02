@@ -25,10 +25,28 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: new RegExp(short) }).click();
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: new RegExp(long) }).click();
-    const coverUrl = `${new URL(page.url()).origin}/icon-light.svg`;
-    await page.getByRole("textbox", { name: "Custom cover image URL" }).fill(coverUrl);
+    await page
+      .locator('input[type="file"][accept="image/png,image/jpeg,image/webp"]')
+      .setInputFiles({
+        name: "multipart-cover.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFklEQVR4nGOM6rn0nwEPYMInOXwUAADOOgLHyCTqtwAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+    await expect(page.getByText("Uploaded from your computer")).toBeVisible();
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Changes saved")).toBeVisible();
+    const uploadedCover = page.getByRole("img", { name: group });
+    await expect(uploadedCover).toBeVisible();
+    await expect
+      .poll(() =>
+        uploadedCover.evaluate((element) =>
+          element instanceof HTMLImageElement ? element.naturalWidth : 0,
+        ),
+      )
+      .toBeGreaterThan(0);
     await expect(page.getByText("Choose one").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Edit multipart set" }).click();
@@ -66,9 +84,7 @@ test.describe("multipart models", () => {
 
     await page.goto(aggregateUrl);
     await page.getByRole("button", { name: "Edit multipart set" }).click();
-    await expect(page.getByRole("textbox", { name: "Custom cover image URL" })).toHaveValue(
-      coverUrl,
-    );
+    await expect(page.getByText("Uploaded from your computer")).toBeVisible();
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();

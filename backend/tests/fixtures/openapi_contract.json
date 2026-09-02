@@ -740,6 +740,20 @@
         "title": "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put",
         "type": "object"
       },
+      "Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put",
+        "type": "object"
+      },
       "Body_upload_collection_image_api_v1_collections__collection_id__images_post": {
         "properties": {
           "file": {
@@ -4168,7 +4182,8 @@
           "mounted",
           "s3",
           "webdav",
-          "sftp"
+          "sftp",
+          "gdrive"
         ],
         "title": "LibrarySourceKind",
         "type": "string"
@@ -6804,6 +6819,11 @@
             ],
             "title": "Collection Id"
           },
+          "cover_image_uploaded": {
+            "default": false,
+            "title": "Cover Image Uploaded",
+            "type": "boolean"
+          },
           "cover_image_url": {
             "anyOf": [
               {
@@ -6942,6 +6962,11 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "cover_image_uploaded": {
+            "default": false,
+            "title": "Cover Image Uploaded",
+            "type": "boolean"
           },
           "cover_image_url": {
             "anyOf": [
@@ -10206,7 +10231,8 @@
           "this_machine",
           "s3_compatible",
           "nextcloud_webdav",
-          "nas_sftp"
+          "nas_sftp",
+          "consumer_cloud"
         ],
         "title": "ProviderCategory",
         "type": "string"
@@ -11831,6 +11857,10 @@
             "title": "Name",
             "type": "string"
           },
+          "purpose": {
+            "$ref": "#/components/schemas/StorageConnectionPurpose",
+            "default": "library"
+          },
           "secrets": {
             "additionalProperties": {
               "type": "string"
@@ -11846,6 +11876,15 @@
         ],
         "title": "StorageConnectionCreate",
         "type": "object"
+      },
+      "StorageConnectionPurpose": {
+        "description": "Authority granted to one reusable remote-storage connection.",
+        "enum": [
+          "library",
+          "backup"
+        ],
+        "title": "StorageConnectionPurpose",
+        "type": "string"
       },
       "StorageConnectionRead": {
         "properties": {
@@ -11869,6 +11908,9 @@
             "title": "Name",
             "type": "string"
           },
+          "purpose": {
+            "$ref": "#/components/schemas/StorageConnectionPurpose"
+          },
           "secret_fields_set": {
             "items": {
               "type": "string"
@@ -11881,11 +11923,26 @@
           "id",
           "name",
           "kind",
+          "purpose",
           "configuration",
           "secret_fields_set",
           "enabled"
         ],
         "title": "StorageConnectionRead",
+        "type": "object"
+      },
+      "StorageConnectionUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "StorageConnectionUpdate",
         "type": "object"
       },
       "StorageFieldDescriptor": {
@@ -24227,6 +24284,153 @@
         ]
       }
     },
+    "/api/v1/multipart-models/{multipart_model_id}/cover": {
+      "delete": {
+        "operationId": "delete_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove a multipart model's uploaded cover",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Upload a multipart model cover",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/cover/content": {
+      "get": {
+        "operationId": "get_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Serve a multipart model's uploaded cover",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
     "/api/v1/multipart-models/{multipart_model_id}/parts": {
       "put": {
         "operationId": "replace_multipart_parts_api_v1_multipart_models__multipart_model_id__parts_put",
@@ -27423,6 +27627,61 @@
           }
         ],
         "summary": "Delete Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      },
+      "patch": {
+        "operationId": "update_connection_api_v1_storage_connections__connection_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConnectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update Connection",
         "tags": [
           "storage-connections"
         ]

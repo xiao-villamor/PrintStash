@@ -50,6 +50,14 @@ class TestFrontendNginxConf:
         api_location = conf.split("location /api/v1/ {", 1)[1].split("}", 1)[0]
         assert "gzip off;" in api_location
 
+    def test_pdf_worker_modules_revalidate_their_response_headers(self) -> None:
+        """A corrected module MIME type must not stay stale in browser caches."""
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+        mjs_location = conf.split(r"location ~* \.mjs$ {", 1)[1].split("}", 1)[0]
+
+        assert "default_type application/javascript;" in mjs_location
+        assert "immutable" not in mjs_location
+
     def test_frontend_sets_browser_security_headers(self) -> None:
         conf = (_root() / "frontend" / "security-headers.conf").read_text()
 

@@ -129,6 +129,12 @@ class TestLocalKeyDerivation:
                 "document-images/4/figure.webp",
                 id="document-image",
             ),
+            pytest.param(
+                lambda backend: backend.multipart_model_cover_key(5, "cover.webp"),
+                "thumb",
+                "multipart-covers/5/cover.webp",
+                id="multipart-model-cover",
+            ),
         ],
     )
     def test_puts_each_object_kind_under_the_expected_root(

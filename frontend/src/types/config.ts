@@ -174,7 +174,12 @@ export interface HealthResponse {
 export type StorageProviderConfigValue = string | number | string[];
 export type StorageProviderConfigValues = Record<string, StorageProviderConfigValue>;
 
-export type ProviderCategory = "this_machine" | "s3_compatible" | "nextcloud_webdav" | "nas_sftp";
+export type ProviderCategory =
+  | "this_machine"
+  | "s3_compatible"
+  | "nextcloud_webdav"
+  | "nas_sftp"
+  | "consumer_cloud";
 
 export interface StorageProviderField {
   name: string;
@@ -207,7 +212,8 @@ export type ExternalLibraryCollectionMode = "mirror" | "single";
 
 // auto: watch only on local filesystems; events: always watch; off: never watch.
 export type ExternalLibraryWatchMode = "auto" | "events" | "off";
-export type LibrarySourceKind = "mounted" | "s3" | "webdav" | "sftp";
+export type LibrarySourceKind = "mounted" | "s3" | "webdav" | "sftp" | "gdrive";
+export type StorageConnectionPurpose = "library" | "backup";
 export type StorageConnectionConfigurationValue = string | number | boolean | null;
 export type StorageConnectionConfiguration = Record<string, StorageConnectionConfigurationValue>;
 
@@ -215,6 +221,7 @@ export interface StorageConnection {
   id: number;
   name: string;
   kind: Exclude<LibrarySourceKind, "mounted">;
+  purpose: StorageConnectionPurpose;
   configuration: StorageConnectionConfiguration;
   secret_fields_set: string[];
   enabled: boolean;

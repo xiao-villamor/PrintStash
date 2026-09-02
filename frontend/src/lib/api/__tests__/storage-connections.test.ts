@@ -7,6 +7,7 @@ import {
   deleteStorageConnection,
   listStorageConnections,
   probeStorageConnection,
+  updateStorageConnection,
 } from "@/lib/api/storage-connections";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
@@ -73,6 +74,17 @@ describe("probeStorageConnection", () => {
 
     expectRequest("/api/v1/storage-connections/4/probe", "POST");
     expect(lastBody()).toEqual({});
+  });
+});
+
+describe("updateStorageConnection", () => {
+  it("pauses or resumes one saved profile", async () => {
+    respondWith({ ...connection, enabled: false });
+
+    await updateStorageConnection(connection.id, { enabled: false });
+
+    expectRequest("/api/v1/storage-connections/4", "PATCH");
+    expect(lastBody()).toEqual({ enabled: false });
   });
 });
 

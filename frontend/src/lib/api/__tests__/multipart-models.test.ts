@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createMultipartModel,
+  deleteMultipartModelCover,
   deleteMultipartModel,
   getMultipartModel,
   listMultipartModelCandidates,
@@ -11,6 +12,7 @@ import {
   saveMultipartModel,
   starMultipartModel,
   unstarMultipartModel,
+  uploadMultipartModelCover,
 } from "@/lib/api/multipart-models";
 import { invalidateApiCache } from "@/lib/api/request";
 import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
@@ -83,6 +85,27 @@ describe("multipart model wire contract", () => {
       cover_image_url: "https://images.example.test/desk.webp",
       parts: [{ name: "Base", choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }] }],
     });
+  });
+
+  it("uploads a local image as the multipart cover", async () => {
+    respondWith({ id: 4, cover_image_uploaded: true });
+    const image = new File(["cover"], "cover.png", { type: "image/png" });
+
+    await uploadMultipartModelCover(4, image);
+
+    expectRequest("/api/v1/multipart-models/4/cover", "PUT");
+    const body = fetchMock.mock.calls[0]?.[1]?.body;
+    expect(body).toBeInstanceOf(FormData);
+    if (!(body instanceof FormData)) throw new Error("Expected multipart form data");
+    expect(body.get("file")).toBe(image);
+  });
+
+  it("removes the uploaded multipart cover", async () => {
+    respondWith({ id: 4, cover_image_uploaded: false });
+
+    await deleteMultipartModelCover(4);
+
+    expectRequest("/api/v1/multipart-models/4/cover", "DELETE");
   });
 
   it("searches reusable candidates", async () => {

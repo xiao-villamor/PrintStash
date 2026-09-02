@@ -297,7 +297,7 @@ describe("SetupPage", () => {
     const user = await reachStorage();
 
     expect(screen.getByLabelText("Backup bucket")).not.toBeVisible();
-    await user.click(screen.getByText("Off-site backup"));
+    await user.click(screen.getByText(/Legacy S3 off-site backup/));
     expect(screen.getByLabelText("Backup bucket")).toBeVisible();
   });
   it("refuses S3 storage with no bucket named", async () => {

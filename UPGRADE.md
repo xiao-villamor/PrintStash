@@ -6,6 +6,11 @@ previous application image until validation is complete.
 
 ## 0.13.0 notes
 
+Start with the [0.13.0 release and migration guide](./docs/0.13.0-release-guide.md)
+for a guided path through backup, compatibility boot, validation, new feature
+setup, and rollback. The notes below are the detailed storage and database
+contract for that process.
+
 - The database migration is additive. It preserves legacy mounted External
   Library rows as `mounted`, adds remote connection/source metadata, durable
   discovery cursors and tombstones, source verification timestamps, and the GC

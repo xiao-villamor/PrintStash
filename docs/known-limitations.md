@@ -60,11 +60,18 @@ manufacturing platform.
   and the generic/native S3 path are stable. Cloudflare R2, Backblaze B2, Wasabi,
   self-hosted S3 presets, Nextcloud, generic WebDAV, and SFTP are beta until their
   real-service compatibility matrices and independent deployments are broader.
-- Library-source discovery supports mounted folders, native S3, WebDAV and
-  SFTP. Automated contracts run against SeaweedFS, Nextcloud and OpenSSH, but
+- Library-source discovery supports mounted folders plus OpenDAL-backed S3,
+  WebDAV and Google Drive. SFTP shares the same connection/source layer but uses
+  AsyncSSH to preserve pinned-host-key and exclusive-create guarantees.
+  Automated contracts run against SeaweedFS, Nextcloud and OpenSSH, but
   that is protocol evidence rather than certification of every Unraid,
   Synology, TrueNAS, OpenMediaVault, QNAP, CasaOS or Proxmox release. Remote
   sources are read-only; only mounted sources may use create-only write-back.
+- Remote backup profiles can replicate every locally committed archive to S3,
+  WebDAV, SFTP or Google Drive. Restore revalidates the durable provider identity
+  and archive hash. Google Drive is beta and cannot prove an immutable delete,
+  so automatic remote retention is disabled and its replicas never satisfy the
+  independent S3 witness required for automatic Vault garbage collection.
 - Remote discovery is deliberately bounded and eventually consistent. A full
   epoch can span several scheduled slices, and provider failures apply a
   24-hour backoff. Absence is not applied until an epoch completes, and empty or

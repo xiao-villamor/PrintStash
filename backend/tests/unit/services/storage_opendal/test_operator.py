@@ -75,6 +75,115 @@ class TestOperatorFor:
             )
         ]
 
+    @pytest.mark.parametrize(
+        ("addressing_style", "expected_virtual"),
+        [("auto", None), ("path", "false"), ("virtual", "true")],
+    )
+    def test_builds_an_s3_operator_without_overriding_auto_addressing(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        addressing_style: str,
+        expected_virtual: str | None,
+    ) -> None:
+        calls: list[tuple[str, dict[str, str]]] = []
+        fake_opendal = ModuleType("opendal")
+
+        def build(kind: str, **options: str) -> object:
+            calls.append((kind, options))
+            return object()
+
+        fake_opendal.Operator = build  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+
+        storage_opendal._operator_for(
+            _spec(
+                TransportKind.S3,
+                options={
+                    "bucket": "models",
+                    "root": "library",
+                    "region": "us-east-1",
+                    "endpoint_url": "",
+                    "addressing_style": addressing_style,
+                    "access_key": "access",
+                    "secret_key": "secret",
+                },
+            )
+        )
+
+        assert calls[0][0] == "s3"
+        options = calls[0][1]
+        assert options["disable_config_load"] == "true"
+        assert options["disable_ec2_metadata"] == "true"
+        assert options["region"] == "us-east-1"
+        if expected_virtual is None:
+            assert "enable_virtual_host_style" not in options
+        else:
+            assert options["enable_virtual_host_style"] == expected_virtual
+
+    def test_s3_leaves_region_discovery_to_opendal_when_configured_as_auto(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[dict[str, str]] = []
+        fake_opendal = ModuleType("opendal")
+        fake_opendal.Operator = (  # type: ignore[attr-defined]
+            lambda _kind, **options: calls.append(options) or object()
+        )
+        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+
+        storage_opendal._operator_for(
+            _spec(
+                TransportKind.S3,
+                options={
+                    "bucket": "models",
+                    "root": "library",
+                    "region": "auto",
+                    "endpoint_url": "",
+                    "addressing_style": "auto",
+                    "access_key": "access",
+                    "secret_key": "secret",
+                },
+            )
+        )
+
+        assert "region" not in calls[0]
+
+    def test_builds_a_google_drive_operator_from_oauth_secrets(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[tuple[str, dict[str, str]]] = []
+        fake_opendal = ModuleType("opendal")
+
+        def build(kind: str, **options: str) -> object:
+            calls.append((kind, options))
+            return object()
+
+        fake_opendal.Operator = build  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+
+        storage_opendal._operator_for(
+            _spec(
+                TransportKind.GDRIVE,
+                options={
+                    "root": "PrintStash",
+                    "client_id": "client",
+                    "client_secret": "secret",
+                    "refresh_token": "refresh",
+                },
+            )
+        )
+
+        assert calls == [
+            (
+                "gdrive",
+                {
+                    "root": "PrintStash",
+                    "client_id": "client",
+                    "client_secret": "secret",
+                    "refresh_token": "refresh",
+                },
+            )
+        ]
+
     def test_builds_a_key_based_sftp_operator(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

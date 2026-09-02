@@ -89,6 +89,11 @@ class TestPublishBytes:
             ("collection_image", "collection_image_key", (704, "image.png")),
             ("document_file", "document_file_key", (705, "manual.pdf")),
             ("document_image", "document_image_key", (706, "image.png")),
+            (
+                "multipart_model_cover",
+                "multipart_model_cover_key",
+                (707, "cover.webp"),
+            ),
         ],
     )
     def test_publishes_every_managed_key_kind_through_the_ledger(
@@ -303,6 +308,31 @@ class TestPublishFile:
 
         assert not source.exists()
         assert backend.read_bytes(key) == b"staged"
+
+    def test_can_bind_a_staged_file_to_a_purpose_scoped_provider(
+        self, db_session: Session, tmp_path
+    ) -> None:
+        backend = get_backend()
+        source = tmp_path / "backup.tar.gz"
+        source.write_bytes(b"backup")
+        key = backend.thumbnail_key(925)
+        scoped_ref = "a" * 64
+
+        receipt = publish_file(
+            db_session,
+            backend,
+            key,
+            source,
+            object_kind="backup",
+            provider_ref=scoped_ref,
+        )
+        db_session.commit()
+
+        row = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        assert receipt.provider_ref == scoped_ref
+        assert row.provider_ref == scoped_ref
 
     def test_leaves_a_pending_intent_when_staged_file_publication_fails(
         self, db_session: Session, tmp_path

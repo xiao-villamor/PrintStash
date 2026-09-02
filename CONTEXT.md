@@ -23,9 +23,9 @@ _Avoid_: upload, attachment
 An independent library grouping that describes one object made from several
 printable Models. It references Models without moving or owning them and has
 its own description, collection, cover, guides and tags. A cover may be a
-custom external image URL; otherwise the UI falls back to a member Model
-thumbnail. Its tags do not propagate to member Models, and member tags do not
-propagate to the grouping.
+private image uploaded to managed storage or a custom external image URL;
+otherwise the UI falls back to a member Model thumbnail. Its tags do not
+propagate to member Models, and member tags do not propagate to the grouping.
 _Avoid_: assembly Model, merged Model, collection
 
 **Multipart Part**:

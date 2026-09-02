@@ -73,6 +73,7 @@ function aMultipartSet(override: Partial<MultipartModelListItem> = {}): Multipar
     guide_count: 0,
     cover_model_id: 1,
     cover_image_url: null,
+    cover_image_uploaded: false,
     cover_thumbnail_url: null,
     starred: false,
     member_model_ids: [1],

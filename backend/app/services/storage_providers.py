@@ -16,6 +16,7 @@ class ProviderCategory(str, Enum):
     S3_COMPATIBLE = "s3_compatible"
     WEBDAV = "nextcloud_webdav"
     SFTP = "nas_sftp"
+    CONSUMER_CLOUD = "consumer_cloud"
 
 
 class TransportKind(str, Enum):
@@ -23,6 +24,7 @@ class TransportKind(str, Enum):
     S3 = "s3"
     WEBDAV = "webdav"
     SFTP = "sftp"
+    GDRIVE = "gdrive"
 
 
 class StorageFieldDescriptor(BaseModel):
@@ -119,15 +121,27 @@ class SFTPProviderConfig(_ProviderConfig):
         return self
 
 
+class GoogleDriveProviderConfig(_ProviderConfig):
+    provider: Literal["gdrive"]
+    client_id: str = Field(min_length=1)
+    client_secret: str = Field(min_length=1, json_schema_extra={"secret": True})
+    refresh_token: str = Field(min_length=1, json_schema_extra={"secret": True})
+
+
 _PROVIDER_CONFIG_MODELS = (
     LocalProviderConfig,
     S3ProviderConfig,
     WebDAVProviderConfig,
     SFTPProviderConfig,
+    GoogleDriveProviderConfig,
 )
 
 StorageProviderConfig = Annotated[
-    LocalProviderConfig | S3ProviderConfig | WebDAVProviderConfig | SFTPProviderConfig,
+    LocalProviderConfig
+    | S3ProviderConfig
+    | WebDAVProviderConfig
+    | SFTPProviderConfig
+    | GoogleDriveProviderConfig,
     Field(discriminator="provider"),
 ]
 _CONFIG_ADAPTER = TypeAdapter(StorageProviderConfig)
@@ -290,6 +304,18 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
                 "username": config.username,
                 "password": config.password,
                 "root": root,
+            },
+        )
+    if isinstance(config, GoogleDriveProviderConfig):
+        return TransportSpec(
+            kind=TransportKind.GDRIVE,
+            provider=config.provider,
+            namespace=f"gdrive/{root}",
+            options={
+                "root": root,
+                "client_id": config.client_id,
+                "client_secret": config.client_secret,
+                "refresh_token": config.refresh_token,
             },
         )
     options: dict[str, str | int | bool] = {
@@ -541,6 +567,57 @@ def provider_catalogue() -> list[StorageProvider]:
             ],
         )
     )
+    entries.append(
+        StorageProvider(
+            id="gdrive",
+            label="Google Drive",
+            category=ProviderCategory.CONSUMER_CLOUD,
+            description="Consumer cloud storage through Apache OpenDAL.",
+            expected_tier="unguarded",
+            expected_tier_note=(
+                "Available for read-only Library sources and off-site backup replicas; "
+                "not selectable as managed Vault storage."
+            ),
+            consequences=[
+                "Remote backup retention is manual because conditional delete is unavailable.",
+                "Google Drive replicas do not authorize automatic Vault garbage collection.",
+            ],
+            documentation_url="/docs/storage-providers.md#gdrive",
+            available=remote_available,
+            selectable=False,
+            support_level="beta",
+            disabled_reason=(
+                "Use a Library or backup connection"
+                if remote_available
+                else remote_reason
+            ),
+            fields=[
+                _field(
+                    "client_id", "OAuth client ID", "Google OAuth application client ID"
+                ),
+                _field(
+                    "client_secret",
+                    "OAuth client secret",
+                    "Google OAuth application client secret",
+                    input_type="password",
+                    secret=True,
+                ),
+                _field(
+                    "refresh_token",
+                    "Refresh token",
+                    "Offline-access refresh token for the selected Google account",
+                    input_type="password",
+                    secret=True,
+                ),
+                _field(
+                    "root",
+                    "Folder",
+                    "Dedicated Google Drive folder",
+                    default="PrintStash",
+                ),
+            ],
+        )
+    )
     return entries
 
 
@@ -551,6 +628,7 @@ def render_storage_provider_docs() -> str:
         ProviderCategory.S3_COMPATIBLE: "S3-compatible object storage",
         ProviderCategory.WEBDAV: "Nextcloud and WebDAV",
         ProviderCategory.SFTP: "NAS over SFTP",
+        ProviderCategory.CONSUMER_CLOUD: "Consumer cloud storage",
     }
     lines = [
         "# Storage providers",

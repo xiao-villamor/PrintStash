@@ -122,6 +122,10 @@ test.describe("documents", () => {
 
   test("upload a PDF and render it in the pdf.js viewer", async ({ page }) => {
     const col = `e2e-pdf-${Date.now()}`;
+    const workerRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("pdf.worker")) workerRequests.push(request.url());
+    });
     await makeCollection(page, col);
     await openDocsTab(page, col);
 
@@ -133,6 +137,8 @@ test.describe("documents", () => {
     await expect(page).toHaveURL(/\/documents\/\d+$/);
     // Worker + render can take a moment; assert the page counter resolves.
     await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
+    expect(workerRequests).toHaveLength(1);
+    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-v2");
     await expect(page.getByTitle("Zoom in")).toBeVisible();
     await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 

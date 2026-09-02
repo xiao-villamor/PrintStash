@@ -26,6 +26,13 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   verified independent backup, explicit approval, quarantine, and final
   revalidation; scheduled maintenance can never approve a deletion plan.
 
+- **OpenDAL Library sources and remote backup replicas.** S3 Library sources
+  now use the shared OpenDAL adapter, Google Drive joins S3 and WebDAV as a beta
+  read-only source, and purpose-scoped backup connections can replicate every
+  locally committed archive to S3, WebDAV, SFTP, or Google Drive. Remote restore
+  verifies provider identity and SHA-256; providers without immutable delete
+  identity are excluded from automatic retention and Vault-GC evidence.
+
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.
   Both are Guarded: permanent deletion requires confirmation and scheduled
@@ -89,10 +96,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   Multipart sets only and Parts only make every reusable Model accessible without a
   second navigation mode. Search always reveals matching member Models, and
   multipart cards use the same square visual language, tag actions and per-user
-  favorites as ordinary Models. Set-owned covers may use an external HTTP(S)
-  image without depending on a member preview. Set details retain their read-only
-  overview, an empty-state Add part action and an explicit editor for metadata,
-  tags, cover, ordered pieces, variants and guides.
+  favorites as ordinary Models. Set-owned covers may be uploaded privately from
+  the user's computer or use an external HTTP(S) image without depending on a
+  member preview. Set details retain their read-only overview, an empty-state Add
+  part action and an explicit editor for metadata, tags, cover, ordered pieces,
+  variants and guides.
 - **Model tags are now discoverable from the library.** Editable model cards
   and detail headers expose a direct Add/Edit tags action, where users can find
   existing tags or create and assign a new one without entering full model edit.
@@ -153,6 +161,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- PDF guides recover from browsers that cached the pdf.js worker before its
+  production MIME type was corrected; module-worker responses now revalidate
+  instead of preserving stale headers for a year.
 - Backup restore confirmations now keep long source identities, namespaces,
   and checksums contained within the dialog at desktop and mobile widths.
 - Saved light and dark theme preferences now survive a page refresh under the

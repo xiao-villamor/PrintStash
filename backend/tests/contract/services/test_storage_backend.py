@@ -499,6 +499,10 @@ class TestKeyDerivation:
                 lambda b: b.document_image_key(4, "fig.webp"),
                 "document-images/4/fig.webp",
             ),
+            (
+                lambda b: b.multipart_model_cover_key(5, "cover.webp"),
+                "multipart-covers/5/cover.webp",
+            ),
         ],
     )
     def test_puts_every_object_kind_in_its_own_namespace(

@@ -18,9 +18,11 @@ still publishes. A recovery that left the slot unusable would be safe and useles
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
@@ -28,7 +30,7 @@ from app.core.time import utcnow
 from app.db.models import CaptureUploadSlot, CaptureUploadSlotState, StagingLease
 from app.schemas.inbox import CaptureUploadSlotsCreate
 from app.services import inbox, staging_leases
-from tests.factories import build_user
+from tests.factories import build_background_job, build_user
 
 
 def _payload(data: bytes) -> CaptureUploadSlotsCreate:
@@ -146,3 +148,190 @@ class TestUploadCaptureSlot:
 
         assert uploaded.state == CaptureUploadSlotState.UPLOADED
         assert not staging_leases.capture_slot_staging_path(slot.id).exists()
+
+
+class TestCaptureStagingLeaseEdges:
+    def test_stream_staging_preserves_declared_bytes(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        owner = build_user(db_session, "staging-stream", superuser=True)
+        data = b"streamed payload"
+        _, slots = inbox.create_capture_upload_slots(db_session, owner, _payload(data))
+        slot = slots[0]
+        path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+
+        staged, size, digest = staging_leases.stage_capture_slot_stream(
+            db_session,
+            slot_id=slot.id,
+            stream=BytesIO(data),
+            max_bytes=len(data),
+        )
+
+        assert staged == path
+        assert size == len(data)
+        assert digest == hashlib.sha256(data).hexdigest()
+        assert path.read_bytes() == data
+
+    def test_stream_staging_rejects_an_oversized_payload(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        owner = build_user(db_session, "staging-too-large", superuser=True)
+        data = b"too large"
+        _, slots = inbox.create_capture_upload_slots(db_session, owner, _payload(data))
+        slot = slots[0]
+        staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+
+        from printstash_core.files import UploadTooLarge
+
+        with pytest.raises(UploadTooLarge, match="upload_too_large"):
+            staging_leases.stage_capture_slot_stream(
+                db_session,
+                slot_id=slot.id,
+                stream=BytesIO(data),
+                max_bytes=len(data) - 1,
+            )
+
+        assert staging_leases.capture_slot_staging_path(slot.id).exists()
+
+    def test_prepare_rejects_a_lease_with_an_invalid_path(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        owner = build_user(db_session, "staging-invalid-path", superuser=True)
+        _, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _payload(b"payload")
+        )
+        lease = db_session.exec(
+            select(StagingLease).where(
+                StagingLease.capture_upload_slot_id == slots[0].id
+            )
+        ).one()
+        lease.path = str(tmp_path / "unexpected.upload")
+        db_session.add(lease)
+        db_session.commit()
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError,
+            match="capture_upload_staging_path_invalid",
+        ):
+            staging_leases.prepare_capture_slot_staging(db_session, slot_id=slots[0].id)
+
+    def test_open_staging_rejects_a_path_mismatch(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        owner = build_user(db_session, "staging-open-mismatch", superuser=True)
+        _, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _payload(b"payload")
+        )
+        slot = slots[0]
+        staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot.id)
+        lease = db_session.exec(
+            select(StagingLease).where(StagingLease.capture_upload_slot_id == slot.id)
+        ).one()
+        lease.path = str(tmp_path / "not-the-slot.upload")
+        db_session.add(lease)
+        db_session.commit()
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError,
+            match="capture_upload_staging_collision",
+        ):
+            with staging_leases.open_capture_slot_staging(db_session, slot_id=slot.id):
+                pass
+
+    def test_review_creation_rejects_a_missing_inbox_item(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "missing-inbox.stl"
+        path.write_bytes(b"payload")
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError, match="inbox item does not exist"
+        ):
+            staging_leases.create_review_lease(
+                db_session,
+                inbox_item_id=999_999,
+                owner_user_id=None,
+                path=path,
+                size_bytes=path.stat().st_size,
+                sha256="a" * 64,
+            )
+
+    def test_review_creation_rejects_a_non_regular_path(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path / "staging")
+        owner = build_user(db_session, "staging-review-directory", superuser=True)
+        row, _slots = inbox.create_capture_upload_slots(
+            db_session, owner, _payload(b"payload")
+        )
+        directory = tmp_path / "not-a-file"
+        directory.mkdir()
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError,
+            match="staged path identity does not match receipt",
+        ):
+            staging_leases.create_review_lease(
+                db_session,
+                inbox_item_id=row.id,
+                owner_user_id=owner.id,
+                path=directory,
+                size_bytes=0,
+                sha256="b" * 64,
+            )
+
+    def test_review_lease_renews_until_the_review_deadline(
+        self, db_session: Session, tmp_path: Path
+    ) -> None:
+        owner = build_user(db_session, "staging-renew-review", superuser=True)
+        row, _slots = inbox.create_capture_upload_slots(
+            db_session, owner, _payload(b"payload")
+        )
+        path = tmp_path / "review.stl"
+        path.write_bytes(b"payload")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=row.id,
+            owner_user_id=owner.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256="c" * 64,
+        )
+        now = datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+        renewed = staging_leases.renew_review_lease(
+            db_session, inbox_item_id=row.id, now=now
+        )
+
+        assert renewed.id == lease.id
+        assert renewed.expires_at == now + timedelta(
+            days=inbox.settings.staging_review_lease_days
+        )
+
+    def test_job_lease_renews_for_every_capture_slot(
+        self, db_session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        owner = build_user(db_session, "staging-renew-job", superuser=True)
+        row, slots = inbox.create_capture_upload_slots(
+            db_session, owner, _payload(b"payload")
+        )
+        job = build_background_job(db_session, owner=owner)
+        staging_leases.transfer_capture_slots_to_job(
+            db_session, inbox_item_id=row.id, job_id=job.id
+        )
+        now = datetime(2026, 1, 3, tzinfo=timezone.utc)
+
+        renewed = staging_leases.renew_job_lease(db_session, job_id=job.id, now=now)
+
+        assert renewed.background_job_id == job.id
+        assert renewed.expires_at == now + timedelta(
+            hours=inbox.settings.staging_import_lease_hours
+        )
+        assert db_session.exec(
+            select(StagingLease).where(StagingLease.background_job_id == job.id)
+        ).all()

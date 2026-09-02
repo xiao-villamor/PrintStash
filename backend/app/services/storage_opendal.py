@@ -1,4 +1,4 @@
-"""Optional blocking WebDAV/SFTP storage adapter."""
+"""Blocking remote-storage adapter for the supported OpenDAL transports."""
 
 from __future__ import annotations
 
@@ -62,7 +62,12 @@ class OpenDALStorageBackend(StorageBackend):
     backend_name = "opendal"
 
     def __init__(self, spec: TransportSpec, *, operator=None) -> None:
-        if spec.kind not in {TransportKind.WEBDAV, TransportKind.SFTP}:
+        if spec.kind not in {
+            TransportKind.S3,
+            TransportKind.WEBDAV,
+            TransportKind.SFTP,
+            TransportKind.GDRIVE,
+        }:
             raise StorageConfigurationError("unsupported remote transport")
         self._spec = spec
         self.backend_name = spec.provider
@@ -220,6 +225,9 @@ class OpenDALStorageBackend(StorageBackend):
     def document_image_key(self, document_id: int, name: str) -> str:
         return self._key(f"document-images/{document_id}/{name}")
 
+    def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
+        return self._key(f"multipart-covers/{multipart_model_id}/{name}")
+
     def exists(self, key: str) -> bool:
         return bool(self._operator.exists(self._relative(key)))
 
@@ -290,6 +298,17 @@ class OpenDALStorageBackend(StorageBackend):
                 if not hasattr(self._operator, "write_exclusive"):
                     raise StorageConfigurationError("sftp_exclusive_create_unavailable")
                 self._operator.write_exclusive(destination, src)
+            elif self._spec.kind in {TransportKind.S3, TransportKind.GDRIVE}:
+                capabilities = self._operator.capability()
+                create_only = bool(
+                    getattr(capabilities, "write_with_if_not_exists", False)
+                )
+                if not create_only and self._operator.exists(destination):
+                    raise StorageCollisionError(key)
+                options = {"if_not_exists": True} if create_only else {}
+                with self._operator.open(destination, "wb", **options) as writer:
+                    while chunk := src.read(1024 * 1024):
+                        writer.write(chunk)
             else:
                 raise StorageConfigurationError("webdav_protocol_endpoint_required")
         except Exception as exc:
@@ -304,6 +323,7 @@ class OpenDALStorageBackend(StorageBackend):
             backend=self.backend_name,
             namespace=self._namespace,
             etag=getattr(metadata, "etag", None),
+            version_id=getattr(metadata, "version", None),
         )
 
     def move(self, src_key: str, dest_key: str) -> None:
@@ -333,11 +353,29 @@ class OpenDALStorageBackend(StorageBackend):
             return None
         metadata = self._operator.stat(relative)
         return StorageObjectInfo(
-            size=int(metadata.content_length), etag=getattr(metadata, "etag", None)
+            size=int(metadata.content_length),
+            etag=getattr(metadata, "etag", None),
+            version_id=getattr(metadata, "version", None),
         )
 
     def read_bytes(self, key: str) -> bytes:
         return bytes(self._operator.read(self._relative(key)))
+
+    @property
+    def operator_capabilities(self):
+        """Expose OpenDAL's measured operation surface to role-specific adapters."""
+        return self._operator.capability()
+
+    def check(self) -> None:
+        self._operator.check()
+
+    def open_reader(self, key: str):
+        return self._operator.open(self._relative(key), "rb")
+
+    def delete_versioned(self, key: str, version_id: str) -> None:
+        if not getattr(self.operator_capabilities, "delete_with_version", False):
+            raise StorageConfigurationError("conditional_delete_unavailable")
+        self._operator.delete(self._relative(key), version=version_id)
 
     def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         if hasattr(self._operator, "stream_chunks"):
@@ -625,6 +663,31 @@ class OpenDALStorageBackend(StorageBackend):
 
 def _operator_for(spec: TransportSpec):
     options = spec.options
+    if spec.kind is TransportKind.S3:
+        try:
+            import opendal
+        except ImportError as exc:
+            raise StorageConfigurationError("Requires the full image") from exc
+        kwargs = {
+            "bucket": str(options["bucket"]),
+            "root": str(options["root"]),
+            "access_key_id": str(options["access_key"]),
+            "secret_access_key": str(options["secret_key"]),
+            "disable_config_load": "true",
+            "disable_ec2_metadata": "true",
+        }
+        addressing_style = str(options.get("addressing_style") or "auto")
+        if addressing_style != "auto":
+            kwargs["enable_virtual_host_style"] = str(
+                addressing_style == "virtual"
+            ).lower()
+        endpoint = str(options.get("endpoint_url") or "")
+        if endpoint:
+            kwargs["endpoint"] = endpoint
+        region = str(options.get("region") or "")
+        if region and region != "auto":
+            kwargs["region"] = region
+        return opendal.Operator("s3", **kwargs)
     if spec.kind is TransportKind.WEBDAV:
         try:
             import opendal
@@ -636,6 +699,18 @@ def _operator_for(spec: TransportSpec):
             root=str(options["root"]),
             username=str(options["username"]),
             password=str(options["password"]),
+        )
+    if spec.kind is TransportKind.GDRIVE:
+        try:
+            import opendal
+        except ImportError as exc:
+            raise StorageConfigurationError("Requires the full image") from exc
+        return opendal.Operator(
+            "gdrive",
+            root=str(options["root"]),
+            client_id=str(options["client_id"]),
+            client_secret=str(options["client_secret"]),
+            refresh_token=str(options["refresh_token"]),
         )
     if spec.kind is TransportKind.SFTP:
         # The OpenDAL SFTP service only accepts a strategy (and uses the

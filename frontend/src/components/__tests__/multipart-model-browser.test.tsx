@@ -26,6 +26,7 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     guide_count: 0,
     cover_model_id: null,
     cover_image_url: null,
+    cover_image_uploaded: false,
     cover_thumbnail_url: null,
     starred: false,
     member_model_ids: [],
@@ -85,6 +86,7 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     guide_count: 0,
     cover_model_id: null,
     cover_image_url: null,
+    cover_image_uploaded: false,
     cover_thumbnail_url: null,
     starred: false,
     member_model_ids: [],
@@ -569,7 +571,7 @@ describe("MultipartModelDetailPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByText("No guides yet");
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]');
+    const input = document.querySelector<HTMLInputElement>('input[type="file"][accept^=".pdf"]');
     expect(input).not.toBeNull();
     await user.upload(input!, new File(["pdf"], "assembly.pdf", { type: "application/pdf" }));
 
@@ -800,12 +802,48 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
-    await user.type(screen.getByRole("textbox", { name: "Custom cover image URL" }), coverImageUrl);
+    await user.type(screen.getByRole("textbox", { name: "Or use an image URL" }), coverImageUrl);
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
     expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_image_url).toBe(coverImageUrl);
     expect(screen.getByText("Set cover")).toBeVisible();
+  });
+
+  it("uploads a cover image from the computer without requiring a URL", async () => {
+    const user = userEvent.setup();
+    const detail = aMultipart();
+    const uploaded = {
+      ...detail,
+      cover_image_uploaded: true,
+      cover_thumbnail_url: "/api/v1/multipart-models/7/cover/content?v=cover.webp",
+    };
+    const { container, requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7/cover": json(uploaded),
+        "GET /api/v1/multipart-models/7/cover/content": new Response("cover", {
+          headers: { "content-type": "image/webp" },
+        }),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    const input = container.querySelector<HTMLInputElement>(
+      'input[type="file"][accept="image/png,image/jpeg,image/webp"]',
+    );
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File(["cover"], "figure.png", { type: "image/png" }));
+
+    await waitFor(() => {
+      expect(requestsWithMethod("PUT").some((request) => request.url.endsWith("/cover"))).toBe(
+        true,
+      );
+    });
+    expect(await screen.findByText("Uploaded from your computer")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Remove uploaded cover" })).toBeVisible();
   });
 
   it("allows cancelling the delete confirmation", async () => {

@@ -48,6 +48,11 @@ from app.db.models import (
 )
 from app.db.session import get_engine, get_session_factory
 from app.services import audit
+from app.services.backup_destination import (
+    BackupDestinationError,
+    configured_destinations,
+    destination_for_ownership,
+)
 from app.services.jobs import registry
 from app.services.storage_backend import (
     CreationReceipt,
@@ -1035,6 +1040,36 @@ def create_backup() -> BackupMeta:
         except Exception:
             logger.warning("backup %s: S3 upload failed", backup_id, exc_info=True)
 
+    # Purpose-scoped connections are independent replicas. A failed remote
+    # destination never invalidates the already committed local archive, and a
+    # failure at one provider does not prevent the remaining replicas.
+    for destination in configured_destinations():
+        try:
+            remote_key = destination.key(archive_name)
+            with get_session_factory().session() as remote_session:
+                publish_file(
+                    remote_session,
+                    destination.backend,
+                    remote_key,
+                    archive_path,
+                    object_kind="backup",
+                    sha256=archive_sha256,
+                    provider_ref=destination.provider_ref,
+                )
+                remote_session.commit()
+            logger.info(
+                "backup %s replicated through OpenDAL provider %s",
+                backup_id,
+                destination.provider,
+            )
+        except Exception:
+            logger.warning(
+                "backup %s: OpenDAL replica %s failed",
+                backup_id,
+                destination.name,
+                exc_info=True,
+            )
+
     # The destination ledger rows were committed immediately after each
     # publication. Keep this audit transaction separate from ownership state.
     with get_session_factory().session() as session:
@@ -1208,8 +1243,48 @@ def reconcile_backup_publications(limit: int = 100) -> int:
                             else None
                         ),
                     )
+                elif row.backend.startswith("backup-opendal-"):
+                    destination = destination_for_ownership(row)
+                    if destination is None:
+                        row.last_error = "retryable:backup_target_changed"
+                        session.add(row)
+                        continue
+                    info = destination.backend.object_info(row.key)
+                    if (
+                        info is None
+                        or row.size_bytes is None
+                        or row.sha256 is None
+                        or info.size != row.size_bytes
+                    ):
+                        raise RuntimeError("backup_publication_evidence_mismatch")
+                    fd, raw_name = tempfile.mkstemp(
+                        prefix=".printstash-backup-reconcile-",
+                        dir=settings.backup_dir,
+                    )
+                    os.close(fd)
+                    candidate = Path(raw_name)
+                    candidate.unlink()
+                    try:
+                        destination.download_owned(
+                            replace(row, state=StorageObjectState.COMMITTED), candidate
+                        )
+                        _validate_created_archive_payload(candidate)
+                    finally:
+                        candidate.unlink(missing_ok=True)
+                    receipt = CreationReceipt(
+                        key=row.key,
+                        size=info.size,
+                        token=row.token or "",
+                        backend=row.backend,
+                        namespace=row.namespace,
+                        etag=info.etag,
+                        version_id=info.version_id,
+                        provider_ref=row.provider_ref,
+                    )
                 else:
-                    if row.backend == "backup-s3":
+                    if row.backend == "backup-s3" or row.backend.startswith(
+                        "backup-opendal-"
+                    ):
                         # A provider outage is not evidence that the
                         # publication is corrupt. Keep the reservation pending
                         # so a later reconciliation can prove this exact
@@ -1227,6 +1302,8 @@ def reconcile_backup_publications(limit: int = 100) -> int:
                     sha256=row.sha256,
                     provider_ref=(row.provider_ref or target.provider_ref)
                     if row.backend == "backup-s3"
+                    else row.provider_ref
+                    if row.backend.startswith("backup-opendal-")
                     else provider_ref_for_backend(
                         LocalStorageBackend(), namespace=row.namespace
                     ),
@@ -1554,6 +1631,55 @@ def _list_s3_backups() -> list[BackupMeta]:
     return results
 
 
+def _list_opendal_backups() -> list[BackupMeta]:
+    """List owned replicas for the currently configured OpenDAL destinations."""
+    results: list[BackupMeta] = []
+    for destination in configured_destinations():
+        try:
+            with get_session_factory().scoped_session() as session:
+                rows = session.exec(
+                    select(OwnedStorageObject).where(
+                        OwnedStorageObject.backend == destination.backend.backend_name,
+                        OwnedStorageObject.namespace == destination.namespace,
+                        OwnedStorageObject.provider_ref == destination.provider_ref,
+                        OwnedStorageObject.object_kind == "backup",
+                        OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                    )
+                ).all()
+                for row in rows:
+                    try:
+                        with destination.open_owned(row) as body:
+                            meta = _read_manifest_from_stream(body)
+                        if meta is None:
+                            continue
+                        archive_name = row.key.rsplit("/", 1)[-1]
+                        meta.id = _backup_id_from_archive_name(archive_name)
+                        meta.path = row.key
+                        meta.location = destination.location
+                        meta.size_bytes = int(row.size_bytes or 0)
+                        meta.archive_sha256 = row.sha256
+                        meta.provider_ref = row.provider_ref
+                        meta.namespace = row.namespace
+                        meta.source_ref = _source_ref(
+                            location=destination.location,
+                            namespace=row.namespace,
+                            path=row.key,
+                            provider_ref=row.provider_ref,
+                        )
+                        results.append(meta)
+                    except Exception:
+                        logger.warning(
+                            "backup: cannot read OpenDAL manifest for %s", row.key
+                        )
+        except Exception:
+            logger.warning(
+                "backup: failed to list OpenDAL destination %s",
+                destination.name,
+                exc_info=True,
+            )
+    return results
+
+
 def list_backups() -> list[BackupMeta]:
     """List all backups: local + S3, sorted by date descending."""
     reconcile_backup_publications()
@@ -1583,7 +1709,7 @@ def list_backup_sources(*, reconcile: bool = True) -> list[BackupMeta]:
     """
     if reconcile:
         reconcile_backup_publications()
-    sources = [*_list_local_backups(), *_list_s3_backups()]
+    sources = [*_list_local_backups(), *_list_s3_backups(), *_list_opendal_backups()]
     grouped: dict[str, list[BackupMeta]] = {}
     for item in sources:
         grouped.setdefault(item.id, []).append(item)
@@ -1605,7 +1731,9 @@ def _backup_precedence(meta: BackupMeta) -> tuple[int, str]:
         return (0, meta.path)
     if meta.path.startswith(_BACKUP_S3_PREFIX):
         return (1, meta.path)
-    return (2, meta.path)
+    if meta.location.startswith("opendal:"):
+        return (2, f"{meta.location}:{meta.path}")
+    return (3, meta.path)
 
 
 def _read_manifest(archive_path: Path) -> BackupMeta | None:
@@ -2131,6 +2259,27 @@ def _require_backup_archive_owned(
             assert row is not None
             return row
 
+        if meta.location.startswith("opendal:"):
+            candidates = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.namespace == meta.namespace,
+                    OwnedStorageObject.key == meta.path,
+                    OwnedStorageObject.provider_ref == meta.provider_ref,
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                )
+            ).all()
+            for candidate in candidates:
+                destination = destination_for_ownership(candidate)
+                if destination is None:
+                    continue
+                try:
+                    destination.require_owned(candidate)
+                except BackupDestinationError:
+                    continue
+                return candidate
+            raise BackupOwnershipError("backup_storage_ownership_unverified")
+
         target = target or _get_backup_s3_target()
         if target is None:
             raise BackupOwnershipError("backup_storage_ownership_unverified")
@@ -2466,7 +2615,19 @@ def verify_backup_ownership(ownership_id: int) -> BackupOwnershipVerification:
             error="backup_ownership_not_committed",
         )
 
-    location = "local" if row.backend == "local" else "s3"
+    if row.backend == "local":
+        location = "local"
+    elif row.backend.startswith("backup-opendal-"):
+        destination = destination_for_ownership(row)
+        if destination is None:
+            return BackupOwnershipVerification(
+                ownership_id=ownership_id,
+                status="identity",
+                error="backup_storage_ownership_unverified",
+            )
+        location = destination.location
+    else:
+        location = "s3"
     try:
         backup_id = _backup_id_from_archive_name(Path(row.key).name)
     except ValueError:
@@ -2496,7 +2657,7 @@ def verify_backup_ownership(ownership_id: int) -> BackupOwnershipVerification:
         archive = (
             Path(row.key) if location == "local" else _download_backup_to_local(meta)
         )
-        if location == "s3":
+        if location != "local":
             cache_path = archive
         result = verify_backup(
             backup_id,
@@ -2560,6 +2721,13 @@ def delete_backup(backup_id: str, *, source_ref: str | None = None) -> bool:
                     "backup_storage_ownership_unverified"
                 ) from exc
             deleted = delete_owned_key(session, local_backend, meta.path)
+        elif meta.location.startswith("opendal:"):
+            owned = _require_backup_archive_owned(meta)
+            destination = destination_for_ownership(owned)
+            if destination is None or not destination.delete_owned(owned):
+                raise BackupOwnershipError("backup_remote_delete_unverified")
+            session.delete(owned)
+            deleted = True
         else:
             target = _get_backup_s3_target()
             if target is None:
@@ -2617,6 +2785,59 @@ def _download_backup_to_local(meta: BackupMeta) -> Path:
     local_path = Path(meta.path) if meta.location == "local" else None
 
     if local_path and local_path.exists():
+        return local_path
+
+    if meta.location.startswith("opendal:"):
+        owned = _require_backup_archive_owned(meta)
+        destination = destination_for_ownership(owned)
+        if destination is None:
+            raise BackupOwnershipError("backup_storage_ownership_unverified")
+        archive_name = meta.path.rsplit("/", 1)[-1]
+        source_ref = meta.source_ref or _source_ref(
+            location=meta.location,
+            namespace=meta.namespace,
+            path=meta.path,
+            provider_ref=owned.provider_ref,
+        )
+        remote_identity = owned.version_id or owned.etag or owned.sha256
+        if not remote_identity:
+            raise BackupOwnershipError("backup_remote_identity_unavailable")
+        cache_identity = hashlib.sha256(
+            f"{source_ref}\x1f{remote_identity}".encode("utf-8")
+        ).hexdigest()
+        cache_dir = settings.backup_dir / ".cloud-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        local_path = cache_dir / f"{cache_identity}-{archive_name}"
+        if local_path.exists():
+            if not owned.sha256 or _sha256_path(local_path) != owned.sha256:
+                raise BackupOwnershipError("backup_local_destination_conflict")
+            cache_ownership = _cache_ownership_for_path(local_path)
+            if cache_ownership is None or cache_ownership.sha256 != owned.sha256:
+                raise BackupOwnershipError("backup_cache_ownership_unverified")
+            return local_path
+
+        fd, raw_temp = tempfile.mkstemp(
+            prefix=".printstash-backup-download-", dir=settings.backup_dir
+        )
+        os.close(fd)
+        download_temp = Path(raw_temp)
+        download_temp.unlink()
+        try:
+            destination.download_owned(owned, download_temp)
+            with get_session_factory().session() as publish_session:
+                publish_file(
+                    publish_session,
+                    LocalStorageBackend(),
+                    str(local_path),
+                    download_temp,
+                    object_kind="backup-cloud-cache",
+                    sha256=owned.sha256,
+                    move=True,
+                )
+                publish_session.commit()
+        except Exception:
+            download_temp.unlink(missing_ok=True)
+            raise
         return local_path
 
     if meta.location == "s3":

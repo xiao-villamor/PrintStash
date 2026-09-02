@@ -7,10 +7,12 @@ A library source can be:
 - an S3 or S3-compatible bucket prefix
 - a WebDAV collection, including Nextcloud
 - an SFTP directory with a pinned SSH host key
+- a Google Drive folder (beta)
 
 The source remains authoritative. PrintStash stores catalog rows, metadata and
-thumbnails, but never deletes source bytes. S3, WebDAV and SFTP sources are
-read-only. A mounted source can optionally accept create-only write-back.
+thumbnails, but never deletes source bytes. S3, WebDAV, SFTP and Google Drive
+sources are read-only. A mounted source can optionally accept create-only
+write-back.
 
 This is separate from the **Storage provider** setting. A Storage provider holds
 bytes PrintStash owns. A Library source indexes bytes you own elsewhere. The
@@ -22,9 +24,10 @@ authority are intentionally separate.
 | Method | Best fit | Discovery | Writes from PrintStash | Safety boundary |
 | --- | --- | --- | --- | --- |
 | Mounted folder | PrintStash runs on the NAS or a stable SMB/NFS mount is already available to Docker | Scheduled scan; local filesystems may also use events | Optional, create-only | Root identity marker and descriptor-pinned reads |
-| S3 | Object storage and NAS services with an S3-compatible API | Native continuation-token pages | Disabled | Stable object metadata around each read |
+| S3 | Object storage and NAS services with an S3-compatible API | OpenDAL continuation-token pages | Disabled | Stable object metadata around each read |
 | WebDAV | Nextcloud or another standards-compliant WebDAV server | Bounded one-directory pages with a durable traversal cursor | Disabled | Read-only adapter and before/after object checks |
 | SFTP | NAS or server with SSH File Transfer Protocol | Bounded one-directory pages with a durable traversal cursor | Disabled | Required pinned host key and read-only adapter |
+| Google Drive | A dedicated folder in a Google account | OpenDAL paged discovery | Disabled | Read-only adapter and before/after object checks; beta |
 
 Use a mounted folder when PrintStash and the files share a host or when the NAS
 mount is already monitored by the operator. Use a direct remote profile when a
@@ -33,7 +36,7 @@ host mount is undesirable or unavailable.
 ## Create A Remote Connection
 
 1. Open **Settings > Library sources** and enable the feature.
-2. Under **Remote source connections**, create an S3, WebDAV or SFTP
+2. Under **Remote source connections**, create an S3, WebDAV, SFTP or Google Drive
    connection. Credentials are encrypted in the database and never returned by the
    API after creation.
 3. Verify the connection. A failed verification does not create a source or change files.
@@ -49,6 +52,35 @@ bucket or changes its versioning or lifecycle policy.
 For Nextcloud, use the account's WebDAV endpoint and a dedicated app password.
 For SFTP, pin either the exact OpenSSH known-host entry or a mounted known-hosts
 file. A changed host key fails closed.
+
+For Google Drive, create an OAuth client and provide its client ID, client
+secret, and an offline refresh token for the account. Use a dedicated root
+folder. PrintStash stores both secrets encrypted and never returns them through
+the API. Google Drive support is beta because its OpenDAL service does not
+provide the immutable delete identity required for automatic retention.
+
+## How Users Read And Download Source Files
+
+After a scan, linked files appear beside managed Vault files in the normal
+library. Preview, download, public-share, and Open-in-slicer requests go through
+PrintStash's Artifact content boundary:
+
+- A mounted source is opened from the path visible inside the API container.
+- S3, WebDAV and Google Drive sources are read through the OpenDAL adapter in
+  the full API image.
+- SFTP uses the same connection and Library-source abstraction, but keeps its
+  hardened AsyncSSH transport so pinned host keys and exclusive creation remain
+  enforceable.
+
+PrintStash checks that the source object remains stable while it is being read,
+then streams the response to the browser or slicer. It does not copy the source
+file into managed Vault storage. Users may also access the original through the
+NAS share or remote service when the operator has granted them access there.
+
+Apache OpenDAL is an implementation detail for supported remote transports. It
+runs inside the full API image, not as another container, and it does not expose
+a separate user-facing endpoint. The lite API image cannot activate remote
+profiles.
 
 ## Network And Scan Budgets
 

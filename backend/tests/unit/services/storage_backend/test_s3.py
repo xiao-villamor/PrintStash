@@ -478,6 +478,10 @@ class TestS3CompatibilityCoverage:
             backend.document_image_key(6, "figure.webp")
             == "vault-data/document-images/6/figure.webp"
         )
+        assert (
+            backend.multipart_model_cover_key(7, "cover.webp")
+            == "vault-data/multipart-covers/7/cover.webp"
+        )
 
     def test_round_trips_objects(self, monkeypatch: pytest.MonkeyPatch) -> None:
         backend, client = _memory_s3_backend(monkeypatch)

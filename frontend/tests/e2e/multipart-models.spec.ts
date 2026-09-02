@@ -67,6 +67,7 @@ test.describe("multipart models", () => {
       guide_count: 0,
       cover_model_id: null,
       cover_image_url: null,
+      cover_image_uploaded: false,
       cover_thumbnail_url: null,
       starred: false,
       member_model_ids: [],

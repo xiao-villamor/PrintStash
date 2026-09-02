@@ -6,9 +6,20 @@ hidden child or copy its files/revisions.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Optional
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
+from fastapi import File as UploadFileParam
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, delete, select
 
@@ -36,8 +47,50 @@ from app.schemas.multipart_models import (
     MultipartPartsReplace,
 )
 from app.services import multipart_models, rbac, taxonomy
+from app.services.source_cover_processing import (
+    MAX_SOURCE_COVER_BYTES,
+    SourceCoverProcessingError,
+    process_source_cover_upload,
+)
+from app.services.storage_backend import CreationReceipt, get_backend
+from app.services.storage_deletion import (
+    enqueue_owned_key,
+    process_storage_delete_intents,
+)
+from app.services.storage_ownership import publish_bytes
 
 router = APIRouter(prefix="/multipart-models", tags=["multipart-models"])
+
+
+def _uploaded_cover_key(aggregate: MultipartModel) -> str | None:
+    if aggregate.id is None or aggregate.cover_filename is None:
+        return None
+    return get_backend().multipart_model_cover_key(
+        int(aggregate.id), aggregate.cover_filename
+    )
+
+
+def _enqueue_uploaded_cover_delete(
+    session: Session,
+    aggregate: MultipartModel,
+    *,
+    key: str | None = None,
+) -> bool:
+    key = key or _uploaded_cover_key(aggregate)
+    if key is None:
+        return False
+    enqueue_owned_key(
+        session,
+        get_backend(),
+        key,
+        required_proof=True,
+        resource_kind="multipart_model_cover",
+        resource_id=aggregate.id,
+    )
+    aggregate.cover_filename = None
+    aggregate.cover_content_type = None
+    aggregate.cover_size_bytes = None
+    return True
 
 
 def _collection_for_write(
@@ -177,6 +230,121 @@ def get_multipart_model(
     return multipart_models.read(session, current_user, aggregate)
 
 
+@router.get(
+    "/{multipart_model_id}/cover/content",
+    summary="Serve a multipart model's uploaded cover",
+)
+def get_multipart_model_cover(
+    multipart_model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    aggregate = multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.VIEW
+    )
+    key = _uploaded_cover_key(aggregate)
+    if key is None:
+        raise HTTPException(status_code=404, detail="multipart_cover_not_found")
+    backend = get_backend()
+    if not backend.exists(key):
+        raise HTTPException(status_code=410, detail="multipart_cover_blob_missing")
+    return Response(
+        content=backend.read_bytes(key),
+        media_type=aggregate.cover_content_type or "image/webp",
+        headers={
+            "Cache-Control": "private, no-cache",
+            "ETag": f'"multipart-cover-{aggregate.id}-{aggregate.cover_filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.put(
+    "/{multipart_model_id}/cover",
+    response_model=MultipartModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Upload a multipart model cover",
+)
+async def put_multipart_model_cover(
+    multipart_model_id: int,
+    file: UploadFile = UploadFileParam(...),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MultipartModelRead:
+    aggregate = multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.EDIT
+    )
+    data = await file.read(MAX_SOURCE_COVER_BYTES + 1)
+    try:
+        processed = process_source_cover_upload(data, file.content_type)
+    except SourceCoverProcessingError as exc:
+        raise HTTPException(status_code=422, detail="multipart_cover_invalid") from exc
+
+    old_cover_key = _uploaded_cover_key(aggregate)
+    # The ownership ledger reserves through an independent session. Release
+    # this read-only transaction first so SQLite never has two writers waiting
+    # on the same connection while the cover publication becomes durable.
+    session.commit()
+    digest = hashlib.sha256(processed.data).hexdigest()
+    filename = f"{digest[:16]}-{uuid4().hex}.webp"
+    backend = get_backend()
+    key = backend.multipart_model_cover_key(multipart_model_id, filename)
+    receipt: CreationReceipt | None = None
+    try:
+        receipt = publish_bytes(
+            session,
+            backend,
+            key,
+            processed.data,
+            object_kind="multipart_model_cover",
+            sha256=digest,
+        )
+        if old_cover_key is not None:
+            _enqueue_uploaded_cover_delete(session, aggregate, key=old_cover_key)
+        aggregate.cover_filename = filename
+        aggregate.cover_content_type = processed.content_type
+        aggregate.cover_size_bytes = len(processed.data)
+        aggregate.cover_image_url = None
+        aggregate.updated_by = current_user.id
+        aggregate.updated_at = utcnow()
+        session.add(aggregate)
+        session.commit()
+    except Exception:
+        session.rollback()
+        if receipt is not None:
+            backend.rollback_create(receipt)
+        raise
+    if old_cover_key is not None:
+        process_storage_delete_intents()
+    session.refresh(aggregate)
+    return multipart_models.read(session, current_user, aggregate)
+
+
+@router.delete(
+    "/{multipart_model_id}/cover",
+    response_model=MultipartModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Remove a multipart model's uploaded cover",
+)
+def delete_multipart_model_cover(
+    multipart_model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MultipartModelRead:
+    aggregate = multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.EDIT
+    )
+    if not _enqueue_uploaded_cover_delete(session, aggregate):
+        raise HTTPException(status_code=404, detail="multipart_cover_not_found")
+    aggregate.updated_by = current_user.id
+    aggregate.updated_at = utcnow()
+    session.add(aggregate)
+    session.commit()
+    process_storage_delete_intents()
+    session.refresh(aggregate)
+    return multipart_models.read(session, current_user, aggregate)
+
+
 @router.patch(
     "/{multipart_model_id}",
     response_model=MultipartModelRead,
@@ -201,7 +369,10 @@ def update_multipart_model(
             aggregate.name = name
     if "description" in payload.model_fields_set:
         aggregate.description = payload.description
+    removed_uploaded_cover = False
     if "cover_image_url" in payload.model_fields_set:
+        if payload.cover_image_url is not None and aggregate.cover_filename is not None:
+            removed_uploaded_cover = _enqueue_uploaded_cover_delete(session, aggregate)
         aggregate.cover_image_url = (
             str(payload.cover_image_url)
             if payload.cover_image_url is not None
@@ -218,7 +389,10 @@ def update_multipart_model(
             status_code=409, detail="multipart_model_slug_exists"
         ) from exc
     session.refresh(aggregate)
-    return multipart_models.read(session, current_user, aggregate)
+    result = multipart_models.read(session, current_user, aggregate)
+    if removed_uploaded_cover:
+        process_storage_delete_intents()
+    return result
 
 
 @router.put(
@@ -277,8 +451,11 @@ def save_multipart_model(
     collection_set = "collection_id" in payload.model_fields_set
     if collection_set:
         _collection_for_write(session, current_user, payload.collection_id)
+    removed_uploaded_cover = False
+    if payload.cover_image_url is not None and aggregate.cover_filename is not None:
+        removed_uploaded_cover = _enqueue_uploaded_cover_delete(session, aggregate)
     try:
-        return multipart_models.save(
+        result = multipart_models.save(
             session,
             current_user,
             aggregate,
@@ -298,6 +475,9 @@ def save_multipart_model(
             ),
             cover_image_set="cover_image_url" in payload.model_fields_set,
         )
+        if removed_uploaded_cover:
+            process_storage_delete_intents()
+        return result
     except multipart_models.MultipartModelError as exc:
         session.rollback()
         code = exc.code
@@ -396,5 +576,8 @@ def delete_multipart_model(
     aggregate = multipart_models.require(
         session, current_user, multipart_model_id, CollectionRole.EDIT
     )
+    removed_uploaded_cover = _enqueue_uploaded_cover_delete(session, aggregate)
     multipart_models.delete_aggregate(session, aggregate)
+    if removed_uploaded_cover:
+        process_storage_delete_intents()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

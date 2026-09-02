@@ -30,6 +30,8 @@ export interface MultipartModelListItem {
   cover_model_id: number | null;
   /** User-selected image URL, independent from every linked Model. */
   cover_image_url: string | null;
+  /** A private cover uploaded to PrintStash is available for this set. */
+  cover_image_uploaded: boolean;
   cover_thumbnail_url: string | null;
   /** Readable Models referenced by this set; used for organised library grouping. */
   member_model_ids: number[];

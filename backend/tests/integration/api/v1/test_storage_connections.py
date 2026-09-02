@@ -111,6 +111,15 @@ class TestStorageConnections:
                 {"password": "ssh-secret"},
                 ["password"],
             ),
+            (
+                "gdrive",
+                {"client_id": "google-client", "root": "PrintStash/models"},
+                {
+                    "client_secret": "google-secret",
+                    "refresh_token": "google-refresh",
+                },
+                ["client_secret", "refresh_token"],
+            ),
         ],
     )
     def test_creates_each_remote_profile_without_returning_secrets(
@@ -137,6 +146,7 @@ class TestStorageConnections:
 
         assert response.status_code == 201, response.text
         assert response.json()["secret_fields_set"] == secret_fields
+        assert response.json()["purpose"] == "library"
         assert next(iter(secrets.values())) not in response.text
 
     def test_list_is_sorted_without_exposing_secrets(
@@ -238,9 +248,12 @@ class TestStorageConnections:
             "configuration": {"bucket": "models"},
             "secrets": {"access_key": "access", "secret_key": "secret"},
         }
-        assert client.post(
-            "/api/v1/storage-connections", headers=_headers(admin), json=payload
-        ).status_code == 201
+        assert (
+            client.post(
+                "/api/v1/storage-connections", headers=_headers(admin), json=payload
+            ).status_code
+            == 201
+        )
 
         duplicate = client.post(
             "/api/v1/storage-connections", headers=_headers(admin), json=payload
@@ -296,6 +309,73 @@ class TestStorageConnections:
         assert failed.status_code == 409
         assert failed.json()["detail"] == "library_source_list_failed"
         assert missing.status_code == 404
+
+    def test_backup_connection_cannot_be_attached_as_a_library(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "backup-profile-admin", superuser=True)
+        enable_feature(db_session)
+        connection = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Off-site copies",
+                "kind": "s3",
+                "purpose": "backup",
+                "configuration": {"bucket": "backups", "root": "PrintStash"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        )
+        assert connection.status_code == 201, connection.text
+
+        library = client.post(
+            "/api/v1/libraries",
+            headers=_headers(admin),
+            json={
+                "name": "Wrong authority",
+                "source_kind": "s3",
+                "connection_id": connection.json()["id"],
+            },
+        )
+
+        assert library.status_code == 409
+        assert library.json()["detail"] == "storage_connection_incompatible"
+
+    def test_backup_connection_can_be_paused_without_forgetting_credentials(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "pause-backup-profile-admin", superuser=True)
+        created = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Paused copies",
+                "kind": "gdrive",
+                "purpose": "backup",
+                "configuration": {
+                    "client_id": "google-client",
+                    "root": "PrintStash/backups",
+                },
+                "secrets": {
+                    "client_secret": "google-secret",
+                    "refresh_token": "google-refresh",
+                },
+            },
+        ).json()
+
+        paused = client.patch(
+            f"/api/v1/storage-connections/{created['id']}",
+            headers=_headers(admin),
+            json={"enabled": False},
+        )
+
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["enabled"] is False
+        assert paused.json()["secret_fields_set"] == [
+            "client_secret",
+            "refresh_token",
+        ]
+        assert "google-secret" not in paused.text
 
     def test_delete_is_blocked_in_use_then_succeeds_when_detached(
         self, client: TestClient, db_session: Session

@@ -23,6 +23,7 @@ from app.db.models import (
     InboxItem,
     InboxItemState,
     Model,
+    MultipartModel,
     User,
     VaultAuditFinding,
     VaultAuditFindingState,
@@ -1577,6 +1578,33 @@ class TestAllOwnedBlobKeys:
 
 
 class TestOwnershipSnapshot:
+    def test_ownership_snapshot_includes_uploaded_multipart_cover(
+        self, db_session: Session
+    ) -> None:
+        multipart = MultipartModel(
+            name="Assembly",
+            slug="assembly",
+            cover_filename="cover.webp",
+            cover_content_type="image/webp",
+            cover_size_bytes=321,
+        )
+        db_session.add(multipart)
+        db_session.commit()
+        db_session.refresh(multipart)
+
+        result = ownership_snapshot(db_session, discover=False)
+
+        matching = [
+            blob
+            for blob in result.primary
+            if blob.resource_type == "multipart_model_cover"
+        ]
+        assert len(matching) == 1
+        assert matching[0].key == get_backend().multipart_model_cover_key(
+            multipart.id, "cover.webp"
+        )
+        assert matching[0].expected_size == 321
+
     def test_ownership_snapshot_skips_file_row_with_no_id(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
     ) -> None:

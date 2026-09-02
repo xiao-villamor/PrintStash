@@ -11,7 +11,12 @@ from types import SimpleNamespace
 import pytest
 from botocore.exceptions import ClientError
 
-from app.db.models import ExternalLibrary, LibrarySourceKind, StorageConnection
+from app.db.models import (
+    ExternalLibrary,
+    LibrarySourceKind,
+    StorageConnection,
+    StorageConnectionPurpose,
+)
 from app.services import library_source
 from app.services.library_source import (
     LibrarySourceError,
@@ -437,16 +442,21 @@ class TestConnectionResolution:
             library_source.source_from_connection(invalid)
 
         mounted = self._connection(LibrarySourceKind.MOUNTED, {}, {})
-        with pytest.raises(
-            LibrarySourceError, match="storage_connection_kind_invalid"
-        ):
+        with pytest.raises(LibrarySourceError, match="storage_connection_kind_invalid"):
             library_source.source_from_connection(mounted)
 
         malformed = self._connection(LibrarySourceKind.S3, {"bucket": ""}, {})
         with pytest.raises(LibrarySourceError, match="storage_connection_invalid"):
             library_source.source_from_connection(malformed)
 
-    @pytest.mark.parametrize("kind", [LibrarySourceKind.WEBDAV, LibrarySourceKind.SFTP])
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            LibrarySourceKind.WEBDAV,
+            LibrarySourceKind.SFTP,
+            LibrarySourceKind.GDRIVE,
+        ],
+    )
     def test_opendal_connections_resolve_supported_transports(
         self,
         kind: LibrarySourceKind,
@@ -454,6 +464,11 @@ class TestConnectionResolution:
     ) -> None:
         config = (
             {
+                "bucket": "models",
+                "root": "library",
+            }
+            if kind == LibrarySourceKind.S3
+            else {
                 "provider": "webdav",
                 "endpoint_url": "https://nas.example.test/dav",
                 "username": "reader",
@@ -461,13 +476,24 @@ class TestConnectionResolution:
             }
             if kind == LibrarySourceKind.WEBDAV
             else {
+                "client_id": "client-id",
+                "root": "models",
+            }
+            if kind == LibrarySourceKind.GDRIVE
+            else {
                 "host": "nas.example.test",
                 "username": "reader",
                 "host_key": "nas.example.test ssh-ed25519 AAAATEST",
                 "root": "models",
             }
         )
-        secrets = {"password": "secret"}
+        secrets = (
+            {"access_key": "access", "secret_key": "secret"}
+            if kind == LibrarySourceKind.S3
+            else {"client_secret": "secret", "refresh_token": "refresh"}
+            if kind == LibrarySourceKind.GDRIVE
+            else {"password": "secret"}
+        )
         captured: list[object] = []
         monkeypatch.setattr(
             library_source,
@@ -484,16 +510,16 @@ class TestConnectionResolution:
         assert source.max_bytes_per_second == 8 * 1024 * 1024
         assert len(captured) == 1
 
-    def test_s3_connection_applies_scan_bandwidth_limit(
+    def test_s3_connections_use_the_opendal_adapter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        created: list[tuple[object, object]] = []
+        captured: list[object] = []
+        monkeypatch.setattr(
+            library_source,
+            "OpenDALStorageBackend",
+            lambda spec: captured.append(spec) or SimpleNamespace(),
+        )
 
-        class FakeS3:
-            def __init__(self, options, *, max_bytes_per_second=None):
-                created.append((options, max_bytes_per_second))
-
-        monkeypatch.setattr(library_source, "S3LibrarySource", FakeS3)
         source = library_source.source_from_connection(
             self._connection(
                 LibrarySourceKind.S3,
@@ -503,8 +529,20 @@ class TestConnectionResolution:
             scan_limits=True,
         )
 
-        assert isinstance(source, FakeS3)
-        assert created[0][1] == 8 * 1024 * 1024
+        assert isinstance(source, OpenDalLibrarySource)
+        assert source.max_bytes_per_second == 8 * 1024 * 1024
+        assert len(captured) == 1
+
+    def test_backup_connection_is_not_accepted_as_a_library(self) -> None:
+        connection = self._connection(
+            LibrarySourceKind.S3,
+            {"bucket": "models", "root": "library"},
+            {"access_key": "access", "secret_key": "secret"},
+        )
+        connection.purpose = StorageConnectionPurpose.BACKUP
+
+        with pytest.raises(LibrarySourceError, match="storage_connection_not_library"):
+            library_source.source_from_connection(connection)
 
     def test_source_guards_precede_any_remote_read(self) -> None:
         mounted = ExternalLibrary(
@@ -562,14 +600,16 @@ class TestConnectionResolution:
         )
         marker = object()
         monkeypatch.setattr(
-            library_source, "get_session_factory", lambda: _SessionFactory({7: connection})
+            library_source,
+            "get_session_factory",
+            lambda: _SessionFactory({7: connection}),
         )
         monkeypatch.setattr(
             library_source,
             "source_from_connection",
-            lambda row, *, scan_limits=False: marker
-            if row is connection and scan_limits
-            else None,
+            lambda row, *, scan_limits=False: (
+                marker if row is connection and scan_limits else None
+            ),
         )
 
         assert library_source.source_for_library(library) is marker

@@ -226,6 +226,7 @@ function renderCard(
     routes: {
       "GET /api/v1/config": json(config),
       "GET /api/v1/storage/providers": json(PROVIDERS),
+      "GET /api/v1/storage-connections": json([]),
       "PUT /api/v1/config": json(config),
       ...routes,
     },

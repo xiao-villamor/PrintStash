@@ -860,6 +860,9 @@ class MultipartModel(SQLModel, table=True):
         ),
     )
     cover_image_url: Optional[str] = Field(default=None, max_length=2083)
+    cover_filename: Optional[str] = Field(default=None, max_length=255)
+    cover_content_type: Optional[str] = Field(default=None, max_length=64)
+    cover_size_bytes: Optional[int] = Field(default=None, ge=0)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
@@ -2027,16 +2030,33 @@ class LibrarySourceKind(str, Enum):
     S3 = "s3"
     WEBDAV = "webdav"
     SFTP = "sftp"
+    GDRIVE = "gdrive"
+
+
+class StorageConnectionPurpose(str, Enum):
+    """Authority granted to one reusable remote-storage connection."""
+
+    LIBRARY = "library"
+    BACKUP = "backup"
 
 
 class StorageConnection(SQLModel, table=True):
-    """Reusable encrypted credentials for a read-only remote library source."""
+    """Reusable encrypted credentials for one bounded remote-storage role."""
 
     __tablename__ = "storage_connections"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128, unique=True, index=True)
     kind: LibrarySourceKind = Field(index=True)
+    purpose: StorageConnectionPurpose = Field(
+        default=StorageConnectionPurpose.LIBRARY,
+        sa_column=Column(
+            SAEnum(StorageConnectionPurpose, native_enum=False, length=16),
+            nullable=False,
+            index=True,
+            server_default=StorageConnectionPurpose.LIBRARY.name,
+        ),
+    )
     config_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     secret_json: str = Field(
         default="{}", sa_column=Column(EncryptedText(), nullable=False)
@@ -2051,7 +2071,8 @@ class ExternalLibrary(SQLModel, table=True):
 
     The source is authoritative. PrintStash stores generated thumbnails and
     metadata, then reads originals through ArtifactContent. Mounted sources may
-    allow create-only write-back. S3, WebDAV, and SFTP sources are read-only.
+    allow create-only write-back. S3, WebDAV, SFTP, and Google Drive sources are
+    read-only.
     Trash and garbage collection never delete source bytes.
     """
 
