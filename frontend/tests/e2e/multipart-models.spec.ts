@@ -169,6 +169,14 @@ test.describe("multipart models", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/?v=multipart");
     await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
+    const setCardDimensions = await page
+      .getByRole("link", { name: /Desk organiser/ })
+      .evaluate((card) => {
+        const bounds = card.getBoundingClientRect();
+        return { height: bounds.height, width: bounds.width };
+      });
+    expect(Math.abs(setCardDimensions.width - setCardDimensions.height)).toBeLessThanOrEqual(1);
+    expect(setCardDimensions.width).toBeLessThanOrEqual(340);
     await page.getByRole("tab", { name: "Models", exact: true }).click();
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 

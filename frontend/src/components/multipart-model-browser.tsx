@@ -278,9 +278,12 @@ export function MultipartModelBrowser({
           </p>
         )}
         {isLoading ? (
-          <div className="space-y-3" aria-busy="true">
+          <div
+            className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"
+            aria-busy="true"
+          >
             {[1, 2, 3].map((item) => (
-              <Card key={item} className="h-32 animate-pulse bg-muted/40" />
+              <Card key={item} className="aspect-square animate-pulse bg-muted/40" />
             ))}
           </div>
         ) : items.length === 0 ? (
@@ -294,25 +297,27 @@ export function MultipartModelBrowser({
             }
           />
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
             {sortedItems.map((item) => (
               <Link
                 key={item.id}
                 href={`/multipart-models/${item.id}`}
-                className="group flex min-h-32 overflow-hidden rounded-lg border border-border bg-card text-card-foreground transition-[border-color,transform] duration-press hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="group flex aspect-square flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,transform] duration-press hover:-translate-y-0.5 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <div className="w-28 shrink-0 border-r border-border bg-muted/40 sm:w-40">
+                <div className="h-48 shrink-0 overflow-hidden border-b border-border bg-muted/40">
                   <Cover src={item.cover_thumbnail_url} alt="" />
                 </div>
-                <div className="flex min-w-0 flex-1 flex-col justify-center space-y-2 p-4">
+                <div className="flex min-h-0 flex-1 flex-col p-3">
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="min-w-0 break-words font-semibold">{item.name}</h3>
+                    <h3 className="line-clamp-2 min-w-0 text-sm font-bold uppercase tracking-tight">
+                      {item.name}
+                    </h3>
                     <ChevronRight
                       className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-press group-hover:translate-x-0.5"
                       aria-hidden
                     />
                   </div>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="mt-2 text-sm text-muted-foreground">
                     <Count
                       count={item.part_count}
                       one={t("multipart.part")}
@@ -333,7 +338,9 @@ export function MultipartModelBrowser({
                     )}
                   </p>
                   {item.collection && (
-                    <p className="truncate text-xs text-muted-foreground">{item.collection}</p>
+                    <p className="mt-auto truncate border-t border-border pt-2 text-xs text-muted-foreground">
+                      {item.collection}
+                    </p>
                   )}
                 </div>
               </Link>
