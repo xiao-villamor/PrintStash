@@ -42,6 +42,7 @@ from tests.factories.protocols import (
     MakeInboxItem,
     MakeModel,
     MakeMultipartModel,
+    MakeMultipartModelStar,
     MakeOwnedStorageObject,
     MakePrinter,
     MakePrinterFile,
@@ -136,6 +137,12 @@ def make_model(db_session: Session) -> MakeModel:
 def make_multipart_model(db_session: Session) -> MakeMultipartModel:
     """A standalone empty multipart grouping."""
     return _bound(factories.build_multipart_model, db_session)
+
+
+@pytest.fixture
+def make_multipart_model_star(db_session: Session) -> MakeMultipartModelStar:
+    """A user's favorite marker for a multipart set."""
+    return _bound(factories.build_multipart_model_star, db_session)
 
 
 @pytest.fixture
@@ -369,6 +376,7 @@ __all__ = [
     "MakeInboxItem",
     "MakeModel",
     "MakeMultipartModel",
+    "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
     "MakePrintJob",
     "MakePrinter",
@@ -401,6 +409,8 @@ __all__ = [
     "make_inbox_result",
     "make_metadata",
     "make_model",
+    "make_multipart_model",
+    "make_multipart_model_star",
     "make_notification_channel",
     "make_owned_storage_object",
     "make_print_job",

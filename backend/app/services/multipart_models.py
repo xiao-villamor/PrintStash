@@ -23,6 +23,7 @@ from app.db.models import (
     Model,
     MultipartModel,
     MultipartModelChoice,
+    MultipartModelStar,
     MultipartModelTagLink,
     MultipartPart,
     Tag,
@@ -222,8 +223,28 @@ def _parts(
     return result, len({choice.model_id for choice in choices})
 
 
+def _starred_ids(
+    session: Session, user: User, aggregate_ids: Iterable[int]
+) -> set[int]:
+    ids = list(aggregate_ids)
+    if not ids or user.id is None:
+        return set()
+    return set(
+        session.exec(
+            select(MultipartModelStar.multipart_model_id).where(
+                MultipartModelStar.user_id == user.id,
+                MultipartModelStar.multipart_model_id.in_(ids),  # type: ignore[union-attr]
+            )
+        ).all()
+    )
+
+
 def _list_item(
-    session: Session, user: User, aggregate: MultipartModel
+    session: Session,
+    user: User,
+    aggregate: MultipartModel,
+    *,
+    starred: bool,
 ) -> MultipartModelListItem:
     parts, model_count = _parts(session, user, int(aggregate.id))
     readable_members = [
@@ -253,13 +274,18 @@ def _list_item(
         model_count=model_count,
         guide_count=len(guides),
         cover_model_id=aggregate.cover_model_id,
+        cover_image_url=aggregate.cover_image_url,
         cover_thumbnail_url=(
-            selected_cover.thumbnail_url
-            if selected_cover is not None and selected_cover.thumbnail_url
-            else fallback_cover
+            aggregate.cover_image_url
+            or (
+                selected_cover.thumbnail_url
+                if selected_cover is not None and selected_cover.thumbnail_url
+                else fallback_cover
+            )
         ),
         member_model_ids=sorted({member.id for member in readable_members}),
         tags=_tag_names(session, int(aggregate.id)),
+        starred=starred,
         effective_role=rbac.effective_collection_role(
             session, user, aggregate.collection_id
         ),
@@ -268,7 +294,12 @@ def _list_item(
 
 
 def read(session: Session, user: User, aggregate: MultipartModel) -> MultipartModelRead:
-    item = _list_item(session, user, aggregate)
+    item = _list_item(
+        session,
+        user,
+        aggregate,
+        starred=int(aggregate.id) in _starred_ids(session, user, [int(aggregate.id)]),
+    )
     parts, _ = _parts(session, user, int(aggregate.id))
     return MultipartModelRead(
         **item.model_dump(),
@@ -301,6 +332,7 @@ def list_visible(
     direct: bool = False,
     query: str | None = None,
     tag_slugs: list[str] | None = None,
+    favorites: bool = False,
     limit: int = 100,
     offset: int = 0,
 ) -> list[MultipartModelListItem]:
@@ -330,12 +362,21 @@ def list_visible(
             .where(Tag.slug == tag_slug, live(Tag))
         )
         stmt = stmt.where(MultipartModel.id.in_(matching_ids))  # type: ignore[union-attr]
+    if favorites:
+        starred_ids = select(MultipartModelStar.multipart_model_id).where(
+            MultipartModelStar.user_id == user.id
+        )
+        stmt = stmt.where(MultipartModel.id.in_(starred_ids))  # type: ignore[union-attr]
     rows = session.exec(
         stmt.order_by(MultipartModel.updated_at.desc(), MultipartModel.id.desc())  # type: ignore[attr-defined]
         .offset(offset)
         .limit(limit)
     ).all()
-    return [_list_item(session, user, row) for row in rows]
+    row_ids = [int(row.id) for row in rows if row.id is not None]
+    starred = _starred_ids(session, user, row_ids)
+    return [
+        _list_item(session, user, row, starred=int(row.id) in starred) for row in rows
+    ]
 
 
 def _choice_inputs(part: MultipartPartWrite) -> list[MultipartChoiceWrite]:
@@ -528,6 +569,8 @@ def save(
     collection_set: bool = False,
     cover_model_id: int | None = None,
     cover_model_set: bool = False,
+    cover_image_url: str | None = None,
+    cover_image_set: bool = False,
 ) -> MultipartModelRead:
     """Validate and persist metadata plus composition in one transaction."""
     prepared = _prepare_parts(session, user, aggregate, requested)
@@ -539,6 +582,8 @@ def save(
         aggregate.description = description
     if collection_set:
         aggregate.collection_id = collection_id
+    if cover_image_set:
+        aggregate.cover_image_url = cover_image_url
     requested_model_ids = {
         model_id for _, choices in prepared[0] for model_id, _choice_id in choices
     }

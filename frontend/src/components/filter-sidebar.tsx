@@ -2,11 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
-import { CollectionRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
+import {
+  CollectionRead,
+  MultipartModelListItem,
+  OutlinerModelRead,
+  PrinterRead,
+  TagRead,
+} from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
 import { useI18n } from "@/lib/i18n";
-import { Box, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
+import { Box, Boxes, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
 import {
   DndContext,
   DragEndEvent,
@@ -98,11 +104,16 @@ function readAllModelsExpanded(): boolean {
 function autoExpandedPaths(
   collections: CollectionRead[],
   modelsByCollection: ReadonlyMap<string, OutlinerModelRead[]>,
+  multipartByCollection: ReadonlyMap<string, MultipartModelListItem[]>,
 ): Set<string> {
   const expanded = new Set<string>();
   const parentIds = new Set(collections.map((c) => c.parent_id).filter((id) => id != null));
   for (const collection of collections) {
-    if (parentIds.has(collection.id) || modelsByCollection.has(collection.path)) {
+    if (
+      parentIds.has(collection.id) ||
+      modelsByCollection.has(collection.path) ||
+      multipartByCollection.has(collection.path)
+    ) {
       expanded.add(collection.path);
     }
   }
@@ -168,6 +179,61 @@ function DraggableModelLeaf({
   );
 }
 
+function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
+  const router = useRouter();
+
+  return (
+    <Localized>
+      <div
+        onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
+        className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+        title={`${multipart.name} · Multipart set`}
+      >
+        <Boxes className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+        <span className="truncate">{multipart.name}</span>
+      </div>
+    </Localized>
+  );
+}
+
+type OutlinerLeaf =
+  | { kind: "model"; model: OutlinerModelRead }
+  | { kind: "multipart"; multipart: MultipartModelListItem };
+
+function mergeLeaves(
+  models: OutlinerModelRead[],
+  multipartModels: MultipartModelListItem[],
+): OutlinerLeaf[] {
+  return [
+    ...models.map((model) => ({ kind: "model" as const, model })),
+    ...multipartModels.map((multipart) => ({ kind: "multipart" as const, multipart })),
+  ].sort((a, b) => {
+    const aName = a.kind === "model" ? a.model.name : a.multipart.name;
+    const bName = b.kind === "model" ? b.model.name : b.multipart.name;
+    return aName.localeCompare(bName);
+  });
+}
+
+function OutlinerLeaves({
+  leaves,
+  dragging,
+}: {
+  leaves: OutlinerLeaf[];
+  dragging: DragPayload | null;
+}) {
+  return leaves.map((leaf) =>
+    leaf.kind === "model" ? (
+      <DraggableModelLeaf
+        key={`model-${leaf.model.id}`}
+        model={leaf.model}
+        isDraggingThisModel={dragging?.type === "model" && dragging.model.id === leaf.model.id}
+      />
+    ) : (
+      <MultipartLeaf key={`multipart-${leaf.multipart.id}`} multipart={leaf.multipart} />
+    ),
+  );
+}
+
 function countDescendants(node: CollectionNode): number {
   return node.children.reduce((acc, c) => acc + 1 + countDescendants(c), 0);
 }
@@ -179,8 +245,10 @@ function CollectionTreeRow({
   expanded,
   toggle,
   modelsByCollection,
+  multipartByCollection,
   visibleIds,
   visibleModelIds,
+  visibleMultipartIds,
   dragging,
   onDelete,
 }: {
@@ -190,8 +258,10 @@ function CollectionTreeRow({
   expanded: Set<string>;
   toggle: (path: string) => void;
   modelsByCollection: Map<string, OutlinerModelRead[]>;
+  multipartByCollection: Map<string, MultipartModelListItem[]>;
   visibleIds?: Set<number> | null;
   visibleModelIds?: Set<number> | null;
+  visibleMultipartIds?: Set<number> | null;
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
 }) {
@@ -248,12 +318,18 @@ function CollectionTreeRow({
   const modelLeaves = visibleModelIds
     ? allModelLeaves.filter((m) => visibleModelIds.has(m.id))
     : allModelLeaves;
+  const allMultipartLeaves = multipartByCollection.get(node.cat.path) ?? [];
+  const multipartLeaves = visibleMultipartIds
+    ? allMultipartLeaves.filter((multipart) => visibleMultipartIds.has(multipart.id))
+    : allMultipartLeaves;
   const isOpen = visibleIds
-    ? visibleChildren.length > 0 || modelLeaves.length > 0
+    ? visibleChildren.length > 0 || modelLeaves.length > 0 || multipartLeaves.length > 0
     : expanded.has(node.cat.path);
   const isSelected = selected === node.cat.path;
-  const hasNestedItems = visibleChildren.length > 0 || modelLeaves.length > 0;
+  const hasNestedItems =
+    visibleChildren.length > 0 || modelLeaves.length > 0 || multipartLeaves.length > 0;
   const displayChildren = visibleIds ? visibleChildren : node.children;
+  const leaves = mergeLeaves(modelLeaves, multipartLeaves);
 
   const descCount = countDescendants(node);
   const hasContent = descCount > 0 || node.cat.model_count > 0;
@@ -379,7 +455,7 @@ function CollectionTreeRow({
               </button>
             )}
             <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-              {node.cat.model_count}
+              {allModelLeaves.length + allMultipartLeaves.length}
             </span>
           </div>
         )}
@@ -394,19 +470,15 @@ function CollectionTreeRow({
                 expanded={expanded}
                 toggle={toggle}
                 modelsByCollection={modelsByCollection}
+                multipartByCollection={multipartByCollection}
                 visibleIds={visibleIds}
                 visibleModelIds={visibleModelIds}
+                visibleMultipartIds={visibleMultipartIds}
                 dragging={dragging}
                 onDelete={onDelete}
               />
             ))}
-            {modelLeaves.map((model) => (
-              <DraggableModelLeaf
-                key={model.id}
-                model={model}
-                isDraggingThisModel={dragging?.type === "model" && dragging.model.id === model.id}
-              />
-            ))}
+            <OutlinerLeaves leaves={leaves} dragging={dragging} />
           </div>
         )}
       </div>
@@ -420,16 +492,20 @@ function DroppableAllModels({
   isExpanded,
   onToggleExpand,
   rootModels,
+  rootMultipartModels,
   dragging,
   visibleModelIds,
+  visibleMultipartIds,
 }: {
   selected: boolean;
   onClick: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
   rootModels: OutlinerModelRead[];
+  rootMultipartModels: MultipartModelListItem[];
   dragging: DragPayload | null;
   visibleModelIds: Set<number> | null;
+  visibleMultipartIds: Set<number> | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: "collection-root",
@@ -439,6 +515,10 @@ function DroppableAllModels({
   const displayModels = visibleModelIds
     ? rootModels.filter((m) => visibleModelIds.has(m.id))
     : rootModels;
+  const displayMultipartModels = visibleMultipartIds
+    ? rootMultipartModels.filter((multipart) => visibleMultipartIds.has(multipart.id))
+    : rootMultipartModels;
+  const leaves = mergeLeaves(displayModels, displayMultipartModels);
 
   return (
     <Localized>
@@ -463,7 +543,7 @@ function DroppableAllModels({
                 : "text-foreground hover:bg-muted"
           }`}
         >
-          {rootModels.length > 0 ? (
+          {rootModels.length > 0 || rootMultipartModels.length > 0 ? (
             <button
               type="button"
               onClick={(e) => {
@@ -485,18 +565,12 @@ function DroppableAllModels({
           <FolderOpen className="h-4 w-4 mr-2 text-primary" />
           All Models
         </div>
-        {isExpanded && displayModels.length > 0 && (
+        {isExpanded && leaves.length > 0 && (
           <div className="ml-5 border-l border-border pl-4 min-w-0">
-            {displayModels.map((model) => (
-              <DraggableModelLeaf
-                key={model.id}
-                model={model}
-                isDraggingThisModel={dragging?.type === "model" && dragging.model.id === model.id}
-              />
-            ))}
-            {displayModels.length > 8 && (
+            <OutlinerLeaves leaves={leaves} dragging={dragging} />
+            {leaves.length > 8 && (
               <div className="px-2 py-1 text-3xs text-muted-foreground">
-                +{displayModels.length - 8} more
+                +{leaves.length - 8} more
               </div>
             )}
           </div>
@@ -509,6 +583,7 @@ function DroppableAllModels({
 export function FilterSidebarContent({
   collections,
   models = [],
+  multipartModels = [],
   tags,
   printers,
   selectedCollection,
@@ -540,14 +615,44 @@ export function FilterSidebarContent({
     selectedTags.length > 0 || selectedPrinterId !== null || selectedPrinterPresence !== null;
   const treeFiltered = !!outlinerQ || facetFilterActive;
 
+  const memberModelIds = useMemo(
+    () => new Set(multipartModels.flatMap((multipart) => multipart.member_model_ids)),
+    [multipartModels],
+  );
+  const treeModels = useMemo(() => {
+    if (libraryView === "multipart") return [];
+    if (libraryView === "components") {
+      return models.filter((model) => memberModelIds.has(model.id));
+    }
+    if (libraryView === "organized") {
+      return models.filter((model) => !memberModelIds.has(model.id));
+    }
+    return models;
+  }, [libraryView, memberModelIds, models]);
+  const treeMultipartModels = useMemo(
+    () => (libraryView === "components" ? [] : multipartModels),
+    [libraryView, multipartModels],
+  );
+
   const visibleModelIds = useMemo<Set<number> | null>(() => {
     if (!treeFiltered) return null;
     const result = new Set<number>();
-    for (const m of models) {
+    for (const m of treeModels) {
       if (!outlinerQ || m.name.toLowerCase().includes(outlinerQ)) result.add(m.id);
     }
     return result;
-  }, [models, outlinerQ, treeFiltered]);
+  }, [outlinerQ, treeFiltered, treeModels]);
+
+  const visibleMultipartIds = useMemo<Set<number> | null>(() => {
+    if (!treeFiltered) return null;
+    const result = new Set<number>();
+    for (const multipart of treeMultipartModels) {
+      if (!outlinerQ || multipart.name.toLowerCase().includes(outlinerQ)) {
+        result.add(multipart.id);
+      }
+    }
+    return result;
+  }, [outlinerQ, treeFiltered, treeMultipartModels]);
 
   const visibleCollectionIds = useMemo<Set<number> | null>(() => {
     if (!treeFiltered) return null;
@@ -568,13 +673,26 @@ export function FilterSidebarContent({
         if (c.name.toLowerCase().includes(outlinerQ)) addWithAncestors(c);
       }
     }
-    for (const m of models) {
+    for (const m of treeModels) {
       if (!m.collection || !visibleModelIds?.has(m.id)) continue;
       const col = collections.find((c) => c.path === m.collection);
       if (col) addWithAncestors(col);
     }
+    for (const multipart of treeMultipartModels) {
+      if (!multipart.collection || !visibleMultipartIds?.has(multipart.id)) continue;
+      const col = collections.find((c) => c.path === multipart.collection);
+      if (col) addWithAncestors(col);
+    }
     return result;
-  }, [collections, models, outlinerQ, treeFiltered, visibleModelIds]);
+  }, [
+    collections,
+    outlinerQ,
+    treeFiltered,
+    treeModels,
+    treeMultipartModels,
+    visibleModelIds,
+    visibleMultipartIds,
+  ]);
 
   const visibleRoots = visibleCollectionIds
     ? tree.filter((n) => visibleCollectionIds.has(n.cat.id))
@@ -582,7 +700,7 @@ export function FilterSidebarContent({
 
   const modelsByCollection = useMemo(() => {
     const grouped = new Map<string, OutlinerModelRead[]>();
-    for (const model of models) {
+    for (const model of treeModels) {
       if (!model.collection) continue;
       const current = grouped.get(model.collection) ?? [];
       current.push(model);
@@ -592,15 +710,38 @@ export function FilterSidebarContent({
       items.sort((a, b) => a.name.localeCompare(b.name));
     }
     return grouped;
-  }, [models]);
+  }, [treeModels]);
+
+  const multipartByCollection = useMemo(() => {
+    const grouped = new Map<string, MultipartModelListItem[]>();
+    for (const multipart of treeMultipartModels) {
+      if (!multipart.collection) continue;
+      const current = grouped.get(multipart.collection) ?? [];
+      current.push(multipart);
+      grouped.set(multipart.collection, current);
+    }
+    for (const items of grouped.values()) {
+      items.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return grouped;
+  }, [treeMultipartModels]);
 
   const rootModels = useMemo(
-    () => models.filter((m) => !m.collection).sort((a, b) => a.name.localeCompare(b.name)),
-    [models],
+    () => treeModels.filter((m) => !m.collection).sort((a, b) => a.name.localeCompare(b.name)),
+    [treeModels],
+  );
+  const rootMultipartModels = useMemo(
+    () =>
+      treeMultipartModels
+        .filter((multipart) => !multipart.collection)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [treeMultipartModels],
   );
 
   const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const initial = readExpandedPaths() ?? autoExpandedPaths(collections, modelsByCollection);
+    const initial =
+      readExpandedPaths() ??
+      autoExpandedPaths(collections, modelsByCollection, multipartByCollection);
     if (selectedCollection) {
       for (const ancestor of ancestorPaths(selectedCollection)) initial.add(ancestor);
     }
@@ -811,13 +952,16 @@ export function FilterSidebarContent({
                   isExpanded={allModelsExpanded}
                   onToggleExpand={() => setAllModelsExpanded((v) => !v)}
                   rootModels={rootModels}
+                  rootMultipartModels={rootMultipartModels}
                   dragging={dragging}
                   visibleModelIds={visibleModelIds}
+                  visibleMultipartIds={visibleMultipartIds}
                 />
                 <div className="ml-5 border-l border-border pl-4 min-w-0">
                   {visibleRoots.length === 0 &&
                   treeFiltered &&
-                  (visibleModelIds?.size ?? 0) === 0 ? (
+                  (visibleModelIds?.size ?? 0) === 0 &&
+                  (visibleMultipartIds?.size ?? 0) === 0 ? (
                     <p className="py-2 text-3xs text-muted-foreground font-mono">No results.</p>
                   ) : (
                     visibleRoots.map((node) => (
@@ -829,8 +973,10 @@ export function FilterSidebarContent({
                         expanded={expanded}
                         toggle={toggleExpanded}
                         modelsByCollection={modelsByCollection}
+                        multipartByCollection={multipartByCollection}
                         visibleIds={visibleCollectionIds}
                         visibleModelIds={visibleModelIds}
+                        visibleMultipartIds={visibleMultipartIds}
                         dragging={dragging}
                         onDelete={onDeleteCollection}
                       />
@@ -1044,6 +1190,7 @@ export function FilterSidebarContent({
 export interface FilterSidebarProps {
   collections: CollectionRead[];
   models?: OutlinerModelRead[];
+  multipartModels?: MultipartModelListItem[];
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;

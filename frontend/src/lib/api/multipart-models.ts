@@ -1,4 +1,12 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import {
+  authHeaders,
+  getJson,
+  getUrl,
+  handleResponse,
+  invalidateApiCache,
+  sendAction,
+  sendJson,
+} from "@/lib/api/request";
 import type {
   MultipartModelCandidate,
   MultipartModelCreate,
@@ -12,6 +20,7 @@ export interface ListMultipartModelsParams {
   direct?: boolean;
   q?: string;
   tag?: string[];
+  favorites?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -22,6 +31,7 @@ function multipartSearch(params?: ListMultipartModelsParams): string {
   if (params?.direct) search.set("direct", "true");
   if (params?.q) search.set("q", params.q);
   params?.tag?.forEach((tag) => search.append("tag", tag));
+  if (params?.favorites) search.set("favorites", "true");
   if (params?.limit != null) search.set("limit", String(params.limit));
   if (params?.offset != null) search.set("offset", String(params.offset));
   const query = search.toString();
@@ -58,6 +68,22 @@ export function deleteMultipartModel(id: number): Promise<void> {
 
 export function replaceMultipartModelTags(id: number, tags: string[]): Promise<MultipartModelRead> {
   return sendJson<MultipartModelRead>(`/api/v1/multipart-models/${id}/tags`, "PUT", { tags });
+}
+
+export interface MultipartModelStarRead {
+  multipart_model_id: number;
+  starred: boolean;
+}
+
+export function starMultipartModel(id: number): Promise<MultipartModelStarRead> {
+  return sendJson<MultipartModelStarRead>(`/api/v1/multipart-models/${id}/star`, "PUT", {});
+}
+
+export async function unstarMultipartModel(id: number): Promise<MultipartModelStarRead> {
+  const path = `/api/v1/multipart-models/${id}/star`;
+  const response = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
+  invalidateApiCache(path);
+  return handleResponse<MultipartModelStarRead>(response);
 }
 
 export function listMultipartModelCandidates(

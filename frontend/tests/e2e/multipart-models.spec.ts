@@ -52,6 +52,7 @@ test.describe("multipart models", () => {
       description: string | null;
       collection_id: number | null;
       cover_model_id: number | null;
+      cover_image_url: string | null;
       parts: Array<{ name: string; choices: Array<{ model_id: number; choice_id?: number }> }>;
     } | null = null;
     let detail: MultipartModelRead = {
@@ -65,7 +66,9 @@ test.describe("multipart models", () => {
       model_count: 0,
       guide_count: 0,
       cover_model_id: null,
+      cover_image_url: null,
       cover_thumbnail_url: null,
+      starred: false,
       member_model_ids: [],
       tags: [],
       effective_role: "admin",
@@ -114,6 +117,7 @@ test.describe("multipart models", () => {
           description: string | null;
           collection_id: number | null;
           cover_model_id: number | null;
+          cover_image_url: string | null;
           parts: Array<{
             name: string;
             choices: Array<{ model_id: number; choice_id?: number }>;
@@ -127,6 +131,8 @@ test.describe("multipart models", () => {
           collection_id: payload.collection_id,
           collection: payload.collection_id === 1 ? "maraio" : null,
           cover_model_id: payload.cover_model_id,
+          cover_image_url: payload.cover_image_url,
+          cover_thumbnail_url: payload.cover_image_url,
           parts: payload.parts.map((part, index) => ({
             id: index + 1,
             name: part.name,
@@ -165,22 +171,26 @@ test.describe("multipart models", () => {
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
-    await page.getByRole("button", { name: "Edit multipart set" }).click();
-    await page.getByRole("button", { name: "Add a part" }).first().click();
+    await page.setViewportSize({ width: 390, height: 844 });
+    const horizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+    await page.getByRole("button", { name: "Add a part" }).click();
     await page.getByRole("button", { name: /Desk base/ }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
     await page.getByRole("button", { name: /Short handle/ }).click();
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: /Long handle/ }).click();
     await page
-      .getByRole("combobox", { name: "Cover model" })
-      .selectOption({ label: "Long handle" });
+      .getByRole("textbox", { name: "Custom cover image URL" })
+      .fill("https://images.example.test/desk-organiser.webp");
     await page.getByRole("button", { name: "Save changes" }).click();
 
     await expect(page.getByText("Changes saved")).toBeVisible();
     expect(savedPayload).toMatchObject({
       collection_id: 1,
-      cover_model_id: 4,
+      cover_image_url: "https://images.example.test/desk-organiser.webp",
       parts: [
         { name: "Part 1", choices: [{ model_id: 2 }] },
         { name: "Part 2", choices: [{ model_id: 3 }, { model_id: 4 }] },

@@ -933,6 +933,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       direct: !searchQuery,
       q: searchQuery,
       tag: selectedTags.length ? selectedTags : undefined,
+      favorites: favoritesOnly || undefined,
       limit: 500,
     },
     { enabled: libraryView !== "components" },
@@ -940,6 +941,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const multipartMembershipQuery = useMultipartModels(
     { limit: 500 },
     { enabled: libraryView === "components" },
+  );
+  const multipartOutlinerQuery = useMultipartModels(
+    {
+      tag: selectedTags.length ? selectedTags : undefined,
+      favorites: favoritesOnly || undefined,
+      limit: 500,
+    },
+    { enabled: desktopOutliner && libraryView !== "components" },
   );
   const outlinerQuery = useOutlinerModels(baseFilters, 500, {
     enabled: desktopOutliner,
@@ -974,6 +983,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     return models;
   })();
   const outlinerModels = outlinerQuery.data ?? [];
+  const outlinerMultipartModels =
+    libraryView === "components"
+      ? (multipartMembershipQuery.data ?? [])
+      : (multipartOutlinerQuery.data ?? []);
   // First load shows skeletons; a filter change keeps the previous page visible
   // and just flags `refreshing` for the subtle "Updating…" hint.
   const loading =
@@ -993,7 +1006,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (hasMore && !loadingMore) fetchNextPage();
   }
   function refresh() {
-    queryClient.invalidateQueries({ queryKey: queryKeys.models });
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.models }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+    ]);
   }
 
   // Multi-select for batch actions. The selected set is view-independent so it
@@ -1660,6 +1677,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         <FilterSidebar
           collections={collections}
           models={outlinerModels}
+          multipartModels={outlinerMultipartModels}
           tags={tags}
           printers={printers}
           selectedCollection={selectedCollection}
@@ -2343,6 +2361,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           key={`multipart-${item.value.id}`}
                           item={item.value}
                           returnTo={currentLibraryHref}
+                          availableTags={tags}
+                          onDataChange={refresh}
                         />
                       ) : (
                         <ModelCard

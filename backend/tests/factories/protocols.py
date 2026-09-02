@@ -40,6 +40,7 @@ from app.db.models import (
     ModelProvenanceSource,
     ModelSourceCover,
     MultipartModel,
+    MultipartModelStar,
     OwnedStorageObject,
     Printer,
     PrinterFile,
@@ -121,6 +122,15 @@ class MakeMultipartModel(Protocol):
         collection: Collection | None = None,
         **overrides: Any,
     ) -> MultipartModel: ...
+
+
+class MakeMultipartModelStar(Protocol):
+    def __call__(
+        self,
+        user: User,
+        multipart_model: MultipartModel,
+        **overrides: Any,
+    ) -> MultipartModelStar: ...
 
 
 class MakeFile(Protocol):
@@ -332,6 +342,7 @@ __all__ = [
     "MakeInboxItem",
     "MakeModel",
     "MakeMultipartModel",
+    "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
     "MakePrintJob",
     "MakePrinter",

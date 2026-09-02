@@ -25,7 +25,9 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     model_count: 0,
     guide_count: 0,
     cover_model_id: null,
+    cover_image_url: null,
     cover_thumbnail_url: null,
+    starred: false,
     member_model_ids: [],
     tags: [],
     effective_role: "admin",
@@ -82,7 +84,9 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     model_count: 3,
     guide_count: 0,
     cover_model_id: null,
+    cover_image_url: null,
     cover_thumbnail_url: null,
+    starred: false,
     member_model_ids: [],
     tags: [],
     effective_role: "admin",
@@ -115,6 +119,17 @@ describe("MultipartModelBrowser", () => {
     expect(screen.getByText("2 parts")).toBeVisible();
     expect(screen.getByText("3 models")).toBeVisible();
     expect(screen.getByText(/2 guides/)).toBeVisible();
+  });
+
+  it("shows an external image on a multipart card", async () => {
+    const coverImageUrl = "https://images.example.test/desk-organiser.webp";
+    const { container } = renderBrowser([
+      aListItem({ cover_image_url: coverImageUrl, cover_thumbnail_url: coverImageUrl }),
+    ]);
+
+    await screen.findByRole("link", { name: /Desk organiser/ });
+
+    expect(container.querySelector("img")).toHaveAttribute("src", coverImageUrl);
   });
 
   it("requests the typed search filter", async () => {
@@ -334,6 +349,22 @@ describe("MultipartModelBrowser", () => {
 });
 
 describe("MultipartModelDetailPage", () => {
+  it("offers the first part action from the empty overview", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(aMultipart()),
+        "GET /api/v1/multipart-models/7/candidates": json([model]),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Add a part" }));
+
+    expect(await screen.findByRole("list", { name: "Choose an existing model" })).toBeVisible();
+  });
+
   it("shows an explicit empty description", async () => {
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -693,6 +724,7 @@ describe("MultipartModelDetailPage", () => {
       description: null,
       collection_id: null,
       cover_model_id: null,
+      cover_image_url: null,
       parts: [{ name: "Top", choices: [{ model_id: 12, choice_id: 101 }] }],
     });
   });
@@ -745,14 +777,19 @@ describe("MultipartModelDetailPage", () => {
     expect(await screen.findByText("parts")).toBeVisible();
   });
 
-  it("saves a linked Model as the set cover", async () => {
+  it("saves an external image as the set cover", async () => {
     const user = userEvent.setup();
     const detail = aMultipart({
       part_count: 1,
       model_count: 2,
       parts: [{ id: 1, name: "Base", sort_order: 0, models: [model, alternative] }],
     });
-    const saved = { ...detail, cover_model_id: alternative.id };
+    const coverImageUrl = "https://images.example.test/desk-organiser.webp";
+    const saved = {
+      ...detail,
+      cover_image_url: coverImageUrl,
+      cover_thumbnail_url: coverImageUrl,
+    };
     const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
       routePath: "/multipart-models/:id",
@@ -763,14 +800,11 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Cover model" }),
-      String(alternative.id),
-    );
+    await user.type(screen.getByRole("textbox", { name: "Custom cover image URL" }), coverImageUrl);
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
-    expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_model_id).toBe(alternative.id);
+    expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_image_url).toBe(coverImageUrl);
     expect(screen.getByText("Set cover")).toBeVisible();
   });
 
@@ -921,6 +955,7 @@ describe("MultipartModelDetailPage", () => {
       description: null,
       collection_id: null,
       cover_model_id: null,
+      cover_image_url: null,
       parts: [],
     });
   });

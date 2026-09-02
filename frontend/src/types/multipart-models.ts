@@ -28,11 +28,15 @@ export interface MultipartModelListItem {
   model_count: number;
   guide_count: number;
   cover_model_id: number | null;
+  /** User-selected image URL, independent from every linked Model. */
+  cover_image_url: string | null;
   cover_thumbnail_url: string | null;
   /** Readable Models referenced by this set; used for organised library grouping. */
   member_model_ids: number[];
   /** Tags attached to the set itself, independent from member Model tags. */
   tags: string[];
+  /** Per-user favorite state for this set. */
+  starred: boolean;
   effective_role: CollectionRole | null;
   updated_at: string;
 }
@@ -66,6 +70,7 @@ export interface MultipartPartsWrite {
   description: string | null;
   collection_id: number | null;
   cover_model_id: number | null;
+  cover_image_url: string | null;
   parts: Array<{
     name: string;
     choices: Array<{ model_id: number; choice_id?: number }>;

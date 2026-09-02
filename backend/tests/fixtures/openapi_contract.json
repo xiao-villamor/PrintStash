@@ -6804,6 +6804,17 @@
             ],
             "title": "Collection Id"
           },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
           "cover_model_id": {
             "anyOf": [
               {
@@ -6881,6 +6892,11 @@
             "title": "Slug",
             "type": "string"
           },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
           "tags": {
             "items": {
               "type": "string"
@@ -6926,6 +6942,17 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
           },
           "cover_model_id": {
             "anyOf": [
@@ -7023,6 +7050,11 @@
             "title": "Slug",
             "type": "string"
           },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
           "tags": {
             "items": {
               "type": "string"
@@ -7060,6 +7092,19 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
           },
           "cover_model_id": {
             "anyOf": [
@@ -7110,9 +7155,40 @@
         "title": "MultipartModelSave",
         "type": "object"
       },
+      "MultipartModelStarRead": {
+        "properties": {
+          "multipart_model_id": {
+            "title": "Multipart Model Id",
+            "type": "integer"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "multipart_model_id",
+          "starred"
+        ],
+        "title": "MultipartModelStarRead",
+        "type": "object"
+      },
       "MultipartModelUpdate": {
         "additionalProperties": false,
         "properties": {
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
           "description": {
             "anyOf": [
               {
@@ -23760,6 +23836,18 @@
             }
           },
           {
+            "description": "Only sets starred by current user",
+            "in": "query",
+            "name": "favorites",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only sets starred by current user",
+              "title": "Favorites",
+              "type": "boolean"
+            }
+          },
+          {
             "in": "query",
             "name": "limit",
             "required": false,
@@ -24191,6 +24279,98 @@
           }
         ],
         "summary": "Replace multipart model composition",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/star": {
+      "delete": {
+        "operationId": "unstar_multipart_model_api_v1_multipart_models__multipart_model_id__star_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelStarRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Unstar a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "star_multipart_model_api_v1_multipart_models__multipart_model_id__star_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelStarRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Star a multipart model",
         "tags": [
           "multipart-models"
         ]

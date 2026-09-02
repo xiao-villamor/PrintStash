@@ -36,8 +36,10 @@ from app.db.models import (
     Model,
     ModelTagLink,
     MultipartModel,
+    MultipartModelStar,
     MultipartModelTagLink,
     Tag,
+    User,
 )
 from tests.factories._support import nth, reject_aliases, save, unique_hash
 
@@ -128,6 +130,23 @@ def build_multipart_model(
         overrides.setdefault("collection_id", collection.id)
     overrides.setdefault("slug", f"multipart-model-{index}")
     return save(session, MultipartModel(name=name, **overrides))
+
+
+def build_multipart_model_star(
+    session: Session,
+    user: User,
+    multipart_model: MultipartModel,
+    **overrides: Any,
+) -> MultipartModelStar:
+    """A user's favorite marker for one multipart set."""
+    return save(
+        session,
+        MultipartModelStar(
+            user_id=int(user.id),
+            multipart_model_id=int(multipart_model.id),
+            **overrides,
+        ),
+    )
 
 
 def build_file(

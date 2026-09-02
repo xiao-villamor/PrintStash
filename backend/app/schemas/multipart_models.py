@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.db.models import CollectionRole
 from app.schemas.documents import DocumentListItem
@@ -22,9 +22,11 @@ class MultipartModelListItem(BaseModel):
     model_count: int = 0
     guide_count: int = 0
     cover_model_id: Optional[int] = None
+    cover_image_url: Optional[str] = None
     cover_thumbnail_url: Optional[str] = None
     member_model_ids: list[int] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    starred: bool = False
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime
 
@@ -42,6 +44,7 @@ class MultipartModelUpdate(BaseModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     description: Optional[str] = Field(default=None, max_length=1_000_000)
+    cover_image_url: Optional[AnyHttpUrl] = None
 
 
 class MultipartMemberRead(BaseModel):
@@ -104,3 +107,8 @@ class MultipartModelSave(MultipartModelUpdate):
     collection_id: Optional[int] = None
     parts: list[MultipartPartWrite] = Field(default_factory=list, max_length=100)
     cover_model_id: Optional[int] = Field(default=None, gt=0)
+
+
+class MultipartModelStarRead(BaseModel):
+    multipart_model_id: int
+    starred: bool

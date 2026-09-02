@@ -37,6 +37,7 @@ from app.db.models import (
     FileTagLink,
     FileType,
     Model,
+    MultipartModelStar,
     MultipartModelTagLink,
     PrinterProvider,
     PrintJobState,
@@ -225,6 +226,16 @@ class TestEntityTagBuilders:
             )
             is not None
         )
+
+
+class TestBuildMultipartModelStar:
+    def test_persists_a_user_favorite_marker(self, db_session: Session) -> None:
+        user = factories.build_user(db_session)
+        multipart_model = factories.build_multipart_model(db_session)
+
+        marker = factories.build_multipart_model_star(db_session, user, multipart_model)
+
+        assert db_session.get(MultipartModelStar, marker.id) is not None
 
 
 class TestBuildUser:

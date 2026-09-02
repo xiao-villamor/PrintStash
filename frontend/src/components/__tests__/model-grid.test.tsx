@@ -72,7 +72,9 @@ function aMultipartSet(override: Partial<MultipartModelListItem> = {}): Multipar
     model_count: 2,
     guide_count: 0,
     cover_model_id: 1,
+    cover_image_url: null,
     cover_thumbnail_url: null,
+    starred: false,
     member_model_ids: [1],
     tags: ["fantasy"],
     effective_role: "admin",
@@ -195,6 +197,13 @@ function lastModelsQuery(requests: () => { method: string; url: string }[]): URL
   return new URLSearchParams(url?.split("?")[1] ?? "");
 }
 
+function lastMultipartQuery(requests: () => { method: string; url: string }[]): URLSearchParams {
+  const url = requests()
+    .filter((call) => call.method === "GET" && call.url.startsWith("/api/v1/multipart-models"))
+    .at(-1)?.url;
+  return new URLSearchParams(url?.split("?")[1] ?? "");
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -221,6 +230,47 @@ describe("ModelBrowser", () => {
       renderVault();
 
       expect(await screen.findByText("No models found")).toBeInTheDocument();
+    });
+
+    it("toggles a multipart card favorite", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderVault({
+        multipartModels: [aMultipartSet()],
+        routes: {
+          "PUT /api/v1/multipart-models/40/star": json({
+            multipart_model_id: 40,
+            starred: true,
+          }),
+        },
+      });
+
+      await user.click(
+        await screen.findByRole("button", { name: "Add Dragon figure to favorites" }),
+      );
+
+      await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
+      expect(
+        screen.getByRole("button", { name: "Remove Dragon figure from favorites" }),
+      ).toBeVisible();
+    });
+
+    it("opens the multipart card tag editor", async () => {
+      const user = userEvent.setup();
+      const set = aMultipartSet({ tags: [] });
+      const saved = { ...set, tags: ["functional"] };
+      const { requestsWithMethod } = renderVault({
+        multipartModels: [set],
+        tags: [aTag()],
+        routes: { "PUT /api/v1/multipart-models/40/tags": json(saved) },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Add tags to Dragon figure" }));
+      const dialog = screen.getByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "functional" }));
+      await user.click(within(dialog).getByRole("button", { name: "Save tags" }));
+
+      await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
+      expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({ tags: ["functional"] });
     });
   });
 
@@ -261,6 +311,7 @@ describe("ModelBrowser", () => {
       const { requests } = renderVault({ at: "/?favorites=true" });
 
       await waitFor(() => expect(lastModelsQuery(requests).get("favorites")).toBe("true"));
+      expect(lastMultipartQuery(requests).get("favorites")).toBe("true");
     });
 
     it("forwards a search term", async () => {
@@ -271,6 +322,14 @@ describe("ModelBrowser", () => {
   });
 
   describe("collection navigation", () => {
+    it("shows multipart sets in the collection tree", async () => {
+      renderVault({ multipartModels: [aMultipartSet()] });
+
+      const outlinerFilter = screen.getByPlaceholderText("Filter outliner...");
+      const outliner = outlinerFilter.closest("aside")!;
+      expect(await within(outliner).findByText("Dragon figure")).toBeVisible();
+    });
+
     it("asks the API only for what is directly in the selected folder", async () => {
       // The grid shows one level; descendants are reached by navigating into
       // them, which is what keeps a deep library from loading everything at once.

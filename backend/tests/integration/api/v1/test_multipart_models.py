@@ -77,6 +77,41 @@ class TestMultipartModels:
             f"/api/v1/files/{handle_file.id}/thumbnail"
         )
 
+    def test_full_save_uses_external_cover_image(self, client, auth_headers) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "External cover assembly"},
+        ).json()
+        cover_url = "https://images.example.test/assemblies/dragon.webp"
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"cover_image_url": cover_url, "parts": []},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["cover_image_url"] == cover_url
+        assert response.json()["cover_thumbnail_url"] == cover_url
+
+    def test_full_save_rejects_invalid_external_cover_image(
+        self, client, auth_headers
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Invalid external cover assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"cover_image_url": "javascript:alert(1)", "parts": []},
+        )
+
+        assert response.status_code == 422, response.text
+
     def test_full_save_rejects_cover_outside_composition(
         self, client, auth_headers, make_model
     ) -> None:
@@ -630,6 +665,79 @@ class TestMultipartModels:
 
         assert response.status_code == 200, response.text
         assert [item["id"] for item in response.json()] == [matched["id"]]
+
+    def test_star_marks_multipart_model_as_favorite(self, client, auth_headers) -> None:
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Favourite figure"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/star",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "multipart_model_id": aggregate["id"],
+            "starred": True,
+        }
+        detail = client.get(
+            f"/api/v1/multipart-models/{aggregate['id']}", headers=auth_headers
+        )
+        assert detail.json()["starred"] is True
+
+    def test_favorites_filter_returns_starred_multipart_models(
+        self, client, auth_headers
+    ) -> None:
+        starred = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Starred set"},
+        ).json()
+        client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Plain set"},
+        )
+        client.put(
+            f"/api/v1/multipart-models/{starred['id']}/star",
+            headers=auth_headers,
+        )
+
+        response = client.get(
+            "/api/v1/multipart-models?favorites=true", headers=auth_headers
+        )
+
+        assert response.status_code == 200, response.text
+        assert [item["id"] for item in response.json()] == [starred["id"]]
+        assert response.json()[0]["starred"] is True
+
+    def test_unstar_removes_multipart_model_from_favorites(
+        self, client, auth_headers
+    ) -> None:
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Temporary favourite"},
+        ).json()
+        client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}/star",
+            headers=auth_headers,
+        )
+
+        response = client.delete(
+            f"/api/v1/multipart-models/{aggregate['id']}/star",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["starred"] is False
+        favorites = client.get(
+            "/api/v1/multipart-models?favorites=true", headers=auth_headers
+        )
+        assert favorites.json() == []
 
     def test_tags_on_a_set_do_not_change_its_members(
         self, client, auth_headers, make_model, make_tag, tag_model

@@ -18,6 +18,7 @@ from app.db.models import (
     Collection,
     CollectionRole,
     MultipartModel,
+    MultipartModelStar,
     MultipartModelTagLink,
     User,
 )
@@ -30,6 +31,7 @@ from app.schemas.multipart_models import (
     MultipartModelListItem,
     MultipartModelRead,
     MultipartModelSave,
+    MultipartModelStarRead,
     MultipartModelUpdate,
     MultipartPartsReplace,
 )
@@ -68,6 +70,7 @@ def list_multipart_models(
     direct: bool = Query(False),
     q: Optional[str] = Query(None, max_length=128),
     tag: Optional[list[str]] = Query(None),
+    favorites: bool = Query(False, description="Only sets starred by current user"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(require_user),
@@ -80,6 +83,7 @@ def list_multipart_models(
         direct=direct,
         query=q,
         tag_slugs=tag or [],
+        favorites=favorites,
         limit=limit,
         offset=offset,
     )
@@ -197,6 +201,12 @@ def update_multipart_model(
             aggregate.name = name
     if "description" in payload.model_fields_set:
         aggregate.description = payload.description
+    if "cover_image_url" in payload.model_fields_set:
+        aggregate.cover_image_url = (
+            str(payload.cover_image_url)
+            if payload.cover_image_url is not None
+            else None
+        )
     aggregate.updated_by = current_user.id
     aggregate.updated_at = utcnow()
     session.add(aggregate)
@@ -281,6 +291,12 @@ def save_multipart_model(
             collection_set=collection_set,
             cover_model_id=payload.cover_model_id,
             cover_model_set="cover_model_id" in payload.model_fields_set,
+            cover_image_url=(
+                str(payload.cover_image_url)
+                if payload.cover_image_url is not None
+                else None
+            ),
+            cover_image_set="cover_image_url" in payload.model_fields_set,
         )
     except multipart_models.MultipartModelError as exc:
         session.rollback()
@@ -309,6 +325,60 @@ def list_multipart_candidates(
         session, current_user, multipart_model_id, CollectionRole.VIEW
     )
     return multipart_models.candidates(session, current_user, query=q, limit=limit)
+
+
+@router.put(
+    "/{multipart_model_id}/star",
+    response_model=MultipartModelStarRead,
+    dependencies=[Depends(require_auth)],
+    summary="Star a multipart model",
+)
+def star_multipart_model(
+    multipart_model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MultipartModelStarRead:
+    multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.VIEW
+    )
+    existing = session.exec(
+        select(MultipartModelStar).where(
+            MultipartModelStar.user_id == current_user.id,
+            MultipartModelStar.multipart_model_id == multipart_model_id,
+        )
+    ).first()
+    if existing is None:
+        session.add(
+            MultipartModelStar(
+                user_id=int(current_user.id), multipart_model_id=multipart_model_id
+            )
+        )
+        session.commit()
+    return MultipartModelStarRead(multipart_model_id=multipart_model_id, starred=True)
+
+
+@router.delete(
+    "/{multipart_model_id}/star",
+    response_model=MultipartModelStarRead,
+    dependencies=[Depends(require_auth)],
+    summary="Unstar a multipart model",
+)
+def unstar_multipart_model(
+    multipart_model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> MultipartModelStarRead:
+    multipart_models.require(
+        session, current_user, multipart_model_id, CollectionRole.VIEW
+    )
+    session.exec(
+        delete(MultipartModelStar).where(
+            MultipartModelStar.user_id == current_user.id,
+            MultipartModelStar.multipart_model_id == multipart_model_id,
+        )
+    )
+    session.commit()
+    return MultipartModelStarRead(multipart_model_id=multipart_model_id, starred=False)
 
 
 @router.delete(

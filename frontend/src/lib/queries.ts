@@ -196,6 +196,7 @@ export interface MultipartModelListFilters {
   direct?: boolean;
   q?: string;
   tag?: string[];
+  favorites?: boolean;
   limit?: number;
   offset?: number;
 }

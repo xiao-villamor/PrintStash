@@ -9,6 +9,8 @@ import {
   listMultipartModels,
   replaceMultipartModelTags,
   saveMultipartModel,
+  starMultipartModel,
+  unstarMultipartModel,
 } from "@/lib/api/multipart-models";
 import { invalidateApiCache } from "@/lib/api/request";
 import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
@@ -29,11 +31,12 @@ describe("multipart model wire contract", () => {
       direct: true,
       q: "desk",
       tag: ["fantasy", "display"],
+      favorites: true,
       limit: 20,
       offset: 40,
     });
     expectRequest(
-      "/api/v1/multipart-models?collection=functional%2Fbrackets&direct=true&q=desk&tag=fantasy&tag=display&limit=20&offset=40",
+      "/api/v1/multipart-models?collection=functional%2Fbrackets&direct=true&q=desk&tag=fantasy&tag=display&favorites=true&limit=20&offset=40",
     );
   });
 
@@ -63,6 +66,7 @@ describe("multipart model wire contract", () => {
       description: "Description",
       collection_id: 3,
       cover_model_id: 8,
+      cover_image_url: "https://images.example.test/desk.webp",
       parts: [
         {
           name: "Base",
@@ -76,6 +80,7 @@ describe("multipart model wire contract", () => {
       description: "Description",
       collection_id: 3,
       cover_model_id: 8,
+      cover_image_url: "https://images.example.test/desk.webp",
       parts: [{ name: "Base", choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }] }],
     });
   });
@@ -103,5 +108,17 @@ describe("multipart model wire contract", () => {
     await replaceMultipartModelTags(4, ["Display"]);
     expectRequest("/api/v1/multipart-models/4/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Display"] });
+  });
+
+  it("stars a grouping", async () => {
+    respondWith({ multipart_model_id: 4, starred: true });
+    await starMultipartModel(4);
+    expectRequest("/api/v1/multipart-models/4/star", "PUT");
+  });
+
+  it("unstars a grouping", async () => {
+    respondWith({ multipart_model_id: 4, starred: false });
+    await unstarMultipartModel(4);
+    expectRequest("/api/v1/multipart-models/4/star", "DELETE");
   });
 });

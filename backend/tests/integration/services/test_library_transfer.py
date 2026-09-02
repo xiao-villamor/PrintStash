@@ -49,6 +49,7 @@ from app.db.models import (
     ModelStar,
     MultipartModel,
     MultipartModelChoice,
+    MultipartModelStar,
     MultipartPart,
     PartGroup,
     PartOption,
@@ -68,6 +69,7 @@ from tests.factories import (
     build_file,
     build_model,
     build_multipart_model,
+    build_multipart_model_star,
     build_print_job,
     build_tag,
     build_user,
@@ -167,8 +169,10 @@ class TestImportArchive:
             [MultipartPartWrite(name="Handle", model_ids=[member.id])],
         )
         aggregate.cover_model_id = member.id
+        aggregate.cover_image_url = "https://images.example.test/portable-cover.webp"
         db_session.add(aggregate)
         db_session.commit()
+        build_multipart_model_star(db_session, user, aggregate)
         archive_path = library_transfer.create_archive(db_session, user)
         try:
             with zipfile.ZipFile(archive_path) as archive:
@@ -176,6 +180,8 @@ class TestImportArchive:
             portable = manifest["multipart_models"][0]
             assert portable["parts"][0]["choices"] == [{"model_source_id": member.id}]
             assert portable["cover_model_source_id"] == member.id
+            assert portable["cover_image_url"] == aggregate.cover_image_url
+            assert portable["starred"] is True
             assert portable["tags"] == ["Display"]
             assert (
                 library_transfer.PortableManifest.model_validate(
@@ -193,7 +199,17 @@ class TestImportArchive:
             restored_part = multipart_models.read(db_session, user, restored).parts[0]
             assert restored_part.models[0].id == member.id
             assert restored.cover_model_id == member.id
+            assert restored.cover_image_url == aggregate.cover_image_url
             assert multipart_models.read(db_session, user, restored).tags == ["Display"]
+            assert (
+                db_session.exec(
+                    select(MultipartModelStar).where(
+                        MultipartModelStar.user_id == user.id,
+                        MultipartModelStar.multipart_model_id == restored.id,
+                    )
+                ).first()
+                is not None
+            )
             assert db_session.get(File, mesh.id) is not None
             assert db_session.get(File, gcode.id).is_recommended is True
         finally:

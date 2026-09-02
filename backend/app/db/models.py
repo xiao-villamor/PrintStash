@@ -859,10 +859,32 @@ class MultipartModel(SQLModel, table=True):
             index=True,
         ),
     )
+    cover_image_url: Optional[str] = Field(default=None, max_length=2083)
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class MultipartModelStar(SQLModel, table=True):
+    """Per-user favorite marker for a multipart set."""
+
+    __tablename__ = "multipart_model_stars"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "multipart_model_id",
+            name="uq_multipart_model_stars_user_model",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
+    multipart_model_id: int = Field(
+        foreign_key="multipart_models.id", index=True, ondelete="CASCADE"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+
 
 class MultipartPart(SQLModel, table=True):
     """A named physical part in a ``MultipartModel``."""

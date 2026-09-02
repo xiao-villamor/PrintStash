@@ -36,6 +36,7 @@ from app.db.models import (
     ModelTagLink,
     MultipartModel,
     MultipartModelChoice,
+    MultipartModelStar,
     MultipartModelTagLink,
     MultipartPart,
     PartGroup,
@@ -226,6 +227,10 @@ class PortableMultipartModel(BaseModel):
     description: str | None = None
     collection: str | None = PydanticField(default=None, max_length=512)
     tags: list[str] = PydanticField(default_factory=list)
+    starred: bool = False
+    cover_image_url: str | None = PydanticField(
+        default=None, max_length=2083, pattern=r"^https?://"
+    )
     cover_model_source_id: int | None = None
     parts: list[PortableMultipartPart] = PydanticField(default_factory=list)
 
@@ -554,6 +559,16 @@ def create_archive(session: Session, user: User) -> Path:
         ).all()
         for aggregate_id, tag_name in aggregate_tag_rows:
             tags_by_aggregate.setdefault(int(aggregate_id), []).append(tag_name)
+    starred_aggregate_ids = set(
+        session.exec(
+            select(MultipartModelStar.multipart_model_id).where(
+                MultipartModelStar.user_id == user.id,
+                MultipartModelStar.multipart_model_id.in_(aggregate_ids),  # type: ignore[union-attr]
+            )
+        ).all()
+        if aggregate_ids
+        else []
+    )
     for aggregate in aggregates:
         if aggregate.id is None:
             continue
@@ -597,6 +612,8 @@ def create_archive(session: Session, user: User) -> Path:
             "description": aggregate.description,
             "collection": aggregate_collection_paths.get(aggregate.collection_id),
             "tags": tags_by_aggregate.get(int(aggregate.id), []),
+            "starred": int(aggregate.id) in starred_aggregate_ids,
+            "cover_image_url": aggregate.cover_image_url,
             "parts": portable_parts,
         }
         if aggregate.cover_model_id in visible_model_ids and any(
@@ -1620,6 +1637,8 @@ def _portable_aggregate_matches(
         "name"
     ) or aggregate.description != aggregate_data.get("description"):
         return False
+    if aggregate.cover_image_url != aggregate_data.get("cover_image_url"):
+        return False
     cover_source_id = aggregate_data.get("cover_model_source_id")
     expected_cover = (
         source_models.get(cover_source_id) if cover_source_id is not None else None
@@ -1932,6 +1951,21 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                 ):
                     # This is an idempotent retry of the same archive.  Do not
                     # churn part/choice rows or overwrite user data.
+                    if aggregate_data.get("starred"):
+                        starred = session.exec(
+                            select(MultipartModelStar).where(
+                                MultipartModelStar.user_id == user.id,
+                                MultipartModelStar.multipart_model_id == existing.id,
+                            )
+                        ).first()
+                        if starred is None:
+                            session.add(
+                                MultipartModelStar(
+                                    user_id=int(user.id),
+                                    multipart_model_id=int(existing.id),
+                                )
+                            )
+                            session.commit()
                     continue
                 # A matching slug with different data belongs to another
                 # composition.  Import additively under a sanitized unique
@@ -1971,6 +2005,7 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                         name=aggregate_data["name"],
                         slug=aggregate_slug,
                         description=aggregate_data.get("description"),
+                        cover_image_url=aggregate_data.get("cover_image_url"),
                         collection_id=collection.id if collection else None,
                         created_by=user.id,
                         updated_by=user.id,
@@ -2080,6 +2115,21 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                     and cover_model.id in used_models
                     else None
                 )
+                existing.cover_image_url = aggregate_data.get("cover_image_url")
+                if aggregate_data.get("starred"):
+                    starred = session.exec(
+                        select(MultipartModelStar).where(
+                            MultipartModelStar.user_id == user.id,
+                            MultipartModelStar.multipart_model_id == aggregate_id,
+                        )
+                    ).first()
+                    if starred is None:
+                        session.add(
+                            MultipartModelStar(
+                                user_id=int(user.id),
+                                multipart_model_id=aggregate_id,
+                            )
+                        )
                 session.commit()
 
             # A v1 archive has no top-level ``multipart_models`` member and

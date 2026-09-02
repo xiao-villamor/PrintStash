@@ -63,6 +63,7 @@ uploads (mesh-only source, BGCODE metadata, into a collection) · filament & pri
 purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,
 status, compare) · public share links (view-only vs downloadable, revoke → 404) ·
+multipart sets (empty-set first action, external cover, tags, favorites, reusable members) ·
 RBAC (create user, grant collection access, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management
 (promote/disable/reset password) · API keys · settings overview (system status

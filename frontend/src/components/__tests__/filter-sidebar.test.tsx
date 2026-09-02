@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilterSidebar, type FilterSidebarProps } from "@/components/filter-sidebar";
 import { aCollection, aPrinter, aTag } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
-import type { OutlinerModelRead } from "@/types";
+import type { MultipartModelListItem, OutlinerModelRead } from "@/types";
 
 const TREE = [
   aCollection({ id: 1, name: "Parts", path: "parts", parent_id: null }),
@@ -37,6 +37,29 @@ function outlinerModel(over: Partial<OutlinerModelRead> = {}): OutlinerModelRead
   // The tree groups by `collection` *path*, not by id — a model with only an id
   // is invisible to it, which is exactly the drift this fixture pins down.
   return { id: 1, name: "Benchy", collection: "parts", collection_id: 1, ...over };
+}
+
+function multipartSet(over: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
+  return {
+    id: 40,
+    name: "Dragon figure",
+    slug: "dragon-figure",
+    description: null,
+    collection: null,
+    collection_id: null,
+    part_count: 2,
+    model_count: 1,
+    guide_count: 0,
+    cover_model_id: 1,
+    cover_image_url: null,
+    cover_thumbnail_url: null,
+    starred: false,
+    member_model_ids: [1],
+    tags: [],
+    effective_role: "admin",
+    updated_at: "2026-01-02T00:00:00Z",
+    ...over,
+  };
 }
 
 function renderSidebar(over: Partial<FilterSidebarProps> = {}) {
@@ -118,6 +141,31 @@ describe("FilterSidebar", () => {
       expect(screen.getByText("Brackets")).toBeInTheDocument();
     });
 
+    it("shows a root multipart set", () => {
+      renderSidebar({ multipartModels: [multipartSet()] });
+
+      expect(screen.getByText("Dragon figure")).toBeInTheDocument();
+    });
+
+    it("nests a multipart set in its folder", () => {
+      renderSidebar({
+        multipartModels: [multipartSet({ collection: "parts", collection_id: 1 })],
+      });
+
+      expect(screen.getByText("Dragon figure")).toBeInTheDocument();
+    });
+
+    it("counts a multipart set in its folder", () => {
+      renderSidebar({
+        collections: [aCollection({ model_count: 0 })],
+        multipartModels: [multipartSet({ collection: "parts", collection_id: 1 })],
+      });
+
+      expect(screen.getByRole("button", { name: "Parts" }).parentElement).toHaveTextContent(
+        "Parts1",
+      );
+    });
+
     it("folds a branch away on request", async () => {
       // A deep library is unscannable fully expanded, so a parent has to be
       // collapsible without losing the selection inside it.
@@ -171,6 +219,17 @@ describe("FilterSidebar", () => {
       await filterBy(user, "benchy");
 
       expect(screen.getByText("Parts")).toBeInTheDocument();
+    });
+
+    it("finds a multipart set by name", async () => {
+      const user = userEvent.setup();
+      renderSidebar({
+        multipartModels: [multipartSet({ collection: "parts", collection_id: 1 })],
+      });
+
+      await filterBy(user, "dragon");
+
+      expect(screen.getByText("Dragon figure")).toBeInTheDocument();
     });
   });
 
@@ -368,6 +427,42 @@ describe("FilterSidebar", () => {
       await user.click(screen.getByRole("button", { name: "Parts only" }));
 
       expect(onLibraryViewChange).toHaveBeenCalledWith("components");
+    });
+
+    it("groups a referenced model beneath its multipart set", () => {
+      renderSidebar({ models: [outlinerModel()], multipartModels: [multipartSet()] });
+
+      expect(screen.queryByText("Benchy")).toBeNull();
+    });
+
+    it("shows referenced models in the parts-only view", () => {
+      renderSidebar({
+        models: [outlinerModel({ collection: null, collection_id: null })],
+        multipartModels: [multipartSet()],
+        libraryView: "components",
+      });
+
+      expect(screen.getByText("Benchy")).toBeInTheDocument();
+    });
+
+    it("hides unrelated models in the parts-only view", () => {
+      renderSidebar({
+        models: [outlinerModel({ id: 2, collection: null, collection_id: null })],
+        multipartModels: [multipartSet()],
+        libraryView: "components",
+      });
+
+      expect(screen.queryByText("Benchy")).toBeNull();
+    });
+
+    it("hides regular models in the multipart-only view", () => {
+      renderSidebar({
+        models: [outlinerModel({ collection: null, collection_id: null })],
+        multipartModels: [multipartSet()],
+        libraryView: "multipart",
+      });
+
+      expect(screen.queryByText("Benchy")).toBeNull();
     });
   });
 

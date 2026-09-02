@@ -206,7 +206,7 @@ const messages = {
     "settings.storage": "Storage",
     "settings.imports": "Imports",
     "settings.maintenance": "Maintenance",
-    "settings.libraries": "Shared volumes",
+    "settings.libraries": "Library sources",
     "settings.notifications": "Notifications",
     "settings.sso": "SSO",
     "settings.spoolman": "Spoolman",
@@ -375,6 +375,11 @@ const messages = {
     "multipart.noParts": "No pieces added yet",
     "multipart.noPartsHelp": "Start by linking the first Model needed to make this object.",
     "multipart.detailsHeading": "Set details",
+    "multipart.coverImage": "Custom cover image URL",
+    "multipart.coverImagePlaceholder": "https://example.com/model-cover.webp",
+    "multipart.coverImageHelp":
+      "Paste an HTTP or HTTPS image URL. Leave it empty to use the first available model image.",
+    "multipart.customCover": "Custom cover image",
     "multipart.coverModel": "Cover model",
     "multipart.coverModelHelp": "Choose which linked Model represents this complete set.",
     "multipart.automaticCover": "Automatic (first available model)",
@@ -426,6 +431,7 @@ const messages = {
     "multipart.detailError": "Couldn't load this multipart model. Try again.",
     "multipart.createError": "Couldn't create this multipart model. Check the name and try again.",
     "multipart.saveError": "Couldn't save changes. Check your access and try again.",
+    "multipart.favoriteError": "Couldn't update this multipart favorite. Try again.",
     "multipart.deleteError": "Couldn't delete this multipart model. Try again.",
     "multipart.networkError": "Couldn't reach PrintStash. Check the server and try again.",
     "multipart.permissionError": "You don't have permission to access this multipart model.",
@@ -638,7 +644,7 @@ const messages = {
     "settings.storage": "Almacenamiento",
     "settings.imports": "Importaciones",
     "settings.maintenance": "Mantenimiento",
-    "settings.libraries": "Volúmenes compartidos",
+    "settings.libraries": "Fuentes de biblioteca",
     "settings.notifications": "Notificaciones",
     "settings.sso": "SSO",
     "settings.spoolman": "Spoolman",
@@ -809,6 +815,11 @@ const messages = {
     "multipart.noPartsHelp":
       "Empieza enlazando el primer modelo necesario para construir este objeto.",
     "multipart.detailsHeading": "Datos del conjunto",
+    "multipart.coverImage": "URL de imagen de portada personalizada",
+    "multipart.coverImagePlaceholder": "https://example.com/model-cover.webp",
+    "multipart.coverImageHelp":
+      "Pega una URL de imagen HTTP o HTTPS. Déjala vacía para usar la primera imagen de modelo disponible.",
+    "multipart.customCover": "Imagen de portada personalizada",
     "multipart.coverModel": "Modelo de portada",
     "multipart.coverModelHelp": "Elige qué modelo enlazado representa al conjunto completo.",
     "multipart.automaticCover": "Automática (primer modelo disponible)",
@@ -862,6 +873,8 @@ const messages = {
       "No se ha podido crear este modelo multiparte. Comprueba el nombre e inténtalo de nuevo.",
     "multipart.saveError":
       "No se han podido guardar los cambios. Comprueba tu acceso e inténtalo de nuevo.",
+    "multipart.favoriteError":
+      "No se pudo actualizar este favorito multiparte. Inténtalo de nuevo.",
     "multipart.deleteError": "No se ha podido eliminar este modelo multiparte. Inténtalo de nuevo.",
     "multipart.networkError":
       "No se ha podido conectar con PrintStash. Comprueba el servidor e inténtalo de nuevo.",

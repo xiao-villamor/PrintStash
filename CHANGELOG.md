@@ -85,8 +85,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   view shows a set once without duplicating its member cards; Everything,
   Multipart sets only and Parts only make every reusable Model accessible without a
   second navigation mode. Search always reveals matching member Models, and
-  multipart cards use the same square visual language as ordinary Models. Set
-  details retain their read-only overview and explicit editor for metadata,
+  multipart cards use the same square visual language, tag actions and per-user
+  favorites as ordinary Models. Set-owned covers may use an external HTTP(S)
+  image without depending on a member preview. Set details retain their read-only
+  overview, an empty-state Add part action and an explicit editor for metadata,
   tags, cover, ordered pieces, variants and guides.
 - **Model tags are now discoverable from the library.** Editable model cards
   and detail headers expose a direct Add/Edit tags action, where users can find

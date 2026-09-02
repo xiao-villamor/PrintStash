@@ -19,13 +19,14 @@ test.describe("multipart models", () => {
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
-    await page.getByRole("button", { name: "Edit multipart set" }).click();
-    await page.getByRole("button", { name: "Add a part" }).first().click();
+    await page.getByRole("button", { name: "Add a part" }).click();
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
     await page.getByRole("button", { name: new RegExp(short) }).click();
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: new RegExp(long) }).click();
+    const coverUrl = `${new URL(page.url()).origin}/icon-light.svg`;
+    await page.getByRole("textbox", { name: "Custom cover image URL" }).fill(coverUrl);
     await page.getByRole("button", { name: "Save changes" }).click();
     await expect(page.getByText("Changes saved")).toBeVisible();
     await expect(page.getByText("Choose one").first()).toBeVisible();
@@ -40,8 +41,18 @@ test.describe("multipart models", () => {
 
     await page.goto("/");
     await expect(page.getByRole("link", { name: group })).toBeVisible();
+    await page.getByRole("button", { name: `Add ${group} to favorites` }).click();
+    await page.getByRole("button", { name: `Add tags to ${group}` }).click();
+    const tagsDialog = page.getByRole("dialog");
+    const setTag = `assembly-${stamp}`;
+    await tagsDialog.getByLabel("Tags to add").fill(setTag);
+    await tagsDialog.getByRole("button", { name: "Create tag" }).click();
+    await tagsDialog.getByRole("button", { name: "Save tags" }).click();
+    await expect(page.getByText(setTag.toUpperCase())).toBeVisible();
     await expect(modelCard(page, base)).toHaveCount(0);
-    await page.getByRole("button", { name: "Everything", exact: true }).first().click();
+    await page.goto("/?favorites=true");
+    await expect(page.getByRole("link", { name: group })).toBeVisible();
+    await page.goto("/?type=all");
     await expect(modelCard(page, base)).toBeVisible();
     await expect(modelCard(page, short)).toBeVisible();
     await expect(modelCard(page, long)).toBeVisible();
@@ -55,6 +66,9 @@ test.describe("multipart models", () => {
 
     await page.goto(aggregateUrl);
     await page.getByRole("button", { name: "Edit multipart set" }).click();
+    await expect(page.getByRole("textbox", { name: "Custom cover image URL" })).toHaveValue(
+      coverUrl,
+    );
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();
