@@ -23,9 +23,14 @@ if (
 // instead (see `installChromeExtension`), which is also better than the old flag:
 // it returns the assigned extension id, so the test no longer has to scrape it out
 // of the settings page's Polymer shadow DOM.
+const chromeProfile = process.env.PRINTSTASH_EXTENSION_USER_DATA_DIR;
+const headless = process.env.PRINTSTASH_EXTENSION_HEADLESS !== "0";
 const chromeOptions = {
   binary: browserBinary,
-  args: ["--headless=new"],
+  args: [
+    ...(headless ? ["--headless=new"] : []),
+    ...(chromeProfile ? [`--user-data-dir=${chromeProfile}`] : []),
+  ],
 };
 
 const firefoxOptions = {

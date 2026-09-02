@@ -196,8 +196,9 @@ manufacturing platform.
   field a source site displays.
 - MakerWorld packages require browser transfer. Thingiverse requires extension
   capture or manual file upload: the server does not acquire Thingiverse ZIP
-  downloads. Cults credentials provide metadata only and do not enable automatic
-  file acquisition.
+  downloads, while the extension can transfer the official ZIP from an active
+  browser session. Cults credentials provide metadata only and do not enable
+  automatic file acquisition.
 - Browser staging is temporary. A review item whose staged browser upload is no
   longer available fails with `staging_expired` and must be captured again.
 - URL captures are limited to supported providers, direct files, and safe

@@ -140,6 +140,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- MakerWorld package resolution now matches the current browser request
+  contract, and Thingiverse model pages can transfer their official ZIP into
+  Pending Imports without requiring a separate local-file selection.
 - Completed uploads no longer leave a duplicate generic Import task polling
   forever; clients also reconcile the stuck duplicate rows persisted by the
   affected build.

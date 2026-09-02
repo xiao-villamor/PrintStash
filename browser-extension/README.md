@@ -65,9 +65,10 @@ pages individually. On Printables, the extension can use the signed-in page to
 let the user select files and transfer those bytes directly; server-side
 resolution remains available for the limited public fields and choices its
 supported endpoints expose. Direct URL capture uses PrintStash's SSRF
-protections. Thingiverse remains a user-assisted flow: the extension creates a
-bounded metadata draft for user-selected files and never automatically
-downloads a package or ZIP.
+protections. For Thingiverse model pages, the extension offers the site's
+official model ZIP as a bounded browser transfer. If Thingiverse requires a
+browser check or changes the response, the same metadata draft remains
+available for a manually downloaded file.
 Direct URLs may point to `.zip`,
 `.3mf`, `.stl`, `.obj`, `.step`, `.stp`, `.gcode`, `.g`, `.gco`, or `.bgcode`
 files.
@@ -118,6 +119,15 @@ and a running local WebDriver service through the `PRINTSTASH_EXTENSION_*`
 environment variables documented in `wdio.conf.ts`. Firefox also needs the
 locally built XPI and that profile's resolved `moz-extension://…/popup.html`
 URL, because Firefox assigns the origin UUID at installation time.
+
+`pnpm test:e2e:live` additionally checks the two real regression pages for
+MakerWorld model `1574312` and Thingiverse thing `7401604`. These checks are
+opt-in because provider uptime and anti-bot challenges are external state. To
+require MakerWorld's signed-package check, set
+`PRINTSTASH_MAKERWORLD_REQUIRE_DOWNLOAD=1` and point
+`PRINTSTASH_EXTENSION_USER_DATA_DIR` at a dedicated signed-in Chrome test
+profile. Set `PRINTSTASH_EXTENSION_HEADLESS=0` if an interactive browser check
+is required. Never use a daily browsing profile or commit its cookies.
 
 The capture boundary has a separate CI-only Vitest harness:
 `pnpm test:real-backend-capture`. CI provisions a throwaway local backend,

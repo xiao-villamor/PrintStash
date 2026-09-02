@@ -446,9 +446,11 @@ describe("MakerWorld MAIN-world seams", () => {
 
   it("resolves an exact selected subset using the known data.url response shape", async () => {
     const requested: string[] = [];
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    const requestOptions: RequestInit[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, options?: RequestInit) => {
       const url = String(input);
       requested.push(url);
+      requestOptions.push(options ?? {});
       const id = url.includes("instance-alt") ? "instance-alt" : "instance-default";
       return response({
         data: { url: `https://makerworld.bblmw.com/${id}.3mf?signature=ephemeral` },
@@ -471,10 +473,35 @@ describe("MakerWorld MAIN-world seams", () => {
       ],
     });
     expect(requested).toEqual([
-      "https://makerworld.com/api/v1/design-service/instance/instance-alt/f3mf?type=download&fileType=3mfstl",
-      "https://makerworld.com/api/v1/design-service/instance/instance-default/f3mf?type=download&fileType=3mfstl",
+      "https://makerworld.com/api/v1/design-service/instance/instance-alt/f3mf?type=download",
+      "https://makerworld.com/api/v1/design-service/instance/instance-default/f3mf?type=download",
     ]);
+    expect(requestOptions[0]?.headers).toMatchObject({
+      Accept: "application/json",
+      "X-BBL-App-Source": "makerworld",
+      "X-BBL-Client-Name": "MakerWorld",
+      "X-BBL-Client-Type": "web",
+      "X-BBL-Client-Version": "00.00.00.01",
+    });
     expect(JSON.stringify(result)).toContain("signature=ephemeral");
+  });
+
+  it("classifies MakerWorld HTTP 418 as a browser challenge", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({}, 418)),
+    );
+    const isolated = new Function(
+      `return (${requestMakerWorldLinksInMainWorld.toString()})`,
+    )() as typeof requestMakerWorldLinksInMainWorld;
+
+    await expect(
+      isolated({
+        endpoint: "https://makerworld.com/api/v1/design-service/instance",
+        selectedIds: ["1656140"],
+        maxResponseBytes: MAKERWORLD_MAX_RESPONSE_BYTES,
+      }),
+    ).resolves.toMatchObject({ ok: false, code: "challenge" });
   });
 
   it("rejects an unsafe final redirect and accepts a bounded allowlisted stream", async () => {

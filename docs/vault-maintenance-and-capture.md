@@ -47,7 +47,7 @@ in Pending Imports before ingestion.
 | --- | --- |
 | Printables | Server resolution can request the limited fields and file choices exposed by Printables. It cannot promise every field visible in a signed-in or changing page; the extension can provide richer visible-page capture when needed. |
 | MakerWorld | Browser transfer only. The signed-in browser downloads the selected package and uploads its bytes to PrintStash; source-site cookies and credentials are not sent to PrintStash. |
-| Thingiverse | Browser/manual file capture only. The server does not resolve Thingiverse ZIP downloads; use the extension’s selected files or upload the files manually. |
+| Thingiverse | Browser/manual file capture only. The server does not resolve Thingiverse ZIP downloads; the extension can transfer the official model ZIP from the active browser session, with manual attachment as the fallback. |
 | MyMiniFactory | An official OAuth connection can obtain supported metadata and files through the provider API. |
 | Cults | A credential connection is used for supported metadata only. PrintStash does not automatically acquire Cults files. |
 | Direct files and safe archives | Normal URL/archive capture remains available where the resolver can safely obtain the file. |

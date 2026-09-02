@@ -834,9 +834,19 @@ export async function requestMakerWorldLinksInMainWorld(args: {
     const links: MakerWorldResolvedLink[] = [];
     for (const selectedId of args.selectedIds) {
       const response = await fetch(
-        `${args.endpoint.replace(/\/$/, "")}/${encodeURIComponent(selectedId)}/f3mf?type=download&fileType=3mfstl`,
-        { credentials: "include", headers: { Accept: "application/json" } },
+        `${args.endpoint.replace(/\/$/, "")}/${encodeURIComponent(selectedId)}/f3mf?type=download`,
+        {
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "X-BBL-App-Source": "makerworld",
+            "X-BBL-Client-Name": "MakerWorld",
+            "X-BBL-Client-Type": "web",
+            "X-BBL-Client-Version": "00.00.00.01",
+          },
+        },
       );
+      if (response.status === 418) return { ok: false, code: "challenge" };
       if (response.status === 401 || response.status === 403)
         return { ok: false, code: "auth_required" };
       if (!response.ok) return { ok: false, code: "request_failed" };

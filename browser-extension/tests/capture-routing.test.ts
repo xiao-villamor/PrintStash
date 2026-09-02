@@ -33,4 +33,25 @@ describe("browser capture popup routing", () => {
 
     expect(browserCaptureRoute(withCandidates)).toBe("candidate_confirmation");
   });
+
+  it("routes a ready Thingiverse archive through candidate confirmation", () => {
+    const capture = buildBrowserCaptureMessage({
+      provider: "Thingiverse",
+      pageUrl: "https://www.thingiverse.com/thing:7401604/files",
+      pageTitle: "Cable Mount",
+    });
+    const withArchive: BrowserCaptureMessage = {
+      ...capture,
+      state: "ready",
+      candidates: [
+        {
+          id: "thingiverse:7401604:archive",
+          filename: "thingiverse-7401604.zip",
+          fileType: "other",
+        },
+      ],
+    };
+
+    expect(browserCaptureRoute(withArchive)).toBe("candidate_confirmation");
+  });
 });
