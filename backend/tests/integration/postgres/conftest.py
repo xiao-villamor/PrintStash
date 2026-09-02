@@ -27,25 +27,10 @@ restored one and `run_migrations` correctly refused to adopt it:
 `tests/e2e` alone is green; `tests/e2e tests/integration/postgres` failed two runs
 in five. Nothing was wrong with either test.
 
-The fixture below restores the metadata after every test here, so the leak cannot
-outlive the tests that cause it. It is deliberately blunt — clear the attribute on
+The suite-wide fixture in ``tests/conftest.py`` restores the metadata after every
+test, so the leak cannot outlive any test that causes it, including mock PostgreSQL
+DDL tests outside this directory. It is deliberately blunt — clear the attribute on
 every constraint rather than trying to remember which ones were touched — because
 being wrong in the other direction just means rendering a foreign key inline, which
 is what the models ask for.
 """
-
-from __future__ import annotations
-
-from typing import Iterator
-
-import pytest
-from sqlmodel import SQLModel
-
-
-@pytest.fixture(autouse=True)
-def _restore_inline_foreign_key_rendering() -> Iterator[None]:
-    yield
-
-    for table in SQLModel.metadata.tables.values():
-        for constraint in table.foreign_key_constraints:
-            constraint._create_rule = None  # noqa: SLF001 - see module docstring

@@ -738,6 +738,12 @@ def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
         with Session(engine) as session:
             snapshot = ownership_snapshot(session, discover=False)
             external_keys = {blob.key for blob in snapshot.external}
+            required_keys = {
+                blob.key for blob in [*snapshot.primary, *snapshot.embedded]
+            }
+            rebuildable_keys = {
+                blob.key for blob in snapshot.derived if blob.key not in required_keys
+            }
             blobs = [
                 *[blob for blob in snapshot.primary if blob.key not in external_keys],
                 *snapshot.derived,
@@ -756,14 +762,14 @@ def _manifest_blobs(snapshot_path: Path) -> list[dict[str, str | int]]:
                 try:
                     size = backend.stat_size(blob.key)
                 except FileNotFoundError:
-                    # Thumbnails and caches are rebuildable projections; an
-                    # absent one must not make an otherwise complete backup
-                    # impossible. Primary/source-cover bytes remain mandatory.
-                    if blob.resource_type not in {
-                        "thumbnail",
-                        "legacy_thumbnail",
-                        "stl_cache",
-                    }:
+                    # Every entry from ``snapshot.derived`` is a rebuildable
+                    # projection, including immutable thumbnail generations
+                    # and the superseded compatibility address. Classify by
+                    # ownership group instead of maintaining a second list of
+                    # resource-type strings that drifts when a derivative is
+                    # added. A key also claimed by a primary/embedded resource
+                    # remains mandatory.
+                    if blob.key not in rebuildable_keys:
                         raise
                     continue
                 digest = hashlib.sha256()

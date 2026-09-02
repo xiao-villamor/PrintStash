@@ -155,6 +155,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   individual files instead of manufacturing a model ZIP candidate.
 - Browser-extension failures now lead with a short recovery step and keep safe
   diagnostic codes in a collapsed technical-details section.
+- Cached 3D previews no longer leave their loading spinner over an already
+  rendered model when the same Model is reopened.
+- Manual backups no longer fail when a superseded thumbnail or another
+  rebuildable preview projection is absent from storage; original Artifact
+  bytes remain mandatory.
 - Completed uploads no longer leave a duplicate generic Import task polling
   forever; clients also reconcile the stuck duplicate rows persisted by the
   affected build.

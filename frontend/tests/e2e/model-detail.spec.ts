@@ -23,6 +23,26 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("cached 3D preview clears its loading indicator", async ({ page }) => {
+    const modelLink = page.getByRole("link", { name: /skadis_kitchen-roll_screw/ }).first();
+    const preview = page.getByLabel("3D model preview");
+    const loadingPreview = page.getByRole("status", { name: "Loading 3D preview" });
+
+    await page.goto("/");
+    await modelLink.click();
+    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(preview).toBeVisible();
+    await expect(loadingPreview).toHaveCount(0);
+
+    await page.goBack();
+    await expect(page).toHaveURL(/\/$/);
+    await modelLink.click();
+    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(preview).toBeVisible();
+
+    await expect(loadingPreview).toHaveCount(0);
+  });
+
   test("model detail route renders data and hydrates printer integrations", async ({ page }) => {
     const problems = await collectPageProblems(page);
 

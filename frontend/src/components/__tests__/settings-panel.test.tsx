@@ -960,6 +960,36 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("reports a backup failure", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "POST /api/v1/backups": json({ detail: "backup_blob_missing" }, 409),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: /Backup now/ }));
+
+      expect(await screen.findByText("Backup blob missing.")).toBeVisible();
+    });
+
+    it("allows retrying after a backup failure", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=storage",
+        routes: {
+          "POST /api/v1/backups": json({ detail: "backup_blob_missing" }, 409),
+        },
+      });
+      const backupNow = await screen.findByRole("button", { name: /Backup now/ });
+
+      await user.click(backupNow);
+      await screen.findByText("Backup blob missing.");
+
+      expect(backupNow).toBeEnabled();
+    });
+
     it("keeps older id-only backups when the new response lacks a source reference", async () => {
       const user = userEvent.setup();
       const olderLocal = {

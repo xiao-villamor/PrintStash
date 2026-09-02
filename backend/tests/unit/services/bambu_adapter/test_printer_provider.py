@@ -30,6 +30,7 @@ import pytest
 from paho.mqtt import client as mqtt
 from paho.mqtt.packettypes import PacketTypes
 from paho.mqtt.reasoncodes import ReasonCode
+from printstash_core.printers import PrintArtifactFormat
 
 from app.db.models import PrinterProvider
 from app.services.printer_provider import (
@@ -39,7 +40,6 @@ from app.services.printer_provider import (
     ElegooCentauriProvider,
     MoonrakerProvider,
     OctoPrintProvider,
-    PrintArtifactFormat,
     ProviderCapabilities,
     ProviderError,
     PrusaLinkProvider,

@@ -76,6 +76,29 @@ _RESOURCES = {
 }
 
 
+def restore_inline_foreign_key_rendering() -> None:
+    """Clear dialect-specific DDL state from the shared model metadata."""
+    for table in SQLModel.metadata.tables.values():
+        for constraint in table.foreign_key_constraints:
+            constraint._create_rule = None  # noqa: SLF001 - see fixture docstring
+
+
+@pytest.fixture(autouse=True)
+def _isolate_inline_foreign_key_rendering() -> Iterator[None]:
+    """Keep dialect-specific DDL compilation from leaking into later tests.
+
+    PostgreSQL ``create_all`` marks the foreign keys involved in the
+    files/models cycle for separate ALTER emission by mutating the shared
+    ``SQLModel.metadata``. SQLite cannot emit those ALTER statements, so a
+    later test would otherwise create a database without the eight affected
+    foreign keys. This must be suite-wide because mock PostgreSQL engines and
+    future DDL tests can trigger the same SQLAlchemy mutation outside the
+    container-backed PostgreSQL directory.
+    """
+    yield
+    restore_inline_foreign_key_rendering()
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Mark the tiers that have their own lane, and refuse to run without a service.
 

@@ -38,6 +38,7 @@ from app.db.models import (
     SENTINEL_MODEL_HASH,
     Document,
     DocumentKind,
+    File,
     FileType,
     Model,
     OwnedStorageObject,
@@ -622,6 +623,26 @@ class TestCreateBackup:
         assert "manifest.json" in names
         # Two blobs captured under files/.
         assert sum(1 for n in names if n.startswith("files/") and n != "files/") == 2
+
+    def test_backs_up_a_model_whose_superseded_thumbnail_is_absent(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Widget", content=b"solid widget\n")
+        backend = get_backend()
+        with backup_env.new_session() as session:
+            file_row = session.exec(select(File)).one()
+            assert file_row.id is not None
+            current_thumbnail = backend.thumbnail_variant_key(
+                file_row.id, file_row.sha256 or "a" * 64, "b" * 64
+            )
+            backend.write_bytes(b"current thumbnail", current_thumbnail)
+            file_row.thumbnail_path = current_thumbnail
+            session.add(file_row)
+            session.commit()
+
+        meta = backup.create_backup()
+
+        assert meta.file_count == 2
 
     def test_create_backup_includes_rows_committed_only_to_wal(
         self, backup_env: BackupEnv

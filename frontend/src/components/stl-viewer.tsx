@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Canvas, useLoader, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -20,6 +20,7 @@ import {
   screenshotHasForeground,
   visibleCanvasBackground,
 } from "@/lib/thumbnail-camera";
+import { useViewerReadiness } from "@/lib/use-viewer-readiness";
 
 export type ViewerDisplayMode = "solid" | "xray" | "wireframe";
 
@@ -124,7 +125,7 @@ function Scene({
   const [modelSize, setModelSize] = useState(
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
-  const [loaded, setLoaded] = useState(false);
+  const { loaded, setLoaded } = useViewerReadiness(url);
   const loadedChangeRef = useRef(onLoadedChange);
   useEffect(() => {
     loadedChangeRef.current = onLoadedChange;
@@ -142,7 +143,7 @@ function Scene({
       loadedChangeRef.current?.(true);
       invalidate();
     },
-    [invalidate],
+    [invalidate, setLoaded],
   );
 
   const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
@@ -247,8 +248,7 @@ function Scene({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onControlsReady, modelSize, loaded, canvasSize.width, canvasSize.height]);
 
-  useEffect(() => {
-    setLoaded(false);
+  useLayoutEffect(() => {
     loadedChangeRef.current?.(false);
   }, [url]);
 
@@ -332,8 +332,7 @@ export function STLViewer({
 }: STLViewerProps) {
   // Tracking *which* url has loaded, rather than a bare boolean, makes the url
   // swap reset the overlay during render instead of through a reset effect.
-  const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
-  const meshLoaded = loadedUrl === url;
+  const { loaded: meshLoaded, setLoaded: setMeshLoaded } = useViewerReadiness(url);
   const previewPreferences = usePreviewPreferences();
 
   useEffect(() => {
@@ -344,6 +343,7 @@ export function STLViewer({
     <div className="relative h-full w-full">
       <MeshErrorBoundary key={url}>
         <Canvas
+          aria-label="3D model preview"
           className="h-full w-full"
           dpr={previewPixelRatio(previewPreferences.previewQuality)}
           frameloop="demand"
@@ -351,7 +351,7 @@ export function STLViewer({
           <Scene
             url={url}
             onControlsReady={onControlsReady}
-            onLoadedChange={(loaded) => setLoadedUrl(loaded ? url : null)}
+            onLoadedChange={setMeshLoaded}
             displayMode={displayMode}
             showGrid={showGrid}
             screenshotName={screenshotName}
@@ -361,7 +361,11 @@ export function STLViewer({
         {/* Overlay while the mesh downloads/parses — the canvas mounts
             immediately, so without this the viewer is a blank void. */}
         {!meshLoaded && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div
+            role="status"
+            aria-label="Loading 3D preview"
+            className="pointer-events-none absolute inset-0 flex items-center justify-center"
+          >
             <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
           </div>
         )}

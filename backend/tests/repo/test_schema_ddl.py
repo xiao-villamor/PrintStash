@@ -40,11 +40,13 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     UniqueConstraint,
     create_engine,
+    create_mock_engine,
 )
 from sqlalchemy.schema import ColumnCollectionConstraint, Constraint, CreateTable
 from sqlmodel import SQLModel
 
 import app.db.models  # noqa: F401 - registers every table on SQLModel.metadata
+from tests.conftest import restore_inline_foreign_key_rendering
 
 # The two tables in the cycle, and therefore the only two whose constraints
 # SQLAlchemy ever lifts out. Naming them rather than sweeping every table keeps the
@@ -103,6 +105,25 @@ def sqlite_dialect():
 
 
 class TestCreateTable:
+    def test_suite_cleanup_restores_metadata_after_postgres_create_all(self) -> None:
+        engine = create_mock_engine(
+            "postgresql+psycopg://", lambda *_args, **_kwargs: None
+        )
+
+        SQLModel.metadata.create_all(engine)
+
+        assert any(
+            constraint._create_rule is not None  # noqa: SLF001
+            for table in SQLModel.metadata.tables.values()
+            for constraint in table.foreign_key_constraints
+        )
+        restore_inline_foreign_key_rendering()
+        assert all(
+            constraint._create_rule is None  # noqa: SLF001
+            for table in SQLModel.metadata.tables.values()
+            for constraint in table.foreign_key_constraints
+        )
+
     @pytest.mark.parametrize("table_name", CYCLE_TABLES)
     def test_renders_every_declared_foreign_key_inline_for_sqlite(
         self, sqlite_dialect, table_name: str

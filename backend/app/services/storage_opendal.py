@@ -151,6 +151,12 @@ class OpenDALStorageBackend(StorageBackend):
         if response.status_code == 412:
             raise StorageCollisionError(destination)
         if response.status_code not in {201, 204}:
+            # Nextcloud can answer 500 instead of the WebDAV-required 412 when
+            # two Overwrite:F MOVE requests race. Do not broadly translate
+            # server errors: only classify the failure as a collision after
+            # confirming that the destination now exists.
+            if self._operator.exists(destination):
+                raise StorageCollisionError(destination)
             raise StorageConfigurationError(
                 f"webdav_move_failed:{response.status_code}"
             )

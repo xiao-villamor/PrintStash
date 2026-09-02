@@ -572,6 +572,22 @@ class TestOpenDALStorageBackend:
         with pytest.raises(StorageConfigurationError, match="webdav_move_failed"):
             backend._webdav_move_create_only("tmp", "destination")
 
+    def test_maps_a_webdav_move_failure_when_destination_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        operator = _MemoryOperator()
+        operator.objects["destination"] = b"winning publication"
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(options={"endpoint_url": "https://dav.example", "root": "vault"}),
+            operator=operator,
+        )
+        monkeypatch.setattr(
+            httpx, "request", lambda *_args, **_kwargs: httpx.Response(500)
+        )
+
+        with pytest.raises(StorageCollisionError):
+            backend._webdav_move_create_only("tmp", "destination")
+
     def test_accepts_a_confirmed_webdav_collection_race(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
