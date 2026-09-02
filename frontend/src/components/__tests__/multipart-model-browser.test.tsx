@@ -1,7 +1,7 @@
 /** Multipart browser/editor behaviour for fixed parts, alternatives, and unavailable Models. */
 import "@testing-library/jest-dom/vitest";
 
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -266,6 +266,70 @@ describe("MultipartModelBrowser", () => {
 });
 
 describe("MultipartModelDetailPage", () => {
+  it("opens as a visual overview", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({
+            description: "Everything needed for the organiser",
+            part_count: 1,
+            model_count: 1,
+            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+          }),
+        ),
+      },
+    });
+
+    expect(await screen.findByText("Everything needed for the organiser")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Base" })).toBeVisible();
+    expect(screen.getByRole("link", { name: /Desk base/ })).toHaveAttribute("href", "/models/12");
+    expect(screen.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    expect(screen.queryByLabelText("Part name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
+  });
+
+  it("reveals management controls after entering edit mode", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({
+            part_count: 1,
+            model_count: 1,
+            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+          }),
+        ),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+
+    expect(screen.getByLabelText("Part name")).toHaveValue("Base");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeVisible();
+  });
+
+  it("discards an unsaved draft when editing is cancelled", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    const name = screen.getByRole("textbox", { name: "Name" });
+    await user.clear(name);
+    await user.type(name, "Unsaved name");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
+    expect(screen.queryByDisplayValue("Unsaved name")).not.toBeInTheDocument();
+  });
+
   it("persists the reordered pieces", async () => {
     const user = userEvent.setup();
     const detail = aMultipart({
@@ -285,6 +349,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByDisplayValue("Lid");
     await user.click(screen.getByRole("button", { name: "Move piece up: Lid" }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -319,6 +384,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByText("No guides yet");
     const input = document.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
@@ -352,19 +418,22 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    await user.click(await screen.findByRole("button", { name: "Remove guide: Assembly" }));
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.click(screen.getByRole("button", { name: "Remove guide: Assembly" }));
 
     await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(1));
     expect(screen.queryByRole("link", { name: "Assembly" })).not.toBeInTheDocument();
   });
 
   it("shows an empty editor with a first-part action", async () => {
+    const user = userEvent.setup();
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
       routePath: "/multipart-models/:id",
       routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     expect(
       (await screen.findAllByRole("button", { name: /Add (the first part|a part)/i }))[0],
     ).toBeVisible();
@@ -386,7 +455,8 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    expect(await screen.findByLabelText("Part name")).toBeVisible();
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    expect(screen.getByLabelText("Part name")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /Remove model.*Desk base/ }));
     expect(screen.queryByLabelText("Part name")).not.toBeInTheDocument();
@@ -406,6 +476,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByText("No pieces added yet");
     await user.click(screen.getAllByRole("button", { name: /Add (the first part|a part)/i })[0]);
     await user.click(await screen.findByRole("button", { name: /Desk base/ }));
@@ -431,6 +502,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByDisplayValue("Base");
     await user.click(screen.getByRole("button", { name: "Add variant" }));
     const options = await screen.findAllByRole("listitem");
@@ -457,7 +529,8 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    const partName = await screen.findByDisplayValue("Base");
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    const partName = screen.getByDisplayValue("Base");
     await user.clear(partName);
     await user.type(partName, "Top");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -479,9 +552,10 @@ describe("MultipartModelDetailPage", () => {
     });
 
     await screen.findByRole("heading", { name: "Desk organiser" });
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
     await user.click(screen.getByRole("button", { name: "Delete multipart set" }));
     expect(screen.getByText(/Models, files and revisions stay in your library/)).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => {
       expect(
@@ -559,7 +633,8 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    const name = await screen.findByDisplayValue("Desk organiser");
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    const name = screen.getByDisplayValue("Desk organiser");
     await user.clear(name);
     await user.type(name, "Updated organiser");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -605,6 +680,7 @@ describe("MultipartModelDetailPage", () => {
     });
 
     expect(await screen.findByText("Model unavailable")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
     await user.click(screen.getByRole("button", { name: /Remove model.*Model unavailable/ }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -627,6 +703,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await screen.findByText("No pieces added yet");
     await user.click(screen.getAllByRole("button", { name: /Add (the first part|a part)/i })[0]);
     const picker = await screen.findByRole("list", { name: "Choose an existing model" });
@@ -681,6 +758,7 @@ describe("MultipartModelDetailPage", () => {
 
     expect(await screen.findByText("Short file")).toBeVisible();
     expect(screen.getByText("Long file")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));

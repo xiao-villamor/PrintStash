@@ -139,6 +139,8 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.getByRole("button", { name: "Add a part" }).first().click();
     await page.getByRole("button", { name: /Desk base/ }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
@@ -155,12 +157,23 @@ test.describe("multipart models", () => {
       ],
     });
     await expect(page.getByText("Choose one").first()).toBeVisible();
+    const cardDimensions = await page.getByRole("link", { name: /Desk base/ }).evaluate((card) => {
+      const bounds = card.getBoundingClientRect();
+      return { height: bounds.height, width: bounds.width };
+    });
+    expect(Math.abs(cardDimensions.width - cardDimensions.height)).toBeLessThanOrEqual(1);
+    expect(cardDimensions.width).toBeLessThanOrEqual(288);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Desk base/ })).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/?v=multipart");
     await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
     await page.getByRole("tab", { name: "Models", exact: true }).click();
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
 
     await page.goto("/multipart-models/90");
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();

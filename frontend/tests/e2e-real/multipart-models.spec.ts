@@ -19,6 +19,7 @@ test.describe("multipart models", () => {
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.getByRole("button", { name: "Add a part" }).first().click();
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
@@ -29,6 +30,7 @@ test.describe("multipart models", () => {
     await expect(page.getByText("Changes saved")).toBeVisible();
     await expect(page.getByText("Choose one").first()).toBeVisible();
 
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.locator('input[type="file"][accept*=".pdf"]').setInputFiles({
       name: "assembly.md",
       mimeType: "text/markdown",
@@ -51,6 +53,7 @@ test.describe("multipart models", () => {
     await expect(page.getByText("Recommended", { exact: true }).first()).toBeVisible();
 
     await page.goto(aggregateUrl);
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.getByRole("button", { name: "Delete multipart set" }).click();
     await expect(page.getByRole("dialog")).toContainText("Models, files and revisions stay");
     await page.getByRole("button", { name: "Delete set" }).click();
