@@ -10,7 +10,7 @@ import "react-pdf/dist/Page/TextLayer.css";
 // Vite bundles the worker from the pinned pdfjs-dist (matches react-pdf's copy).
 pdfjs.GlobalWorkerOptions.workerSrc =
   new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString() +
-  "?cache=pdfjs-worker-v2";
+  "?cache=pdfjs-worker-v3";
 
 const btn =
   "flex items-center justify-center p-1.5 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-default";

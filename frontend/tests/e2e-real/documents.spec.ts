@@ -6,6 +6,7 @@
  * case is here because rendering one goes through pdf.js in the browser, which no unit
  * test can stand in for.
  */
+import { devices } from "@playwright/test";
 import { test, expect, type Page } from "./helpers";
 import { createCollectionViaVault } from "./util";
 
@@ -119,15 +120,27 @@ test.describe("documents", () => {
     await page.reload();
     await expect(page.getByRole("heading", { name: "Printed parts" })).toBeVisible();
   });
+});
 
-  test("upload a PDF and render it in the pdf.js viewer", async ({ page }) => {
+test.describe("PDF documents", () => {
+  test.use({
+    viewport: devices["Pixel 5"].viewport,
+    userAgent: devices["Pixel 5"].userAgent,
+    deviceScaleFactor: devices["Pixel 5"].deviceScaleFactor,
+    isMobile: devices["Pixel 5"].isMobile,
+    hasTouch: devices["Pixel 5"].hasTouch,
+  });
+
+  test("renders an uploaded PDF in the pdf.js viewer", async ({ page }) => {
     const col = `e2e-pdf-${Date.now()}`;
     const workerRequests: string[] = [];
     page.on("request", (request) => {
       if (request.url().includes("pdf.worker")) workerRequests.push(request.url());
     });
+    await page.setViewportSize({ width: 1280, height: 720 });
     await makeCollection(page, col);
     await openDocsTab(page, col);
+    await page.setViewportSize({ width: 393, height: 851 });
 
     await page
       .locator('input[accept=".pdf,.md,.markdown,.txt"]')
@@ -138,7 +151,7 @@ test.describe("documents", () => {
     // Worker + render can take a moment; assert the page counter resolves.
     await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
     expect(workerRequests).toHaveLength(1);
-    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-v2");
+    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-v3");
     await expect(page.getByTitle("Zoom in")).toBeVisible();
     await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 

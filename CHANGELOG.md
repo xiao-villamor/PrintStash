@@ -165,12 +165,16 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Multipart Model editing now keeps part actions, variants, metadata, and the
+  Save action in the mobile flow. Model-detail previews reserve a larger touch
+  surface, keep their file label clear of viewer controls, and use 44px mobile
+  targets without handing drag gestures to the page.
 - Selecting **None** while editing a Model now removes its Collection
   assignment instead of leaving the Model in its previous Collection
   ([#110](https://github.com/xiao-villamor/PrintStash/issues/110)).
 - PDF guides recover from browsers that cached the pdf.js worker before its
-  production MIME type was corrected; module-worker responses now revalidate
-  instead of preserving stale headers for a year.
+  production MIME type was corrected; a fresh versioned worker URL bypasses
+  the immutable bad response, and module-worker responses now revalidate.
 - Backup restore confirmations now keep long source identities, namespaces,
   and checksums contained within the dialog at desktop and mobile widths.
 - Saved light and dark theme preferences now survive a page refresh under the
