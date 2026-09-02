@@ -21,6 +21,7 @@ class MultipartModelListItem(BaseModel):
     part_count: int = 0
     model_count: int = 0
     guide_count: int = 0
+    cover_model_id: Optional[int] = None
     cover_thumbnail_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     updated_at: datetime
@@ -99,3 +100,4 @@ class MultipartModelSave(MultipartModelUpdate):
     """Atomic metadata and composition replacement."""
 
     parts: list[MultipartPartWrite] = Field(default_factory=list, max_length=100)
+    cover_model_id: Optional[int] = Field(default=None, gt=0)

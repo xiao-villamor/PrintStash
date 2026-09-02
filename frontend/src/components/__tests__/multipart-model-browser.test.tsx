@@ -24,6 +24,7 @@ function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead 
     part_count: 0,
     model_count: 0,
     guide_count: 0,
+    cover_model_id: null,
     cover_thumbnail_url: null,
     effective_role: "admin",
     created_at: "2026-01-01T00:00:00Z",
@@ -78,6 +79,7 @@ function aListItem(over: Partial<MultipartModelListItem> = {}): MultipartModelLi
     part_count: 2,
     model_count: 3,
     guide_count: 0,
+    cover_model_id: null,
     cover_thumbnail_url: null,
     effective_role: "admin",
     updated_at: "2026-01-01T00:00:00Z",
@@ -139,6 +141,47 @@ describe("MultipartModelBrowser", () => {
         .filter((link) => link.getAttribute("href")?.startsWith("/multipart-models/"))
         .map((link) => link.textContent),
     ).toEqual([expect.stringContaining("Adapter kit"), expect.stringContaining("Zebra stand")]);
+  });
+
+  it("filters sets by multipart structure", async () => {
+    renderApp(
+      <MultipartModelBrowser
+        collection={null}
+        structure="variants"
+        canCreate
+        onCreate={() => undefined}
+      />,
+      {
+        routes: {
+          "GET /api/v1/multipart-models": json([
+            aListItem({ id: 8, name: "Variant handle", part_count: 1, model_count: 2 }),
+            aListItem({ id: 9, name: "Fixed base", part_count: 1, model_count: 1 }),
+            aListItem({ id: 10, name: "Empty kit", part_count: 0, model_count: 0 }),
+          ]),
+        },
+      },
+    );
+
+    expect(await screen.findByRole("link", { name: /Variant handle/ })).toBeVisible();
+    expect(screen.queryByRole("link", { name: /Fixed base/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Empty kit/ })).not.toBeInTheDocument();
+  });
+
+  it("filters sets that have guides", async () => {
+    renderApp(
+      <MultipartModelBrowser collection={null} guidesOnly canCreate onCreate={() => undefined} />,
+      {
+        routes: {
+          "GET /api/v1/multipart-models": json([
+            aListItem({ id: 8, name: "Assembly kit", guide_count: 1 }),
+            aListItem({ id: 9, name: "Undocumented kit", guide_count: 0 }),
+          ]),
+        },
+      },
+    );
+
+    expect(await screen.findByRole("link", { name: /Assembly kit/ })).toBeVisible();
+    expect(screen.queryByRole("link", { name: /Undocumented kit/ })).not.toBeInTheDocument();
   });
 
   it("shows the empty list action", async () => {
@@ -539,8 +582,38 @@ describe("MultipartModelDetailPage", () => {
     expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({
       name: "Desk organiser",
       description: null,
+      cover_model_id: null,
       parts: [{ name: "Top", choices: [{ model_id: 12, choice_id: 101 }] }],
     });
+  });
+
+  it("saves a linked Model as the set cover", async () => {
+    const user = userEvent.setup();
+    const detail = aMultipart({
+      part_count: 1,
+      model_count: 2,
+      parts: [{ id: 1, name: "Base", sort_order: 0, models: [model, alternative] }],
+    });
+    const saved = { ...detail, cover_model_id: alternative.id };
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json(saved),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Cover model" }),
+      String(alternative.id),
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
+    expect(JSON.parse(requestsWithMethod("PUT")[0].body).cover_model_id).toBe(alternative.id);
+    expect(screen.getByText("Set cover")).toBeVisible();
   });
 
   it("allows cancelling the delete confirmation", async () => {
@@ -597,7 +670,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    expect(await screen.findByText("Model unavailable")).toBeVisible();
+    expect((await screen.findAllByText("Model unavailable"))[0]).toBeVisible();
     expect(screen.queryByRole("link", { name: "Model unavailable" })).not.toBeInTheDocument();
   });
 
@@ -679,7 +752,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    expect(await screen.findByText("Model unavailable")).toBeVisible();
+    expect((await screen.findAllByText("Model unavailable"))[0]).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
     await user.click(screen.getByRole("button", { name: /Remove model.*Model unavailable/ }));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
@@ -688,6 +761,7 @@ describe("MultipartModelDetailPage", () => {
     expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({
       name: "Desk organiser",
       description: null,
+      cover_model_id: null,
       parts: [],
     });
   });

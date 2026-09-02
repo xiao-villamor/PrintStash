@@ -21,7 +21,12 @@ import { MODEL_DND_MIME } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
-import { MultipartModelBrowser } from "@/components/multipart-model-browser";
+import {
+  MultipartModelBrowser,
+  NewMultipartModelModal,
+  type MultipartStructureFilter,
+} from "@/components/multipart-model-browser";
+import { MultipartFilterSidebar } from "@/components/multipart-filter-sidebar";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
 import { FilterSidebar } from "@/components/filter-sidebar";
@@ -497,6 +502,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       : readLastView();
   const [docView, setDocView] = useState<"models" | "docs" | "multipart">(initialVaultView);
   const isMultipartView = docView === "multipart";
+  const [multipartStructure, setMultipartStructure] = useState<MultipartStructureFilter>("all");
+  const [multipartGuidesOnly, setMultipartGuidesOnly] = useState(false);
+  const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
@@ -1509,6 +1517,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           preloadItems={dropPreload?.items ?? null}
           initialMode={dropPreload?.mode}
         />
+        <NewMultipartModelModal
+          open={multipartCreateOpen}
+          onClose={() => setMultipartCreateOpen(false)}
+          collectionId={selectedCollectionRow?.id ?? null}
+        />
         {!isMultipartView && (
           <MobileFilterDrawer
             open={filterDrawerOpen}
@@ -1549,44 +1562,56 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         )}
 
         {/* Stitch layout: filter sidebar + main content */}
-        <FilterSidebar
-          collections={collections}
-          models={outlinerModels}
-          tags={tags}
-          printers={printers}
-          selectedCollection={selectedCollection}
-          selectedTags={selectedTags}
-          selectedPrinterId={selectedPrinterId}
-          selectedPrinterPresence={selectedPrinterPresence}
-          onCollectionChange={handleCollectionChange}
-          onTagsChange={setSelectedTags}
-          onPrinterChange={setSelectedPrinterId}
-          onPrinterPresenceChange={setSelectedPrinterPresence}
-          onCreateCollection={handleOpenCreateCollection}
-          onMoveModel={handleMoveModel}
-          onMoveCollection={handleMoveCollection}
-          onDeleteCollection={handleDeleteCollection}
-          canViewPrinters={canViewPrinters}
-          loading={facetsLoading || facetQuery.isLoading}
-          structuredFilters={
-            <StructuredFilters
-              facets={facetQuery.data}
-              loading={facetQuery.isLoading}
-              error={facetQuery.isError}
-              active={structured}
-              onChange={setStructuredFilter}
-              uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
-              uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
-              onDateChange={(key, value) => {
-                const params = new URLSearchParams(searchParams.toString());
-                if (value) params.set(key, value);
-                else params.delete(key);
-                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
-              }}
-              onClearAll={clearStructuredFilters}
-            />
-          }
-        />
+        {isMultipartView ? (
+          <MultipartFilterSidebar
+            collections={collections}
+            selectedCollection={selectedCollection}
+            structure={multipartStructure}
+            guidesOnly={multipartGuidesOnly}
+            onCollectionChange={handleCollectionChange}
+            onStructureChange={setMultipartStructure}
+            onGuidesOnlyChange={setMultipartGuidesOnly}
+          />
+        ) : (
+          <FilterSidebar
+            collections={collections}
+            models={outlinerModels}
+            tags={tags}
+            printers={printers}
+            selectedCollection={selectedCollection}
+            selectedTags={selectedTags}
+            selectedPrinterId={selectedPrinterId}
+            selectedPrinterPresence={selectedPrinterPresence}
+            onCollectionChange={handleCollectionChange}
+            onTagsChange={setSelectedTags}
+            onPrinterChange={setSelectedPrinterId}
+            onPrinterPresenceChange={setSelectedPrinterPresence}
+            onCreateCollection={handleOpenCreateCollection}
+            onMoveModel={handleMoveModel}
+            onMoveCollection={handleMoveCollection}
+            onDeleteCollection={handleDeleteCollection}
+            canViewPrinters={canViewPrinters}
+            loading={facetsLoading || facetQuery.isLoading}
+            structuredFilters={
+              <StructuredFilters
+                facets={facetQuery.data}
+                loading={facetQuery.isLoading}
+                error={facetQuery.isError}
+                active={structured}
+                onChange={setStructuredFilter}
+                uploadedAfter={searchParams.get("uploaded_after") ?? undefined}
+                uploadedBefore={searchParams.get("uploaded_before") ?? undefined}
+                onDateChange={(key, value) => {
+                  const params = new URLSearchParams(searchParams.toString());
+                  if (value) params.set(key, value);
+                  else params.delete(key);
+                  router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+                }}
+                onClearAll={clearStructuredFilters}
+              />
+            }
+          />
+        )}
 
         <main
           className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
@@ -1610,7 +1635,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   onClick={() => handleCollectionChange(null)}
                   className="text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  {isMultipartView ? t("nav.vault") : "All Models"}
+                  {isMultipartView ? t("multipart.title") : "All Models"}
                 </button>
                 {breadcrumbs.map((crumb) => (
                   <span key={crumb.id} className="flex items-center space-x-2">
@@ -1629,7 +1654,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 onClick={() => handleCollectionChange(null)}
                 className="text-foreground font-medium"
               >
-                {isMultipartView ? t("nav.vault") : "All Models"}
+                {isMultipartView ? t("multipart.title") : "All Models"}
               </button>
             )}
             {availableRecentFolders.length > 0 && (
@@ -1685,6 +1710,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </nav>
 
           {/* Content Top Bar */}
+          {isMultipartView && (
+            <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="min-w-0 space-y-1">
+                  <h1 className="break-words text-lg font-bold tracking-tight text-foreground sm:truncate sm:text-2xl">
+                    {selectedName ?? t("multipart.title")}
+                  </h1>
+                  <p className="max-w-3xl text-sm text-muted-foreground">
+                    {t("multipart.description")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="xs"
+                  onClick={() => setMultipartCreateOpen(true)}
+                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  title={
+                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
+                      ? undefined
+                      : t("multipart.editAccess")
+                  }
+                  className="h-10 shrink-0 sm:h-8"
+                >
+                  <Plus className="h-4 w-4" /> {t("multipart.new")}
+                </Button>
+              </div>
+            </div>
+          )}
           {!isMultipartView && (
             <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -2130,8 +2183,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {docView === "multipart" ? (
             <MultipartModelBrowser
               collection={selectedCollection}
-              collections={collections}
+              structure={multipartStructure}
+              guidesOnly={multipartGuidesOnly}
               canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+              onCreate={() => setMultipartCreateOpen(true)}
+              onStructureChange={setMultipartStructure}
+              onGuidesOnlyChange={setMultipartGuidesOnly}
             />
           ) : docView === "docs" ? (
             <DocumentBrowser

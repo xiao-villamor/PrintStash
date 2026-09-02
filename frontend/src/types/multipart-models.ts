@@ -27,6 +27,7 @@ export interface MultipartModelListItem {
   part_count: number;
   model_count: number;
   guide_count: number;
+  cover_model_id: number | null;
   cover_thumbnail_url: string | null;
   effective_role: CollectionRole | null;
   updated_at: string;
@@ -59,6 +60,7 @@ export interface MultipartModelUpdate {
 export interface MultipartPartsWrite {
   name: string;
   description: string | null;
+  cover_model_id: number | null;
   parts: Array<{
     name: string;
     choices: Array<{ model_id: number; choice_id?: number }>;

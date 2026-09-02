@@ -163,12 +163,16 @@ class TestImportArchive:
             aggregate,
             [MultipartPartWrite(name="Handle", model_ids=[member.id])],
         )
+        aggregate.cover_model_id = member.id
+        db_session.add(aggregate)
+        db_session.commit()
         archive_path = library_transfer.create_archive(db_session, user)
         try:
             with zipfile.ZipFile(archive_path) as archive:
                 manifest = json.loads(archive.read("manifest.json"))
             portable = manifest["multipart_models"][0]
             assert portable["parts"][0]["choices"] == [{"model_source_id": member.id}]
+            assert portable["cover_model_source_id"] == member.id
             assert (
                 library_transfer.PortableManifest.model_validate(
                     {"format": library_transfer.FORMAT, "models": []}
@@ -184,6 +188,7 @@ class TestImportArchive:
             ).one()
             restored_part = multipart_models.read(db_session, user, restored).parts[0]
             assert restored_part.models[0].id == member.id
+            assert restored.cover_model_id == member.id
             assert db_session.get(File, mesh.id) is not None
             assert db_session.get(File, gcode.id).is_recommended is True
         finally:
@@ -1461,6 +1466,27 @@ class TestPortableManifestValidation:
                         "parts": [
                             {"name": "Handle", "model_source_ids": [99]},
                         ],
+                    }
+                ],
+            )
+
+    def test_rejects_a_multipart_cover_outside_its_choices(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart cover must reference an archive choice"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[
+                    {"source_id": 1, "name": "Base", "hash": "a" * 64},
+                    {"source_id": 2, "name": "Other", "hash": "b" * 64},
+                ],
+                multipart_models=[
+                    {
+                        "source_id": 5,
+                        "name": "Assembly",
+                        "slug": "assembly",
+                        "cover_model_source_id": 2,
+                        "parts": [{"name": "Base", "model_source_ids": [1]}],
                     }
                 ],
             )

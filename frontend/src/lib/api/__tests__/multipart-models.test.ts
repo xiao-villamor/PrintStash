@@ -59,6 +59,7 @@ describe("multipart model wire contract", () => {
     await saveMultipartModel(4, {
       name: "Updated",
       description: "Description",
+      cover_model_id: 8,
       parts: [
         {
           name: "Base",
@@ -70,6 +71,7 @@ describe("multipart model wire contract", () => {
     expect(lastBody()).toEqual({
       name: "Updated",
       description: "Description",
+      cover_model_id: 8,
       parts: [{ name: "Base", choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }] }],
     });
   });

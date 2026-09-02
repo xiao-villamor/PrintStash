@@ -224,6 +224,7 @@ class PortableMultipartModel(BaseModel):
     slug: str = PydanticField(min_length=1, max_length=255)
     description: str | None = None
     collection: str | None = PydanticField(default=None, max_length=512)
+    cover_model_source_id: int | None = None
     parts: list[PortableMultipartPart] = PydanticField(default_factory=list)
 
     @model_validator(mode="after")
@@ -313,6 +314,12 @@ class PortableManifest(BaseModel):
                     )
             if len(selected) != len(set(selected)):
                 raise ValueError("multipart models must reference archive choices once")
+            if (
+                aggregate.cover_model_source_id is not None
+                and aggregate.cover_model_source_id
+                not in {model_id for model_id, _artifact_id in selected}
+            ):
+                raise ValueError("multipart cover must reference an archive choice")
         return self
 
 
@@ -565,16 +572,21 @@ def create_archive(session: Session, user: User) -> Path:
                 portable_choices.append(portable_choice)
             if portable_choices:
                 portable_parts.append({"name": part.name, "choices": portable_choices})
-        manifest["multipart_models"].append(  # type: ignore[union-attr]
-            {
-                "source_id": aggregate.id,
-                "name": aggregate.name,
-                "slug": aggregate.slug,
-                "description": aggregate.description,
-                "collection": aggregate_collection_paths.get(aggregate.collection_id),
-                "parts": portable_parts,
-            }
-        )
+        portable_aggregate: dict[str, object] = {
+            "source_id": aggregate.id,
+            "name": aggregate.name,
+            "slug": aggregate.slug,
+            "description": aggregate.description,
+            "collection": aggregate_collection_paths.get(aggregate.collection_id),
+            "parts": portable_parts,
+        }
+        if aggregate.cover_model_id in visible_model_ids and any(
+            choice.get("model_source_id") == aggregate.cover_model_id
+            for part in portable_parts
+            for choice in part.get("choices", [])  # type: ignore[union-attr]
+        ):
+            portable_aggregate["cover_model_source_id"] = aggregate.cover_model_id
+        manifest["multipart_models"].append(portable_aggregate)  # type: ignore[union-attr]
     for job in jobs:
         manifest["print_jobs"].append(  # type: ignore[union-attr]
             {
@@ -1589,6 +1601,14 @@ def _portable_aggregate_matches(
         "name"
     ) or aggregate.description != aggregate_data.get("description"):
         return False
+    cover_source_id = aggregate_data.get("cover_model_source_id")
+    expected_cover = (
+        source_models.get(cover_source_id) if cover_source_id is not None else None
+    )
+    if aggregate.cover_model_id != (
+        expected_cover.id if expected_cover is not None else None
+    ):
+        return False
     parts = session.exec(
         select(MultipartPart)
         .where(MultipartPart.multipart_model_id == aggregate.id)
@@ -2019,6 +2039,19 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                             kwargs["label"] = label
                         session.add(MultipartModelChoice(**kwargs))
                         used_models.add(model_id)
+                cover_source_id = aggregate_data.get("cover_model_source_id")
+                cover_model = (
+                    source_models.get(cover_source_id)
+                    if cover_source_id is not None
+                    else None
+                )
+                existing.cover_model_id = (
+                    int(cover_model.id)
+                    if cover_model is not None
+                    and cover_model.id is not None
+                    and cover_model.id in used_models
+                    else None
+                )
                 session.commit()
 
             # A v1 archive has no top-level ``multipart_models`` member and

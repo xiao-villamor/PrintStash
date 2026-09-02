@@ -6804,6 +6804,17 @@
             ],
             "title": "Collection Id"
           },
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
+          },
           "cover_thumbnail_url": {
             "anyOf": [
               {
@@ -6901,6 +6912,17 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
           },
           "cover_thumbnail_url": {
             "anyOf": [
@@ -7000,6 +7022,18 @@
         "additionalProperties": false,
         "description": "Atomic metadata and composition replacement.",
         "properties": {
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
+          },
           "description": {
             "anyOf": [
               {

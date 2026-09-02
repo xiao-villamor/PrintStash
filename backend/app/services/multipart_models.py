@@ -210,13 +210,19 @@ def _list_item(
     session: Session, user: User, aggregate: MultipartModel
 ) -> MultipartModelListItem:
     parts, model_count = _parts(session, user, int(aggregate.id))
-    cover = next(
+    readable_members = [
+        member for part in parts for member in part.models if member.available
+    ]
+    selected_cover = next(
         (
-            member.thumbnail_url
-            for part in parts
-            for member in part.models
-            if member.available and member.thumbnail_url
+            member
+            for member in readable_members
+            if member.id == aggregate.cover_model_id
         ),
+        None,
+    )
+    fallback_cover = next(
+        (member.thumbnail_url for member in readable_members if member.thumbnail_url),
         None,
     )
     guides = _guides(session, user, int(aggregate.id))
@@ -230,7 +236,12 @@ def _list_item(
         part_count=len(parts),
         model_count=model_count,
         guide_count=len(guides),
-        cover_thumbnail_url=cover,
+        cover_model_id=aggregate.cover_model_id,
+        cover_thumbnail_url=(
+            selected_cover.thumbnail_url
+            if selected_cover is not None and selected_cover.thumbnail_url
+            else fallback_cover
+        ),
         effective_role=rbac.effective_collection_role(
             session, user, aggregate.collection_id
         ),
@@ -487,6 +498,8 @@ def save(
     slug: str | None = None,
     description: str | None = None,
     description_set: bool = False,
+    cover_model_id: int | None = None,
+    cover_model_set: bool = False,
 ) -> MultipartModelRead:
     """Validate and persist metadata plus composition in one transaction."""
     prepared = _prepare_parts(session, user, aggregate, requested)
@@ -496,6 +509,15 @@ def save(
         aggregate.slug = slug
     if description_set:
         aggregate.description = description
+    requested_model_ids = {
+        model_id for _, choices in prepared[0] for model_id, _choice_id in choices
+    }
+    if cover_model_set:
+        if cover_model_id is not None and cover_model_id not in requested_model_ids:
+            raise MultipartModelError("multipart_cover_requires_member")
+        aggregate.cover_model_id = cover_model_id
+    elif aggregate.cover_model_id not in requested_model_ids:
+        aggregate.cover_model_id = None
     _apply_parts(session, aggregate, prepared)
     aggregate.updated_by = user.id
     from app.core.time import utcnow

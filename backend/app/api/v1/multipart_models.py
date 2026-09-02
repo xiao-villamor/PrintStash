@@ -230,6 +230,8 @@ def save_multipart_model(
             slug=slug,
             description=payload.description,
             description_set="description" in payload.model_fields_set,
+            cover_model_id=payload.cover_model_id,
+            cover_model_set="cover_model_id" in payload.model_fields_set,
         )
     except multipart_models.MultipartModelError as exc:
         session.rollback()

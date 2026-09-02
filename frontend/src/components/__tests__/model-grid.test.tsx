@@ -346,8 +346,10 @@ describe("ModelBrowser", () => {
         "true",
       );
       expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
-      expect(screen.getByText("Printer")).toBeInTheDocument();
-      expect(screen.getByText(/Model filters/i)).toBeInTheDocument();
+      expect(screen.getByRole("radiogroup", { name: "Set structure" })).toBeInTheDocument();
+      expect(screen.getByText("All multipart sets")).toBeInTheDocument();
+      expect(screen.queryByText("Printer")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Model filters/i)).not.toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Search existing models" })).toBeInTheDocument();
       expect(screen.queryByRole("heading", { name: "All Models" })).not.toBeInTheDocument();
       expect(screen.queryByText(/models? total/)).not.toBeInTheDocument();

@@ -827,6 +827,15 @@ class MultipartModel(SQLModel, table=True):
     collection_id: Optional[int] = Field(
         default=None, foreign_key="collections.id", index=True
     )
+    cover_model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     created_by: Optional[int] = Field(default=None, foreign_key="users.id")
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)

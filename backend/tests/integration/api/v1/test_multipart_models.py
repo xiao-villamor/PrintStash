@@ -39,6 +39,98 @@ class TestMultipartModels:
         assert response.json()["description"] == "A complete composition"
         assert response.json()["parts"][0]["models"][0]["id"] == member.id
 
+    def test_full_save_uses_selected_member_as_cover(
+        self, client, auth_headers, db_session, make_model, make_file
+    ) -> None:
+        base = make_model("Cover base")
+        handle = make_model("Cover handle")
+        base_file = make_file(base, file_type=FileType.STL, filename="cover-base.stl")
+        handle_file = make_file(
+            handle, file_type=FileType.STL, filename="cover-handle.stl"
+        )
+        base.thumbnail_file_id = base_file.id
+        handle.thumbnail_file_id = handle_file.id
+        db_session.add(base)
+        db_session.add(handle)
+        db_session.commit()
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Cover assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "cover_model_id": handle.id,
+                "parts": [
+                    {"name": "Base", "choices": [{"model_id": base.id}]},
+                    {"name": "Handle", "choices": [{"model_id": handle.id}]},
+                ],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["cover_model_id"] == handle.id
+        assert response.json()["cover_thumbnail_url"] == (
+            f"/api/v1/files/{handle_file.id}/thumbnail"
+        )
+
+    def test_full_save_rejects_cover_outside_composition(
+        self, client, auth_headers, make_model
+    ) -> None:
+        member = make_model("Cover member")
+        outsider = make_model("Cover outsider")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Invalid cover assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "cover_model_id": outsider.id,
+                "parts": [{"name": "Body", "choices": [{"model_id": member.id}]}],
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert response.json()["detail"] == "multipart_cover_requires_member"
+
+    def test_full_save_clears_removed_legacy_cover(
+        self, client, auth_headers, make_model
+    ) -> None:
+        first = make_model("Original cover")
+        replacement = make_model("Replacement member")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Changing cover assembly"},
+        ).json()
+        saved = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "cover_model_id": first.id,
+                "parts": [{"name": "Body", "choices": [{"model_id": first.id}]}],
+            },
+        )
+        assert saved.status_code == 200, saved.text
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "parts": [{"name": "Body", "choices": [{"model_id": replacement.id}]}]
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["cover_model_id"] is None
+
     def test_full_save_rejects_invalid_member_without_partial_metadata_change(
         self, client, auth_headers, make_model
     ) -> None:

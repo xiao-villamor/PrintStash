@@ -50,6 +50,7 @@ test.describe("multipart models", () => {
     let savedPayload: {
       name: string;
       description: string | null;
+      cover_model_id: number | null;
       parts: Array<{ name: string; choices: Array<{ model_id: number; choice_id?: number }> }>;
     } | null = null;
     let detail: MultipartModelRead = {
@@ -62,6 +63,7 @@ test.describe("multipart models", () => {
       part_count: 0,
       model_count: 0,
       guide_count: 0,
+      cover_model_id: null,
       cover_thumbnail_url: null,
       effective_role: "admin",
       created_at: "2026-06-04T00:24:22.000000",
@@ -97,6 +99,7 @@ test.describe("multipart models", () => {
         const payload = request.postDataJSON() as {
           name: string;
           description: string | null;
+          cover_model_id: number | null;
           parts: Array<{
             name: string;
             choices: Array<{ model_id: number; choice_id?: number }>;
@@ -107,6 +110,7 @@ test.describe("multipart models", () => {
           ...detail,
           name: payload.name,
           description: payload.description,
+          cover_model_id: payload.cover_model_id,
           parts: payload.parts.map((part, index) => ({
             id: index + 1,
             name: part.name,
@@ -147,10 +151,14 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: /Short handle/ }).click();
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: /Long handle/ }).click();
+    await page
+      .getByRole("combobox", { name: "Cover model" })
+      .selectOption({ label: "Long handle" });
     await page.getByRole("button", { name: "Save changes" }).click();
 
     await expect(page.getByText("Changes saved")).toBeVisible();
     expect(savedPayload).toMatchObject({
+      cover_model_id: 4,
       parts: [
         { name: "Part 1", choices: [{ model_id: 2 }] },
         { name: "Part 2", choices: [{ model_id: 3 }, { model_id: 4 }] },
@@ -169,6 +177,8 @@ test.describe("multipart models", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/?v=multipart");
     await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
+    await page.getByRole("radio", { name: "With variants" }).click();
+    await expect(page.getByRole("link", { name: /Desk organiser/ })).toBeVisible();
     const setCardDimensions = await page
       .getByRole("link", { name: /Desk organiser/ })
       .evaluate((card) => {
