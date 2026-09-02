@@ -146,6 +146,8 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Saved light and dark theme preferences now survive a page refresh under the
+  production Content Security Policy.
 - MakerWorld package resolution accepts both current root-level and compatible
   nested link responses, and Thingiverse model pages list and transfer selected
   individual files instead of manufacturing a model ZIP candidate.
