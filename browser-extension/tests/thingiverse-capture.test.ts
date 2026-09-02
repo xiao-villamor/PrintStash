@@ -69,6 +69,123 @@ describe("Thingiverse browser capture", () => {
     });
   });
 
+  it("accepts the current Thingiverse CDN download URL", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              files: [
+                {
+                  id: 991001,
+                  name: "ChestView-Main.stl",
+                  direct_url:
+                    "https://cdn.thingiverse.com/assets/01/23/45/67/89/ChestView-Main.stl",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://cdn.thingiverse.com/assets/01/23/45/67/89/ChestView-Main.stl",
+        },
+      ],
+    });
+  });
+
+  it("chooses a usable Thingiverse download field", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              files: [
+                {
+                  id: 991001,
+                  name: "ChestView-Main.stl",
+                  public_url: "https://api.thingiverse.com/files/991001",
+                  download_url: "https://api.thingiverse.com/files/991001/download",
+                },
+              ],
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://api.thingiverse.com/files/991001/download",
+        },
+      ],
+    });
+  });
+
+  it("accepts a root Thingiverse file array", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify([
+              {
+                id: 991001,
+                name: "ChestView-Main.stl",
+                public_url: "https://www.thingiverse.com/download:991001",
+              },
+            ]),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+      ],
+    });
+  });
+
   it("retries the current Thingiverse API with its public view token", async () => {
     document.body.innerHTML = `
       <button aria-label="Download LightFront.stl">Download</button>
@@ -290,6 +407,29 @@ describe("Thingiverse browser capture", () => {
       ],
     });
     expect(JSON.stringify(capture)).not.toContain("/download:991001");
+  });
+
+  it("validates a current Thingiverse CDN file DTO", () => {
+    const files = validateThingiverseFiles({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://cdn.thingiverse.com/assets/01/23/45/67/89/ChestView-Main.stl",
+        },
+      ],
+    });
+
+    expect(files).toEqual([
+      {
+        id: "991001",
+        filename: "ChestView-Main.stl",
+        fileType: "stl",
+        url: "https://cdn.thingiverse.com/assets/01/23/45/67/89/ChestView-Main.stl",
+      },
+    ]);
   });
 
   it("discovers a later individual download control", async () => {

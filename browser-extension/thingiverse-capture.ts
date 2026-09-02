@@ -53,7 +53,11 @@ function isSafeThingiverseUrl(value: string): boolean {
 
 function validDownloadUrl(value: string, fileId: string): boolean {
   if (!isSafeThingiverseUrl(value)) return false;
-  const pathname = new URL(value).pathname;
+  const parsed = new URL(value);
+  const pathname = parsed.pathname;
+  if (parsed.hostname.toLowerCase() === "cdn.thingiverse.com") {
+    return pathname.startsWith("/assets/") && pathname.length > "/assets/".length;
+  }
   return (
     pathname === `/download:${fileId}` || new RegExp(`^/files/${fileId}/download/?$`).test(pathname)
   );
@@ -101,6 +105,39 @@ export async function requestThingiverseFilesInMainWorld(args: {
     if (/\.(?:gcode|gco|bgcode)$/i.test(filename)) return "gcode";
     if (/\.(?:ctb|photon|pwmo)$/i.test(filename)) return "sla";
     return "other";
+  };
+  const usableFileUrl = (value: unknown, fileId: string): URL | undefined => {
+    if (typeof value !== "string") return undefined;
+    let parsed: URL;
+    try {
+      parsed = new URL(value, window.location.origin);
+    } catch {
+      return undefined;
+    }
+    const host = parsed.hostname.toLowerCase();
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username ||
+      parsed.password ||
+      parsed.hash ||
+      ![
+        "thingiverse.com",
+        "www.thingiverse.com",
+        "api.thingiverse.com",
+        "cdn.thingiverse.com",
+      ].includes(host)
+    ) {
+      return undefined;
+    }
+    if (host === "cdn.thingiverse.com") {
+      return parsed.pathname.startsWith("/assets/") && parsed.pathname.length > "/assets/".length
+        ? parsed
+        : undefined;
+    }
+    return parsed.pathname === `/download:${fileId}` ||
+      new RegExp(`^/files/${fileId}/download/?$`).test(parsed.pathname)
+      ? parsed
+      : undefined;
   };
   if (
     !/^\d{1,20}$/.test(args.sourceItemId) ||
@@ -271,9 +308,11 @@ export async function requestThingiverseFilesInMainWorld(args: {
     const responseResult = await readBoundedJson(response);
     if (!responseResult.ok) return responseResult;
     const parsed = responseResult.value;
-    const queue: Array<{ value: unknown; depth: number }> = [{ value: parsed, depth: 0 }];
+    const queue: Array<{ value: unknown; depth: number }> = Array.isArray(parsed)
+      ? []
+      : [{ value: parsed, depth: 0 }];
     let nodes = 0;
-    let rawFiles: unknown[] | undefined;
+    let rawFiles: unknown[] | undefined = Array.isArray(parsed) ? parsed : undefined;
     while (queue.length > 0) {
       const entry = queue.shift();
       if (!entry || entry.depth > 6 || ++nodes > 2_048) {
@@ -312,40 +351,21 @@ export async function requestThingiverseFilesInMainWorld(args: {
             ? file.filename.trim()
             : undefined;
       const filename = safeFilename(rawFilename);
-      const urlValue = file.public_url ?? file.download_url ?? file.downloadUrl ?? file.url;
-      if (
-        !/^\d{1,20}$/.test(fileId) ||
-        seen.has(fileId) ||
-        !filename ||
-        filename !== rawFilename ||
-        typeof urlValue !== "string"
-      ) {
+      if (!/^\d{1,20}$/.test(fileId) || seen.has(fileId) || !filename || filename !== rawFilename) {
         return { ok: false, code: "contract_changed" };
       }
-      let parsedUrl: URL;
-      try {
-        parsedUrl = new URL(urlValue, window.location.origin);
-      } catch {
-        return { ok: false, code: "contract_changed" };
+      let parsedUrl: URL | undefined;
+      for (const value of [
+        file.direct_url,
+        file.download_url,
+        file.downloadUrl,
+        file.public_url,
+        file.url,
+      ]) {
+        parsedUrl = usableFileUrl(value, fileId);
+        if (parsedUrl) break;
       }
-      if (
-        parsedUrl.protocol !== "https:" ||
-        parsedUrl.username ||
-        parsedUrl.password ||
-        parsedUrl.hash ||
-        ![
-          "thingiverse.com",
-          "www.thingiverse.com",
-          "api.thingiverse.com",
-          "cdn.thingiverse.com",
-        ].includes(parsedUrl.hostname.toLowerCase()) ||
-        !(
-          parsedUrl.pathname === `/download:${fileId}` ||
-          new RegExp(`^/files/${fileId}/download/?$`).test(parsedUrl.pathname)
-        )
-      ) {
-        return { ok: false, code: "contract_changed" };
-      }
+      if (!parsedUrl) return { ok: false, code: "contract_changed" };
       seen.add(fileId);
       files.push({
         id: fileId,
