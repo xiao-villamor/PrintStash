@@ -942,6 +942,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     { limit: 500 },
     { enabled: libraryView === "components" },
   );
+  const multipartGroupingQuery = useMultipartModels(
+    {
+      tag: selectedTags.length ? selectedTags : undefined,
+      favorites: favoritesOnly || undefined,
+      limit: 500,
+    },
+    { enabled: libraryView === "organized" && !searchQuery },
+  );
   const multipartOutlinerQuery = useMultipartModels(
     {
       tag: selectedTags.length ? selectedTags : undefined,
@@ -968,8 +976,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [multipartMembership],
   );
   const groupedModelIds = useMemo(
-    () => new Set(multipartModels.flatMap((item) => item.member_model_ids)),
-    [multipartModels],
+    () => new Set((multipartGroupingQuery.data ?? []).flatMap((item) => item.member_model_ids)),
+    [multipartGroupingQuery.data],
   );
   const visibleMultipartModels = libraryView === "components" ? [] : multipartModels;
   const visibleModels = (() => {
@@ -992,6 +1000,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const loading =
     modelQuery.isLoading ||
     multipartQuery.isLoading ||
+    (libraryView === "organized" && !searchQuery && multipartGroupingQuery.isLoading) ||
     (libraryView === "components" && multipartMembershipQuery.isLoading);
   const refreshing = modelQuery.isFetching && !modelQuery.isFetchingNextPage && !loading;
   const loadingMore = modelQuery.isFetchingNextPage;
@@ -1000,6 +1009,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const error =
     modelQuery.error?.message ??
     multipartQuery.error?.message ??
+    multipartGroupingQuery.error?.message ??
     multipartMembershipQuery.error?.message ??
     null;
   function loadMore() {

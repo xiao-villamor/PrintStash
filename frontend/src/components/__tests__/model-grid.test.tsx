@@ -446,6 +446,26 @@ describe("ModelBrowser", () => {
       expect(screen.queryByRole("tab", { name: "Multipart sets" })).not.toBeInTheDocument();
     });
 
+    it("groups a root component under a multipart set stored in a collection", async () => {
+      const nestedSet = aMultipartSet({ collection: "figures", collection_id: 1 });
+      renderVault({
+        collections: [aCollection({ id: 1, name: "Figures", slug: "figures", path: "figures" })],
+        models: [
+          aModelListItem({ id: 1, name: "Dragon body", collection: null }),
+          aModelListItem({ id: 2, name: "Calibration cube", collection: null }),
+        ],
+        routes: {
+          "GET /api/v1/multipart-models": (url) =>
+            json(
+              new URL(url, "http://printstash.test").searchParams.has("direct") ? [] : [nestedSet],
+            ),
+        },
+      });
+
+      expect(await screen.findByText("Calibration cube")).toBeVisible();
+      await waitFor(() => expect(screen.queryByText("Dragon body")).not.toBeInTheDocument());
+    });
+
     it("reveals reusable component models in the everything view", async () => {
       const user = userEvent.setup();
       renderVault({
@@ -504,6 +524,20 @@ describe("ModelBrowser", () => {
       });
 
       expect(await screen.findByText("Dragon body")).toBeVisible();
+    });
+
+    it("surfaces a failed multipart grouping request in the organised view", async () => {
+      renderVault({
+        models: [aModelListItem({ id: 1, name: "Dragon body" })],
+        routes: {
+          "GET /api/v1/multipart-models": (url) =>
+            new URL(url, "http://printstash.test").searchParams.has("direct")
+              ? json([])
+              : json({ detail: "multipart_grouping_unavailable" }, 503),
+        },
+      });
+
+      expect(await screen.findByText("[503] multipart_grouping_unavailable")).toBeVisible();
     });
 
     it("keeps the normal workspace chrome for multipart-only bookmarks", async () => {
