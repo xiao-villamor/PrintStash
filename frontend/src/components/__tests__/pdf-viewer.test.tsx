@@ -34,7 +34,7 @@ beforeEach(() => {
 
 describe("PdfViewer", () => {
   it("shows the underlying PDF.js error when rendering fails", () => {
-    render(<PdfViewer file="/api/v1/documents/19/file" renderDocument={renderDocument} />);
+    render(<PdfViewer file={new Blob(["pdf"])} renderDocument={renderDocument} />);
 
     act(() => documentProps.at(-1)?.onLoadError?.(new Error("worker crashed")));
 

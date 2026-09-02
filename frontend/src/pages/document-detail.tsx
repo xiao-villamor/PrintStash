@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentType, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
 
@@ -20,7 +20,7 @@ import type { DocumentRead } from "@/types";
 import NotFound from "./not-found";
 
 // pdf.js is heavy — only pull the chunk in when a PDF is actually opened.
-const PdfViewer = lazy(() =>
+const DefaultPdfViewer = lazy(() =>
   import("@/components/pdf-viewer").then((m) => ({ default: m.PdfViewer })),
 );
 
@@ -30,13 +30,23 @@ type ViewMode = "preview" | "edit";
 
 /** The name and body the editor is holding, tagged with the document it belongs to. */
 type Draft = { docId: number; name: string; body: string };
+type BinaryPreview = {
+  documentId: number;
+  kind: DocumentRead["kind"];
+  blob: Blob;
+  imageUrl: string | null;
+};
 
 function canEditDoc(doc: DocumentRead | null, isSuper: boolean): boolean {
   if (isSuper) return true;
   return doc?.effective_role === "edit" || doc?.effective_role === "admin";
 }
 
-export default function DocumentDetailPage() {
+export default function DocumentDetailPage({
+  pdfViewer: PdfViewer = DefaultPdfViewer,
+}: {
+  pdfViewer?: ComponentType<{ file: Blob }>;
+} = {}) {
   const { id } = useParams();
   const isNew = id === "new";
   const docId = Number(id);
@@ -72,7 +82,7 @@ export default function DocumentDetailPage() {
   const [modeChoice, setModeChoice] = useState<ViewMode | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [binaryUrl, setBinaryUrl] = useState<string | null>(null);
+  const [binaryPreview, setBinaryPreview] = useState<BinaryPreview | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Tagging the fetch results with their document id makes every derived value
@@ -84,6 +94,10 @@ export default function DocumentDetailPage() {
   const liveDraft = draft?.docId === docKey ? draft : null;
   const draftName = liveDraft?.name ?? doc?.name ?? "";
   const draftBody = liveDraft?.body ?? doc?.body ?? "";
+  const activeBinaryPreview =
+    binaryPreview && binaryPreview.documentId === doc?.id && binaryPreview.kind === doc.kind
+      ? binaryPreview
+      : null;
   // A new document opens in the editor; anything else opens in preview until the
   // reader asks for one or the other.
   const mode: ViewMode = modeChoice ?? (isNew ? "edit" : "preview");
@@ -135,8 +149,8 @@ export default function DocumentDetailPage() {
     getAuthenticatedBlob(`/api/v1/documents/${doc.id}/file`)
       .then((blob) => {
         if (!alive) return;
-        url = URL.createObjectURL(blob);
-        setBinaryUrl(url);
+        if (isImage) url = URL.createObjectURL(blob);
+        setBinaryPreview({ documentId: doc.id, kind: doc.kind, blob, imageUrl: url });
       })
       .catch(() => alive && toast.error("Could not load PDF"));
     return () => {
@@ -328,7 +342,7 @@ export default function DocumentDetailPage() {
 
           {/* PDF: themed inline viewer (pdf.js) */}
           {doc.kind === "pdf" &&
-            (binaryUrl ? (
+            (activeBinaryPreview ? (
               <Suspense
                 fallback={
                   <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -336,7 +350,7 @@ export default function DocumentDetailPage() {
                   </div>
                 }
               >
-                <PdfViewer file={binaryUrl} />
+                <PdfViewer file={activeBinaryPreview.blob} />
               </Suspense>
             ) : (
               <div className="flex-1 flex items-center justify-center text-muted-foreground">
@@ -344,9 +358,9 @@ export default function DocumentDetailPage() {
               </div>
             ))}
 
-          {doc.kind === "other" && isImage && binaryUrl && (
+          {doc.kind === "other" && isImage && activeBinaryPreview?.imageUrl && (
             <img
-              src={binaryUrl}
+              src={activeBinaryPreview.imageUrl}
               alt={doc.name}
               className="mx-auto max-h-full max-w-full rounded-lg border border-border object-contain"
             />

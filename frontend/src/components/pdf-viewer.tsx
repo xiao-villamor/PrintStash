@@ -25,7 +25,7 @@ export function PdfViewer({
   file,
   renderDocument = defaultDocumentRenderer,
 }: {
-  file: string;
+  file: Blob;
   renderDocument?: DocumentRenderer;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);

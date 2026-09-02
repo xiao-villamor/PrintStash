@@ -20,6 +20,7 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import DocumentDetailPage from "@/pages/document-detail";
@@ -42,9 +43,20 @@ function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
   };
 }
 
-function renderDocument(options: RenderAppOptions & { document?: DocumentRead } = {}) {
-  const { document: doc = aDocument(), at = "/documents/3", routes = {}, ...rest } = options;
-  return renderApp(<DocumentDetailPage />, {
+function renderDocument(
+  options: RenderAppOptions & {
+    document?: DocumentRead;
+    pdfViewer?: ComponentType<{ file: Blob }>;
+  } = {},
+) {
+  const {
+    document: doc = aDocument(),
+    pdfViewer,
+    at = "/documents/3",
+    routes = {},
+    ...rest
+  } = options;
+  return renderApp(<DocumentDetailPage pdfViewer={pdfViewer} />, {
     at,
     routePath: "/documents/:id",
     routes: {
@@ -58,6 +70,10 @@ function renderDocument(options: RenderAppOptions & { document?: DocumentRead } 
 /** A pasted screenshot, which is how most images reach a document. */
 function anImage() {
   return new File(["png-bytes"], "diagram.png", { type: "image/png" });
+}
+
+function PdfBytes({ file }: { file: Blob }) {
+  return <output>{`PDF bytes: ${file.type}:${file.size}`}</output>;
 }
 
 beforeEach(() => {
@@ -223,6 +239,20 @@ describe("DocumentDetailPage", () => {
         "src",
         "blob:guide-image",
       );
+    });
+
+    it("passes protected PDF bytes directly to the viewer", async () => {
+      renderDocument({
+        document: aDocument({ kind: "pdf", filename: "manual.pdf", body: null }),
+        pdfViewer: PdfBytes,
+        routes: {
+          "GET /api/v1/documents/3/file": new Response("pdf-bytes", {
+            headers: { "content-type": "application/pdf" },
+          }),
+        },
+      });
+
+      expect(await screen.findByText("PDF bytes: application/pdf:9")).toBeInTheDocument();
     });
   });
 
