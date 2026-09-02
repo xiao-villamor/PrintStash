@@ -151,7 +151,7 @@ test.describe("PDF documents", () => {
     // Worker + render can take a moment; assert the page counter resolves.
     await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
     expect(workerRequests).toHaveLength(1);
-    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-v3");
+    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-compat-v1");
     await expect(page.getByTitle("Zoom in")).toBeVisible();
     await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 

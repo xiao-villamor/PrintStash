@@ -173,8 +173,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   assignment instead of leaving the Model in its previous Collection
   ([#110](https://github.com/xiao-villamor/PrintStash/issues/110)).
 - PDF guides recover from browsers that cached the pdf.js worker before its
-  production MIME type was corrected; a fresh versioned worker URL bypasses
-  the immutable bad response, and module-worker responses now revalidate.
+  production MIME type was corrected and use PDF.js's compatibility worker for
+  mobile browsers that cannot start its modern build. Module-worker responses
+  now revalidate, and renderer failures report their underlying error.
 - Backup restore confirmations now keep long source identities, namespaces,
   and checksums contained within the dialog at desktop and mobile widths.
 - Saved light and dark theme preferences now survive a page refresh under the
