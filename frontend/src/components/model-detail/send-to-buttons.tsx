@@ -638,9 +638,9 @@ export function SendToButtons({
                                   ? "Upload unsupported"
                                   : !formatSupported
                                     ? "Format unsupported"
-                                : printer.capabilities.can_start
-                                  ? "Upload + start"
-                                  : "Upload only"}
+                                    : printer.capabilities.can_start
+                                      ? "Upload + start"
+                                      : "Upload only"}
                             </Badge>
                           </span>
                         </span>
