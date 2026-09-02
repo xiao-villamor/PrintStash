@@ -67,6 +67,7 @@ import {
   type BrowserProviderAdapter,
 } from "./browser-provider-adapter.ts";
 import { browserCaptureRoute } from "./capture-routing.ts";
+import { buildStatusPresentation, type StatusKind } from "./status-presentation.ts";
 
 declare const chrome: unknown;
 function requiredElement<T extends Element>(selector: string, constructor: { new (): T }): T {
@@ -103,6 +104,10 @@ const runtimeMarker = requiredElement("#runtime-marker", HTMLElement);
 const pageLabel = requiredElement("#page", HTMLElement);
 const sourceLabel = requiredElement("#source", HTMLElement);
 const statusLabel = requiredElement("#status", HTMLElement);
+const statusTitle = requiredElement("#status-title", HTMLElement);
+const statusMessage = requiredElement("#status-message", HTMLElement);
+const statusDetails = requiredElement("#status-details", HTMLDetailsElement);
+const statusCode = requiredElement("#status-code", HTMLElement);
 const captureButton = requiredElement("#capture", HTMLButtonElement);
 const inboxButton = requiredElement("#open-inbox", HTMLButtonElement);
 const importPanel = requiredElement("#import-panel", HTMLElement);
@@ -240,9 +245,13 @@ function runCaptureSyncStage<T>(
 
 function diagnosticStatus(error: unknown, fallbackMessage = "Capture could not be completed.") {
   if (error instanceof CaptureDiagnosticError) {
-    return `${error.safeMessage} · code: ${error.diagnosticCode}`;
+    return {
+      message: error.safeMessage,
+      diagnosticCode: error.diagnosticCode,
+      providerCode: error.fallbackCode,
+    };
   }
-  return `${fallbackMessage} · code: capture_failed`;
+  return { message: fallbackMessage, diagnosticCode: "capture_failed" as const };
 }
 
 function safeCaptureMessage(error: unknown) {
@@ -287,10 +296,42 @@ function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
-function showStatus(message = "", kind = "") {
-  statusLabel.textContent = message;
+function showStatus(
+  message = "",
+  kind: StatusKind = "",
+  diagnosticCode?: string,
+  providerCode?: string,
+) {
+  if (!message) {
+    statusLabel.hidden = true;
+    statusTitle.textContent = "";
+    statusMessage.textContent = "";
+    statusDetails.hidden = true;
+    statusDetails.open = false;
+    statusCode.textContent = "";
+    delete statusLabel.dataset.kind;
+    return;
+  }
+  const presentation = buildStatusPresentation({
+    message,
+    kind,
+    diagnosticCode,
+    providerCode,
+  });
+  statusLabel.hidden = false;
+  statusTitle.textContent = presentation.title ?? "";
+  statusTitle.hidden = !presentation.title;
+  statusMessage.textContent = presentation.message;
+  statusDetails.hidden = !presentation.technicalCode;
+  statusDetails.open = false;
+  statusCode.textContent = presentation.technicalCode ?? "";
   if (kind) statusLabel.dataset.kind = kind;
   else delete statusLabel.dataset.kind;
+}
+
+function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
+  const diagnostic = diagnosticStatus(error, fallbackMessage);
+  showStatus(diagnostic.message, "error", diagnostic.diagnosticCode, diagnostic.providerCode);
 }
 
 function clearInboxAction() {
@@ -765,7 +806,14 @@ async function resolveMakerWorldLinks(
       const result = results[0]?.result as
         | { ok: boolean; links?: Array<{ id: string; url: string }>; code?: MakerWorldFailureCode }
         | undefined;
-      if (!result?.ok || !result.links) throw new Error(makerWorldFailureMessage(result?.code));
+      if (!result?.ok || !result.links) {
+        throw new CaptureDiagnosticError(
+          "makerworld_links_failed",
+          makerWorldFailureMessage(result?.code),
+          "MakerWorld",
+          result?.code,
+        );
+      }
       const selectedFiles: MakerWorldPackageFile[] = selected.map((candidate) => ({
         id: candidate.id,
         filename: candidate.filename,
@@ -1190,9 +1238,9 @@ captureButton.addEventListener("click", async () => {
       const fallback = fallbackVisibleCapture("cors_failure");
       if (fallback) {
         renderManualFileSelection(fallback);
-        showStatus(diagnosticStatus(error), "error");
+        showDiagnosticStatus(error);
       } else {
-        showStatus(diagnosticStatus(error), "error");
+        showDiagnosticStatus(error);
       }
       return;
     }
@@ -1412,7 +1460,7 @@ captureButton.addEventListener("click", async () => {
         pendingThingiverseCapture ||
         (error.provider ? fallbackVisibleCapture(error.fallbackCode, error.fallbackJsonLd) : null);
       if (fallback) renderManualFileSelection(fallback);
-      showStatus(diagnosticStatus(error), "error");
+      showDiagnosticStatus(error);
       return;
     }
     const message = messageFrom(error);
@@ -1453,7 +1501,7 @@ captureButton.addEventListener("click", async () => {
       renderConnection("error", { detail: "Reconnect PrintStash to continue importing." });
       showStatus();
     } else {
-      showStatus(`${safeCaptureMessage(error)} · code: capture_failed`, "error");
+      showStatus(safeCaptureMessage(error), "error", "capture_failed");
     }
   } finally {
     importBusy = false;

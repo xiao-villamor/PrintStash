@@ -488,10 +488,12 @@ describe("MakerWorld MAIN-world seams", () => {
     expect(JSON.stringify(result)).toContain("signature=ephemeral");
   });
 
-  it("explains how to complete a MakerWorld CAPTCHA before retrying", () => {
-    expect(makerWorldFailureMessage("challenge")).toContain("click Download 3MF");
-    expect(makerWorldFailureMessage("challenge")).toContain("complete the browser check");
-    expect(makerWorldFailureMessage("challenge")).toContain("retry PrintStash");
+  it("directs a challenged MakerWorld download to manual recovery", () => {
+    expect(makerWorldFailureMessage("challenge")).toContain(
+      "did not authorize the automatic download",
+    );
+    expect(makerWorldFailureMessage("challenge")).toContain("Download the selected 3MF");
+    expect(makerWorldFailureMessage("challenge")).toContain("attach it below");
   });
 
   it("accepts the current root-level url response shape", async () => {

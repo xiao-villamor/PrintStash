@@ -36,6 +36,22 @@
         <p id="source" class="source">Detecting a supported model source…</p>
       </section>
 
+      <section
+        id="status"
+        class="status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <p id="status-title" class="status-title" hidden></p>
+        <p id="status-message" class="status-message"></p>
+        <details id="status-details" class="status-details" hidden>
+          <summary>Technical details</summary>
+          <code id="status-code"></code>
+        </details>
+      </section>
+
       <section id="connection-panel" class="connection-panel" aria-labelledby="connection-label">
         <div class="section-heading">
           <div>
@@ -125,7 +141,6 @@
         <button id="capture" class="wide" type="button" disabled>Send to Pending Imports</button>
       </section>
       <button id="open-inbox" class="secondary wide" hidden>Open Pending Imports</button>
-      <p id="status" role="status" aria-live="polite"></p>
     </main>
     <script type="module" src="./main.ts"></script>
   </body>

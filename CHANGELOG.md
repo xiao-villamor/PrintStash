@@ -143,6 +143,8 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 - MakerWorld package resolution accepts both current root-level and compatible
   nested link responses, and Thingiverse model pages list and transfer selected
   individual files instead of manufacturing a model ZIP candidate.
+- Browser-extension failures now lead with a short recovery step and keep safe
+  diagnostic codes in a collapsed technical-details section.
 - Completed uploads no longer leave a duplicate generic Import task polling
   forever; clients also reconcile the stuck duplicate rows persisted by the
   affected build.

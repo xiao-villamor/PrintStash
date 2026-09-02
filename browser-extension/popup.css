@@ -451,23 +451,62 @@ button:disabled {
   opacity: 0.55;
 }
 
-#status {
+.status {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.status[hidden] {
   display: none;
-  padding: 9px 10px;
-  border-radius: var(--radius);
+}
+
+.status-title {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.status-message {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.status-details {
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
   line-height: 1.4;
 }
 
-#status:not(:empty) {
-  display: block;
+.status-details summary {
+  cursor: pointer;
+  font-weight: 600;
 }
-#status[data-kind="error"] {
+
+.status-details code {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.status[data-kind="error"] {
+  border-color: color-mix(in srgb, var(--error) 30%, var(--border));
   background: var(--error-soft);
   color: var(--error);
 }
-#status[data-kind="success"] {
+
+.status[data-kind="error"] .status-details {
+  color: color-mix(in srgb, var(--error) 78%, var(--foreground));
+}
+
+.status[data-kind="success"] {
+  border-color: color-mix(in srgb, var(--success) 30%, var(--border));
   background: var(--success-soft);
   color: var(--success);
 }

@@ -77,6 +77,15 @@ describe("popup browser adapters", () => {
     expect(document.querySelector("header")?.textContent).not.toContain("diagnostics");
   });
 
+  it("places recovery guidance before the fallback controls", () => {
+    const status = element("#status");
+    const manualFilePanel = element("#manual-file-panel");
+
+    expect(status.compareDocumentPosition(manualFilePanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it("reports a safe code and falls back when Printables permission checking times out", async () => {
     vi.stubGlobal("__PRINTSTASH_CAPTURE_TIMEOUT_MS__", 5);
     await fakeBrowser.storage.local.set({
@@ -1188,6 +1197,75 @@ describe("popup browser adapters", () => {
             "selectedIds" in details.args[0],
         ),
     ).toBe(false);
+  });
+
+  it("presents a MakerWorld challenge as a manual recovery", async () => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_vault_secret",
+    });
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+      {
+        id: 42,
+        title: "Design Headphone Stand Swing",
+        url: "https://makerworld.com/en/models/1574312-design-headphone-stand-swing-quickprint",
+      },
+    ]);
+    fakeBrowser.scripting.executeScript = vi
+      .fn()
+      .mockResolvedValueOnce([{ result: null }])
+      .mockResolvedValueOnce([
+        {
+          result: { pageTitle: "Design Headphone Stand Swing", jsonLd: [] },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          result: {
+            ok: true,
+            metadata: {
+              fixtureVersion: "makerworld-design-service-v1",
+              sourceItemId: "1574312",
+              source: { title: "Design Headphone Stand Swing" },
+              files: [
+                {
+                  id: "1656140",
+                  filename: "0.24mm layer, 3 walls, 15% infill.3mf",
+                  fileType: "other",
+                },
+              ],
+            },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([{ result: { ok: false, code: "challenge" } }]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+        throw new Error(`Unexpected MakerWorld challenge request: ${url}`);
+      }),
+    );
+
+    await import("../popup.ts");
+    await settle();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    document.querySelector<HTMLInputElement>("#candidate-list input")?.click();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+
+    expect(element("#manual-file-panel").hidden).toBe(false);
+    expect(element("#status-title").textContent).toBe("Automatic download blocked");
+    expect(element("#status-message").textContent).toBe(
+      "MakerWorld did not authorize the automatic download. Download the selected 3MF from MakerWorld, then attach it below.",
+    );
+    expect(element("#status-message").textContent).not.toContain("user_file_required");
+    expect(element("#status-code").textContent).toBe("makerworld_links_failed · challenge");
+    expect(requiredElement("#status-details", HTMLDetailsElement).open).toBe(false);
   });
 
   it("stops on a changed Printables file contract and directs manual attachment without retry", async () => {
