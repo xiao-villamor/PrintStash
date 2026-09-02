@@ -5,7 +5,7 @@ from enum import Enum
 from typing import List, Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
 from app.schemas.printers import (
@@ -72,9 +72,19 @@ class FileRevisionUpdate(BaseModel):
     is_recommended: Optional[bool] = None
 
 
+class PartModelRead(BaseModel):
+    id: int
+    name: str
+    slug: str
+    thumbnail_url: Optional[str] = None
+    source_file_count: int = 0
+    gcode_revision_count: int = 0
+
+
 class PartOptionRead(BaseModel):
     id: int
-    file_id: int
+    file_id: Optional[int] = None
+    model: PartModelRead
     name: str
     is_default: bool
 
@@ -88,16 +98,23 @@ class PartGroupRead(BaseModel):
 class PartOptionWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    file_id: int
+    file_id: Optional[int] = None
+    model_id: Optional[int] = None
     name: str = Field(min_length=1, max_length=128)
     is_default: bool = False
+
+    @model_validator(mode="after")
+    def exactly_one_target(self) -> "PartOptionWrite":
+        if (self.file_id is None) == (self.model_id is None):
+            raise ValueError("part_option_target_required")
+        return self
 
 
 class PartGroupWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=128)
-    options: List[PartOptionWrite] = Field(min_length=2, max_length=100)
+    options: List[PartOptionWrite] = Field(min_length=1, max_length=100)
 
 
 class PartGroupsReplace(BaseModel):
@@ -121,7 +138,6 @@ class ModelRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     files: List[FileRead] = []
-    part_groups: List[PartGroupRead] = []
     starred: bool = False
 
 

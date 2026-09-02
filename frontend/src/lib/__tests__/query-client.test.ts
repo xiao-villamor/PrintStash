@@ -66,25 +66,40 @@ describe("invalidateQueriesForPath", () => {
 
   it("busts collections AND models on a collection write (labels affect lists)", () => {
     invalidateQueriesForPath("/api/v1/collections/5");
-    expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.collections, queryKeys.models]));
+    expect(bustedKeys(spy.mock.calls)).toEqual(
+      keyNames([queryKeys.collections, queryKeys.models, queryKeys.multipartModels]),
+    );
   });
 
   it("busts tags AND models on a tag write", () => {
     invalidateQueriesForPath("/api/v1/tags");
-    expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.tags, queryKeys.models]));
+    expect(bustedKeys(spy.mock.calls)).toEqual(
+      keyNames([queryKeys.tags, queryKeys.models, queryKeys.multipartModels]),
+    );
   });
 
   it("refreshes taxonomy after a model tag mutation", () => {
     invalidateQueriesForPath("/api/v1/models/batch/tags");
     expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.tags, queryKeys.models, queryKeys.vaultStats, queryKeys.collections]),
+      keyNames([
+        queryKeys.tags,
+        queryKeys.models,
+        queryKeys.vaultStats,
+        queryKeys.collections,
+        queryKeys.multipartModels,
+      ]),
     );
   });
 
   it("busts models, vault stats AND collections on a model write (stats + counts derive from models)", () => {
     invalidateQueriesForPath("/api/v1/models/12");
     expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.models, queryKeys.vaultStats, queryKeys.collections]),
+      keyNames([
+        queryKeys.models,
+        queryKeys.vaultStats,
+        queryKeys.collections,
+        queryKeys.multipartModels,
+      ]),
     );
   });
 
@@ -93,9 +108,42 @@ describe("invalidateQueriesForPath", () => {
       spy.mockClear();
       invalidateQueriesForPath(path);
       expect(bustedKeys(spy.mock.calls)).toEqual(
-        keyNames([queryKeys.models, queryKeys.vaultStats, queryKeys.collections]),
+        keyNames([
+          queryKeys.models,
+          queryKeys.vaultStats,
+          queryKeys.collections,
+          queryKeys.multipartModels,
+        ]),
       );
     }
+  });
+
+  it("refreshes every multipart query prefix after collection writes", () => {
+    invalidateQueriesForPath("/api/v1/collections/5", "PATCH");
+    expect(bustedKeys(spy.mock.calls)).toEqual(
+      keyNames([queryKeys.collections, queryKeys.models, queryKeys.multipartModels]),
+    );
+  });
+
+  it("refreshes multipart reads for every trash lifecycle route", () => {
+    for (const path of ["/api/v1/trash/12", "/api/v1/restore/12", "/api/v1/purge/12"]) {
+      spy.mockClear();
+      invalidateQueriesForPath(path, "POST");
+      expect(bustedKeys(spy.mock.calls)).toEqual(
+        keyNames([
+          queryKeys.models,
+          queryKeys.collections,
+          queryKeys.vaultStats,
+          queryKeys.multipartModels,
+        ]),
+      );
+    }
+  });
+
+  it("does not invalidate anything for a non-mutating GET", () => {
+    invalidateQueriesForPath("/api/v1/models/12", "GET");
+    invalidateQueriesForPath("/api/v1/multipart-models/4/candidates", "HEAD");
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("busts printers on a printer write", () => {
@@ -138,7 +186,12 @@ describe("refreshVaultAfterIngest", () => {
 
     await refreshVaultAfterIngest();
 
-    const vaultKeys = keyNames([queryKeys.models, queryKeys.collections, queryKeys.vaultStats]);
+    const vaultKeys = keyNames([
+      queryKeys.models,
+      queryKeys.collections,
+      queryKeys.vaultStats,
+      queryKeys.multipartModels,
+    ]);
     expect(bustedKeys(cancel.mock.calls)).toEqual(vaultKeys);
     expect(bustedKeys(invalidate.mock.calls)).toEqual(vaultKeys);
     expect(cancel.mock.invocationCallOrder.at(-1)).toBeLessThan(

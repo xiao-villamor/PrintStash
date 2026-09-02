@@ -6313,14 +6313,6 @@
             "title": "Name",
             "type": "string"
           },
-          "part_groups": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/PartGroupRead"
-            },
-            "title": "Part Groups",
-            "type": "array"
-          },
           "slug": {
             "title": "Slug",
             "type": "string"
@@ -6583,6 +6575,535 @@
         "title": "MoonrakerConfigRead",
         "type": "object"
       },
+      "MultipartChoiceWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "model_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Model Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "MultipartChoiceWrite",
+        "type": "object"
+      },
+      "MultipartMemberRead": {
+        "description": "A live readable member or a deliberately redacted unavailable member.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "choice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "gcode_revision_count": {
+            "default": 0,
+            "title": "Gcode Revision Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "legacy_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Label"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "source_file_count": {
+            "default": 0,
+            "title": "Source File Count",
+            "type": "integer"
+          },
+          "source_file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source File Id"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "MultipartMemberRead",
+        "type": "object"
+      },
+      "MultipartModelCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MultipartModelCreate",
+        "type": "object"
+      },
+      "MultipartModelListItem": {
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Thumbnail Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "part_count": {
+            "default": 0,
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "updated_at"
+        ],
+        "title": "MultipartModelListItem",
+        "type": "object"
+      },
+      "MultipartModelRead": {
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Thumbnail Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "part_count": {
+            "default": 0,
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartRead"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "updated_at",
+          "created_at"
+        ],
+        "title": "MultipartModelRead",
+        "type": "object"
+      },
+      "MultipartModelSave": {
+        "additionalProperties": false,
+        "description": "Atomic metadata and composition replacement.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartWrite"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "title": "MultipartModelSave",
+        "type": "object"
+      },
+      "MultipartModelUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "MultipartModelUpdate",
+        "type": "object"
+      },
+      "MultipartPartRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartMemberRead"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sort_order"
+        ],
+        "title": "MultipartPartRead",
+        "type": "object"
+      },
+      "MultipartPartWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MultipartChoiceWrite"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "model_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ids"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MultipartPartWrite",
+        "type": "object"
+      },
+      "MultipartPartsReplace": {
+        "additionalProperties": false,
+        "properties": {
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartWrite"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "MultipartPartsReplace",
+        "type": "object"
+      },
       "NotificationTarget": {
         "description": "Where a notification is delivered.",
         "enum": [
@@ -6698,130 +7219,6 @@
           "name"
         ],
         "title": "OutlinerModelRead",
-        "type": "object"
-      },
-      "PartGroupRead": {
-        "properties": {
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "options": {
-            "items": {
-              "$ref": "#/components/schemas/PartOptionRead"
-            },
-            "title": "Options",
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "options"
-        ],
-        "title": "PartGroupRead",
-        "type": "object"
-      },
-      "PartGroupWrite": {
-        "additionalProperties": false,
-        "properties": {
-          "name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "options": {
-            "items": {
-              "$ref": "#/components/schemas/PartOptionWrite"
-            },
-            "maxItems": 100,
-            "minItems": 2,
-            "title": "Options",
-            "type": "array"
-          }
-        },
-        "required": [
-          "name",
-          "options"
-        ],
-        "title": "PartGroupWrite",
-        "type": "object"
-      },
-      "PartGroupsReplace": {
-        "additionalProperties": false,
-        "properties": {
-          "groups": {
-            "items": {
-              "$ref": "#/components/schemas/PartGroupWrite"
-            },
-            "maxItems": 50,
-            "title": "Groups",
-            "type": "array"
-          }
-        },
-        "required": [
-          "groups"
-        ],
-        "title": "PartGroupsReplace",
-        "type": "object"
-      },
-      "PartOptionRead": {
-        "properties": {
-          "file_id": {
-            "title": "File Id",
-            "type": "integer"
-          },
-          "id": {
-            "title": "Id",
-            "type": "integer"
-          },
-          "is_default": {
-            "title": "Is Default",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "file_id",
-          "name",
-          "is_default"
-        ],
-        "title": "PartOptionRead",
-        "type": "object"
-      },
-      "PartOptionWrite": {
-        "additionalProperties": false,
-        "properties": {
-          "file_id": {
-            "title": "File Id",
-            "type": "integer"
-          },
-          "is_default": {
-            "default": false,
-            "title": "Is Default",
-            "type": "boolean"
-          },
-          "name": {
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "file_id",
-          "name"
-        ],
-        "title": "PartOptionWrite",
         "type": "object"
       },
       "PrintArtifactFormat": {
@@ -22304,64 +22701,6 @@
         ]
       }
     },
-    "/api/v1/models/{model_id}/part-options": {
-      "put": {
-        "description": "Atomically replaces every Part Group. Each group must contain at least two source Artifacts and exactly one default option.",
-        "operationId": "replace_part_options_api_v1_models__model_id__part_options_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "model_id",
-            "required": true,
-            "schema": {
-              "title": "Model Id",
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PartGroupsReplace"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelRead"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "summary": "Replace a model's Part Groups and choices",
-        "tags": [
-          "models"
-        ]
-      }
-    },
     "/api/v1/models/{model_id}/print-jobs": {
       "get": {
         "operationId": "get_model_print_jobs_api_v1_models__model_id__print_jobs_get",
@@ -23212,6 +23551,490 @@
         "summary": "Star Model",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models": {
+      "get": {
+        "operationId": "list_multipart_models_api_v1_multipart_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Collection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direct",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Direct",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MultipartModelListItem"
+                  },
+                  "title": "Response List Multipart Models Api V1 Multipart Models Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List multipart models",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "post": {
+        "operationId": "create_multipart_model_api_v1_multipart_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}": {
+      "delete": {
+        "operationId": "delete_multipart_model_api_v1_multipart_models__multipart_model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete a multipart model grouping",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "get": {
+        "operationId": "get_multipart_model_api_v1_multipart_models__multipart_model_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "patch": {
+        "operationId": "update_multipart_model_api_v1_multipart_models__multipart_model_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update multipart model metadata",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "save_multipart_model_api_v1_multipart_models__multipart_model_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Atomically update metadata and multipart composition",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/candidates": {
+      "get": {
+        "operationId": "list_multipart_candidates_api_v1_multipart_models__multipart_model_id__candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MultipartMemberRead"
+                  },
+                  "title": "Response List Multipart Candidates Api V1 Multipart Models  Multipart Model Id  Candidates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List readable Models for multipart parts",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/parts": {
+      "put": {
+        "operationId": "replace_multipart_parts_api_v1_multipart_models__multipart_model_id__parts_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartPartsReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace multipart model composition",
+        "tags": [
+          "multipart-models"
         ]
       }
     },

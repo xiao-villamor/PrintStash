@@ -14,6 +14,9 @@ import {
   listFilamentProfiles,
   listFleetQueue,
   listModelPage,
+  listMultipartModelCandidates,
+  listMultipartModels,
+  getMultipartModel,
   listOutlinerModels,
   listPrinterProfiles,
   listPrinters,
@@ -31,6 +34,9 @@ import type {
   ModelPageRead,
   ModelSort,
   ModelFacetsRead,
+  MultipartModelCandidate,
+  MultipartModelListItem,
+  MultipartModelRead,
   OutlinerModelRead,
   PrinterProfileRead,
   PrinterRead,
@@ -76,6 +82,9 @@ export const defaultQueryApi = {
   listFilamentProfiles,
   listFleetQueue,
   listModelPage,
+  listMultipartModelCandidates,
+  listMultipartModels,
+  getMultipartModel,
   listOutlinerModels,
   listPrinterProfiles,
   listPrinters,
@@ -179,6 +188,56 @@ export function useVaultStats() {
   return useQuery<VaultStatsRead>({
     queryKey: queryKeys.vaultStats,
     queryFn: () => api.getVaultStats({ fresh: true }),
+  });
+}
+
+export interface MultipartModelListFilters {
+  collection?: string;
+  direct?: boolean;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function useMultipartModels(filters?: MultipartModelListFilters) {
+  const api = useQueryApi();
+  return useQuery<MultipartModelListItem[]>({
+    queryKey: [...queryKeys.multipartModels, "list", filters ?? {}],
+    queryFn: () => api.listMultipartModels(filters),
+  });
+}
+
+export function useMultipartModel(id: number | null) {
+  const api = useQueryApi();
+  return useQuery<MultipartModelRead>({
+    queryKey:
+      id === null
+        ? [...queryKeys.multipartModels, "detail", "empty"]
+        : queryKeys.multipartModel(id),
+    queryFn: () => {
+      if (id === null) return Promise.reject(new Error("Multipart model id is required"));
+      return api.getMultipartModel(id);
+    },
+    enabled: id !== null,
+  });
+}
+
+export function useMultipartModelCandidates(
+  id: number | null,
+  query: string,
+  options?: { enabled?: boolean },
+) {
+  const api = useQueryApi();
+  return useQuery<MultipartModelCandidate[]>({
+    queryKey:
+      id === null
+        ? [...queryKeys.multipartModels, "candidates", "empty"]
+        : queryKeys.multipartCandidates(id, query),
+    queryFn: () => {
+      if (id === null) return Promise.reject(new Error("Multipart model id is required"));
+      return api.listMultipartModelCandidates(id, { q: query, limit: 50 });
+    },
+    enabled: id !== null && (options?.enabled ?? true),
   });
 }
 

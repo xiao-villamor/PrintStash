@@ -123,6 +123,7 @@ function renderVault(
       "GET /api/v1/models": json(models),
       "GET /api/v1/saved-views": json([]),
       "GET /api/v1/documents": json([]),
+      "GET /api/v1/multipart-models": json([]),
       "GET /api/v1/collections": json(collections),
       "GET /api/v1/tags": json(tags),
       ...routes,
@@ -326,7 +327,45 @@ describe("ModelBrowser", () => {
     it("opens on the documents tab when the URL asks for it", async () => {
       renderVault({ at: "/?v=docs" });
 
-      expect(await screen.findByRole("button", { name: "Documents" })).toBeInTheDocument();
+      expect(await screen.findByRole("tab", { name: "Documents" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    });
+  });
+
+  describe("the multipart models tab", () => {
+    it("shows only the multipart workspace chrome", async () => {
+      renderVault({ at: "/?v=multipart", models: [aModelListItem({ name: "Handle" })] });
+
+      expect(await screen.findByRole("heading", { name: "Multipart models" })).toBeInTheDocument();
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(screen.getByRole("tablist")).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Multipart models" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(screen.getAllByRole("button", { name: "New multipart model" })).not.toHaveLength(0);
+      expect(screen.getByRole("textbox", { name: "Search existing models" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "All Models" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/models? total/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Upload" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Sort models" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Favorites" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Select/ })).not.toBeInTheDocument();
+    });
+
+    it("keeps the model workspace chrome on the models tab", async () => {
+      renderVault({ models: [aModelListItem({ name: "Handle" })] });
+
+      expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
+      expect(screen.getByText(/models? total/)).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: "Sort models" })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: "Favorites" })).not.toHaveLength(0);
+      expect(screen.getAllByRole("button", { name: /Select/ })).not.toHaveLength(0);
     });
   });
 
@@ -1140,7 +1179,7 @@ describe("ModelBrowser", () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
       await screen.findByText("Benchy");
 
-      await user.click(screen.getByRole("button", { name: "Documents" }));
+      await user.click(screen.getByRole("tab", { name: "Documents" }));
 
       expect(window.localStorage.getItem("printstash.last.view")).toBe("docs");
     });

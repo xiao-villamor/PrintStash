@@ -9,23 +9,36 @@ retention. This file pins the project's domain language.
 ### Library
 
 **Model**:
-A logical asset deduplicated by source-mesh sha256; owns versioned Files.
+A printable logical asset deduplicated by source-mesh sha256; owns versioned
+Files and remains independently visible even when referenced by Multipart Models.
 _Avoid_: asset, item, part
 
 **Artifact** (File):
 One physical stored blob (STL/3MF/OBJ/G-code) at a version under a Model.
 _Avoid_: upload, attachment
 
-**Part Group**:
-A named replaceable role within one Model, such as “handle” or “lid”. A Part
-Group contains at least two Part Options and has exactly one default.
-_Avoid_: collection, folder, variant group
+**Multipart Model**:
+An independent library grouping that describes one object made from several
+printable Models. It references Models without moving, hiding or owning them.
+_Avoid_: assembly Model, merged Model, collection
 
-**Part Option**:
-One selectable source Artifact and its user-facing choice name within a Part
-Group. An Artifact belongs to at most one Part Option; G-code Revisions are not
-Part Options.
-_Avoid_: revision, tag, duplicate Model
+**Multipart Part**:
+A named physical role within a Multipart Model, such as “base”, “handle” or
+“lid”. It has one Model when fixed and several Model Choices when alternatives
+are valid.
+_Avoid_: Part Group, folder, variant group
+
+**Model Choice**:
+One existing Model that can satisfy a Multipart Part. A Model can be referenced
+by any number of Multipart Models and keeps its own Artifacts, preview, G-code
+Revisions and print history.
+_Avoid_: Part Option, source file option, revision
+
+Multipart Models are created and edited from their own Vault view. Adding a
+piece or alternative references an existing Model; it never transfers or
+duplicates that Model's files. Removing a piece or deleting the grouping only
+removes the reference, leaving the Model and all of its Artifacts and
+Revisions available in the main Models view.
 
 **Artifact persistence**:
 The invariant-heavy sequence `version → canonical publication → File row +

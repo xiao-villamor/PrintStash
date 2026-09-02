@@ -33,35 +33,6 @@ const artifact: FileRead = {
   tags: ["Existing"],
 };
 
-const secondArtifact: FileRead = {
-  ...artifact,
-  id: 8,
-  original_filename: "bracket-wide.stl",
-  version: 2,
-  sha256: "c".repeat(64),
-  tags: [],
-};
-
-const thirdArtifact: FileRead = {
-  ...artifact,
-  id: 9,
-  original_filename: "bracket-tall.stl",
-  version: 3,
-  sha256: "d".repeat(64),
-  tags: [],
-};
-
-const partGroups = [
-  {
-    id: 3,
-    name: "Bracket width",
-    options: [
-      { id: 4, file_id: 7, name: "Narrow", is_default: true },
-      { id: 5, file_id: 8, name: "Wide", is_default: false },
-    ],
-  },
-];
-
 const updatedModel: ModelRead = {
   id: 1,
   name: "Bracket",
@@ -77,7 +48,6 @@ const updatedModel: ModelRead = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   files: [{ ...artifact, tags: ["Existing", "Workshop"] }],
-  part_groups: [],
   starred: false,
 };
 
@@ -99,7 +69,7 @@ describe("FilesTab", () => {
   it("replaces an Artifact tag set", async () => {
     const onModel = vi.fn<(model: ModelRead) => void>();
     const view = renderApp(
-      <FilesTab modelId={1} sourceFiles={[artifact]} partGroups={[]} canEdit onModel={onModel} />,
+      <FilesTab modelId={1} sourceFiles={[artifact]} canEdit onModel={onModel} />,
       {
         routes: {
           "GET /api/v1/tags": json([
@@ -126,7 +96,6 @@ describe("FilesTab", () => {
       <FilesTab
         modelId={1}
         sourceFiles={[]}
-        partGroups={[]}
         canEdit={false}
         onModel={vi.fn<(model: ModelRead) => void>()}
       />,
@@ -143,7 +112,6 @@ describe("FilesTab", () => {
       <FilesTab
         modelId={1}
         sourceFiles={[artifact]}
-        partGroups={[]}
         canEdit
         onModel={vi.fn<(model: ModelRead) => void>()}
       />,
@@ -177,7 +145,6 @@ describe("FilesTab", () => {
       <FilesTab
         modelId={1}
         sourceFiles={[{ ...artifact, is_external: true }]}
-        partGroups={[]}
         canEdit={false}
         onModel={vi.fn<(model: ModelRead) => void>()}
       />,
@@ -200,148 +167,5 @@ describe("FilesTab", () => {
     );
     expect(createObjectURL).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Linked")).toBeVisible();
-  });
-
-  it("creates a named Part Group with one default option", async () => {
-    const onModel = vi.fn<(model: ModelRead) => void>();
-    const response = {
-      ...updatedModel,
-      files: [artifact, secondArtifact],
-      part_groups: [
-        {
-          id: 3,
-          name: "Bracket width",
-          options: [
-            { id: 4, file_id: 7, name: "bracket", is_default: true },
-            { id: 5, file_id: 8, name: "bracket-wide", is_default: false },
-          ],
-        },
-      ],
-    } satisfies ModelRead;
-    const view = renderApp(
-      <FilesTab
-        modelId={1}
-        sourceFiles={[artifact, secondArtifact]}
-        partGroups={[]}
-        canEdit
-        onModel={onModel}
-      />,
-      {
-        routes: {
-          "GET /api/v1/tags": json([]),
-          "PUT /api/v1/models/1/part-options": json(response),
-        },
-      },
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Manage options" }));
-    await userEvent.click(screen.getByRole("button", { name: "Add part" }));
-    await userEvent.type(screen.getByPlaceholderText("e.g. Handle"), "Bracket width");
-    await userEvent.click(screen.getByRole("button", { name: "Save options" }));
-
-    await waitFor(() => expect(onModel).toHaveBeenCalledWith(response));
-    expect(JSON.parse(view.requestsWithMethod("PUT")[0]?.body ?? "{}")).toEqual({
-      groups: [
-        {
-          name: "Bracket width",
-          options: [
-            { file_id: 7, name: "bracket", is_default: true },
-            { file_id: 8, name: "bracket-wide", is_default: false },
-          ],
-        },
-      ],
-    });
-  });
-
-  it("persists a revised three-choice Part Group", async () => {
-    const onModel = vi.fn<(model: ModelRead) => void>();
-    const response = {
-      ...updatedModel,
-      files: [artifact, secondArtifact, thirdArtifact],
-      part_groups: [],
-    } satisfies ModelRead;
-    const view = renderApp(
-      <FilesTab
-        modelId={1}
-        sourceFiles={[artifact, secondArtifact, thirdArtifact]}
-        partGroups={partGroups}
-        canEdit
-        onModel={onModel}
-      />,
-      {
-        routes: {
-          "GET /api/v1/tags": json([]),
-          "PUT /api/v1/models/1/part-options": json(response),
-        },
-      },
-    );
-
-    expect(screen.getByText("Bracket width", { exact: true })).toBeVisible();
-    expect(screen.getByText("Default", { exact: true })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Manage options" }));
-    const groupName = screen.getByLabelText("Part name");
-    await userEvent.clear(groupName);
-    await userEvent.type(groupName, "Bracket height");
-    await userEvent.click(screen.getByRole("button", { name: "Add option" }));
-    await userEvent.click(screen.getAllByRole("radio", { name: "Use as default" })[2]);
-    await userEvent.click(screen.getAllByRole("button", { name: "Remove option" })[0]);
-    await userEvent.click(screen.getByRole("button", { name: "Save options" }));
-
-    await waitFor(() => expect(onModel).toHaveBeenCalledWith(response));
-    expect(JSON.parse(view.requestsWithMethod("PUT")[0]?.body ?? "{}")).toEqual({
-      groups: [
-        {
-          name: "Bracket height",
-          options: [
-            { file_id: 8, name: "Wide", is_default: false },
-            { file_id: 9, name: "bracket-tall", is_default: true },
-          ],
-        },
-      ],
-    });
-  });
-
-  it("keeps Part Option edits open when the server rejects them", async () => {
-    const view = renderApp(
-      <FilesTab
-        modelId={1}
-        sourceFiles={[artifact, secondArtifact]}
-        partGroups={partGroups}
-        canEdit
-        onModel={vi.fn<(model: ModelRead) => void>()}
-      />,
-      {
-        routes: {
-          "GET /api/v1/tags": json([]),
-          "PUT /api/v1/models/1/part-options": json({ detail: "conflict" }, 409),
-        },
-      },
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Manage options" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save options" }));
-
-    await waitFor(() => expect(view.requestsWithMethod("PUT")).toHaveLength(1));
-    expect(screen.getByRole("dialog", { name: "Manage part options" })).toBeVisible();
-  });
-
-  it("refuses an unnamed Part Group before sending", async () => {
-    const view = renderApp(
-      <FilesTab
-        modelId={1}
-        sourceFiles={[artifact, secondArtifact]}
-        partGroups={[]}
-        canEdit
-        onModel={vi.fn<(model: ModelRead) => void>()}
-      />,
-      { routes: { "GET /api/v1/tags": json([]) } },
-    );
-
-    await userEvent.click(screen.getByRole("button", { name: "Manage options" }));
-    await userEvent.click(screen.getByRole("button", { name: "Add part" }));
-    await userEvent.click(screen.getByRole("button", { name: "Save options" }));
-
-    expect(view.requestsWithMethod("PUT")).toHaveLength(0);
-    expect(screen.getByRole("dialog", { name: "Manage part options" })).toBeVisible();
   });
 });

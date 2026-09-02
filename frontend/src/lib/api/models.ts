@@ -30,7 +30,6 @@ import {
   ModelStarRead,
   ModelUpdate,
   OutlinerModelRead,
-  PartGroupWrite,
   RevisionBatchResult,
   TrashPurgeRead,
   normalizeTrashPurgeRead,
@@ -311,10 +310,6 @@ export function replaceFileTags(
   tags: string[],
 ): Promise<ModelRead> {
   return sendJson<ModelRead>(`/api/v1/models/${modelId}/files/${fileId}/tags`, "PUT", { tags });
-}
-
-export function replacePartOptions(modelId: number, groups: PartGroupWrite[]): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${modelId}/part-options`, "PUT", { groups });
 }
 
 export async function deleteFileRevision(modelId: number, fileId: number): Promise<ModelRead> {

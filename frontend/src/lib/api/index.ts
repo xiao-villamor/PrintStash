@@ -21,6 +21,7 @@ export * from "@/lib/api/provenance";
 export * from "@/lib/api/provider-connections";
 export * from "@/lib/api/maintenance";
 export * from "@/lib/api/models";
+export * from "@/lib/api/multipart-models";
 export * from "@/lib/api/saved-views";
 export * from "@/lib/api/notifications";
 export * from "@/lib/api/printer-profiles";

@@ -26,7 +26,7 @@ async function openDocsTab(page: Page, col: string): Promise<void> {
   await expect(
     page.getByRole("button", { name: /Add a description for this collection/ }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Documents" }).click();
+  await page.getByRole("tab", { name: "Documents" }).click();
   await expect(page.getByText("No documents here yet.")).toBeVisible();
 }
 

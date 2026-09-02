@@ -34,6 +34,8 @@ from app.db.models import (
     ModelProvenanceSource,
     ModelSourceCover,
     ModelStar,
+    MultipartModelChoice,
+    MultipartPart,
     PrintBatch,
     Printer,
     PrinterFile,
@@ -631,6 +633,30 @@ def hard_delete_model(
         inbox.resulting_model_id = None
         session.add(inbox)
     session.exec(delete(ModelStar).where(ModelStar.model_id == model.id))
+    # Multipart compositions reference Models without owning them. Detach this
+    # member before the restrictive Model FK is enforced; an empty part no
+    # longer represents a useful choice and is removed, while its aggregate
+    # remains available to be edited.
+    member_part_ids = session.exec(
+        select(MultipartModelChoice.multipart_part_id).where(
+            MultipartModelChoice.model_id == model.id
+        )
+    ).all()
+    session.exec(
+        delete(MultipartModelChoice).where(MultipartModelChoice.model_id == model.id)
+    )
+    session.flush()
+    for part_id in member_part_ids:
+        if (
+            session.exec(
+                select(MultipartModelChoice.id)
+                .where(MultipartModelChoice.multipart_part_id == part_id)
+                .limit(1)
+            ).first()
+            is None
+        ):
+            session.exec(delete(MultipartPart).where(MultipartPart.id == part_id))
+    part_options.remove_model_from_groups(session, model.id)
     # Don't bulk-delete the tag links here: ``Model.tags`` is a link_model
     # (many-to-many) relationship, so deleting the model already removes its
     # ModelTagLink rows. Doing both makes the ORM's cascade try to delete rows

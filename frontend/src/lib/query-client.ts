@@ -37,6 +37,10 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   models: ["models"] as const,
   model: (id: number) => ["models", id] as const,
+  multipartModels: ["multipart-models"] as const,
+  multipartModel: (id: number) => ["multipart-models", id] as const,
+  multipartCandidates: (id: number, q: string) =>
+    ["multipart-models", id, "candidates", q] as const,
   collections: ["collections"] as const,
   tags: ["tags"] as const,
   printers: ["printers"] as const,
@@ -63,7 +67,12 @@ export const queryKeys = {
  * race with this completion refresh.
  */
 export async function refreshVaultAfterIngest(): Promise<void> {
-  const keys = [queryKeys.models, queryKeys.collections, queryKeys.vaultStats];
+  const keys = [
+    queryKeys.models,
+    queryKeys.collections,
+    queryKeys.vaultStats,
+    queryKeys.multipartModels,
+  ];
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
   await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
 }
@@ -72,10 +81,27 @@ export async function refreshVaultAfterIngest(): Promise<void> {
  * Invalidate the query keys a mutated API path can affect.
  *
  * Keyed (not blanket) invalidation: a collection/tag write also touches how
- * models are listed/labelled, so those fan out to ["models"]. Anything not
- * recognised here falls back to a full invalidation in `invalidateApiCache`.
+ * models are listed/labelled, so those fan out to ["models"]. An unrecognised
+ * path is intentionally left alone; callers that do not know the affected
+ * resource can omit the path and request a full invalidation instead.
  */
-export function invalidateQueriesForPath(path: string): void {
+type ApiMethod = "GET" | "HEAD" | "OPTIONS" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+/**
+ * Invalidate read models affected by a successful API mutation.
+ *
+ * `request.ts` calls this only for writes. Keeping the method argument here is
+ * useful for callers that work with a generic transport and, importantly,
+ * makes an accidental GET invalidation a no-op. Resource names are matched as
+ * path segments, never as substrings: `/printer-profiles` must not be treated
+ * as `/printers`, and `/multipart-models` is not the only write that can make
+ * a multipart view stale.
+ */
+export function invalidateQueriesForPath(path: string, method: ApiMethod = "POST"): void {
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
+
+  const segments = path.split(/[/?#]/).filter(Boolean);
+  const has = (...names: string[]) => names.some((name) => segments.includes(name));
   const invalidated = new Set<string>();
   const bust = (queryKey: readonly unknown[]) => {
     const identity = JSON.stringify(queryKey);
@@ -84,15 +110,34 @@ export function invalidateQueriesForPath(path: string): void {
     void queryClient.invalidateQueries({ queryKey });
   };
 
-  if (/\/collections(\/|$|\?)/.test(path)) {
+  const multipartAffected = () => {
+    // The root key is a prefix, so this refreshes list, detail, and candidate
+    // queries together (including entries with query parameters).
+    bust(queryKeys.multipartModels);
+  };
+
+  if (has("collections")) {
     bust(queryKeys.collections);
     bust(queryKeys.models);
+    multipartAffected();
   }
-  if (/\/tags(\/|$|\?)/.test(path)) {
+  if (has("tags")) {
     bust(queryKeys.tags);
     bust(queryKeys.models);
+    multipartAffected();
   }
-  if (/\/(models|files|ingest|gcode)(\/|$|\?|-)/.test(path)) {
+  if (
+    has(
+      "models",
+      "files",
+      "artifacts",
+      "ingest",
+      "gcode",
+      "gcode-revision",
+      "gcode-revisions",
+      "revisions",
+    )
+  ) {
     bust(queryKeys.models);
     // Vault totals (count, size, material breakdown) are derived from models,
     // so any model/file write can change them.
@@ -100,29 +145,42 @@ export function invalidateQueriesForPath(path: string): void {
     // Collections carry a `model_count`; a move/delete/import shifts those
     // counts, so refresh the collection list (and its sidebar badges) too.
     bust(queryKeys.collections);
+    multipartAffected();
   }
-  if (/\/printers(\/|$|\?)/.test(path)) {
+  if (has("trash", "restore", "purge", "gc")) {
+    // Trash routes can operate on Models, Files, or collections. These reads
+    // are cheap and keeping them in sync also covers restore/purge actions
+    // whose route does not include the affected resource name.
+    bust(queryKeys.models);
+    bust(queryKeys.collections);
+    bust(queryKeys.vaultStats);
+    multipartAffected();
+  }
+  if (has("multipart-models")) {
+    multipartAffected();
+  }
+  if (has("printers")) {
     bust(queryKeys.printers);
   }
-  if (/\/fleet(\/|$|\?)/.test(path)) {
+  if (has("fleet")) {
     bust(queryKeys.fleetQueue);
     bust(queryKeys.fleetSummary);
     bust(queryKeys.printers);
   }
-  if (/\/filament-profiles(\/|$|\?)/.test(path)) {
+  if (has("filament-profiles")) {
     bust(queryKeys.filamentProfiles);
   }
-  if (/\/printer-profiles(\/|$|\?)/.test(path)) {
+  if (has("printer-profiles")) {
     bust(queryKeys.printerProfiles);
   }
-  if (/\/admin\/users(\/|$|\?)/.test(path)) {
+  if (segments.includes("admin") && segments.includes("users")) {
     bust(queryKeys.adminUsers);
   }
-  if (/\/spoolman(\/|$|\?)/.test(path)) {
+  if (has("spoolman")) {
     bust(queryKeys.spoolmanStatus);
     bust(queryKeys.spools);
     // A filament sync rewrites linked presets.
-    if (/\/spoolman\/sync-filaments/.test(path)) {
+    if (segments.includes("sync-filaments")) {
       bust(queryKeys.filamentProfiles);
     }
   }

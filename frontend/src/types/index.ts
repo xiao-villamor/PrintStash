@@ -1,4 +1,14 @@
 export type { DocumentKind, DocumentListItem, DocumentRead } from "./documents";
+export type {
+  MultipartModelReference,
+  MultipartModelListItem,
+  MultipartPartRead,
+  MultipartModelRead,
+  MultipartModelCreate,
+  MultipartModelUpdate,
+  MultipartPartsWrite,
+  MultipartModelCandidate,
+} from "./multipart-models";
 
 export type {
   MetadataRead,
@@ -6,10 +16,6 @@ export type {
   FileRevisionStatus,
   CollectionRole,
   FileRevisionUpdate,
-  PartOptionRead,
-  PartGroupRead,
-  PartOptionWrite,
-  PartGroupWrite,
   ModelRead,
   ModelPrinterFileRead,
   ModelPrinterPresenceRead,

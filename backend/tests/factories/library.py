@@ -35,6 +35,7 @@ from app.db.models import (
     Metadata,
     Model,
     ModelTagLink,
+    MultipartModel,
     Tag,
 )
 from tests.factories._support import nth, reject_aliases, save, unique_hash
@@ -111,6 +112,21 @@ def build_model(
     overrides.setdefault("slug", f"model-{index}")
     overrides.setdefault("hash", f"{index:064d}")
     return save(session, Model(name=name, **overrides))
+
+
+def build_multipart_model(
+    session: Session,
+    name: str = "Multipart bracket",
+    *,
+    collection: Collection | None = None,
+    **overrides: Any,
+) -> MultipartModel:
+    """A standalone empty multipart grouping; members are API/service state."""
+    index = nth("multipart_model")
+    if collection is not None:
+        overrides.setdefault("collection_id", collection.id)
+    overrides.setdefault("slug", f"multipart-model-{index}")
+    return save(session, MultipartModel(name=name, **overrides))
 
 
 def build_file(

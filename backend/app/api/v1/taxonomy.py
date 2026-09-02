@@ -39,6 +39,7 @@ from app.db.models import (
     FileTagLink,
     Model,
     ModelTagLink,
+    MultipartModel,
     Tag,
     User,
 )
@@ -57,7 +58,7 @@ from app.schemas.models import (
     TagRead,
     TagSetUpdate,
 )
-from app.services import library_search, rbac, taxonomy
+from app.services import library_search, rbac, taxonomy, trash
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_ownership import publish_bytes
 from app.services.taxonomy import slugify
@@ -548,6 +549,21 @@ def delete_collection(
             )
         ).all()
         affected_ids = [cat.id] + [d.id for d in descendants]
+        # Multipart Models are independent rows that reference their
+        # collection.  Recursive deletion must fail closed just like the
+        # non-recursive path: otherwise the collection subtree is trashed
+        # first and the dangling composition only fails later at purge/FK
+        # handling.  This check deliberately precedes every mutation below so
+        # a conflict leaves collections and Models untouched.
+        multipart_collection_ids = select(Collection.id).where(
+            (Collection.path == cat.path) | Collection.path.startswith(cat.path + "/")
+        )
+        if session.exec(
+            select(func.count(MultipartModel.id)).where(
+                MultipartModel.collection_id.in_(multipart_collection_ids)  # type: ignore[union-attr]
+            )
+        ).one():
+            raise HTTPException(status_code=409, detail="collection_has_models")
         for desc in descendants:
             desc.deleted_at = now
             session.add(desc)
@@ -556,10 +572,11 @@ def delete_collection(
         models_in_tree = session.exec(
             select(Model).where(live(Model), Model.collection_id.in_(affected_ids))
         ).all()
+        # Use the shared trash seam so external-library files receive durable
+        # discovery tombstones and cannot reappear on the next scan.
+        trash.soft_delete_models(session, models_in_tree)
         for m in models_in_tree:
             m.collection_id = None
-            m.deleted_at = now
-            m.updated_at = now
             session.add(m)
     else:
         if session.exec(
@@ -570,6 +587,15 @@ def delete_collection(
         ).first():
             raise HTTPException(status_code=409, detail="collection_has_children")
         if _collection_model_count(session, cat.path, current_user):
+            raise HTTPException(status_code=409, detail="collection_has_models")
+        multipart_ids = select(Collection.id).where(
+            (Collection.path == cat.path) | Collection.path.startswith(cat.path + "/")
+        )
+        if session.exec(
+            select(func.count(MultipartModel.id)).where(
+                MultipartModel.collection_id.in_(multipart_ids)  # type: ignore[union-attr]
+            )
+        ).one():
             raise HTTPException(status_code=409, detail="collection_has_models")
 
     cat.deleted_at = now

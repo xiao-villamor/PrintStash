@@ -6,9 +6,8 @@ import { downloadAuthenticatedFile, replaceFileTags } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { useTags } from "@/lib/queries";
 import { toast } from "@/lib/toast";
-import { FileRead, ModelRead, PartGroupRead } from "@/types";
+import { FileRead, ModelRead } from "@/types";
 
-import { PartOptionsDialog } from "@/components/part-options-dialog";
 import { SlicerOpenButton } from "@/components/slicer-open-button";
 import { Localized } from "@/components/ui/localized";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
@@ -18,13 +17,11 @@ const SLICEABLE_TYPES = new Set(["stl", "3mf", "obj"]);
 export function FilesTab({
   modelId,
   sourceFiles,
-  partGroups,
   canEdit,
   onModel,
 }: {
   modelId: number;
   sourceFiles: FileRead[];
-  partGroups: PartGroupRead[];
   canEdit: boolean;
   onModel: (model: ModelRead) => void;
 }) {
@@ -46,13 +43,6 @@ export function FilesTab({
         <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
           Source Files
         </h2>
-        <PartOptionsDialog
-          modelId={modelId}
-          files={sourceFiles}
-          groups={partGroups}
-          canEdit={canEdit}
-          onModel={onModel}
-        />
         {sourceFiles.length === 0 && (
           <p className="font-mono text-xs text-on-surface-variant">
             No source files (STL / 3MF / OBJ) for this model.

@@ -311,8 +311,9 @@ export async function sendJson<T>(
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
+  const value = await handleResponse<T>(res);
   invalidateApiCache(path);
-  return handleResponse<T>(res);
+  return value;
 }
 
 export async function sendForm<T>(path: string, formData: FormData): Promise<T> {
@@ -321,8 +322,9 @@ export async function sendForm<T>(path: string, formData: FormData): Promise<T> 
     headers: authHeaders(),
     body: formData,
   });
+  const value = await handleResponse<T>(res);
   invalidateApiCache(path);
-  return handleResponse<T>(res);
+  return value;
 }
 
 export async function sendAction(path: string, method: "POST" | "DELETE"): Promise<void> {
@@ -330,6 +332,6 @@ export async function sendAction(path: string, method: "POST" | "DELETE"): Promi
     method,
     headers: authHeaders(),
   });
+  await expectOk(res);
   invalidateApiCache(path);
-  return expectOk(res);
 }

@@ -16,7 +16,7 @@ from typing import Any, Literal
 from printstash_core.imports import CaptureContractError, CaptureManifestV2
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.core.time import utcnow
 from app.db.models import (
@@ -34,6 +34,9 @@ from app.db.models import (
     ModelSourceCover,
     ModelStar,
     ModelTagLink,
+    MultipartModel,
+    MultipartModelChoice,
+    MultipartPart,
     PartGroup,
     PartOption,
     PrintJob,
@@ -50,6 +53,7 @@ from app.services import (
     model_views,
     part_options,
     provenance,
+    rbac,
     source_covers,
     storage,
     taxonomy,
@@ -97,24 +101,36 @@ class PortableArtifact(BaseModel):
 class PortablePartOption(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    artifact_source_id: int
+    artifact_source_id: int | None = None
+    model_source_id: int | None = None
     name: str = PydanticField(min_length=1, max_length=255)
     is_default: bool = False
+
+    @model_validator(mode="after")
+    def exactly_one_target(self) -> "PortablePartOption":
+        if (self.artifact_source_id is None) == (self.model_source_id is None):
+            raise ValueError("part option requires exactly one target")
+        return self
 
 
 class PortablePartGroup(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     name: str = PydanticField(min_length=1, max_length=255)
-    options: list[PortablePartOption] = PydanticField(min_length=2, max_length=100)
+    options: list[PortablePartOption] = PydanticField(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def valid_choices(self) -> "PortablePartGroup":
         if sum(option.is_default for option in self.options) != 1:
             raise ValueError("part group requires exactly one default")
-        source_ids = [option.artifact_source_id for option in self.options]
-        if len(source_ids) != len(set(source_ids)):
-            raise ValueError("part group artifact choices must be unique")
+        targets = [
+            ("artifact", option.artifact_source_id)
+            if option.artifact_source_id is not None
+            else ("model", option.model_source_id)
+            for option in self.options
+        ]
+        if len(targets) != len(set(targets)):
+            raise ValueError("part group targets must be unique")
         names = [" ".join(option.name.split()).casefold() for option in self.options]
         if len(names) != len(set(names)):
             raise ValueError("part option names must be unique")
@@ -149,18 +165,72 @@ class PortableModel(BaseModel):
             for artifact in self.artifacts
             if artifact.source_id is not None
         }
-        chosen_ids = [
+        chosen_artifact_ids = [
             option.artifact_source_id
             for group in self.part_groups
             for option in group.options
+            if option.artifact_source_id is not None
         ]
-        if not set(chosen_ids) <= artifact_ids or len(chosen_ids) != len(
-            set(chosen_ids)
-        ):
+        if not set(chosen_artifact_ids) <= artifact_ids or len(
+            chosen_artifact_ids
+        ) != len(set(chosen_artifact_ids)):
             raise ValueError("part options must reference unique model artifacts")
         names = [" ".join(group.name.split()).casefold() for group in self.part_groups]
         if len(names) != len(set(names)):
             raise ValueError("part group names must be unique")
+        return self
+
+
+class PortableMultipartChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    model_source_id: int
+    artifact_source_id: int | None = None
+    label: str | None = PydanticField(default=None, max_length=128)
+
+
+class PortableMultipartPart(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = PydanticField(min_length=1, max_length=128)
+    # ``model_source_ids`` is the shape emitted by the first standalone
+    # archive implementation.  Keep accepting it, but write the richer
+    # explicit choice shape so file-pinned alternatives survive a round trip.
+    model_source_ids: list[int] | None = PydanticField(
+        default=None, min_length=1, max_length=100
+    )
+    choices: list[PortableMultipartChoice] | None = PydanticField(
+        default=None, min_length=1, max_length=100
+    )
+
+    @model_validator(mode="after")
+    def valid_shape(self) -> "PortableMultipartPart":
+        if self.model_source_ids is None and self.choices is None:
+            raise ValueError("multipart part requires choices")
+        if self.model_source_ids is not None and self.choices is not None:
+            raise ValueError("multipart part has multiple choice shapes")
+        if self.model_source_ids is not None and len(self.model_source_ids) != len(
+            set(self.model_source_ids)
+        ):
+            raise ValueError("multipart part models must be unique")
+        return self
+
+
+class PortableMultipartModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    source_id: int
+    name: str = PydanticField(min_length=1, max_length=255)
+    slug: str = PydanticField(min_length=1, max_length=255)
+    description: str | None = None
+    collection: str | None = PydanticField(default=None, max_length=512)
+    parts: list[PortableMultipartPart] = PydanticField(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_part_names(self) -> "PortableMultipartModel":
+        names = [" ".join(part.name.split()).casefold() for part in self.parts]
+        if any(not name for name in names) or len(names) != len(set(names)):
+            raise ValueError("multipart part names must be unique")
         return self
 
 
@@ -172,6 +242,9 @@ class PortableManifest(BaseModel):
     models: list[PortableModel]
     print_jobs: list[dict[str, Any]] = PydanticField(default_factory=list)
     saved_views: list[dict[str, Any]] = PydanticField(default_factory=list)
+    # Optional keeps archives produced before standalone multipart models fully
+    # readable.
+    multipart_models: list[PortableMultipartModel] = PydanticField(default_factory=list)
 
     @model_validator(mode="after")
     def unique_source_ids(self) -> "PortableManifest":
@@ -186,6 +259,60 @@ class PortableManifest(BaseModel):
         ]
         if len(artifact_ids) != len(set(artifact_ids)):
             raise ValueError("duplicate artifact source_id")
+        model_id_set = set(model_ids)
+        chosen_model_ids = [
+            option.model_source_id
+            for model in self.models
+            for group in model.part_groups or []
+            for option in group.options
+            if option.model_source_id is not None
+        ]
+        if not set(chosen_model_ids) <= model_id_set or len(chosen_model_ids) != len(
+            set(chosen_model_ids)
+        ):
+            raise ValueError("part options must reference unique archive models")
+        aggregate_ids = [row.source_id for row in self.multipart_models]
+        if len(aggregate_ids) != len(set(aggregate_ids)):
+            raise ValueError("duplicate multipart source_id")
+        artifact_ids_by_model = {
+            model.source_id: {
+                artifact.source_id
+                for artifact in model.artifacts
+                if artifact.source_id is not None
+            }
+            for model in self.models
+        }
+        for aggregate in self.multipart_models:
+            selected: list[tuple[int, int | None]] = []
+            for part in aggregate.parts:
+                if part.choices is not None:
+                    for choice in part.choices:
+                        if choice.model_source_id not in model_id_set:
+                            raise ValueError(
+                                "multipart models must reference archive models once"
+                            )
+                        if (
+                            choice.artifact_source_id is not None
+                            and choice.artifact_source_id
+                            not in artifact_ids_by_model[choice.model_source_id]
+                        ):
+                            raise ValueError(
+                                "multipart choices must reference archive artifacts"
+                            )
+                        selected.append(
+                            (choice.model_source_id, choice.artifact_source_id)
+                        )
+                else:
+                    assert part.model_source_ids is not None
+                    if not set(part.model_source_ids) <= model_id_set:
+                        raise ValueError(
+                            "multipart models must reference archive models once"
+                        )
+                    selected.extend(
+                        (model_id, None) for model_id in part.model_source_ids
+                    )
+            if len(selected) != len(set(selected)):
+                raise ValueError("multipart models must reference archive choices once")
         return self
 
 
@@ -218,25 +345,37 @@ def create_archive(session: Session, user: User) -> Path:
         .where(File.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
         .order_by(File.model_id.asc(), File.version.asc())  # type: ignore[attr-defined]
     ).all()
+    visible_model_ids = {int(model.id) for model in models}
+    visible_file_ids = {int(file.id) for file in files}
     portable_groups: dict[int, dict[int, dict[str, object]]] = {}
+    incomplete_group_ids: set[int] = set()
     for group, option in session.exec(
         select(PartGroup, PartOption)
         .join(PartOption, PartOption.part_group_id == PartGroup.id)
-        .join(File, File.id == PartOption.file_id)
-        .where(PartGroup.model_id.in_(visible_ids), live(File))  # type: ignore[union-attr]
+        .where(PartGroup.model_id.in_(visible_ids))  # type: ignore[union-attr]
         .order_by(PartGroup.sort_order.asc(), PartOption.sort_order.asc())  # type: ignore[attr-defined]
     ).all():
         assert group.id is not None
+        if (
+            option.file_id is not None
+            and option.file_id not in visible_file_ids
+            or option.model_id is not None
+            and option.model_id not in visible_model_ids
+        ):
+            incomplete_group_ids.add(group.id)
+            continue
         portable_group = portable_groups.setdefault(group.model_id, {}).setdefault(
             group.id, {"name": group.name, "options": []}
         )
-        portable_group["options"].append(  # type: ignore[union-attr]
-            {
-                "artifact_source_id": option.file_id,
-                "name": option.name,
-                "is_default": option.is_default,
-            }
-        )
+        portable_option = {
+            "name": option.name,
+            "is_default": option.is_default,
+        }
+        if option.model_id is not None:
+            portable_option["model_source_id"] = option.model_id
+        else:
+            portable_option["artifact_source_id"] = option.file_id
+        portable_group["options"].append(portable_option)  # type: ignore[union-attr]
     metadata = {
         row.file_id: row
         for row in session.exec(
@@ -297,6 +436,7 @@ def create_archive(session: Session, user: User) -> Path:
         "saved_views": [
             {"name": row.name, "filters": json.loads(row.filters_json)} for row in saved
         ],
+        "multipart_models": [],
     }
     files_by_model: dict[int, list[File]] = {}
     for row in files:
@@ -359,9 +499,80 @@ def create_archive(session: Session, user: User) -> Path:
                 "artifacts": artifacts,
                 "part_groups": [
                     group
-                    for group in portable_groups.get(model.id, {}).values()
-                    if len(group["options"]) >= 2  # type: ignore[arg-type]
+                    for group_id, group in portable_groups.get(model.id, {}).items()
+                    if group_id not in incomplete_group_ids
+                    and len(group["options"]) >= 1  # type: ignore[arg-type]
                 ],
+            }
+        )
+    aggregate_stmt = select(MultipartModel)
+    if not user.is_superuser:
+        aggregate_collection_ids = rbac.accessible_collection_ids(session, user)
+        if not aggregate_collection_ids:
+            aggregate_stmt = aggregate_stmt.where(MultipartModel.id == -1)
+        else:
+            aggregate_stmt = aggregate_stmt.where(
+                MultipartModel.collection_id.in_(aggregate_collection_ids)  # type: ignore[union-attr]
+            )
+    aggregates = session.exec(aggregate_stmt.order_by(MultipartModel.id.asc())).all()  # type: ignore[attr-defined]
+    aggregate_collection_paths = {
+        row.id: row.path
+        for row in session.exec(
+            select(Collection).where(
+                Collection.id.in_(  # type: ignore[union-attr]
+                    [
+                        row.collection_id
+                        for row in aggregates
+                        if row.collection_id is not None
+                    ]
+                )
+            )
+        ).all()
+    }
+    for aggregate in aggregates:
+        if aggregate.id is None:
+            continue
+        portable_parts: list[dict[str, object]] = []
+        parts = session.exec(
+            select(MultipartPart)
+            .where(MultipartPart.multipart_model_id == aggregate.id)
+            .order_by(MultipartPart.sort_order.asc())  # type: ignore[attr-defined]
+        ).all()
+        for part in parts:
+            choices = session.exec(
+                select(MultipartModelChoice)
+                .where(MultipartModelChoice.multipart_part_id == part.id)
+                .order_by(MultipartModelChoice.sort_order.asc())  # type: ignore[attr-defined]
+            ).all()
+            portable_choices: list[dict[str, object]] = []
+            for choice in choices:
+                if choice.model_id not in visible_model_ids:
+                    continue
+                source_file_id = getattr(choice, "source_file_id", None)
+                if (
+                    source_file_id is not None
+                    and source_file_id not in visible_file_ids
+                ):
+                    continue
+                portable_choice: dict[str, object] = {
+                    "model_source_id": int(choice.model_id),
+                }
+                if source_file_id is not None:
+                    portable_choice["artifact_source_id"] = int(source_file_id)
+                label = getattr(choice, "label", None)
+                if label is not None:
+                    portable_choice["label"] = label
+                portable_choices.append(portable_choice)
+            if portable_choices:
+                portable_parts.append({"name": part.name, "choices": portable_choices})
+        manifest["multipart_models"].append(  # type: ignore[union-attr]
+            {
+                "source_id": aggregate.id,
+                "name": aggregate.name,
+                "slug": aggregate.slug,
+                "description": aggregate.description,
+                "collection": aggregate_collection_paths.get(aggregate.collection_id),
+                "parts": portable_parts,
             }
         )
     for job in jobs:
@@ -1226,6 +1437,213 @@ def _restore_portable_covers(
     return writes
 
 
+def _legacy_multipart_slug(model: Model) -> str:
+    """Return a reserved, stable slug for a composition materialized from v1."""
+    # Model hashes are unique in a vault, so this is stable across retries and
+    # cannot collide between generated compositions.  It is intentionally a
+    # slug rather than a description marker: descriptions remain user data.
+    return f"legacy-parts-{model.hash}"
+
+
+def _restore_legacy_multipart_model(
+    session: Session,
+    user: User,
+    model: Model,
+    model_data: dict[str, Any],
+    source_models: dict[int, Model],
+    source_files: dict[int, File],
+) -> None:
+    """Expose old nested part groups as a standalone composition.
+
+    Releases before standalone multipart models stored the composition below a
+    Model.  Keep those rows (they are still used by the old read/restore seam),
+    but also materialize the same roles into the current independent tables so
+    users can find and edit the composition in the new UI.  A source file is
+    retained as choice metadata when that column is available; the owning
+    Model remains the only owner of the Artifact.
+    """
+    groups = model_data.get("part_groups")
+    if not groups:
+        return
+    reserved_slug = _legacy_multipart_slug(model)
+    aggregate = session.exec(
+        select(MultipartModel).where(MultipartModel.slug == reserved_slug)
+    ).first()
+    if aggregate is None:
+        # If a manually-created row occupies the reserved hash slug, use a
+        # deterministic model-id suffix.  This remains stable on retries while
+        # avoiding any overwrite of the unrelated composition.
+        fallback_slug = f"{reserved_slug}-{model.id}"
+        aggregate = session.exec(
+            select(MultipartModel).where(MultipartModel.slug == fallback_slug)
+        ).first()
+        base_slug = fallback_slug if aggregate is not None else reserved_slug
+        aggregate_slug = storage.ensure_unique_slug(
+            base_slug,
+            lambda value: (
+                session.exec(
+                    select(MultipartModel.id).where(MultipartModel.slug == value)
+                ).first()
+                is not None
+            ),
+        )
+        if aggregate is None:
+            aggregate = MultipartModel(
+                name=f"{model.name} (Parts)",
+                slug=aggregate_slug,
+                description=model.description,
+                collection_id=model.collection_id,
+                created_by=user.id,
+                updated_by=user.id,
+            )
+            session.add(aggregate)
+            session.flush()
+    else:
+        # Re-import updates the generated composition while retaining the
+        # user's current name/description and collection choices.
+        aggregate.updated_by = user.id
+        session.add(aggregate)
+        session.flush()
+
+    assert aggregate.id is not None
+    # Import is a replacement for this source composition, not an append.  The
+    # reserved slug makes retries idempotent even after a process died mid-import.
+    old_parts = session.exec(
+        select(MultipartPart).where(MultipartPart.multipart_model_id == aggregate.id)
+    ).all()
+    for old_part in old_parts:
+        old_choices = session.exec(
+            select(MultipartModelChoice).where(
+                MultipartModelChoice.multipart_part_id == old_part.id
+            )
+        ).all()
+        for old_choice in old_choices:
+            session.delete(old_choice)
+        session.delete(old_part)
+    session.flush()
+    _materialize_legacy_parts(session, aggregate, groups, source_models, source_files)
+
+
+def _materialize_legacy_parts(
+    session: Session,
+    aggregate: MultipartModel,
+    groups: list[dict[str, Any]],
+    source_models: dict[int, Model],
+    source_files: dict[int, File],
+) -> None:
+    for part_order, group in enumerate(groups):
+        part_name = " ".join(str(group["name"]).split())
+        part = MultipartPart(
+            multipart_model_id=aggregate.id,
+            name=part_name,
+            name_key=part_name.casefold(),
+            sort_order=part_order,
+        )
+        session.add(part)
+        session.flush()
+        assert part.id is not None
+        for choice_order, option in enumerate(group.get("options", [])):
+            source_file = (
+                source_files.get(int(option["artifact_source_id"]))
+                if option.get("artifact_source_id") is not None
+                else None
+            )
+            member = (
+                source_models.get(int(option["model_source_id"]))
+                if option.get("model_source_id") is not None
+                else source_file and session.get(Model, source_file.model_id)
+            )
+            if member is None or member.id is None:
+                continue
+            # ``source_file_id``/``label`` were added with the standalone
+            # compatibility migration.  Keeping this guarded also lets an
+            # operator run the import code against a pre-migration test DB.
+            kwargs: dict[str, object] = {
+                "multipart_model_id": aggregate.id,
+                "multipart_part_id": part.id,
+                "model_id": member.id,
+                "sort_order": choice_order,
+            }
+            if hasattr(MultipartModelChoice, "source_file_id"):
+                kwargs["source_file_id"] = source_file.id if source_file else None
+            if hasattr(MultipartModelChoice, "label"):
+                kwargs["label"] = option["name"]
+            session.add(MultipartModelChoice(**kwargs))
+    session.flush()
+
+
+def _portable_aggregate_matches(
+    session: Session,
+    aggregate: MultipartModel,
+    aggregate_data: dict[str, Any],
+    source_models: dict[int, Model],
+    source_files: dict[int, File],
+) -> bool:
+    """Check an existing slug before allowing an archive replacement.
+
+    Slugs are user-editable, so a matching slug is not proof that a row came
+    from this archive.  Compare the complete imported composition first; a
+    mismatch is handled as an additive import with a unique slug.
+    """
+    if aggregate.name != aggregate_data.get(
+        "name"
+    ) or aggregate.description != aggregate_data.get("description"):
+        return False
+    parts = session.exec(
+        select(MultipartPart)
+        .where(MultipartPart.multipart_model_id == aggregate.id)
+        .order_by(MultipartPart.sort_order.asc())  # type: ignore[attr-defined]
+    ).all()
+    portable_parts = aggregate_data.get("parts", [])
+    if len(parts) != len(portable_parts):
+        return False
+    for part, part_data in zip(parts, portable_parts, strict=True):
+        if part.name != part_data.get("name"):
+            return False
+        choices = session.exec(
+            select(MultipartModelChoice)
+            .where(MultipartModelChoice.multipart_part_id == part.id)
+            .order_by(MultipartModelChoice.sort_order.asc())  # type: ignore[attr-defined]
+        ).all()
+        expected: list[tuple[int, int | None, str | None]] = []
+        if part_data.get("choices") is not None:
+            for choice in part_data["choices"]:
+                model = source_models.get(choice["model_source_id"])
+                source_file = (
+                    source_files.get(choice["artifact_source_id"])
+                    if choice.get("artifact_source_id") is not None
+                    else None
+                )
+                if model is None or model.id is None:
+                    return False
+                expected.append(
+                    (
+                        int(model.id),
+                        int(source_file.id)
+                        if source_file is not None and source_file.id is not None
+                        else None,
+                        choice.get("label"),
+                    )
+                )
+        else:
+            for source_id in part_data.get("model_source_ids", []):
+                model = source_models.get(source_id)
+                if model is None or model.id is None:
+                    return False
+                expected.append((int(model.id), None, None))
+        actual = [
+            (
+                int(choice.model_id),
+                getattr(choice, "source_file_id", None),
+                getattr(choice, "label", None),
+            )
+            for choice in choices
+        ]
+        if actual != expected:
+            return False
+    return True
+
+
 def import_archive(session: Session, archive_path: Path, user: User) -> dict[str, int]:
     assert user.id is not None
     with zipfile.ZipFile(archive_path) as archive:
@@ -1245,7 +1663,14 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                 manifest_bytes = manifest_file.read(MAX_MANIFEST_BYTES + 1)
             if len(manifest_bytes) > MAX_MANIFEST_BYTES:
                 raise ValueError("portable_manifest_invalid")
-            manifest = PortableManifest.model_validate_json(manifest_bytes).model_dump(
+            raw_manifest = json.loads(manifest_bytes)
+            if not isinstance(raw_manifest, dict):
+                raise ValueError("portable_manifest_invalid")
+            # Empty/missing top-level data is the signature of a pre-standalone
+            # archive when nested part_groups are present.  Treat both forms as
+            # legacy so those compositions are materialized instead of hidden.
+            has_standalone_multipart_models = bool(raw_manifest.get("multipart_models"))
+            manifest = PortableManifest.model_validate(raw_manifest).model_dump(
                 mode="json"
             )
         except ValueError as exc:
@@ -1432,27 +1857,6 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                         )
                         provenance_conflicts += len(merge.conflicting_override_fields)
                     created_files += 1
-                if model_data.get("part_groups") is not None:
-                    part_options.replace_for_model(
-                        session,
-                        model.id,
-                        [
-                            PartGroupWrite(
-                                name=group["name"],
-                                options=[
-                                    PartOptionWrite(
-                                        file_id=source_files[
-                                            option["artifact_source_id"]
-                                        ].id,
-                                        name=option["name"],
-                                        is_default=option["is_default"],
-                                    )
-                                    for option in group["options"]
-                                ],
-                            )
-                            for group in model_data["part_groups"]
-                        ],
-                    )
                 if model_data.get("starred"):
                     exists = session.exec(
                         select(ModelStar).where(
@@ -1463,6 +1867,214 @@ def import_archive(session: Session, archive_path: Path, user: User) -> dict[str
                     if exists is None:
                         session.add(ModelStar(user_id=user.id, model_id=model.id))
                         session.commit()
+
+            # Standalone multipart compositions are independent of Models.  An
+            # archive from before this field simply yields an empty list here.
+            for aggregate_data in manifest.get("multipart_models", []):
+                collection = (
+                    taxonomy.resolve_or_create_collection(
+                        session, aggregate_data.get("collection") or ""
+                    )
+                    if aggregate_data.get("collection")
+                    else None
+                )
+                imported_slug = storage.slugify(str(aggregate_data["slug"]))
+                if not imported_slug:
+                    imported_slug = "multipart-model"
+                existing = session.exec(
+                    select(MultipartModel).where(MultipartModel.slug == imported_slug)
+                ).first()
+                if existing is not None and _portable_aggregate_matches(
+                    session,
+                    existing,
+                    aggregate_data,
+                    source_models,
+                    source_files,
+                ):
+                    # This is an idempotent retry of the same archive.  Do not
+                    # churn part/choice rows or overwrite user data.
+                    continue
+                # A matching slug with different data belongs to another
+                # composition.  Import additively under a sanitized unique
+                # slug rather than deleting that composition.
+                if existing is not None:
+                    existing = None
+                if existing is None:
+                    # A caller may have deleted a prior aggregate in this
+                    # session while its parts remain in SQLAlchemy's identity
+                    # map.  SQLite can reuse those ids on the insert below;
+                    # expunge only orphaned multipart identities to avoid
+                    # replacement warnings and stale reads.
+                    for identity in list(session.identity_map.values()):
+                        if isinstance(identity, MultipartModelChoice):
+                            owner_id = identity.__dict__.get("multipart_model_id")
+                        elif isinstance(identity, MultipartPart):
+                            owner_id = identity.__dict__.get("multipart_model_id")
+                        else:
+                            continue
+                        if owner_id is None:
+                            session.expunge(identity)
+                            continue
+                        if session.get(MultipartModel, owner_id) is None:
+                            session.expunge(identity)
+                    aggregate_slug = storage.ensure_unique_slug(
+                        imported_slug,
+                        lambda value: (
+                            session.exec(
+                                select(MultipartModel.id).where(
+                                    MultipartModel.slug == value
+                                )
+                            ).first()
+                            is not None
+                        ),
+                    )
+                    existing = MultipartModel(
+                        name=aggregate_data["name"],
+                        slug=aggregate_slug,
+                        description=aggregate_data.get("description"),
+                        collection_id=collection.id if collection else None,
+                        created_by=user.id,
+                        updated_by=user.id,
+                    )
+                    session.add(existing)
+                    # Keep the aggregate and its composition in the same
+                    # transaction.  A malformed part must never leave an
+                    # empty top-level row behind.
+                    session.flush()
+                aggregate_id = int(existing.id)
+                session.exec(
+                    delete(MultipartModelChoice).where(
+                        MultipartModelChoice.multipart_model_id == aggregate_id
+                    )
+                )
+                session.exec(
+                    delete(MultipartPart).where(
+                        MultipartPart.multipart_model_id == aggregate_id
+                    )
+                )
+                session.flush()
+                used_models: set[int] = set()
+                for part_order, part_data in enumerate(aggregate_data.get("parts", [])):
+                    choice_rows: list[tuple[int, int | None, str | None]] = []
+                    explicit_choices = part_data.get("choices")
+                    if explicit_choices is not None:
+                        for choice in explicit_choices:
+                            source_model = source_models.get(choice["model_source_id"])
+                            source_file = (
+                                source_files.get(choice["artifact_source_id"])
+                                if choice.get("artifact_source_id") is not None
+                                else None
+                            )
+                            if source_model is None or source_model.id is None:
+                                continue
+                            if (
+                                choice.get("artifact_source_id") is not None
+                                and source_file is None
+                            ):
+                                continue
+                            choice_rows.append(
+                                (
+                                    int(source_model.id),
+                                    int(source_file.id)
+                                    if source_file and source_file.id is not None
+                                    else None,
+                                    choice.get("label"),
+                                )
+                            )
+                    else:
+                        # Archives emitted by the initial standalone format
+                        # only carried model ids and had a global no-duplicate
+                        # member rule.
+                        for source_id in part_data.get("model_source_ids", []):
+                            source_model = source_models.get(source_id)
+                            if (
+                                source_model is not None
+                                and source_model.id is not None
+                                and source_model.id not in used_models
+                            ):
+                                choice_rows.append((int(source_model.id), None, None))
+                    if not choice_rows:
+                        continue
+                    part_row = MultipartPart(
+                        multipart_model_id=aggregate_id,
+                        name=part_data["name"],
+                        name_key=part_data["name"].casefold(),
+                        sort_order=part_order,
+                    )
+                    session.add(part_row)
+                    session.flush()
+                    assert part_row.id is not None
+                    for model_order, (model_id, source_file_id, label) in enumerate(
+                        choice_rows
+                    ):
+                        kwargs: dict[str, object] = {
+                            "multipart_model_id": aggregate_id,
+                            "multipart_part_id": part_row.id,
+                            "model_id": model_id,
+                            "sort_order": model_order,
+                        }
+                        if hasattr(MultipartModelChoice, "source_file_id"):
+                            kwargs["source_file_id"] = source_file_id
+                        if hasattr(MultipartModelChoice, "label"):
+                            kwargs["label"] = label
+                        session.add(MultipartModelChoice(**kwargs))
+                        used_models.add(model_id)
+                session.commit()
+
+            # A v1 archive has no top-level ``multipart_models`` member and
+            # stores composition below each Model.  Materialize that legacy
+            # shape into the current standalone tables, while retaining the
+            # legacy rows below for backwards-compatible restore/export.  A
+            # modern archive may still carry those rows for compatibility, but
+            # its explicit top-level composition is authoritative and must not
+            # be duplicated here.
+            if not has_standalone_multipart_models:
+                for model_data in manifest["models"]:
+                    if model_data.get("part_groups") is None:
+                        continue
+                    _restore_legacy_multipart_model(
+                        session,
+                        user,
+                        source_models[model_data["source_id"]],
+                        model_data,
+                        source_models,
+                        source_files,
+                    )
+                session.commit()
+
+            # Model-target groups are restored only after every archive Model
+            # exists, so forward references do not depend on manifest ordering.
+            for model_data in manifest["models"]:
+                if model_data.get("part_groups") is None:
+                    continue
+                model = source_models[model_data["source_id"]]
+                part_options.replace_for_model(
+                    session,
+                    model.id,
+                    [
+                        PartGroupWrite(
+                            name=group["name"],
+                            options=[
+                                PartOptionWrite(
+                                    file_id=(
+                                        source_files[option["artifact_source_id"]].id
+                                        if option["artifact_source_id"] is not None
+                                        else None
+                                    ),
+                                    model_id=(
+                                        source_models[option["model_source_id"]].id
+                                        if option["model_source_id"] is not None
+                                        else None
+                                    ),
+                                    name=option["name"],
+                                    is_default=option["is_default"],
+                                )
+                                for option in group["options"]
+                            ],
+                        )
+                        for group in model_data["part_groups"]
+                    ],
+                )
 
         imported_jobs = 0
         for job_data in manifest.get("print_jobs", []):

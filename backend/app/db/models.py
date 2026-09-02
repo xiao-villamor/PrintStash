@@ -660,7 +660,12 @@ class PartGroup(SQLModel, table=True):
 
 
 class PartOption(SQLModel, table=True):
-    """One source Artifact choice within a Part Group."""
+    """One complete printable Model choice within a Part Group.
+
+    ``file_id`` remains nullable for the short-lived artifact-based contract so
+    databases upgraded through 0.13.0 keep their data. New writes use
+    ``model_id``: the member Model retains its own mesh, preview and revisions.
+    """
 
     __tablename__ = "part_options"
     __table_args__ = (
@@ -671,6 +676,11 @@ class PartOption(SQLModel, table=True):
             "part_group_id", "sort_order", name="uq_part_options_group_sort_order"
         ),
         UniqueConstraint("file_id", name="uq_part_options_file_id"),
+        UniqueConstraint("model_id", name="uq_part_options_model_id"),
+        CheckConstraint(
+            "(file_id IS NULL) != (model_id IS NULL)",
+            name="part_option_exactly_one_target",
+        ),
         Index(
             "uq_part_options_one_default",
             "part_group_id",
@@ -689,13 +699,23 @@ class PartOption(SQLModel, table=True):
             index=True,
         )
     )
-    file_id: int = Field(
+    file_id: Optional[int] = Field(
+        default=None,
         sa_column=Column(
             Integer,
             ForeignKey("files.id", ondelete="CASCADE"),
-            nullable=False,
+            nullable=True,
             index=True,
-        )
+        ),
+    )
+    model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
     )
     name: str = Field(max_length=128)
     name_key: str = Field(max_length=128)
@@ -787,6 +807,121 @@ class Model(SQLModel, table=True):
             "lazy": "selectin",
         },
     )
+
+
+class MultipartModel(SQLModel, table=True):
+    """A named composition of printable Models.
+
+    This is deliberately separate from ``Model``: composing models never moves,
+    hides, or owns their files and revisions.  A model may be used by many
+    multipart models.
+    """
+
+    __tablename__ = "multipart_models"
+    __table_args__ = (UniqueConstraint("slug", name="uq_multipart_models_slug"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=255, index=True)
+    slug: str = Field(max_length=255, index=True)
+    description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", index=True
+    )
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class MultipartPart(SQLModel, table=True):
+    """A named physical part in a ``MultipartModel``."""
+
+    __tablename__ = "multipart_parts"
+    __table_args__ = (
+        UniqueConstraint(
+            "multipart_model_id", "name_key", name="uq_multipart_parts_model_name_key"
+        ),
+        UniqueConstraint(
+            "multipart_model_id",
+            "sort_order",
+            name="uq_multipart_parts_model_sort_order",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartModelChoice(SQLModel, table=True):
+    """A Model selected as one possible choice for a multipart part.
+
+    ``source_file_id`` and ``label`` retain the identity of choices imported
+    from the pre-0.13 nested part-option tables.  A legacy composition may
+    contain more than one file from the same Model, so the source file is
+    deliberately metadata rather than another uniqueness key.
+    """
+
+    __tablename__ = "multipart_model_choices"
+    __table_args__ = (
+        UniqueConstraint(
+            "multipart_part_id",
+            "sort_order",
+            name="uq_multipart_choices_part_sort_order",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    multipart_part_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_parts.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    # Do not cascade Model deletion into the aggregate.  Purge detaches this
+    # row explicitly and removes an empty part; normal DB deletes are guarded by
+    # the FK so a caller cannot silently lose composition data.
+    model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id"),
+            nullable=False,
+            index=True,
+        )
+    )
+    source_file_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    label: Optional[str] = Field(default=None, max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ModelProvenanceSource(SQLModel, table=True):

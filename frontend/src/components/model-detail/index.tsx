@@ -911,7 +911,6 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <FilesTab
                   modelId={model.id}
                   sourceFiles={sourceFiles}
-                  partGroups={model.part_groups ?? []}
                   canEdit={canEditModel}
                   onModel={setModel}
                 />

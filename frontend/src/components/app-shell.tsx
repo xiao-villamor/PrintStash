@@ -28,23 +28,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         ? "nav.vault"
         : pathname.startsWith("/models/")
           ? "nav.model"
-          : pathname.startsWith("/documents/")
-            ? "nav.document"
-            : pathname.startsWith("/printers/")
-              ? "nav.printer"
-              : pathname.startsWith("/printers")
-                ? "nav.printers"
-                : pathname.startsWith("/statistics")
-                  ? "nav.statistics"
-                  : pathname.startsWith("/settings")
-                    ? "nav.settings"
-                    : pathname.startsWith("/profiles")
-                      ? "nav.profiles"
-                      : pathname.startsWith("/login")
-                        ? "nav.signIn"
-                        : pathname.startsWith("/setup")
-                          ? "nav.setup"
-                          : null;
+          : pathname.startsWith("/multipart-models/")
+            ? "nav.multipart"
+            : pathname.startsWith("/documents/")
+              ? "nav.document"
+              : pathname.startsWith("/printers/")
+                ? "nav.printer"
+                : pathname.startsWith("/printers")
+                  ? "nav.printers"
+                  : pathname.startsWith("/statistics")
+                    ? "nav.statistics"
+                    : pathname.startsWith("/settings")
+                      ? "nav.settings"
+                      : pathname.startsWith("/profiles")
+                        ? "nav.profiles"
+                        : pathname.startsWith("/login")
+                          ? "nav.signIn"
+                          : pathname.startsWith("/setup")
+                            ? "nav.setup"
+                            : null;
     document.title = `${titleKey ? t(titleKey) : "PrintStash"} · PrintStash`;
   }, [pathname, t]);
 

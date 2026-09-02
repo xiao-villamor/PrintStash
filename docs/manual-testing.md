@@ -177,12 +177,19 @@ must never be copied as production identity configuration.
 - [ ] Create, rename, nest, move, and delete Collections; breadcrumbs stay correct.
 - [ ] Drag one Model and batch-move several Models between Collections.
 - [ ] Create, apply, remove, and filter tags; repeated tags use AND semantics.
-- [ ] In a Model with at least two source files, create a Part Group, rename its
-      choices, change the default, save, reload, search by the group/choice name,
-      and confirm a viewer cannot edit it.
-- [ ] Trash one Part Option and confirm the incomplete group is hidden; restore
-      it and confirm the group returns. Purging a choice must either promote a
-      surviving default or remove a group that would have only one choice.
+- [ ] Open the separate **Multipart models** tab in the Vault and create a
+      Multipart Model with a clear name and description.
+- [ ] Add a named piece, choose an existing Model from the picker, then add a
+      second existing Model as an alternative. Save and reload the grouping;
+      confirm both Models remain visible in **Models** with their own files,
+      previews, and G-code revisions.
+- [ ] Add another piece after the first save, remove an alternative, and
+      confirm the changes affect only the grouping. Reuse the same Model in a
+      second Multipart Model.
+- [ ] Trash or restore a referenced Model and reload the grouping; it must show
+      as unavailable while trashed and become available again after restore.
+      Deleting a Multipart Model must remove only the grouping, never its Models
+      or files.
 - [ ] Favorite, bulk tag/move/trash, and partial failures report accurately.
 - [ ] Every facet restores from its URL: Artifact type, material, slicer,
       printer model, Revision status, printed state, outcome, vault/external

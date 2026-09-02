@@ -41,6 +41,7 @@ from tests.factories.protocols import (
     MakeFile,
     MakeInboxItem,
     MakeModel,
+    MakeMultipartModel,
     MakeOwnedStorageObject,
     MakePrinter,
     MakePrinterFile,
@@ -129,6 +130,12 @@ def grant_printer_role(db_session: Session) -> Any:
 def make_model(db_session: Session) -> MakeModel:
     """A library model. `trashed=True` puts it in the trash."""
     return _bound(factories.build_model, db_session)
+
+
+@pytest.fixture
+def make_multipart_model(db_session: Session) -> MakeMultipartModel:
+    """A standalone empty multipart grouping."""
+    return _bound(factories.build_multipart_model, db_session)
 
 
 @pytest.fixture
@@ -355,6 +362,7 @@ __all__ = [
     "MakeFile",
     "MakeInboxItem",
     "MakeModel",
+    "MakeMultipartModel",
     "MakeOwnedStorageObject",
     "MakePrintJob",
     "MakePrinter",

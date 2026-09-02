@@ -8,10 +8,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Added
 
-- **Part alternatives for multi-part Models.** Artifacts can now be grouped as
-  interchangeable options for one logical part, with one default choice per
-  group, portable import/export support, unified search, and a focused Model
-  detail workflow for creating, changing, and removing those alternatives.
+- **Multipart Models.** The Vault now has a separate view for grouping existing
+  Models into named pieces and alternatives. Adding or deleting a grouping
+  never moves, hides, or deletes a Model, its files, or its revisions; Models
+  can be reused in multiple groupings.
 
 - **Quick restart from Settings.** Administrators on supervised deployments
   can now gracefully restart the PrintStash API without opening container

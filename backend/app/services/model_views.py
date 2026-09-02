@@ -82,7 +82,7 @@ from app.schemas.provenance import (
     ProvenanceFieldRead,
     ProvenanceSourceRead,
 )
-from app.services import library_search, part_options, provenance, rbac
+from app.services import library_search, provenance, rbac
 from app.services.storage_backend import get_backend
 from app.services.trash import trash_expires_at
 
@@ -1271,7 +1271,6 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
         created_at=m.created_at,
         updated_at=m.updated_at,
         files=_file_reads_with_revisions(session, files_with_meta),
-        part_groups=part_options.read_for_model(session, model_id),
         starred=starred,
     )
 

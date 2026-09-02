@@ -63,30 +63,6 @@ export interface FileRevisionUpdate {
   is_recommended?: boolean;
 }
 
-export interface PartOptionRead {
-  id: number;
-  file_id: number;
-  name: string;
-  is_default: boolean;
-}
-
-export interface PartGroupRead {
-  id: number;
-  name: string;
-  options: PartOptionRead[];
-}
-
-export interface PartOptionWrite {
-  file_id: number;
-  name: string;
-  is_default?: boolean;
-}
-
-export interface PartGroupWrite {
-  name: string;
-  options: PartOptionWrite[];
-}
-
 export interface ModelRead {
   id: number;
   name: string;
@@ -102,7 +78,6 @@ export interface ModelRead {
   created_at: string;
   updated_at: string;
   files: FileRead[];
-  part_groups?: PartGroupRead[];
   starred: boolean;
 }
 

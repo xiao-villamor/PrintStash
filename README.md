@@ -60,9 +60,12 @@ are welcome in
   logs in with username + API key, then uploads under a JWT Bearer token.
 - Content-hash dedup groups files into logical models and keeps version history
   in one place rather than scattered across folders.
-- Part Groups turn interchangeable source Artifacts into named choices (for
-  example, short/long handles) with one explicit default, while keeping every
-  STL/3MF/OBJ/STEP file independently downloadable and sliceable.
+- Multipart Models group existing Models into named parts and alternatives
+  (for example, a short or long handle) without moving, hiding, or deleting
+  their files. Each Model remains independently visible, downloadable, and
+  sliceable, and can be reused in more than one Multipart Model. Open the
+  separate **Multipart models** tab in the Vault to create a grouping, add a
+  part, then choose existing Models as its alternatives.
 - Nested collections; direct Model, Collection, and Artifact tags; unified search
   across names, files, collection paths, effective tags, and provenance; filters,
   thumbnails, grid/list views,

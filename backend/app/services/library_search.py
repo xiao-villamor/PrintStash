@@ -20,8 +20,6 @@ from app.db.models import (
     ModelProvenanceField,
     ModelProvenanceSource,
     ModelTagLink,
-    PartGroup,
-    PartOption,
     Tag,
 )
 from app.db.scopes import live
@@ -95,24 +93,6 @@ def _text_match_model_ids(query: str):
         live(File),
         File.original_filename.ilike(pattern, escape="\\"),
     )
-    incomplete_part_groups = (
-        select(PartOption.part_group_id)
-        .join(File, File.id == PartOption.file_id)
-        .where(File.deleted_at.is_not(None))
-    )
-    part_options = (
-        select(PartGroup.model_id)
-        .join(PartOption, PartOption.part_group_id == PartGroup.id)
-        .join(File, File.id == PartOption.file_id)
-        .where(
-            live(File),
-            PartGroup.id.not_in(incomplete_part_groups),  # type: ignore[attr-defined]
-            or_(
-                PartGroup.name.ilike(pattern, escape="\\"),
-                PartOption.name.ilike(pattern, escape="\\"),
-            ),
-        )
-    )
     collections = (
         select(Model.id)
         .select_from(Model)
@@ -167,7 +147,6 @@ def _text_match_model_ids(query: str):
     )
     return union_all(
         artifacts,
-        part_options,
         collections,
         tags,
         provenance_sources,

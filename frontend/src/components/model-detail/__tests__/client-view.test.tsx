@@ -77,6 +77,23 @@ describe("ModelDetailClientView", () => {
       expect(await screen.findByText("Benchy")).toBeInTheDocument();
       expect(requests().some((call) => call.url === "/api/v1/models/1")).toBe(false);
     });
+
+    it("loads a member Model when navigation changes the route id", async () => {
+      const view = renderView({
+        initialModel: aModel(),
+        routes: {
+          "GET /api/v1/models/2": json(aModel({ id: 2, name: "Handle", slug: "handle" })),
+          "GET /api/v1/models/2/print-jobs": json([]),
+          "GET /api/v1/models/2/printer-files": json([]),
+        },
+      });
+
+      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      view.rerender(<ModelDetailClientView key={2} id={2} initialModel={null} />);
+
+      expect(await screen.findByText("Handle")).toBeInTheDocument();
+      expect(screen.queryByText("Benchy")).toBeNull();
+    });
   });
 
   describe("when the server could not", () => {

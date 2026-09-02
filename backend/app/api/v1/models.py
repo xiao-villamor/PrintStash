@@ -82,7 +82,6 @@ from app.schemas.models import (
     ModelSort,
     ModelUpdate,
     OutlinerModelRead,
-    PartGroupsReplace,
     PrintStatisticsRead,
     RevisionBatchLabels,
     RevisionBatchResult,
@@ -101,7 +100,6 @@ from app.services import (
     job_import,
     library_transfer,
     model_views,
-    part_options,
     print_results,
     provenance,
     rbac,
@@ -1675,33 +1673,6 @@ def replace_file_tags(
     model.updated_at = utcnow()
     session.add(model)
     session.commit()
-    return _detail_or_404(session, model_id, current_user)
-
-
-@router.put(
-    "/{model_id}/part-options",
-    response_model=ModelRead,
-    dependencies=[Depends(require_auth)],
-    summary="Replace a model's Part Groups and choices",
-    description=(
-        "Atomically replaces every Part Group. Each group must contain at least "
-        "two source Artifacts and exactly one default option."
-    ),
-)
-def replace_part_options(
-    model_id: int,
-    payload: PartGroupsReplace,
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
-) -> ModelRead:
-    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
-    model.updated_at = utcnow()
-    session.add(model)
-    try:
-        part_options.replace_for_model(session, model_id, payload.groups)
-    except part_options.PartOptionsError as exc:
-        session.rollback()
-        raise HTTPException(status_code=400, detail=exc.code) from exc
     return _detail_or_404(session, model_id, current_user)
 
 

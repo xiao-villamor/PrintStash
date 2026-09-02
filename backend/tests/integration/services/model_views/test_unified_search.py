@@ -6,12 +6,14 @@ from sqlmodel import Session
 
 from app.core.time import utcnow
 from app.db.models import FileType
-from app.schemas.models import ModelFilters, PartGroupWrite, PartOptionWrite
-from app.services import model_views, part_options
+from app.schemas.models import ModelFilters
+from app.schemas.multipart_models import MultipartPartWrite
+from app.services import model_views, multipart_models
 from tests.factories import (
     build_collection,
     build_file,
     build_model,
+    build_multipart_model,
     build_tag,
     build_user,
     tag_collection,
@@ -103,32 +105,22 @@ def _assert_trashed_artifact_tag_no_longer_applies(db_session: Session) -> None:
     )
 
 
-def _assert_search_matches_part_group_plus_option_name(db_session: Session) -> None:
-    user = build_user(db_session, "part-option-search", superuser=True)
-    model = build_model(db_session, "Configurable bracket")
-    narrow = build_file(db_session, model, filename="a.stl")
-    wide = build_file(db_session, model, filename="b.stl")
-    part_options.replace_for_model(
+def _assert_member_model_remains_visible_after_composition(
+    db_session: Session,
+) -> None:
+    user = build_user(db_session, "assembly-search", superuser=True)
+    assembly = build_multipart_model(db_session, "Desk lamp")
+    shade = build_model(db_session, "Voronoi shade")
+    build_file(db_session, shade, filename="shade.stl")
+    multipart_models.replace_parts(
         db_session,
-        model.id,
-        [
-            PartGroupWrite(
-                name="Mounting width",
-                options=[
-                    PartOptionWrite(file_id=narrow.id, name="Narrow", is_default=True),
-                    PartOptionWrite(file_id=wide.id, name="Wide stance"),
-                ],
-            )
-        ],
+        user,
+        assembly,
+        [MultipartPartWrite(name="Shade", model_ids=[shade.id])],
     )
 
-    assert model.id in _ids(db_session, user, q="mounting width")
-    assert model.id in _ids(db_session, user, q="wide stance")
-
-    wide.deleted_at = utcnow()
-    db_session.add(wide)
-    db_session.commit()
-    assert model.id not in _ids(db_session, user, q="mounting width")
+    assert shade.id in _ids(db_session, user)
+    assert shade.id in _ids(db_session, user, q="Voronoi shade")
 
 
 class TestUnifiedSearch:
@@ -146,5 +138,7 @@ class TestUnifiedSearch:
     def test_trashed_artifact_tag_no_longer_applies(self, db_session: Session) -> None:
         _assert_trashed_artifact_tag_no_longer_applies(db_session)
 
-    def test_search_matches_part_option_context(self, db_session: Session) -> None:
-        _assert_search_matches_part_group_plus_option_name(db_session)
+    def test_member_models_remain_visible_after_composition(
+        self, db_session: Session
+    ) -> None:
+        _assert_member_model_remains_visible_after_composition(db_session)

@@ -265,4 +265,18 @@ describe("sendJson", () => {
     await expect(sendAction("/api/v1/tags/5", "DELETE")).resolves.toBeUndefined();
     expect(initOf(0)).toMatchObject({ method: "DELETE" });
   });
+
+  it("keeps cached reads when a mutation fails", async () => {
+    respondWith([{ id: 1 }]);
+    await getJson("/api/v1/models");
+
+    respondWith({ detail: "multipart_model_member_not_found" }, 400);
+    await expect(
+      sendJson("/api/v1/multipart-models/7", "PUT", { parts: [] }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    respondWith([{ id: 2 }]);
+    expect(await getJson("/api/v1/models")).toEqual([{ id: 1 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });

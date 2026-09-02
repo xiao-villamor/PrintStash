@@ -32,13 +32,17 @@ from app.db.models import (
     InboxItemState,
     InboxSourceKind,
     Model,
+    MultipartModelChoice,
+    MultipartPart,
     PartGroup,
     PartOption,
 )
 from app.schemas.models import PartGroupWrite, PartOptionWrite
-from app.services import part_options, trash
+from app.schemas.multipart_models import MultipartPartWrite
+from app.services import multipart_models, part_options, trash
 from tests.factories import (
     build_model,
+    build_multipart_model,
     build_stored_file,
     build_user,
     detached_collection,
@@ -213,7 +217,7 @@ class TestHardDeleteFile:
             ("Long", False),
         ]
 
-    def test_part_group_is_removed_when_a_purge_leaves_one_choice(
+    def test_part_group_becomes_a_fixed_part_when_one_choice_survives(
         self, db_session: Session, storage
     ) -> None:
         model = build_model(db_session, "two handles")
@@ -238,12 +242,13 @@ class TestHardDeleteFile:
         trash.hard_delete_file(db_session, first)
         db_session.commit()
 
-        assert (
-            db_session.exec(
-                select(PartGroup).where(PartGroup.model_id == model.id)
-            ).all()
-            == []
-        )
+        group = db_session.exec(
+            select(PartGroup).where(PartGroup.model_id == model.id)
+        ).one()
+        choice = db_session.exec(
+            select(PartOption).where(PartOption.part_group_id == group.id)
+        ).one()
+        assert (choice.name, choice.is_default) == ("Long", True)
 
 
 class TestHardDeleteDocument:
@@ -295,6 +300,77 @@ class TestHardDeleteCollection:
 
 
 class TestHardDeleteModel:
+    def test_purge_removes_empty_multipart_parts(
+        self, db_session: Session, storage
+    ) -> None:
+        owner = build_user(db_session, "multipart-purge-owner", superuser=True)
+        aggregate = build_multipart_model(db_session, "Multipart lamp")
+        member = build_model(db_session, "Lamp shade")
+        build_stored_file(db_session, storage, member, filename="shade.stl")
+        multipart_models.replace_parts(
+            db_session,
+            owner,
+            aggregate,
+            [MultipartPartWrite(name="Shade", model_ids=[member.id])],
+        )
+
+        trash.hard_delete_model(db_session, member, confirm_storage_risk=True)
+        db_session.commit()
+
+        assert (
+            db_session.exec(
+                select(MultipartModelChoice).where(
+                    MultipartModelChoice.multipart_model_id == aggregate.id
+                )
+            ).all()
+            == []
+        )
+        assert (
+            db_session.exec(
+                select(MultipartPart).where(
+                    MultipartPart.multipart_model_id == aggregate.id
+                )
+            ).all()
+            == []
+        )
+
+    def test_member_purge_promotes_the_surviving_legacy_option(
+        self, db_session: Session, storage
+    ) -> None:
+        assembly = build_model(db_session, "lamp assembly")
+        short = build_model(db_session, "short stem")
+        long = build_model(db_session, "long stem")
+        part_options.replace_for_model(
+            db_session,
+            assembly.id,
+            [
+                PartGroupWrite(
+                    name="Stem",
+                    options=[
+                        PartOptionWrite(
+                            model_id=short.id, name="Short", is_default=True
+                        ),
+                        PartOptionWrite(model_id=long.id, name="Long"),
+                    ],
+                )
+            ],
+        )
+
+        trash.hard_delete_model(db_session, short)
+        db_session.commit()
+
+        group = db_session.exec(
+            select(PartGroup).where(PartGroup.model_id == assembly.id)
+        ).one()
+        choice = db_session.exec(
+            select(PartOption).where(PartOption.part_group_id == group.id)
+        ).one()
+        assert (choice.model_id, choice.name, choice.is_default) == (
+            long.id,
+            "Long",
+            True,
+        )
+
     def test_detaches_the_pending_import_that_produced_the_model(
         self, db_session: Session, storage
     ) -> None:

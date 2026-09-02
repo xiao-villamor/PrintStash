@@ -13,10 +13,12 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
-- Part Groups currently describe interchangeable source Artifacts within one
-  Model. They do not encode assemblies, quantities, compatibility rules between
-  groups, or selectable G-code revisions. An incomplete group is hidden while
-  any of its source Artifacts is in trash and reappears after restore.
+- Multipart Models currently reference existing Models as named pieces and
+  alternatives. They do not encode quantities, compatibility rules between
+  pieces, or selectable G-code revisions. Models and their files remain in the
+  main Models view; deleting a Multipart Model removes only the grouping.
+  Members that are trashed or inaccessible remain visible as unavailable in the
+  grouping until they are restored or replaced.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
   status, streamed plain-text G-code and validated `.bgcode` upload/start, file
   inventory/deletion, and pause/resume/cancel are implemented. BGCODE preview,

@@ -39,6 +39,7 @@ from app.db.models import (
     ArtifactProvenanceLink,
     CollectionTagLink,
     File,
+    FileRevisionStatus,
     FileTagLink,
     FileType,
     Metadata,
@@ -46,6 +47,9 @@ from app.db.models import (
     ModelProvenanceField,
     ModelProvenanceSource,
     ModelStar,
+    MultipartModel,
+    MultipartModelChoice,
+    MultipartPart,
     PartGroup,
     PartOption,
     PrintJob,
@@ -56,14 +60,18 @@ from app.db.models import (
     User,
 )
 from app.schemas.models import PartGroupWrite, PartOptionWrite
+from app.schemas.multipart_models import MultipartPartWrite
 from app.schemas.provenance import CaptureManifestV2
-from app.services import library_transfer, part_options, provenance
+from app.services import library_transfer, multipart_models, part_options, provenance
 from tests.factories import (
     build_collection,
     build_file,
     build_model,
+    build_multipart_model,
     build_print_job,
     build_tag,
+    build_user,
+    grant_collection_role,
     tag_collection,
     tag_file,
 )
@@ -109,6 +117,332 @@ def _seed(db: Session, tmp_path: Path) -> tuple[User, Model, File]:
 
 
 class TestImportArchive:
+    def test_standalone_multipart_archive_round_trip_is_lossless(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        del auth_headers  # fixture creates the superuser used by _seed
+        user, _assembly, _assembly_mesh = _seed(db_session, tmp_path)
+        member = build_model(
+            db_session,
+            name="Archive handle",
+            slug="archive-handle",
+            hash="d" * 64,
+        )
+        member_dir = tmp_path / "files" / "archive-handle"
+        member_dir.mkdir(parents=True)
+        mesh_blob = member_dir / "handle.stl"
+        mesh_blob.write_bytes(b"solid handle\nendsolid handle\n")
+        gcode_blob = member_dir / "handle.gcode"
+        gcode_blob.write_bytes(b"G28\n")
+        mesh = build_file(
+            db_session,
+            member,
+            path=str(mesh_blob),
+            filename="handle.stl",
+            file_type=FileType.STL,
+            size_bytes=mesh_blob.stat().st_size,
+            sha256=hashlib.sha256(mesh_blob.read_bytes()).hexdigest(),
+        )
+        gcode = build_file(
+            db_session,
+            member,
+            path=str(gcode_blob),
+            filename="handle.gcode",
+            file_type=FileType.GCODE,
+            size_bytes=gcode_blob.stat().st_size,
+            sha256=hashlib.sha256(gcode_blob.read_bytes()).hexdigest(),
+            recommended=True,
+        )
+        aggregate = build_multipart_model(db_session, "Portable handle assembly")
+        multipart_models.replace_parts(
+            db_session,
+            user,
+            aggregate,
+            [MultipartPartWrite(name="Handle", model_ids=[member.id])],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+            portable = manifest["multipart_models"][0]
+            assert portable["parts"][0]["choices"] == [{"model_source_id": member.id}]
+            assert (
+                library_transfer.PortableManifest.model_validate(
+                    {"format": library_transfer.FORMAT, "models": []}
+                ).multipart_models
+                == []
+            )
+
+            db_session.delete(aggregate)
+            db_session.commit()
+            library_transfer.import_archive(db_session, archive_path, user)
+            restored = db_session.exec(
+                select(MultipartModel).where(MultipartModel.slug == aggregate.slug)
+            ).one()
+            restored_part = multipart_models.read(db_session, user, restored).parts[0]
+            assert restored_part.models[0].id == member.id
+            assert db_session.get(File, mesh.id) is not None
+            assert db_session.get(File, gcode.id).is_recommended is True
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_model_parts_keep_their_own_revision_history_across_round_trip(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, assembly, _assembly_mesh = _seed(db_session, tmp_path)
+        member = build_model(
+            db_session,
+            name="Long handle",
+            slug="long-handle",
+            hash="c" * 64,
+        )
+        member_dir = tmp_path / "files" / "long-handle"
+        member_dir.mkdir(parents=True)
+        source_blob = member_dir / "handle.stl"
+        source_blob.write_bytes(b"solid handle\nendsolid handle\n")
+        gcode_blob = member_dir / "handle.gcode"
+        gcode_blob.write_bytes(b"G28\n")
+        source = build_file(
+            db_session,
+            member,
+            path=str(source_blob),
+            filename="handle.stl",
+            sha256=hashlib.sha256(source_blob.read_bytes()).hexdigest(),
+            size_bytes=source_blob.stat().st_size,
+        )
+        revision = build_file(
+            db_session,
+            member,
+            path=str(gcode_blob),
+            filename="handle.gcode",
+            file_type=FileType.GCODE,
+            sha256=hashlib.sha256(gcode_blob.read_bytes()).hexdigest(),
+            size_bytes=gcode_blob.stat().st_size,
+            recommended=True,
+        )
+        part_options.replace_for_model(
+            db_session,
+            assembly.id,
+            [
+                PartGroupWrite(
+                    name="Handle",
+                    options=[
+                        PartOptionWrite(
+                            model_id=member.id,
+                            name="Long",
+                            is_default=True,
+                        )
+                    ],
+                )
+            ],
+        )
+
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+            assembly_data = next(
+                row for row in manifest["models"] if row["source_id"] == assembly.id
+            )
+            assert (
+                assembly_data["part_groups"][0]["options"][0]["model_source_id"]
+                == member.id
+            )
+
+            part_options.replace_for_model(db_session, assembly.id, [])
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            restored = part_options.read_for_model(db_session, assembly.id)
+            assert restored[0].options[0].model.id == member.id
+            assert db_session.get(File, source.id).model_id == member.id
+            assert db_session.get(File, revision.id).model_id == member.id
+            assert db_session.get(File, revision.id).is_recommended is True
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_standalone_archive_preserves_file_pinned_choices_on_one_model(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, first = _seed(db_session, tmp_path)
+        second_bytes = b"solid second\nendsolid second\n"
+        second_blob = tmp_path / "files" / "calibration-cube" / "v2" / "second.stl"
+        second_blob.parent.mkdir(parents=True, exist_ok=True)
+        second_blob.write_bytes(second_bytes)
+        second = build_file(
+            db_session,
+            model,
+            path=str(second_blob),
+            filename="second.stl",
+            size_bytes=len(second_bytes),
+            sha256=hashlib.sha256(second_bytes).hexdigest(),
+        )
+        aggregate = build_multipart_model(db_session, "Pinned alternatives")
+        part = MultipartPart(
+            multipart_model_id=aggregate.id,
+            name="Size",
+            name_key="size",
+            sort_order=0,
+        )
+        db_session.add(part)
+        db_session.flush()
+        db_session.add_all(
+            [
+                MultipartModelChoice(
+                    multipart_model_id=aggregate.id,
+                    multipart_part_id=part.id,
+                    model_id=model.id,
+                    source_file_id=first.id,
+                    label="Small",
+                    sort_order=0,
+                ),
+                MultipartModelChoice(
+                    multipart_model_id=aggregate.id,
+                    multipart_part_id=part.id,
+                    model_id=model.id,
+                    source_file_id=second.id,
+                    label="Large",
+                    sort_order=1,
+                ),
+            ]
+        )
+        db_session.commit()
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                portable = json.loads(archive.read("manifest.json"))[
+                    "multipart_models"
+                ][0]
+            assert portable["parts"][0]["choices"] == [
+                {
+                    "model_source_id": model.id,
+                    "artifact_source_id": first.id,
+                    "label": "Small",
+                },
+                {
+                    "model_source_id": model.id,
+                    "artifact_source_id": second.id,
+                    "label": "Large",
+                },
+            ]
+
+            db_session.delete(aggregate)
+            db_session.commit()
+            library_transfer.import_archive(db_session, archive_path, user)
+            restored = db_session.exec(select(MultipartModel)).one()
+            choices = db_session.exec(
+                select(MultipartModelChoice)
+                .where(MultipartModelChoice.multipart_model_id == restored.id)
+                .order_by(MultipartModelChoice.sort_order.asc())  # type: ignore[attr-defined]
+            ).all()
+            assert [
+                (choice.model_id, choice.source_file_id, choice.label)
+                for choice in choices
+            ] == [
+                (model.id, first.id, "Small"),
+                (model.id, second.id, "Large"),
+            ]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_import_slug_collision_is_safe(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, _mesh = _seed(db_session, tmp_path)
+        source = build_multipart_model(
+            db_session, "Source assembly", slug="source-assembly"
+        )
+        existing = build_multipart_model(
+            db_session, "Unrelated assembly", slug="imported-assembly"
+        )
+        multipart_models.replace_parts(
+            db_session,
+            user,
+            source,
+            [MultipartPartWrite(name="Source", model_ids=[model.id])],
+        )
+        multipart_models.replace_parts(
+            db_session,
+            user,
+            existing,
+            [MultipartPartWrite(name="Keep me", model_ids=[model.id])],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+
+            def collide_with_existing(manifest: dict) -> None:
+                row = next(
+                    row
+                    for row in manifest["multipart_models"]
+                    if row["source_id"] == source.id
+                )
+                row.update({"slug": "imported assembly/unsafe", "name": "Imported"})
+
+            _rewrite_manifest(archive_path, collide_with_existing)
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            db_session.refresh(existing)
+            existing_parts = db_session.exec(
+                select(MultipartPart).where(
+                    MultipartPart.multipart_model_id == existing.id
+                )
+            ).all()
+            imported = db_session.exec(
+                select(MultipartModel).where(MultipartModel.name == "Imported")
+            ).one()
+            assert existing.slug == "imported-assembly"
+            assert [part.name for part in existing_parts] == ["Keep me"]
+            assert imported.slug.startswith("imported-assembly-unsafe")
+            assert imported.slug != existing.slug
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_invalid_multipart_parts_leave_no_partial_aggregate(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, model, _mesh = _seed(db_session, tmp_path)
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+
+            def add_invalid_aggregate(manifest: dict) -> None:
+                manifest["multipart_models"] = [
+                    {
+                        "source_id": 999,
+                        "name": "Bad aggregate",
+                        "slug": "bad aggregate",
+                        "parts": [
+                            {"name": "Handle", "model_source_ids": [model.id]},
+                            {"name": " handle ", "model_source_ids": [model.id]},
+                        ],
+                    }
+                ]
+
+            _rewrite_manifest(archive_path, add_invalid_aggregate)
+            with pytest.raises(ValueError, match="portable_manifest_invalid"):
+                library_transfer.import_archive(db_session, archive_path, user)
+            assert (
+                db_session.exec(
+                    select(MultipartModel).where(MultipartModel.name == "Bad aggregate")
+                ).first()
+                is None
+            )
+        finally:
+            archive_path.unlink(missing_ok=True)
+
     def test_part_options_survive_a_portable_archive_round_trip(
         self,
         db_session: Session,
@@ -184,9 +518,7 @@ class TestImportArchive:
     ) -> None:
         user, model, first = _seed(db_session, tmp_path)
         second_bytes = b"solid second\nendsolid second\n"
-        second_blob = (
-            tmp_path / "files" / "calibration-cube" / "v2" / "second.stl"
-        )
+        second_blob = tmp_path / "files" / "calibration-cube" / "v2" / "second.stl"
         second_blob.parent.mkdir(parents=True)
         second_blob.write_bytes(second_bytes)
         second = build_file(
@@ -204,7 +536,9 @@ class TestImportArchive:
                 PartGroupWrite(
                     name="Size",
                     options=[
-                        PartOptionWrite(file_id=first.id, name="Small", is_default=True),
+                        PartOptionWrite(
+                            file_id=first.id, name="Small", is_default=True
+                        ),
                         PartOptionWrite(file_id=second.id, name="Large"),
                     ],
                 )
@@ -220,6 +554,136 @@ class TestImportArchive:
             library_transfer.import_archive(db_session, archive_path, user)
 
             assert len(part_options.read_for_model(db_session, model.id)) == 1
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    @pytest.mark.parametrize("drop_field", [True, False])
+    def test_legacy_manifest_materializes_a_visible_standalone_composition(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+        drop_field: bool,
+    ) -> None:
+        user, model, first = _seed(db_session, tmp_path)
+        second_bytes = b"solid second\\nendsolid second\\n"
+        second_blob = tmp_path / "files" / "calibration-cube" / "v2" / "second.stl"
+        second_blob.parent.mkdir(parents=True, exist_ok=True)
+        second_blob.write_bytes(second_bytes)
+        second = build_file(
+            db_session,
+            model,
+            path=str(second_blob),
+            filename="second.stl",
+            size_bytes=len(second_bytes),
+            sha256=hashlib.sha256(second_bytes).hexdigest(),
+        )
+        part_options.replace_for_model(
+            db_session,
+            model.id,
+            [
+                PartGroupWrite(
+                    name="Size",
+                    options=[
+                        PartOptionWrite(
+                            file_id=first.id, name="Small", is_default=True
+                        ),
+                        PartOptionWrite(file_id=second.id, name="Large"),
+                    ],
+                )
+            ],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            # Strip the modern field to emulate a pre-standalone v1 archive.
+            _rewrite_manifest(
+                archive_path,
+                lambda manifest: (
+                    manifest.pop("multipart_models")
+                    if drop_field
+                    else manifest.update({"multipart_models": []})
+                ),
+            )
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            aggregates = db_session.exec(select(MultipartModel)).all()
+            assert len(aggregates) == 1
+            parts = db_session.exec(
+                select(MultipartPart).where(
+                    MultipartPart.multipart_model_id == aggregates[0].id
+                )
+            ).all()
+            choices = db_session.exec(
+                select(MultipartModelChoice)
+                .where(MultipartModelChoice.multipart_part_id == parts[0].id)
+                .order_by(MultipartModelChoice.sort_order.asc())  # type: ignore[attr-defined]
+            ).all()
+            assert parts[0].name == "Size"
+            assert [
+                (choice.model_id, choice.source_file_id, choice.label)
+                for choice in choices
+            ] == [
+                (model.id, first.id, "Small"),
+                (model.id, second.id, "Large"),
+            ]
+
+            # Retrying the same archive updates the marked composition rather
+            # than creating another visible aggregate.
+            library_transfer.import_archive(db_session, archive_path, user)
+            assert len(db_session.exec(select(MultipartModel)).all()) == 1
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_legacy_model_target_preserves_exact_part_groups_without_inventing_parts(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        user, parent, _mesh = _seed(db_session, tmp_path)
+        alternative = build_model(
+            db_session,
+            name="Alternative handle",
+            slug="alternative-handle",
+            hash="f" * 64,
+        )
+        part_options.replace_for_model(
+            db_session,
+            parent.id,
+            [
+                PartGroupWrite(
+                    name="Handle",
+                    options=[
+                        PartOptionWrite(
+                            model_id=alternative.id,
+                            name="Alternative",
+                            is_default=True,
+                        )
+                    ],
+                )
+            ],
+        )
+        archive_path = library_transfer.create_archive(db_session, user)
+        try:
+            _rewrite_manifest(
+                archive_path,
+                lambda manifest: manifest.pop("multipart_models"),
+            )
+            library_transfer.import_archive(db_session, archive_path, user)
+
+            aggregate = db_session.exec(select(MultipartModel)).one()
+            parts = db_session.exec(
+                select(MultipartPart)
+                .where(MultipartPart.multipart_model_id == aggregate.id)
+                .order_by(MultipartPart.sort_order.asc())  # type: ignore[attr-defined]
+            ).all()
+            assert [part.name for part in parts] == ["Handle"]
+            original = db_session.exec(
+                select(MultipartModelChoice).where(
+                    MultipartModelChoice.multipart_part_id == parts[0].id
+                )
+            ).one()
+            assert original.model_id == alternative.id
         finally:
             archive_path.unlink(missing_ok=True)
 
@@ -826,6 +1290,358 @@ class TestImportArchive:
             _rewrite_sidecar(archive_path, mutate)
             with pytest.raises(ValueError, match="portable_provenance_invalid"):
                 library_transfer.import_archive(db_session, archive_path, user)
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+
+class TestPortableManifestValidation:
+    def test_rejects_a_part_option_without_a_target(self) -> None:
+        with pytest.raises(ValueError, match="part option requires exactly one target"):
+            library_transfer.PortablePartOption(name="Handle")
+
+    def test_rejects_a_part_option_with_two_targets(self) -> None:
+        with pytest.raises(ValueError, match="part option requires exactly one target"):
+            library_transfer.PortablePartOption(
+                name="Handle", model_source_id=1, artifact_source_id=2
+            )
+
+    def test_rejects_a_part_group_without_one_default(self) -> None:
+        option = {"model_source_id": 1, "name": "Handle"}
+
+        with pytest.raises(ValueError, match="part group requires exactly one default"):
+            library_transfer.PortablePartGroup(
+                name="Handle", options=[option, {**option, "name": "Lid"}]
+            )
+
+    def test_rejects_duplicate_part_group_targets(self) -> None:
+        option = {"model_source_id": 1, "name": "Handle", "is_default": True}
+
+        with pytest.raises(ValueError, match="part group targets must be unique"):
+            library_transfer.PortablePartGroup(
+                name="Handle",
+                options=[option, {**option, "name": "Alternate", "is_default": False}],
+            )
+
+    def test_rejects_duplicate_part_option_names(self) -> None:
+        with pytest.raises(ValueError, match="part option names must be unique"):
+            library_transfer.PortablePartGroup(
+                name="Handle",
+                options=[
+                    {
+                        "model_source_id": 1,
+                        "name": "Standard",
+                        "is_default": True,
+                    },
+                    {"model_source_id": 2, "name": " standard "},
+                ],
+            )
+
+    def test_rejects_duplicate_model_artifact_choices(self) -> None:
+        artifact = {
+            "source_id": 2,
+            "entry": "blobs/model/1.stl",
+            "original_filename": "part.stl",
+            "file_type": "stl",
+            "version": 1,
+            "size_bytes": 0,
+            "sha256": "a" * 64,
+        }
+
+        with pytest.raises(
+            ValueError, match="part options must reference unique model artifacts"
+        ):
+            library_transfer.PortableModel(
+                source_id=1,
+                name="Model",
+                hash="b" * 64,
+                artifacts=[artifact],
+                part_groups=[
+                    {
+                        "name": "Size",
+                        "options": [
+                            {
+                                "artifact_source_id": 2,
+                                "name": "Small",
+                                "is_default": True,
+                            },
+                        ],
+                    },
+                    {
+                        "name": "Second size",
+                        "options": [
+                            {
+                                "artifact_source_id": 2,
+                                "name": "Large",
+                                "is_default": True,
+                            }
+                        ],
+                    },
+                ],
+            )
+
+    def test_rejects_duplicate_portable_model_part_names(self) -> None:
+        option = {"model_source_id": 1, "name": "Standard", "is_default": True}
+
+        with pytest.raises(ValueError, match="part group names must be unique"):
+            library_transfer.PortableModel(
+                source_id=1,
+                name="Model",
+                hash="b" * 64,
+                part_groups=[
+                    {"name": "Size", "options": [option]},
+                    {"name": " size ", "options": [option]},
+                ],
+            )
+
+    def test_rejects_a_multipart_part_without_choices(self) -> None:
+        with pytest.raises(ValueError, match="multipart part requires choices"):
+            library_transfer.PortableMultipartPart(name="Handle")
+
+    def test_rejects_a_multipart_part_with_two_choice_shapes(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart part has multiple choice shapes"
+        ):
+            library_transfer.PortableMultipartPart(
+                name="Handle",
+                model_source_ids=[1],
+                choices=[{"model_source_id": 1}],
+            )
+
+    def test_rejects_duplicate_multipart_part_models(self) -> None:
+        with pytest.raises(ValueError, match="multipart part models must be unique"):
+            library_transfer.PortableMultipartPart(
+                name="Handle", model_source_ids=[1, 1]
+            )
+
+    def test_rejects_duplicate_multipart_model_ids(self) -> None:
+        with pytest.raises(ValueError, match="duplicate model source_id"):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[
+                    {"source_id": 1, "name": "A", "hash": "a" * 64},
+                    {"source_id": 1, "name": "B", "hash": "b" * 64},
+                ],
+            )
+
+    def test_rejects_duplicate_multipart_artifact_ids(self) -> None:
+        artifact = {
+            "source_id": 4,
+            "entry": "blobs/model/1.stl",
+            "original_filename": "part.stl",
+            "file_type": "stl",
+            "version": 1,
+            "size_bytes": 0,
+            "sha256": "a" * 64,
+        }
+        model = {
+            "source_id": 1,
+            "name": "A",
+            "hash": "b" * 64,
+            "artifacts": [artifact],
+        }
+
+        with pytest.raises(ValueError, match="duplicate artifact source_id"):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[model, {**model, "source_id": 2, "hash": "c" * 64}],
+            )
+
+    def test_rejects_a_multipart_reference_to_an_unknown_model(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart models must reference archive models once"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[{"source_id": 1, "name": "A", "hash": "a" * 64}],
+                multipart_models=[
+                    {
+                        "source_id": 5,
+                        "name": "Assembly",
+                        "slug": "assembly",
+                        "parts": [
+                            {"name": "Handle", "model_source_ids": [99]},
+                        ],
+                    }
+                ],
+            )
+
+    def test_rejects_an_explicit_choice_for_an_unknown_model(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart models must reference archive models once"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[{"source_id": 1, "name": "A", "hash": "a" * 64}],
+                multipart_models=[
+                    {
+                        "source_id": 5,
+                        "name": "Assembly",
+                        "slug": "assembly",
+                        "parts": [
+                            {
+                                "name": "Handle",
+                                "choices": [{"model_source_id": 99}],
+                            }
+                        ],
+                    }
+                ],
+            )
+
+    def test_rejects_a_legacy_model_option_to_an_unknown_model(self) -> None:
+        with pytest.raises(
+            ValueError, match="part options must reference unique archive models"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[
+                    {
+                        "source_id": 1,
+                        "name": "A",
+                        "hash": "a" * 64,
+                        "part_groups": [
+                            {
+                                "name": "Handle",
+                                "options": [
+                                    {
+                                        "model_source_id": 99,
+                                        "name": "Missing",
+                                        "is_default": True,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+
+    def test_accepts_legacy_multipart_model_choices(self) -> None:
+        manifest = library_transfer.PortableManifest(
+            format=library_transfer.FORMAT,
+            models=[{"source_id": 1, "name": "A", "hash": "a" * 64}],
+            multipart_models=[
+                {
+                    "source_id": 5,
+                    "name": "Assembly",
+                    "slug": "assembly",
+                    "parts": [{"name": "Handle", "model_source_ids": [1]}],
+                }
+            ],
+        )
+
+        assert manifest.multipart_models[0].parts[0].model_source_ids == [1]
+
+    def test_rejects_a_multipart_choice_for_an_unknown_artifact(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart choices must reference archive artifacts"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[{"source_id": 1, "name": "A", "hash": "a" * 64}],
+                multipart_models=[
+                    {
+                        "source_id": 5,
+                        "name": "Assembly",
+                        "slug": "assembly",
+                        "parts": [
+                            {
+                                "name": "Handle",
+                                "choices": [
+                                    {"model_source_id": 1, "artifact_source_id": 9}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            )
+
+    def test_rejects_duplicate_multipart_composition_ids(self) -> None:
+        aggregate = {
+            "source_id": 5,
+            "name": "Assembly",
+            "slug": "assembly",
+        }
+
+        with pytest.raises(ValueError, match="duplicate multipart source_id"):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[],
+                multipart_models=[aggregate, dict(aggregate)],
+            )
+
+    def test_rejects_duplicate_multipart_choices(self) -> None:
+        with pytest.raises(
+            ValueError, match="multipart models must reference archive choices once"
+        ):
+            library_transfer.PortableManifest(
+                format=library_transfer.FORMAT,
+                models=[{"source_id": 1, "name": "A", "hash": "a" * 64}],
+                multipart_models=[
+                    {
+                        "source_id": 5,
+                        "name": "Assembly",
+                        "slug": "assembly",
+                        "parts": [
+                            {
+                                "name": "Handle",
+                                "choices": [
+                                    {"model_source_id": 1},
+                                    {"model_source_id": 1},
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            )
+
+    def test_serializes_archive_scalar_values(self) -> None:
+        assert (
+            library_transfer._json_value(FileRevisionStatus.KNOWN_GOOD) == "known_good"
+        )
+        timestamp = utcnow()
+        assert library_transfer._json_value(timestamp) == timestamp.isoformat()
+        marker = object()
+        assert library_transfer._json_value(marker) is marker
+
+
+class TestCreateArchiveMultipartAccess:
+    def test_non_superuser_archive_omits_unassigned_compositions(
+        self, db_session: Session, auth_headers: dict[str, str], tmp_path: Path
+    ) -> None:
+        del auth_headers
+        _seed(db_session, tmp_path)
+        build_multipart_model(db_session, "Private assembly")
+        reader = build_user(db_session, "archive-reader")
+
+        archive_path = library_transfer.create_archive(db_session, reader)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["multipart_models"] == []
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+    def test_collection_reader_archive_includes_shared_compositions(
+        self, db_session: Session, auth_headers: dict[str, str], tmp_path: Path
+    ) -> None:
+        del auth_headers
+        _user, model, _mesh = _seed(db_session, tmp_path)
+        collection = build_collection(db_session, "Shared shelf")
+        model.collection_id = collection.id
+        db_session.add(model)
+        aggregate = build_multipart_model(
+            db_session, "Shared assembly", collection=collection
+        )
+        reader = build_user(db_session, "shared-reader")
+        grant_collection_role(db_session, reader, collection)
+        db_session.commit()
+
+        archive_path = library_transfer.create_archive(db_session, reader)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+            assert [row["source_id"] for row in manifest["multipart_models"]] == [
+                aggregate.id
+            ]
         finally:
             archive_path.unlink(missing_ok=True)
 

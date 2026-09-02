@@ -26,7 +26,6 @@ import {
   unstarModel,
   updateFileRevision,
   replaceFileTags,
-  replacePartOptions,
   updateModel,
 } from "@/lib/api/models";
 import { invalidateApiCache } from "@/lib/api/request";
@@ -144,35 +143,6 @@ describe("replaceFileTags", () => {
 
     expectRequest("/api/v1/models/4/files/9/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Painted"] });
-  });
-});
-
-describe("replacePartOptions", () => {
-  it("PUTs the complete part option set", async () => {
-    respondWith({ id: 4, files: [], part_groups: [] });
-
-    await replacePartOptions(4, [
-      {
-        name: "Handle",
-        options: [
-          { file_id: 9, name: "Short", is_default: true },
-          { file_id: 10, name: "Long" },
-        ],
-      },
-    ]);
-
-    expectRequest("/api/v1/models/4/part-options", "PUT");
-    expect(lastBody()).toEqual({
-      groups: [
-        {
-          name: "Handle",
-          options: [
-            { file_id: 9, name: "Short", is_default: true },
-            { file_id: 10, name: "Long" },
-          ],
-        },
-      ],
-    });
   });
 });
 

@@ -12,15 +12,17 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.v1 import taxonomy as taxonomy_router
 from app.core.config import _overlay
-from app.db.models import CollectionRole
+from app.db.models import CollectionRole, ExternalLibraryTombstone, MultipartModel
 from app.services import taxonomy
 from app.services.storage_backend import get_backend
 from tests.factories import (
     bearer,
+    build_external_library,
+    build_file,
     build_model,
     build_user,
     grant_collection_role,
@@ -525,6 +527,90 @@ class TestDeleteCollection:
         assert child.deleted_at is not None
         assert model.deleted_at is not None
         assert model.collection_id is None
+
+    def test_recursive_delete_records_external_source_tombstone(
+        self,
+        client: TestClient,
+        db_session: Session,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        parent = taxonomy.resolve_or_create_collection(db_session, "ExternalTree")
+        child = taxonomy.resolve_or_create_collection(db_session, "ExternalTree/Branch")
+        assert parent is not None and child is not None
+        nas = tmp_path / "nas"
+        nas.mkdir()
+        library = build_external_library(db_session, nas, name="test-nas")
+        model = build_model(
+            db_session,
+            name="external leaf",
+            slug="external-leaf",
+            hash="a" * 64,
+            collection_id=child.id,
+        )
+        build_file(
+            db_session,
+            model,
+            filename="leaf.stl",
+            external=True,
+            external_library_id=library.id,
+            source_key="leaf.stl",
+            path=str(nas / "leaf.stl"),
+        )
+        db_session.commit()
+
+        response = client.delete(
+            f"/api/v1/collections/{parent.id}?recursive=true",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 204
+        tombstone = db_session.exec(
+            select(ExternalLibraryTombstone).where(
+                ExternalLibraryTombstone.library_id == library.id,
+                ExternalLibraryTombstone.source_key == "leaf.stl",
+            )
+        ).one()
+        assert tombstone.reason == "model_trashed"
+
+    def test_recursive_delete_rejects_multipart_model_without_partial_trash(
+        self, client: TestClient, db_session: Session, auth_headers: dict[str, str]
+    ) -> None:
+        parent = taxonomy.resolve_or_create_collection(db_session, "AssemblyTree")
+        child = taxonomy.resolve_or_create_collection(
+            db_session, "AssemblyTree/Variant"
+        )
+        assert parent is not None and child is not None
+        model = build_model(
+            db_session,
+            name="assembly member",
+            slug="assembly-member",
+            hash="e" * 64,
+            collection_id=child.id,
+        )
+        aggregate = MultipartModel(
+            name="Assembly",
+            slug="assembly",
+            collection_id=child.id,
+        )
+        db_session.add(aggregate)
+        db_session.commit()
+
+        response = client.delete(
+            f"/api/v1/collections/{parent.id}?recursive=true",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "collection_has_models"
+        db_session.refresh(parent)
+        db_session.refresh(child)
+        db_session.refresh(model)
+        assert parent.deleted_at is None
+        assert child.deleted_at is None
+        assert model.deleted_at is None
+        assert model.collection_id == child.id
+        assert db_session.get(MultipartModel, aggregate.id) is not None
 
     def test_delete_leaf_no_children_no_models(
         self, client: TestClient, db_session: Session, auth_headers: dict[str, str]
