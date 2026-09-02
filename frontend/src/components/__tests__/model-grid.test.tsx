@@ -346,7 +346,11 @@ describe("ModelBrowser", () => {
         "true",
       );
       expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
-      expect(screen.getByRole("radiogroup", { name: "Set structure" })).toBeInTheDocument();
+      const filters = within(screen.getByRole("complementary", { name: "Multipart set filters" }));
+      expect(filters.getByRole("checkbox", { name: "With variants" })).toBeInTheDocument();
+      expect(filters.getByRole("checkbox", { name: "Fixed pieces only" })).toBeInTheDocument();
+      expect(filters.getByRole("checkbox", { name: "Not organised yet" })).toBeInTheDocument();
+      expect(filters.getByRole("checkbox", { name: "With guides" })).toBeInTheDocument();
       expect(screen.getByText("All multipart sets")).toBeInTheDocument();
       expect(screen.queryByText("Printer")).not.toBeInTheDocument();
       expect(screen.queryByText(/Model filters/i)).not.toBeInTheDocument();
@@ -358,6 +362,22 @@ describe("ModelBrowser", () => {
       expect(screen.queryByRole("button", { name: "Sort models" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Favorites" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Select/ })).not.toBeInTheDocument();
+    });
+
+    it("toggles multipart structure filters independently", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?v=multipart" });
+
+      const filters = within(
+        await screen.findByRole("complementary", { name: "Multipart set filters" }),
+      );
+      const variants = filters.getByRole("checkbox", { name: "With variants" });
+      const empty = filters.getByRole("checkbox", { name: "Not organised yet" });
+      await user.click(variants);
+      await user.click(empty);
+
+      expect(variants).toBeChecked();
+      expect(empty).toBeChecked();
     });
 
     it("keeps the model workspace chrome on the models tab", async () => {

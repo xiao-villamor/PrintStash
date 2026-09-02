@@ -143,11 +143,11 @@ describe("MultipartModelBrowser", () => {
     ).toEqual([expect.stringContaining("Adapter kit"), expect.stringContaining("Zebra stand")]);
   });
 
-  it("filters sets by multipart structure", async () => {
+  it("combines selected structure filters", async () => {
     renderApp(
       <MultipartModelBrowser
         collection={null}
-        structure="variants"
+        structures={["variants", "empty"]}
         canCreate
         onCreate={() => undefined}
       />,
@@ -164,7 +164,7 @@ describe("MultipartModelBrowser", () => {
 
     expect(await screen.findByRole("link", { name: /Variant handle/ })).toBeVisible();
     expect(screen.queryByRole("link", { name: /Fixed base/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Empty kit/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Empty kit/ })).toBeVisible();
   });
 
   it("filters sets that have guides", async () => {
@@ -284,7 +284,28 @@ describe("MultipartModelBrowser", () => {
     expect(JSON.parse(requestsWithMethod("POST")[0].body)).toMatchObject({
       name: "New organiser",
       description: "Desk accessories",
+      collection_id: 3,
     });
+  });
+
+  it("creates a grouping in the chosen collection", async () => {
+    const user = userEvent.setup();
+    const { requestsWithMethod } = renderApp(
+      <MultipartModelBrowser collection={null} collections={[collection]} canCreate />,
+      {
+        routes: {
+          "GET /api/v1/multipart-models": json([]),
+          "POST /api/v1/multipart-models": json(aMultipart()),
+        },
+      },
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "New multipart set" })[0]);
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "Filed organiser");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Collection" }), "3");
+    await user.click(screen.getByRole("button", { name: "Create multipart set" }));
+
+    expect(JSON.parse(requestsWithMethod("POST")[0].body).collection_id).toBe(3);
   });
 
   it("keeps the form draft after a friendly create error", async () => {
@@ -309,6 +330,27 @@ describe("MultipartModelBrowser", () => {
 });
 
 describe("MultipartModelDetailPage", () => {
+  it("shows an explicit empty description", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+
+    expect(await screen.findByText("No description yet")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Edit description" })).toBeVisible();
+  });
+
+  it("shows vault only when no collection is assigned", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+
+    expect(await screen.findByText("Vault only")).toBeVisible();
+  });
+
   it("opens as a visual overview", async () => {
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -582,9 +624,58 @@ describe("MultipartModelDetailPage", () => {
     expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({
       name: "Desk organiser",
       description: null,
+      collection_id: null,
       cover_model_id: null,
       parts: [{ name: "Top", choices: [{ model_id: 12, choice_id: 101 }] }],
     });
+  });
+
+  it("saves an edited description", async () => {
+    const user = userEvent.setup();
+    const detail = aMultipart();
+    const saved = { ...detail, description: "Print the base before the clips." };
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json(saved),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit description" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Description" }),
+      "Print the base before the clips.",
+    );
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(JSON.parse(requestsWithMethod("PUT")[0].body).description).toBe(
+      "Print the base before the clips.",
+    );
+    expect(await screen.findByText("Print the base before the clips.")).toBeVisible();
+  });
+
+  it("saves the selected collection", async () => {
+    const user = userEvent.setup();
+    const detail = aMultipart();
+    const saved = { ...detail, collection: collection.path, collection_id: collection.id };
+    const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/collections": json([collection]),
+        "GET /api/v1/multipart-models/7": json(detail),
+        "PUT /api/v1/multipart-models/7": json(saved),
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Collection" }), "3");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(JSON.parse(requestsWithMethod("PUT")[0].body).collection_id).toBe(3);
+    expect(await screen.findByText("parts")).toBeVisible();
   });
 
   it("saves a linked Model as the set cover", async () => {
@@ -761,6 +852,7 @@ describe("MultipartModelDetailPage", () => {
     expect(JSON.parse(requestsWithMethod("PUT")[0].body)).toEqual({
       name: "Desk organiser",
       description: null,
+      collection_id: null,
       cover_model_id: null,
       parts: [],
     });

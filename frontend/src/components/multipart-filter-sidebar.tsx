@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Boxes, FileText, Folder, FolderOpen, Search, X } from "lucide-react";
+import { Boxes, Folder, FolderOpen, Search, X } from "lucide-react";
 
+import { Checkbox } from "@/components/ui/checkbox";
 import { Localized } from "@/components/ui/localized";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -12,14 +13,14 @@ import type { MultipartStructureFilter } from "@/components/multipart-model-brow
 interface MultipartFilterSidebarProps {
   collections: CollectionRead[];
   selectedCollection: string | null;
-  structure: MultipartStructureFilter;
+  structures: MultipartStructureFilter[];
   guidesOnly: boolean;
   onCollectionChange: (path: string | null) => void;
-  onStructureChange: (value: MultipartStructureFilter) => void;
+  onStructuresChange: (value: MultipartStructureFilter[]) => void;
   onGuidesOnlyChange: (value: boolean) => void;
 }
 
-const STRUCTURE_FILTERS: MultipartStructureFilter[] = ["all", "variants", "fixed", "empty"];
+const STRUCTURE_FILTERS: MultipartStructureFilter[] = ["variants", "fixed", "empty"];
 
 function readSidebarWidth(): number {
   try {
@@ -36,10 +37,10 @@ function collectionDepth(path: string): number {
 export function MultipartFilterSidebar({
   collections,
   selectedCollection,
-  structure,
+  structures,
   guidesOnly,
   onCollectionChange,
-  onStructureChange,
+  onStructuresChange,
   onGuidesOnlyChange,
 }: MultipartFilterSidebarProps) {
   const { t } = useI18n();
@@ -75,6 +76,14 @@ export function MultipartFilterSidebar({
     document.body.style.userSelect = "none";
     document.addEventListener("mousemove", handleMove);
     document.addEventListener("mouseup", handleUp);
+  }
+
+  function toggleStructure(value: MultipartStructureFilter) {
+    onStructuresChange(
+      structures.includes(value)
+        ? structures.filter((current) => current !== value)
+        : [...structures, value],
+    );
   }
 
   return (
@@ -161,30 +170,19 @@ export function MultipartFilterSidebar({
             <h2 className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               {t("multipart.structure")}
             </h2>
-            <div role="radiogroup" aria-label={t("multipart.structure")} className="space-y-0.5">
+            <div className="space-y-0.5">
               {STRUCTURE_FILTERS.map((value) => (
-                <button
+                <label
                   key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={structure === value}
-                  onClick={() => onStructureChange(value)}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm transition-colors duration-press",
-                    structure === value
-                      ? "bg-accent text-accent-foreground"
-                      : "text-foreground hover:bg-muted",
-                  )}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground transition-colors duration-press hover:bg-muted"
                 >
-                  <span>{t(`multipart.structure.${value}`)}</span>
-                  <span
-                    className={cn(
-                      "h-3 w-3 rounded-full border",
-                      structure === value ? "border-primary bg-primary" : "border-border",
-                    )}
-                    aria-hidden
+                  <Checkbox
+                    className="h-4 w-4"
+                    checked={structures.includes(value)}
+                    onChange={() => toggleStructure(value)}
                   />
-                </button>
+                  <span>{t(`multipart.structure.${value}`)}</span>
+                </label>
               ))}
             </div>
           </section>
@@ -193,18 +191,14 @@ export function MultipartFilterSidebar({
             <h2 className="mb-2 px-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               {t("multipart.guidesHeading")}
             </h2>
-            <button
-              type="button"
-              aria-pressed={guidesOnly}
-              onClick={() => onGuidesOnlyChange(!guidesOnly)}
-              className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors duration-press",
-                guidesOnly ? "bg-accent text-accent-foreground" : "text-foreground hover:bg-muted",
-              )}
-            >
-              <FileText className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+            <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm text-foreground transition-colors duration-press hover:bg-muted">
+              <Checkbox
+                className="h-4 w-4"
+                checked={guidesOnly}
+                onChange={() => onGuidesOnlyChange(!guidesOnly)}
+              />
               <span>{t("multipart.withGuides")}</span>
-            </button>
+            </label>
           </section>
         </div>
 

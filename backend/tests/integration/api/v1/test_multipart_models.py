@@ -131,6 +131,74 @@ class TestMultipartModels:
         assert response.status_code == 200, response.text
         assert response.json()["cover_model_id"] is None
 
+    def test_full_save_moves_aggregate_to_collection(
+        self, client, auth_headers, make_collection
+    ) -> None:
+        collection = make_collection("Organised sets")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Unsorted assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"collection_id": collection.id, "parts": []},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_id"] == collection.id
+        assert response.json()["collection"] == collection.path
+
+    def test_full_save_moves_aggregate_to_vault(
+        self, client, auth_headers, make_collection
+    ) -> None:
+        collection = make_collection("Temporary sets")
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Filed assembly", "collection_id": collection.id},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"collection_id": None, "parts": []},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_id"] is None
+        assert response.json()["collection"] is None
+
+    def test_full_save_rejects_missing_target_collection_atomically(
+        self, client, auth_headers
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Stable collection assembly"},
+        ).json()
+
+        response = client.put(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={
+                "name": "Must not persist",
+                "description": "Must not persist",
+                "collection_id": 99_999_999,
+                "parts": [],
+            },
+        )
+
+        assert response.status_code == 404, response.text
+        current = client.get(
+            f"/api/v1/multipart-models/{created['id']}", headers=auth_headers
+        ).json()
+        assert current["name"] == "Stable collection assembly"
+        assert current["description"] is None
+        assert current["collection_id"] is None
+
     def test_full_save_rejects_invalid_member_without_partial_metadata_change(
         self, client, auth_headers, make_model
     ) -> None:
@@ -595,6 +663,39 @@ class TestMultipartModels:
         assert current["name"] == "Protected save assembly"
         assert current["parts"][0]["name"] == "Body"
         assert current["parts"][0]["models"][0]["id"] == member.id
+
+    def test_save_rejects_viewer_for_target_collection(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_user,
+        headers_for,
+        grant_role,
+    ) -> None:
+        source = make_collection("Editable source sets")
+        target = make_collection("View-only target sets")
+        aggregate = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Protected move", "collection_id": source.id},
+        ).json()
+        editor = make_user("multipart-target-viewer")
+        grant_role(editor, source, CollectionRole.EDIT)
+        grant_role(editor, target, CollectionRole.VIEW)
+
+        response = client.put(
+            f"/api/v1/multipart-models/{aggregate['id']}",
+            headers=headers_for(editor),
+            json={"collection_id": target.id, "parts": []},
+        )
+
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "collection_permission_denied"
+        current = client.get(
+            f"/api/v1/multipart-models/{aggregate['id']}", headers=auth_headers
+        ).json()
+        assert current["collection_id"] == source.id
 
     def test_delete_rejects_viewer_for_aggregate(
         self, client, auth_headers, make_collection, make_user, headers_for, grant_role

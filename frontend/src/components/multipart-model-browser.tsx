@@ -21,8 +21,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useI18n } from "@/lib/i18n";
-import { useMultipartModels } from "@/lib/queries";
+import { useCollections, useMultipartModels } from "@/lib/queries";
 import {
   createMultipartModel,
   deleteDocument,
@@ -97,17 +98,36 @@ export function NewMultipartModelModal({
   open,
   onClose,
   collectionId,
+  collections = [],
 }: {
   open: boolean;
   onClose: () => void;
   collectionId: number | null;
+  collections?: CollectionRead[];
 }) {
   const { t } = useI18n();
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [targetCollectionId, setTargetCollectionId] = useState<number | null>(collectionId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const writableCollections = useMemo(
+    () =>
+      collections.filter(
+        (collection) =>
+          collection.effective_role === "edit" || collection.effective_role === "admin",
+      ),
+    [collections],
+  );
+
+  function closeModal() {
+    setName("");
+    setDescription("");
+    setTargetCollectionId(collectionId);
+    setError(null);
+    onClose();
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -118,11 +138,9 @@ export function NewMultipartModelModal({
       const created = await createMultipartModel({
         name: name.trim(),
         description: description.trim() || null,
-        collection_id: collectionId,
+        collection_id: targetCollectionId,
       });
-      setName("");
-      setDescription("");
-      onClose();
+      closeModal();
       router.push(`/multipart-models/${created.id}`);
     } catch (cause) {
       setError(multipartError(cause, t, "multipart.createError"));
@@ -134,7 +152,7 @@ export function NewMultipartModelModal({
   return (
     <Modal
       open={open}
-      onClose={busy ? () => undefined : onClose}
+      onClose={busy ? () => undefined : closeModal}
       title={t("multipart.new")}
       className="max-w-lg"
     >
@@ -150,6 +168,23 @@ export function NewMultipartModelModal({
             maxLength={200}
             required
           />
+        </label>
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
+          <select
+            value={targetCollectionId ?? ""}
+            onChange={(event) =>
+              setTargetCollectionId(event.target.value ? Number(event.target.value) : null)
+            }
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <option value="">{t("multipart.vaultOnly")}</option>
+            {writableCollections.map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {collection.path}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="block space-y-1.5">
           <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
@@ -170,7 +205,7 @@ export function NewMultipartModelModal({
           </p>
         )}
         <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+          <Button type="button" variant="outline" onClick={closeModal} disabled={busy}>
             {t("multipart.cancel")}
           </Button>
           <Button type="submit" loading={busy} disabled={!name.trim()}>
@@ -182,29 +217,27 @@ export function NewMultipartModelModal({
   );
 }
 
-export type MultipartStructureFilter = "all" | "variants" | "fixed" | "empty";
+export type MultipartStructureFilter = "variants" | "fixed" | "empty";
 
-function isMultipartStructureFilter(value: string): value is MultipartStructureFilter {
-  return value === "all" || value === "variants" || value === "fixed" || value === "empty";
-}
+const STRUCTURE_FILTERS: MultipartStructureFilter[] = ["variants", "fixed", "empty"];
 
 export function MultipartModelBrowser({
   collection,
   collections = [],
-  structure = "all",
+  structures = [],
   guidesOnly = false,
   canCreate,
   onCreate,
-  onStructureChange,
+  onStructuresChange,
   onGuidesOnlyChange,
 }: {
   collection: string | null;
   collections?: CollectionRead[];
-  structure?: MultipartStructureFilter;
+  structures?: MultipartStructureFilter[];
   guidesOnly?: boolean;
   canCreate: boolean;
   onCreate?: () => void;
-  onStructureChange?: (value: MultipartStructureFilter) => void;
+  onStructuresChange?: (value: MultipartStructureFilter[]) => void;
   onGuidesOnlyChange?: (value: boolean) => void;
 }) {
   const { t } = useI18n();
@@ -213,6 +246,13 @@ export function MultipartModelBrowser({
   const [createOpen, setCreateOpen] = useState(false);
   const collectionId = collections.find((item) => item.path === collection)?.id ?? null;
   const requestCreate = onCreate ?? (() => setCreateOpen(true));
+  function toggleStructure(value: MultipartStructureFilter) {
+    onStructuresChange?.(
+      structures.includes(value)
+        ? structures.filter((current) => current !== value)
+        : [...structures, value],
+    );
+  }
   const {
     data: items = [],
     isLoading,
@@ -226,28 +266,32 @@ export function MultipartModelBrowser({
   const sortedItems = useMemo(() => {
     const rows = items.filter((item) => {
       if (guidesOnly && item.guide_count === 0) return false;
-      if (structure === "variants" && item.model_count <= item.part_count) return false;
-      if (
-        structure === "fixed" &&
-        (item.part_count === 0 || item.model_count !== item.part_count)
-      ) {
-        return false;
+      if (structures.length > 0) {
+        const matchesStructure = structures.some((structure) => {
+          if (structure === "variants") return item.model_count > item.part_count;
+          if (structure === "fixed") {
+            return item.part_count > 0 && item.model_count === item.part_count;
+          }
+          return item.part_count === 0;
+        });
+        if (!matchesStructure) return false;
       }
-      if (structure === "empty" && item.part_count !== 0) return false;
       return true;
     });
     if (sort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
     if (sort === "parts") return rows.sort((a, b) => b.part_count - a.part_count);
     return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [guidesOnly, items, sort, structure]);
+  }, [guidesOnly, items, sort, structures]);
 
   return (
     <section className="flex-1 px-4 py-5 sm:px-6">
       {!onCreate && (
         <NewMultipartModelModal
+          key={collectionId ?? "vault"}
           open={createOpen}
           onClose={() => setCreateOpen(false)}
           collectionId={collectionId}
+          collections={collections}
         />
       )}
       <div className="w-full space-y-5">
@@ -284,35 +328,29 @@ export function MultipartModelBrowser({
             </Button>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-2 md:hidden">
-          <label className="space-y-1 text-xs font-medium text-muted-foreground">
-            <span>{t("multipart.structure")}</span>
-            <select
-              aria-label={t("multipart.structure")}
-              value={structure}
-              onChange={(event) => {
-                if (isMultipartStructureFilter(event.target.value)) {
-                  onStructureChange?.(event.target.value);
-                }
-              }}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="all">{t("multipart.structure.all")}</option>
-              <option value="variants">{t("multipart.structure.variants")}</option>
-              <option value="fixed">{t("multipart.structure.fixed")}</option>
-              <option value="empty">{t("multipart.structure.empty")}</option>
-            </select>
-          </label>
-          <label className="flex min-h-10 items-end gap-2 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground">
-            <input
-              type="checkbox"
-              checked={guidesOnly}
-              onChange={(event) => onGuidesOnlyChange?.(event.target.checked)}
-              className="h-4 w-4 accent-primary"
-            />
-            <span>{t("multipart.withGuides")}</span>
-          </label>
-        </div>
+        <fieldset className="grid gap-1 rounded-md border border-border bg-muted/30 p-2 md:hidden">
+          <legend className="px-1 text-xs font-medium text-muted-foreground">
+            {t("multipart.filters")}
+          </legend>
+          <div className="grid grid-cols-2 gap-1">
+            {STRUCTURE_FILTERS.map((value) => (
+              <label
+                key={value}
+                className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted"
+              >
+                <Checkbox
+                  checked={structures.includes(value)}
+                  onChange={() => toggleStructure(value)}
+                />
+                <span>{t(`multipart.structure.${value}`)}</span>
+              </label>
+            ))}
+            <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted">
+              <Checkbox checked={guidesOnly} onChange={() => onGuidesOnlyChange?.(!guidesOnly)} />
+              <span>{t("multipart.withGuides")}</span>
+            </label>
+          </div>
+        </fieldset>
         {error && (
           <p
             role="alert"
@@ -333,17 +371,17 @@ export function MultipartModelBrowser({
         ) : sortedItems.length === 0 ? (
           <EmptyState
             title={
-              query || structure !== "all" || guidesOnly
+              query || structures.length > 0 || guidesOnly
                 ? t("multipart.noFilteredSets")
                 : t("multipart.empty")
             }
             description={
-              query || structure !== "all" || guidesOnly
+              query || structures.length > 0 || guidesOnly
                 ? t("multipart.noFilteredSetsHelp")
                 : t("multipart.emptyDescription")
             }
             action={
-              !query && structure === "all" && !guidesOnly && canCreate ? (
+              !query && structures.length === 0 && !guidesOnly && canCreate ? (
                 <Button onClick={requestCreate}>{t("multipart.new")}</Button>
               ) : undefined
             }
@@ -616,7 +654,15 @@ function MultipartMemberCard({ model }: { model: MultipartModelCandidate }) {
   );
 }
 
-function MultipartOverview({ model }: { model: MultipartModelRead }) {
+function MultipartOverview({
+  model,
+  canEdit,
+  onEdit,
+}: {
+  model: MultipartModelRead;
+  canEdit: boolean;
+  onEdit: () => void;
+}) {
   const { t } = useI18n();
   const members = model.parts.flatMap((part) => part.models);
   const coverMember =
@@ -668,12 +714,38 @@ function MultipartOverview({ model }: { model: MultipartModelRead }) {
                 </span>
               )}
             </div>
-            <p className="mt-5 max-w-3xl text-sm leading-6 text-muted-foreground">
-              {model.description || t("multipart.workspaceHelp")}
-            </p>
-            {model.collection && (
-              <p className="mt-4 text-xs font-medium text-muted-foreground">{model.collection}</p>
-            )}
+            <dl className="divide-y divide-border rounded-md border border-border">
+              <div className="px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("multipart.descriptionLabel")}
+                  </dt>
+                  {canEdit && (
+                    <Button type="button" variant="ghost" size="sm" onClick={onEdit}>
+                      <Pencil className="h-3.5 w-3.5" /> {t("multipart.editDescription")}
+                    </Button>
+                  )}
+                </div>
+                <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">
+                  {model.description || t("multipart.noDescription")}
+                </dd>
+              </div>
+              <div className="px-3 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("multipart.collectionLabel")}
+                  </dt>
+                  {canEdit && (
+                    <Button type="button" variant="ghost" size="sm" onClick={onEdit}>
+                      {t("multipart.changeCollection")}
+                    </Button>
+                  )}
+                </div>
+                <dd className="mt-1 text-sm font-medium text-foreground">
+                  {model.collection || t("multipart.vaultOnly")}
+                </dd>
+              </div>
+            </dl>
             {model.guides.length > 0 && (
               <div className="border-t border-border pt-4">
                 <h2 className="text-sm font-semibold">{t("multipart.guidesHeading")}</h2>
@@ -859,6 +931,7 @@ export function MultipartModelDetailPage() {
   const id = Number(params.id);
   const { t } = useI18n();
   const { user } = useAuth();
+  const { data: collections = [] } = useCollections();
   const router = useRouter();
   const searchParams = useSearchParams();
   const {
@@ -879,6 +952,16 @@ export function MultipartModelDetailPage() {
   const model = draft ?? savedModel;
   const canEdit =
     !!user?.is_superuser || model?.effective_role === "edit" || model?.effective_role === "admin";
+  const writableCollections = useMemo(
+    () =>
+      collections.filter(
+        (collection) =>
+          !!user?.is_superuser ||
+          collection.effective_role === "edit" ||
+          collection.effective_role === "admin",
+      ),
+    [collections, user?.is_superuser],
+  );
   const usedIds = useMemo(
     () => new Set((model?.parts ?? []).flatMap((part) => part.models.map((member) => member.id))),
     [model?.parts],
@@ -1006,6 +1089,7 @@ export function MultipartModelDetailPage() {
       const saved = await saveMultipartModel(model.id, {
         name: model.name,
         description: model.description ?? null,
+        collection_id: model.collection_id,
         cover_model_id:
           model.cover_model_id !== null && usedIds.has(model.cover_model_id)
             ? model.cover_model_id
@@ -1213,6 +1297,41 @@ export function MultipartModelDetailPage() {
                     disabled={!canEdit}
                   />
                 </label>
+                <div className="space-y-1.5">
+                  <label htmlFor="multipart-collection" className="block text-sm font-medium">
+                    {t("multipart.collectionLabel")}
+                  </label>
+                  <select
+                    id="multipart-collection"
+                    aria-describedby="multipart-collection-help"
+                    value={model.collection_id ?? ""}
+                    onChange={(event) => {
+                      const collectionId = event.target.value ? Number(event.target.value) : null;
+                      setDraft({
+                        ...model,
+                        collection_id: collectionId,
+                        collection:
+                          writableCollections.find((collection) => collection.id === collectionId)
+                            ?.path ?? null,
+                      });
+                    }}
+                    disabled={!canEdit}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  >
+                    <option value="">{t("multipart.vaultOnly")}</option>
+                    {writableCollections.map((collection) => (
+                      <option key={collection.id} value={collection.id}>
+                        {collection.path}
+                      </option>
+                    ))}
+                  </select>
+                  <span
+                    id="multipart-collection-help"
+                    className="block text-xs text-muted-foreground"
+                  >
+                    {t("multipart.collectionHelp")}
+                  </span>
+                </div>
                 <label className="block space-y-1.5">
                   <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
                   <textarea
@@ -1355,7 +1474,7 @@ export function MultipartModelDetailPage() {
           />
         </div>
       ) : (
-        <MultipartOverview model={model} />
+        <MultipartOverview model={model} canEdit={canEdit} onEdit={beginEditing} />
       )}
     </div>
   );

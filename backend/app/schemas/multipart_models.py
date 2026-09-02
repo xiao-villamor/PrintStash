@@ -99,5 +99,6 @@ class MultipartPartsReplace(BaseModel):
 class MultipartModelSave(MultipartModelUpdate):
     """Atomic metadata and composition replacement."""
 
+    collection_id: Optional[int] = None
     parts: list[MultipartPartWrite] = Field(default_factory=list, max_length=100)
     cover_model_id: Optional[int] = Field(default=None, gt=0)

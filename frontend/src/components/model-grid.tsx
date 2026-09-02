@@ -502,7 +502,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       : readLastView();
   const [docView, setDocView] = useState<"models" | "docs" | "multipart">(initialVaultView);
   const isMultipartView = docView === "multipart";
-  const [multipartStructure, setMultipartStructure] = useState<MultipartStructureFilter>("all");
+  const [multipartStructures, setMultipartStructures] = useState<MultipartStructureFilter[]>([]);
   const [multipartGuidesOnly, setMultipartGuidesOnly] = useState(false);
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -1518,9 +1518,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           initialMode={dropPreload?.mode}
         />
         <NewMultipartModelModal
+          key={selectedCollectionRow?.id ?? "vault"}
           open={multipartCreateOpen}
           onClose={() => setMultipartCreateOpen(false)}
           collectionId={selectedCollectionRow?.id ?? null}
+          collections={collections}
         />
         {!isMultipartView && (
           <MobileFilterDrawer
@@ -1566,10 +1568,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           <MultipartFilterSidebar
             collections={collections}
             selectedCollection={selectedCollection}
-            structure={multipartStructure}
+            structures={multipartStructures}
             guidesOnly={multipartGuidesOnly}
             onCollectionChange={handleCollectionChange}
-            onStructureChange={setMultipartStructure}
+            onStructuresChange={setMultipartStructures}
             onGuidesOnlyChange={setMultipartGuidesOnly}
           />
         ) : (
@@ -2183,11 +2185,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           {docView === "multipart" ? (
             <MultipartModelBrowser
               collection={selectedCollection}
-              structure={multipartStructure}
+              structures={multipartStructures}
               guidesOnly={multipartGuidesOnly}
               canCreate={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
               onCreate={() => setMultipartCreateOpen(true)}
-              onStructureChange={setMultipartStructure}
+              onStructuresChange={setMultipartStructures}
               onGuidesOnlyChange={setMultipartGuidesOnly}
             />
           ) : docView === "docs" ? (

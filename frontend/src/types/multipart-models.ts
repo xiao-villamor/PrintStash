@@ -60,6 +60,7 @@ export interface MultipartModelUpdate {
 export interface MultipartPartsWrite {
   name: string;
   description: string | null;
+  collection_id: number | null;
   cover_model_id: number | null;
   parts: Array<{
     name: string;

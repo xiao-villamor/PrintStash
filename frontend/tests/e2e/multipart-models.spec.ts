@@ -50,6 +50,7 @@ test.describe("multipart models", () => {
     let savedPayload: {
       name: string;
       description: string | null;
+      collection_id: number | null;
       cover_model_id: number | null;
       parts: Array<{ name: string; choices: Array<{ model_id: number; choice_id?: number }> }>;
     } | null = null;
@@ -81,8 +82,18 @@ test.describe("multipart models", () => {
       }
       if (url.pathname === "/api/v1/multipart-models" && request.method() === "POST") {
         // SAFETY: the browser sends this exact JSON shape from NewMultipartModelModal.
-        const payload = request.postDataJSON() as { name: string; description: string | null };
-        detail = { ...detail, name: payload.name, description: payload.description };
+        const payload = request.postDataJSON() as {
+          name: string;
+          description: string | null;
+          collection_id: number | null;
+        };
+        detail = {
+          ...detail,
+          name: payload.name,
+          description: payload.description,
+          collection_id: payload.collection_id,
+          collection: payload.collection_id === 1 ? "maraio" : null,
+        };
         await route.fulfill({ json: detail });
         return;
       }
@@ -99,6 +110,7 @@ test.describe("multipart models", () => {
         const payload = request.postDataJSON() as {
           name: string;
           description: string | null;
+          collection_id: number | null;
           cover_model_id: number | null;
           parts: Array<{
             name: string;
@@ -110,6 +122,8 @@ test.describe("multipart models", () => {
           ...detail,
           name: payload.name,
           description: payload.description,
+          collection_id: payload.collection_id,
+          collection: payload.collection_id === 1 ? "maraio" : null,
           cover_model_id: payload.cover_model_id,
           parts: payload.parts.map((part, index) => ({
             id: index + 1,
@@ -140,6 +154,7 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "New multipart set" }).first().click();
     await page.getByLabel("Name", { exact: true }).fill("Desk organiser");
     await page.getByLabel("Description").fill("A complete desk organiser");
+    await page.getByLabel("Collection").selectOption({ label: "maraio" });
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await expect(page.getByRole("heading", { name: "Desk organiser" })).toBeVisible();
@@ -158,6 +173,7 @@ test.describe("multipart models", () => {
 
     await expect(page.getByText("Changes saved")).toBeVisible();
     expect(savedPayload).toMatchObject({
+      collection_id: 1,
       cover_model_id: 4,
       parts: [
         { name: "Part 1", choices: [{ model_id: 2 }] },
@@ -165,6 +181,14 @@ test.describe("multipart models", () => {
       ],
     });
     await expect(page.getByText("Choose one").first()).toBeVisible();
+    await page.getByRole("button", { name: "Edit description" }).click();
+    await page.getByLabel("Description").fill("Print the base before attaching the handle.");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    expect(savedPayload).toMatchObject({
+      collection_id: 1,
+      description: "Print the base before attaching the handle.",
+    });
+    await expect(page.getByText("Print the base before attaching the handle.")).toBeVisible();
     const cardDimensions = await page.getByRole("link", { name: /Desk base/ }).evaluate((card) => {
       const bounds = card.getBoundingClientRect();
       return { height: bounds.height, width: bounds.width };
@@ -177,7 +201,7 @@ test.describe("multipart models", () => {
     await page.setViewportSize({ width: 1280, height: 720 });
     await page.goto("/?v=multipart");
     await expect(page.getByRole("heading", { name: "Multipart sets" })).toBeVisible();
-    await page.getByRole("radio", { name: "With variants" }).click();
+    await page.getByRole("checkbox", { name: "With variants" }).click();
     await expect(page.getByRole("link", { name: /Desk organiser/ })).toBeVisible();
     const setCardDimensions = await page
       .getByRole("link", { name: /Desk organiser/ })

@@ -220,6 +220,9 @@ def save_multipart_model(
             raise HTTPException(status_code=422, detail="name_required")
         if name != aggregate.name:
             slug = _unique_slug(session, name, exclude_id=int(aggregate.id))
+    collection_set = "collection_id" in payload.model_fields_set
+    if collection_set:
+        _collection_for_write(session, current_user, payload.collection_id)
     try:
         return multipart_models.save(
             session,
@@ -230,6 +233,8 @@ def save_multipart_model(
             slug=slug,
             description=payload.description,
             description_set="description" in payload.model_fields_set,
+            collection_id=payload.collection_id,
+            collection_set=collection_set,
             cover_model_id=payload.cover_model_id,
             cover_model_set="cover_model_id" in payload.model_fields_set,
         )

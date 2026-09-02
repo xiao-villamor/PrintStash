@@ -81,10 +81,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 ### Changed
 
 - **Multipart sets now follow the Vault's library hierarchy.** Their browser
-  keeps the shared navigation shell, adds structure and guide filters, and uses
-  compact Model-style cards. Set details open in a read-only overview with an
-  explicit edit action, an ordered piece/variant hierarchy, and a user-selected
-  member Model as the persistent cover.
+  keeps the shared navigation shell, adds combinable checkbox filters, and uses
+  compact Model-style cards. Set details open in a read-only overview with
+  explicit actions for editing the description or collection, an ordered
+  piece/variant hierarchy, and a user-selected member Model as the persistent
+  cover.
 - **Model tags are now discoverable from the library.** Editable model cards
   and detail headers expose a direct Add/Edit tags action, where users can find
   existing tags or create and assign a new one without entering full model edit.

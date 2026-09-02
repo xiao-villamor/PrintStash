@@ -7022,6 +7022,17 @@
         "additionalProperties": false,
         "description": "Atomic metadata and composition replacement.",
         "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
           "cover_model_id": {
             "anyOf": [
               {

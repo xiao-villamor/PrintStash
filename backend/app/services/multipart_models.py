@@ -498,6 +498,8 @@ def save(
     slug: str | None = None,
     description: str | None = None,
     description_set: bool = False,
+    collection_id: int | None = None,
+    collection_set: bool = False,
     cover_model_id: int | None = None,
     cover_model_set: bool = False,
 ) -> MultipartModelRead:
@@ -509,6 +511,8 @@ def save(
         aggregate.slug = slug
     if description_set:
         aggregate.description = description
+    if collection_set:
+        aggregate.collection_id = collection_id
     requested_model_ids = {
         model_id for _, choices in prepared[0] for model_id, _choice_id in choices
     }
