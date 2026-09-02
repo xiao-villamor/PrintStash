@@ -654,15 +654,7 @@ function MultipartMemberCard({ model }: { model: MultipartModelCandidate }) {
   );
 }
 
-function MultipartOverview({
-  model,
-  canEdit,
-  onEdit,
-}: {
-  model: MultipartModelRead;
-  canEdit: boolean;
-  onEdit: () => void;
-}) {
+function MultipartOverview({ model }: { model: MultipartModelRead }) {
   const { t } = useI18n();
   const members = model.parts.flatMap((part) => part.models);
   const coverMember =
@@ -716,31 +708,17 @@ function MultipartOverview({
             </div>
             <dl className="divide-y divide-border rounded-md border border-border">
               <div className="px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("multipart.descriptionLabel")}
-                  </dt>
-                  {canEdit && (
-                    <Button type="button" variant="ghost" size="sm" onClick={onEdit}>
-                      <Pencil className="h-3.5 w-3.5" /> {t("multipart.editDescription")}
-                    </Button>
-                  )}
-                </div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("multipart.descriptionLabel")}
+                </dt>
                 <dd className="mt-1 whitespace-pre-wrap text-sm leading-6 text-foreground">
                   {model.description || t("multipart.noDescription")}
                 </dd>
               </div>
               <div className="px-3 py-3">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    {t("multipart.collectionLabel")}
-                  </dt>
-                  {canEdit && (
-                    <Button type="button" variant="ghost" size="sm" onClick={onEdit}>
-                      {t("multipart.changeCollection")}
-                    </Button>
-                  )}
-                </div>
+                <dt className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("multipart.collectionLabel")}
+                </dt>
                 <dd className="mt-1 text-sm font-medium text-foreground">
                   {model.collection || t("multipart.vaultOnly")}
                 </dd>
@@ -1474,7 +1452,7 @@ export function MultipartModelDetailPage() {
           />
         </div>
       ) : (
-        <MultipartOverview model={model} canEdit={canEdit} onEdit={beginEditing} />
+        <MultipartOverview model={model} />
       )}
     </div>
   );

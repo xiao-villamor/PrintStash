@@ -338,7 +338,6 @@ describe("MultipartModelDetailPage", () => {
     });
 
     expect(await screen.findByText("No description yet")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Edit description" })).toBeVisible();
   });
 
   it("shows vault only when no collection is assigned", async () => {
@@ -395,6 +394,24 @@ describe("MultipartModelDetailPage", () => {
 
     expect(screen.getByLabelText("Part name")).toHaveValue("Base");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeVisible();
+  });
+
+  it("keeps metadata actions inside edit mode", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: { "GET /api/v1/multipart-models/7": json(aMultipart()) },
+    });
+
+    await screen.findByRole("heading", { name: "Desk organiser" });
+    expect(screen.queryByRole("button", { name: "Edit description" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change collection" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit multipart set" }));
+
+    expect(screen.getByRole("textbox", { name: "Description" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Collection" })).toBeVisible();
   });
 
   it("discards an unsaved draft when editing is cancelled", async () => {
@@ -643,7 +660,7 @@ describe("MultipartModelDetailPage", () => {
       },
     });
 
-    await user.click(await screen.findByRole("button", { name: "Edit description" }));
+    await user.click(await screen.findByRole("button", { name: "Edit multipart set" }));
     await user.type(
       screen.getByRole("textbox", { name: "Description" }),
       "Print the base before the clips.",

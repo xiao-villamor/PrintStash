@@ -181,7 +181,7 @@ test.describe("multipart models", () => {
       ],
     });
     await expect(page.getByText("Choose one").first()).toBeVisible();
-    await page.getByRole("button", { name: "Edit description" }).click();
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
     await page.getByLabel("Description").fill("Print the base before attaching the handle.");
     await page.getByRole("button", { name: "Save changes" }).click();
     expect(savedPayload).toMatchObject({

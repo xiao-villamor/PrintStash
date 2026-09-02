@@ -332,10 +332,8 @@ const messages = {
     "multipart.descriptionLabel": "Description",
     "multipart.descriptionPlaceholder": "What does this object include?",
     "multipart.noDescription": "No description yet",
-    "multipart.editDescription": "Edit description",
     "multipart.collectionLabel": "Collection",
     "multipart.vaultOnly": "Vault only",
-    "multipart.changeCollection": "Change collection",
     "multipart.collectionHelp":
       "This organises the multipart set only. Its linked Models stay where they are.",
     "multipart.create": "Create multipart set",
@@ -755,10 +753,8 @@ const messages = {
     "multipart.descriptionLabel": "Descripción",
     "multipart.descriptionPlaceholder": "¿Qué incluye este objeto?",
     "multipart.noDescription": "Todavía no hay descripción",
-    "multipart.editDescription": "Editar descripción",
     "multipart.collectionLabel": "Colección",
     "multipart.vaultOnly": "Solo en el Vault",
-    "multipart.changeCollection": "Cambiar colección",
     "multipart.collectionHelp":
       "Esto solo organiza el conjunto multiparte. Sus modelos enlazados permanecen donde están.",
     "multipart.create": "Crear conjunto multiparte",
