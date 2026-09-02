@@ -45,7 +45,90 @@ const candidates: MultipartModelCandidate[] = [
   },
 ];
 
+const populatedMobileDetail: MultipartModelRead = {
+  id: 90,
+  name: "broom_holder_vcd_base_25mm",
+  slug: "broom-holder-vcd-base-25mm",
+  description: "A multipart holder with a fixed base and an alternative body.",
+  collection: "tetitas",
+  collection_id: 1,
+  part_count: 1,
+  model_count: 2,
+  guide_count: 0,
+  cover_model_id: 1,
+  cover_image_url: null,
+  cover_image_uploaded: false,
+  cover_thumbnail_url: null,
+  starred: false,
+  member_model_ids: [1, 2],
+  tags: ["demo"],
+  effective_role: "admin",
+  created_at: "2026-06-04T00:24:22.000000",
+  updated_at: "2026-06-04T00:24:22.000000",
+  parts: [
+    {
+      id: 1,
+      name: "broom_holder_vcd_base_25mm",
+      sort_order: 0,
+      models: candidates.slice(0, 2).map((candidate, index) => ({
+        ...candidate,
+        choice_id: index + 1,
+      })),
+    },
+  ],
+  guides: [],
+};
+
 test.describe("multipart models", () => {
+  test("keeps populated editor controls in the mobile flow", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.route("**/api/v1/multipart-models/90", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({ json: populatedMobileDetail });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/multipart-models/90");
+    await page.getByRole("button", { name: "Edit multipart set" }).click();
+
+    const addVariant = page.getByRole("button", { name: "Add variant" });
+    const saveChanges = page.getByRole("button", { name: "Save changes" });
+    const controls = [
+      addVariant,
+      page.getByRole("textbox", { name: "Name", exact: true }),
+      saveChanges,
+    ];
+    const bounds = await Promise.all(controls.map((control) => control.boundingBox()));
+    const horizontalOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    const partOverflow = await page
+      .getByRole("group", { name: "broom_holder_vcd_base_25mm" })
+      .evaluate((part) => part.scrollWidth - part.clientWidth);
+    const [saveBox, guidesBox] = await Promise.all([
+      page.getByRole("button", { name: "Save changes" }).boundingBox(),
+      page
+        .getByRole("heading", { name: "Guides", exact: true })
+        .locator("xpath=ancestor::section[1]")
+        .boundingBox(),
+    ]);
+
+    expect(horizontalOverflow).toBeLessThanOrEqual(0);
+    expect(partOverflow).toBeLessThanOrEqual(0);
+    for (const box of bounds) {
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+    }
+    expect((await addVariant.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await saveChanges.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(saveBox).not.toBeNull();
+    expect(guidesBox).not.toBeNull();
+    expect(saveBox!.y).toBeGreaterThanOrEqual(guidesBox!.y + guidesBox!.height);
+  });
+
   test("preserves Models while creating fixed parts with alternatives", async ({ page }) => {
     let savedPayload: {
       name: string;

@@ -968,11 +968,11 @@ function PartEditorRow({
   const { t } = useI18n();
   return (
     <fieldset
-      className="overflow-hidden rounded-lg border border-border bg-card"
+      className="min-w-0 overflow-hidden rounded-lg border border-border bg-card"
       aria-labelledby={`multipart-part-${part.id}`}
     >
       <legend className="sr-only">{part.name}</legend>
-      <div className="flex items-center gap-3 border-b border-border bg-muted/30 px-4 py-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2 border-b border-border bg-muted/30 px-4 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
           {index + 1}
         </span>
@@ -991,7 +991,7 @@ function PartEditorRow({
             className="mt-1"
           />
         </div>
-        <div className="flex items-center gap-1">
+        <div className="col-start-2 flex items-center gap-1 sm:col-start-3 sm:row-start-1">
           <Button
             type="button"
             variant="ghost"
@@ -999,6 +999,7 @@ function PartEditorRow({
             onClick={onMoveUp}
             disabled={index === 0}
             aria-label={`${t("multipart.moveUp")}: ${part.name}`}
+            className="h-11 w-11 sm:h-9 sm:w-9"
           >
             <ArrowUp className="h-4 w-4" />
           </Button>
@@ -1009,6 +1010,7 @@ function PartEditorRow({
             onClick={onMoveDown}
             disabled={!canMoveDown}
             aria-label={`${t("multipart.moveDown")}: ${part.name}`}
+            className="h-11 w-11 sm:h-9 sm:w-9"
           >
             <ArrowDown className="h-4 w-4" />
           </Button>
@@ -1018,13 +1020,14 @@ function PartEditorRow({
             size="sm"
             onClick={onRemovePart}
             aria-label={`${t("multipart.removePart")}: ${index + 1}`}
+            className="h-11 w-11 sm:h-9 sm:w-9"
           >
             <Trash2 className="h-4 w-4 text-destructive" />
           </Button>
         </div>
       </div>
-      <div className="flex items-center justify-between gap-3 px-4 pt-4">
-        <div>
+      <div className="flex min-w-0 flex-col items-stretch gap-3 px-4 pt-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold">
             {part.models.length > 1 ? t("multipart.variants") : t("multipart.fixedModel")}
           </h3>
@@ -1032,7 +1035,13 @@ function PartEditorRow({
             {part.models.length > 1 ? t("multipart.chooseOne") : t("multipart.fixedModelHelp")}
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={onOpenPicker}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onOpenPicker}
+          className="h-11 w-full sm:h-9 sm:w-auto"
+        >
           <Plus className="h-4 w-4" /> {t("multipart.addVariant")}
         </Button>
       </div>
@@ -1049,6 +1058,7 @@ function PartEditorRow({
               size="sm"
               onClick={() => onRemoveModel(model.choice_id, model.id)}
               aria-label={`${t("multipart.removeModel")}: ${model.available ? modelLabel(model, t("multipart.unavailable")) : t("multipart.unavailable")}`}
+              className="h-11 w-11 sm:h-9 sm:w-9"
             >
               <Trash2 className="h-4 w-4 text-muted-foreground" />
             </Button>
@@ -1353,7 +1363,7 @@ export function MultipartModelDetailPage() {
         confirmLabel={t("multipart.deleteConfirm")}
       />
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-lowest px-4 py-3 md:px-6">
-        <div className="flex min-w-0 items-center gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
           <Link
             href={backHref}
             aria-label={t("multipart.title")}
@@ -1388,13 +1398,14 @@ export function MultipartModelDetailPage() {
           </div>
         </div>
         {isEditing ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={cancelEditing}
               disabled={busy}
+              className="h-11 sm:h-9"
             >
               {t("multipart.cancel")}
             </Button>
@@ -1404,6 +1415,7 @@ export function MultipartModelDetailPage() {
               size="sm"
               onClick={() => setDeleteOpen(true)}
               disabled={!canEdit || busy}
+              className="h-11 sm:h-9"
             >
               <Trash2 className="h-4 w-4" /> {t("multipart.delete")}
             </Button>
@@ -1416,14 +1428,19 @@ export function MultipartModelDetailPage() {
       </header>
       {isEditing ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
-          <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-            <section className="space-y-4">
+          <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+            <section className="min-w-0 space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold">{t("multipart.partsHeading")}</h2>
                   <p className="mt-1 text-sm text-muted-foreground">{t("multipart.partsHelp")}</p>
                 </div>
-                <Button type="button" onClick={() => setPickerPart(-1)} disabled={!canEdit}>
+                <Button
+                  type="button"
+                  onClick={() => setPickerPart(-1)}
+                  disabled={!canEdit}
+                  className="h-11 sm:h-10"
+                >
                   <Plus className="h-4 w-4" />{" "}
                   {model.parts.length === 0 ? t("multipart.addFirst") : t("multipart.addAnother")}
                 </Button>
@@ -1478,7 +1495,7 @@ export function MultipartModelDetailPage() {
                 />
               ))}
             </section>
-            <aside className="space-y-4 xl:sticky xl:top-0">
+            <aside className="min-w-0 space-y-4 xl:sticky xl:top-0">
               <section className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div>
                   <h2 className="font-semibold">{t("multipart.detailsHeading")}</h2>
@@ -1631,7 +1648,7 @@ export function MultipartModelDetailPage() {
                 </div>
               </section>
               <section className="space-y-3 rounded-lg border border-border bg-card p-4">
-                <div className="flex items-start justify-between gap-3">
+                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <h2 className="font-semibold">{t("multipart.guidesHeading")}</h2>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -1708,12 +1725,13 @@ export function MultipartModelDetailPage() {
               {saveError}
             </p>
           )}
-          <div className="sticky bottom-16 flex justify-end border-t border-border bg-background/95 py-3 md:bottom-0">
+          <div className="mt-4 flex justify-end border-t border-border bg-background py-3 xl:sticky xl:bottom-0">
             <Button
               type="button"
               onClick={() => void save()}
               loading={busy}
               disabled={!canEdit || !model.name.trim()}
+              className="h-11 sm:h-10"
             >
               {t("multipart.save")}
             </Button>

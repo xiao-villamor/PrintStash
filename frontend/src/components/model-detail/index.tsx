@@ -666,7 +666,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
         <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden pb-24 md:pb-0">
           {/* Left: 3D Model Preview */}
           <div
-            className="flex-1 min-h-[250px] md:min-h-0 bg-surface-container-low relative border-b md:border-b-0 md:border-r border-outline-variant flex items-center justify-center m-2 md:m-4 rounded overflow-hidden"
+            className="relative m-2 flex min-h-80 flex-1 items-center justify-center overflow-hidden rounded border-b border-outline-variant bg-surface-container-low md:m-4 md:min-h-0 md:border-b-0 md:border-r"
             style={{ boxShadow: "inset 0 0 0 1px var(--outline-variant)" }}
           >
             {viewerMode === "gcode" && hasGcode ? (
@@ -702,48 +702,52 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </div>
             )}
 
-            {/* Viewer toolbar (top-left) */}
+            {/* Viewer toolbar and context stay in one responsive overlay so
+                neither can cover the other on narrow touch screens. */}
             {(meshFile || hasGcode) && (
-              <ViewerToolbar
-                displayMode={displayMode}
-                setDisplayMode={setDisplayMode}
-                showGrid={showGrid}
-                setShowGrid={setShowGrid}
-                controls={viewerControls}
-                viewerMode={viewerMode}
-                setViewerMode={setViewerMode}
-                hasGcode={hasGcode}
-                viewerReady={viewerReady}
-              />
-            )}
-
-            {/* Viewing label (top-right) */}
-            {(meshFile || (viewerMode === "gcode" && hasGcode)) && (
-              <div className="absolute top-4 right-4 z-10 max-w-[60%]">
-                <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-2.5 py-1.5 text-right">
-                  {viewerMode === "gcode" ? (
-                    <>
-                      <p className="font-mono text-2xs text-on-surface truncate">
-                        {(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])?.original_filename}
-                      </p>
-                      <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                        G-code toolpath
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-mono text-2xs text-on-surface truncate">
-                        Viewing: {meshFile?.original_filename}
-                      </p>
-                      <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                        Source model
-                        {recommendedGcode
-                          ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
-                          : ""}
-                      </p>
-                    </>
-                  )}
-                </div>
+              <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex min-w-0 flex-col gap-2 sm:inset-x-4 sm:top-4 xl:flex-row xl:items-start xl:justify-between">
+                <ViewerToolbar
+                  displayMode={displayMode}
+                  setDisplayMode={setDisplayMode}
+                  showGrid={showGrid}
+                  setShowGrid={setShowGrid}
+                  controls={viewerControls}
+                  viewerMode={viewerMode}
+                  setViewerMode={setViewerMode}
+                  hasGcode={hasGcode}
+                  viewerReady={viewerReady}
+                />
+                {(meshFile || (viewerMode === "gcode" && hasGcode)) && (
+                  <div className="min-w-0 max-w-full self-stretch xl:max-w-[60%] xl:self-start">
+                    <div className="rounded border border-outline-variant bg-surface-container-lowest/90 px-2.5 py-1.5 text-right backdrop-blur">
+                      {viewerMode === "gcode" ? (
+                        <>
+                          <p className="truncate font-mono text-2xs text-on-surface">
+                            {
+                              (recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])
+                                ?.original_filename
+                            }
+                          </p>
+                          <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+                            G-code toolpath
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="truncate font-mono text-2xs text-on-surface">
+                            Viewing: {meshFile?.original_filename}
+                          </p>
+                          <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+                            Source model
+                            {recommendedGcode
+                              ? ` · Recommended G-code: Rev ${recommendedGcode.gcode_revision_number ?? recommendedGcode.version}`
+                              : ""}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -752,14 +756,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               <div className="flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm">
                 <button
                   onClick={() => viewerControls.current?.zoomIn()}
-                  className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors border-r border-outline-variant"
+                  className="flex h-11 w-11 items-center justify-center border-r border-outline-variant text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
                   title="Zoom in"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
                 <button
                   onClick={() => viewerControls.current?.zoomOut()}
-                  className="w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
+                  className="flex h-11 w-11 items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9"
                   title="Zoom out"
                 >
                   <Minus className="h-4 w-4" />
@@ -767,7 +771,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               </div>
               <button
                 onClick={() => viewerControls.current?.resetView()}
-                className="h-9 px-3 bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded shadow-sm flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors"
+                className="flex h-11 items-center justify-center rounded border border-outline-variant bg-surface-container-lowest/90 px-3 text-on-surface-variant shadow-sm backdrop-blur transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9"
                 title="Reset view"
               >
                 <RotateCcw className="h-4 w-4" />

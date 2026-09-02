@@ -340,11 +340,11 @@ export function STLViewer({
   }, [meshLoaded, onReadyChange]);
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full touch-none overscroll-contain">
       <MeshErrorBoundary key={url}>
         <Canvas
           aria-label="3D model preview"
-          className="h-full w-full"
+          className="h-full w-full touch-none overscroll-contain"
           dpr={previewPixelRatio(previewPreferences.previewQuality)}
           frameloop="demand"
         >

@@ -36,17 +36,17 @@ export function ViewerToolbar({
   const cluster =
     "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
   const iconBtn =
-    "w-9 h-9 flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-colors";
+    "flex h-11 w-11 items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9";
 
   return (
     <Localized>
-      <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
+      <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-1.5">
         {/* 3D ↔ G-code toggle */}
         {hasGcode && (
           <div className={cluster}>
             <button
               onClick={() => setViewerMode("model")}
-              className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+              className={`flex h-11 items-center gap-1.5 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
                 viewerMode === "model"
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
@@ -57,7 +57,7 @@ export function ViewerToolbar({
             </button>
             <button
               onClick={() => setViewerMode("gcode")}
-              className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+              className={`flex h-11 items-center gap-1.5 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
                 viewerMode === "gcode"
                   ? "bg-accent text-accent-foreground"
                   : "text-on-surface-variant hover:bg-surface-container-high"
@@ -77,7 +77,7 @@ export function ViewerToolbar({
                 <button
                   key={m}
                   onClick={() => setDisplayMode(m)}
-                  className={`px-2.5 h-9 font-mono text-2xs uppercase tracking-wider transition-colors ${
+                  className={`h-11 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
                     displayMode === m
                       ? "bg-accent text-accent-foreground"
                       : "text-on-surface-variant hover:bg-surface-container-high"

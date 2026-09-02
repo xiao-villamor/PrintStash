@@ -23,6 +23,78 @@ import { collectPageProblems, useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("keeps viewer controls reachable inside the phone preview", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto("/models/1");
+
+    const preview = page.getByLabel("3D model preview");
+    const previewBox = await preview.boundingBox();
+    const controls = [
+      page.getByRole("button", { name: "Fit to view" }),
+      page.getByRole("button", { name: "Screenshot" }),
+      page.getByRole("button", { name: "Build plate grid" }),
+      page.getByTitle("Zoom in"),
+      page.getByTitle("Zoom out"),
+      page.getByTitle("Reset view"),
+    ];
+    const controlBoxes = await Promise.all(controls.map((control) => control.boundingBox()));
+
+    expect(previewBox).not.toBeNull();
+    for (const box of controlBoxes) {
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(previewBox!.x);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(previewBox!.x + previewBox!.width);
+      expect(box!.y).toBeGreaterThanOrEqual(previewBox!.y);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(previewBox!.y + previewBox!.height);
+      expect(Math.min(box!.width, box!.height)).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  test("keeps the viewing label clear of mode controls on a phone", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto("/models/1");
+
+    const viewingLabel = page.getByText(/Viewing:/).locator("..");
+    await expect(viewingLabel).toBeVisible();
+    const modeControls = [
+      page.getByRole("button", { name: "Solid" }),
+      page.getByRole("button", { name: "X-Ray" }),
+      page.getByRole("button", { name: "Wire" }),
+      page.getByTitle("Zoom in"),
+      page.getByTitle("Zoom out"),
+      page.getByTitle("Reset view"),
+    ];
+    const labelBox = await viewingLabel.boundingBox();
+    const modeBoxes = await Promise.all(modeControls.map((control) => control.boundingBox()));
+
+    expect(labelBox).not.toBeNull();
+    for (const box of modeBoxes) {
+      expect(box).not.toBeNull();
+      const overlaps =
+        labelBox!.x < box!.x + box!.width &&
+        labelBox!.x + labelBox!.width > box!.x &&
+        labelBox!.y < box!.y + box!.height &&
+        labelBox!.y + labelBox!.height > box!.y;
+      expect(overlaps).toBe(false);
+    }
+  });
+
+  test("keeps a stable touch surface for the 3D preview", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+
+    await page.goto("/models/1");
+
+    const preview = page.getByLabel("3D model preview");
+    const previewBox = await preview.boundingBox();
+    const touchAction = await preview.evaluate((canvas) => getComputedStyle(canvas).touchAction);
+
+    expect(previewBox).not.toBeNull();
+    expect(touchAction).toBe("none");
+    expect(previewBox!.height).toBeGreaterThanOrEqual(300);
+  });
+
   test("cached 3D preview clears its loading indicator", async ({ page }) => {
     const modelLink = page.getByRole("link", { name: /skadis_kitchen-roll_screw/ }).first();
     const preview = page.getByLabel("3D model preview");
