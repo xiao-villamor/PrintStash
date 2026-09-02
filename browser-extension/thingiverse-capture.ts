@@ -30,6 +30,26 @@ export interface ThingiverseFilesPageResult {
   ok: boolean;
   files?: ThingiversePageFile[];
   code?: "challenge" | "contract_changed" | "request_failed" | "response_too_large";
+  reason?: "files_missing";
+}
+
+export type ThingiverseFailureCode =
+  | NonNullable<ThingiverseFilesPageResult["code"]>
+  | NonNullable<ThingiverseFilesPageResult["reason"]>;
+
+export function thingiverseFailureMessage(code?: ThingiverseFailureCode): string {
+  switch (code) {
+    case "challenge":
+      return "user_file_required: Thingiverse blocked access to its file list. Refresh this page and try again. If the files remain visible but PrintStash still cannot list them, download one and attach it in Pending Imports.";
+    case "files_missing":
+      return "user_file_required: Thingiverse did not expose its file list. Refresh the Files page, then try again. If it still fails, download one file and attach it in Pending Imports.";
+    case "response_too_large":
+      return "user_file_required: Thingiverse returned a file list that was too large to inspect safely. Download one file and attach it in Pending Imports.";
+    case "request_failed":
+      return "user_file_required: Thingiverse's file service did not respond. Try again, or download one file and attach it in Pending Imports.";
+    default:
+      return "user_file_required: Thingiverse returned file information PrintStash could not safely use. Refresh the Files page and try again, or attach a downloaded file in Pending Imports.";
+  }
 }
 
 function candidateId(sourceItemId: string, fileId: string): string {
@@ -269,14 +289,27 @@ export async function requestThingiverseFilesInMainWorld(args: {
       // Storage may be unavailable in hardened browser profiles; the public token fallback remains.
     }
 
-    let response = await fetch(args.endpoint, {
-      credentials: "include",
-      cache: "no-store",
-      headers: access
-        ? { Accept: "application/json", Authorization: `Bearer ${access}` }
-        : { Accept: "application/json" },
-    });
-    if ([401, 403].includes(response.status)) {
+    const requestJson = async (
+      endpoint: string,
+    ): Promise<
+      | { ok: true; value: unknown }
+      | {
+          ok: false;
+          code: "challenge" | "contract_changed" | "request_failed" | "response_too_large";
+        }
+    > => {
+      let response = await fetch(endpoint, {
+        credentials: "include",
+        cache: "no-store",
+        headers: access
+          ? { Accept: "application/json", Authorization: `Bearer ${access}` }
+          : { Accept: "application/json" },
+      });
+      if (![401, 403].includes(response.status)) {
+        if ([418, 429].includes(response.status)) return { ok: false, code: "challenge" };
+        if (!response.ok) return { ok: false, code: "request_failed" };
+        return readBoundedJson(response);
+      }
       const viewTokenResponse = await fetch(`${new URL(args.endpoint).origin}/api/v2/auth/view`, {
         credentials: "include",
         cache: "no-store",
@@ -295,42 +328,62 @@ export async function requestThingiverseFilesInMainWorld(args: {
           ? safeAccessToken((viewTokenResult.value as Record<string, unknown>).access)
           : undefined;
       if (!access) return { ok: false, code: "contract_changed" };
-      response = await fetch(args.endpoint, {
+      response = await fetch(endpoint, {
         credentials: "include",
         cache: "no-store",
         headers: { Accept: "application/json", Authorization: `Bearer ${access}` },
       });
-    }
-    if ([401, 403, 418, 429].includes(response.status)) {
-      return { ok: false, code: "challenge" };
-    }
-    if (!response.ok) return { ok: false, code: "request_failed" };
-    const responseResult = await readBoundedJson(response);
+      if ([401, 403, 418, 429].includes(response.status)) {
+        return { ok: false, code: "challenge" };
+      }
+      if (!response.ok) return { ok: false, code: "request_failed" };
+      return readBoundedJson(response);
+    };
+
+    const responseResult = await requestJson(args.endpoint);
     if (!responseResult.ok) return responseResult;
-    const parsed = responseResult.value;
-    const queue: Array<{ value: unknown; depth: number }> = Array.isArray(parsed)
-      ? []
-      : [{ value: parsed, depth: 0 }];
-    let nodes = 0;
-    let rawFiles: unknown[] | undefined = Array.isArray(parsed) ? parsed : undefined;
-    while (queue.length > 0) {
-      const entry = queue.shift();
-      if (!entry || entry.depth > 6 || ++nodes > 2_048) {
-        return { ok: false, code: "contract_changed" };
-      }
-      if (!entry.value || typeof entry.value !== "object" || Array.isArray(entry.value)) continue;
-      const object = entry.value as Record<string, unknown>;
-      if (Array.isArray(object.files)) {
-        rawFiles = object.files;
-        break;
-      }
-      for (const value of Object.values(object)) {
-        if (value && typeof value === "object") {
-          queue.push({ value, depth: entry.depth + 1 });
+    const findFiles = (
+      parsed: unknown,
+    ): { ok: true; files?: unknown[] } | { ok: false; code: "contract_changed" } => {
+      const queue: Array<{ value: unknown; depth: number }> = Array.isArray(parsed)
+        ? []
+        : [{ value: parsed, depth: 0 }];
+      let nodes = 0;
+      let rawFiles: unknown[] | undefined = Array.isArray(parsed) ? parsed : undefined;
+      while (queue.length > 0) {
+        const entry = queue.shift();
+        if (!entry || entry.depth > 6 || ++nodes > 2_048) {
+          return { ok: false, code: "contract_changed" };
+        }
+        if (!entry.value || typeof entry.value !== "object" || Array.isArray(entry.value)) continue;
+        const object = entry.value as Record<string, unknown>;
+        if (Array.isArray(object.files)) {
+          rawFiles = object.files;
+          break;
+        }
+        for (const value of Object.values(object)) {
+          if (value && typeof value === "object") {
+            queue.push({ value, depth: entry.depth + 1 });
+          }
         }
       }
+      return { ok: true, files: rawFiles };
+    };
+    const completeFiles = findFiles(responseResult.value);
+    if (!completeFiles.ok) return completeFiles;
+    let rawFiles = completeFiles.files;
+    if (!rawFiles || rawFiles.length === 0) {
+      const filesEndpoint = `https://api.thingiverse.com/things/${args.sourceItemId}/files`;
+      const filesResult = await requestJson(filesEndpoint);
+      if (!filesResult.ok) return filesResult;
+      const dedicatedFiles = findFiles(filesResult.value);
+      if (!dedicatedFiles.ok) return dedicatedFiles;
+      rawFiles = dedicatedFiles.files;
+      if (!rawFiles || rawFiles.length === 0) {
+        return { ok: false, code: "contract_changed", reason: "files_missing" };
+      }
     }
-    if (!rawFiles || rawFiles.length === 0 || rawFiles.length > 256) {
+    if (rawFiles.length > 256) {
       return { ok: false, code: "contract_changed" };
     }
     for (const value of rawFiles) {

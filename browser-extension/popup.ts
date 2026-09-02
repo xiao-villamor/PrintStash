@@ -57,8 +57,10 @@ import {
   THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
   downloadThingiverseCandidate,
   requestThingiverseFilesInMainWorld,
+  thingiverseFailureMessage,
   thingiverseCaptureFromPage,
   validateThingiverseFiles,
+  type ThingiverseFailureCode,
   type ThingiverseFilesPageResult,
 } from "./thingiverse-capture.ts";
 import {
@@ -163,6 +165,7 @@ type DiagnosticCode =
   | "printables_links_timeout"
   | "makerworld_links_failed"
   | "makerworld_links_timeout"
+  | "thingiverse_links_failed"
   | "capture_download_failed"
   | "capture_download_timeout"
   | "capture_vault_slot_create_failed"
@@ -173,8 +176,11 @@ type DiagnosticCode =
   | "capture_vault_finalize_timeout"
   | "capture_failed";
 
-type DiagnosticProvider = "Printables" | "MakerWorld";
-type DiagnosticFallbackCode = PrintablesFailureCode | MakerWorldFailureCode;
+type DiagnosticProvider = "Printables" | "MakerWorld" | "Thingiverse";
+type DiagnosticFallbackCode =
+  | PrintablesFailureCode
+  | MakerWorldFailureCode
+  | ThingiverseFailureCode;
 
 class CaptureDiagnosticError extends Error {
   constructor(
@@ -972,11 +978,27 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         ],
       });
       const fileResult = fileResults[0]?.result as ThingiverseFilesPageResult | undefined;
+      if (!fileResult?.ok) {
+        const failureCode = fileResult?.reason || fileResult?.code || "request_failed";
+        throw new CaptureDiagnosticError(
+          "thingiverse_links_failed",
+          thingiverseFailureMessage(failureCode),
+          "Thingiverse",
+          failureCode,
+          visible.jsonLd,
+        );
+      }
       let files: ReturnType<typeof validateThingiverseFiles>;
       try {
         files = validateThingiverseFiles(fileResult);
       } catch {
-        files = [];
+        throw new CaptureDiagnosticError(
+          "thingiverse_links_failed",
+          thingiverseFailureMessage("contract_changed"),
+          "Thingiverse",
+          "contract_changed",
+          visible.jsonLd,
+        );
       }
       pendingThingiverseLinks = new Map(
         files.map((file) => [`thingiverse:${sourceItemId}:file:${file.id}`, file.url]),
@@ -987,13 +1009,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         jsonLd: visible.jsonLd,
         files,
       });
-      return fileResult?.code === "challenge" && thingiverseCapture.state === "manual_file_required"
-        ? {
-            ...thingiverseCapture,
-            message:
-              "user_file_required: Thingiverse blocked access to its file list. Refresh this page and try again. If the files remain visible but PrintStash still cannot list them, download one and attach it in Pending Imports.",
-          }
-        : thingiverseCapture;
+      return thingiverseCapture;
     }
     if (provider !== "Printables") return capture;
     if (visible.challengeDetected) {
@@ -1081,11 +1097,24 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
 }
 
 function fallbackVisibleCapture(
-  code?: PrintablesFailureCode | MakerWorldFailureCode,
+  code?: PrintablesFailureCode | MakerWorldFailureCode | ThingiverseFailureCode,
   jsonLd: string[] = [],
 ) {
-  if (!activePage?.url || (activeSource !== "Printables" && activeSource !== "MakerWorld"))
+  if (
+    !activePage?.url ||
+    (activeSource !== "Printables" &&
+      activeSource !== "MakerWorld" &&
+      activeSource !== "Thingiverse")
+  )
     return null;
+  if (activeSource === "Thingiverse") {
+    return thingiverseCaptureFromPage({
+      pageUrl: activePage.url,
+      pageTitle: activePage.title,
+      jsonLd,
+      files: [],
+    });
+  }
   const capture = buildBrowserCaptureMessage({
     provider: activeSource,
     pageUrl: activePage.url,

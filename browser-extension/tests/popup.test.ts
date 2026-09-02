@@ -1478,7 +1478,66 @@ describe("popup browser adapters", () => {
     expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
     expect(button("#capture").disabled).toBe(false);
     expect(element("#manual-file-panel").hidden).toBe(false);
-    expect(element("#status").textContent).toContain("Thingiverse file links could not be read");
+    expect(element("#status").textContent).toContain(
+      "Thingiverse returned file information PrintStash could not safely use",
+    );
+    expect(element("#status-code").textContent).toContain(
+      "thingiverse_links_failed · contract_changed",
+    );
+  });
+
+  it("shows a safe diagnostic when Thingiverse omits its file list", async () => {
+    fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+      {
+        id: 42,
+        title: "Thingiverse - The community for Open Hardware",
+        url: "https://www.thingiverse.com/thing:7398551/files",
+      },
+    ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [
+            {
+              frameId: 0,
+              result: { ok: false, code: "contract_changed", reason: "files_missing" },
+            },
+          ]
+        : [
+            {
+              frameId: 0,
+              result: {
+                pageTitle: "Thingiverse - The community for Open Hardware",
+                jsonLd: [],
+              },
+            },
+          ],
+    );
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "psk_vault_secret",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
+        throw new Error(`Unexpected Thingiverse request: ${url}`);
+      }),
+    );
+
+    await import("../popup.ts");
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    button("#capture").click();
+    for (let attempt = 0; attempt < 12; attempt += 1) await settle();
+
+    expect(element("#status").textContent).toContain(
+      "Thingiverse did not expose its file list. Refresh the Files page, then try again",
+    );
+    expect(element("#status-code").textContent).toContain(
+      "thingiverse_links_failed · files_missing",
+    );
   });
 
   it("explains a blocked Thingiverse file service without blaming the visible page", async () => {

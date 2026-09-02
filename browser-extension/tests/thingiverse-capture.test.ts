@@ -186,6 +186,71 @@ describe("Thingiverse browser capture", () => {
     });
   });
 
+  it("falls back to the dedicated Thingiverse files endpoint", async () => {
+    const viewToken = "eyJhbGciOiJIUzI1NiJ9.active-session.signature";
+    localStorage.setItem("tv_access_token", JSON.stringify({ data: viewToken }));
+    const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      expect(new Headers(options.headers).get("Authorization")).toBe(`Bearer ${viewToken}`);
+      return url.endsWith("/complete")
+        ? new Response(JSON.stringify({ id: 7398551, name: "ChestView" }), {
+            headers: { "Content-Type": "application/json" },
+          })
+        : new Response(
+            JSON.stringify([
+              {
+                id: 991001,
+                name: "ChestView-Main.stl",
+                download_url: "https://api.thingiverse.com/files/991001/download",
+              },
+            ]),
+            { headers: { "Content-Type": "application/json" } },
+          );
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const result = await requestThingiverseFilesInMainWorld({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "ChestView-Main.stl",
+          fileType: "stl",
+          url: "https://api.thingiverse.com/files/991001/download",
+        },
+      ],
+    });
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
+      "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      "https://api.thingiverse.com/things/7398551/files",
+    ]);
+    expect(JSON.stringify(result)).not.toContain(viewToken);
+  });
+
+  it("reports when neither Thingiverse endpoint exposes a file list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ id: 7398551 }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7398551",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({ ok: false, code: "contract_changed", reason: "files_missing" });
+  });
+
   it("retries the current Thingiverse API with its public view token", async () => {
     document.body.innerHTML = `
       <button aria-label="Download LightFront.stl">Download</button>
