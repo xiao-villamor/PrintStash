@@ -991,7 +991,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         ? {
             ...thingiverseCapture,
             message:
-              "user_file_required: Thingiverse requires a browser check. Complete it in this tab, then try again, or attach a downloaded file in Pending Imports.",
+              "user_file_required: Thingiverse blocked access to its file list. Refresh this page and try again. If the files remain visible but PrintStash still cannot list them, download one and attach it in Pending Imports.",
           }
         : thingiverseCapture;
     }

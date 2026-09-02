@@ -11,6 +11,7 @@ import {
 afterEach(() => {
   vi.unstubAllGlobals();
   document.body.replaceChildren();
+  localStorage.clear();
 });
 
 describe("Thingiverse browser capture", () => {
@@ -66,6 +67,159 @@ describe("Thingiverse browser capture", () => {
         },
       ],
     });
+  });
+
+  it("retries the current Thingiverse API with its public view token", async () => {
+    document.body.innerHTML = `
+      <button aria-label="Download LightFront.stl">Download</button>
+      <button aria-label="Download LightBack.stl">Download</button>
+      <button aria-label="Download BlackParts.stl">Download</button>
+      <button aria-label="Download Stand.stl">Download</button>
+    `;
+    const viewToken = "eyJhbGciOiJIUzI1NiJ9.public.signature";
+    const apiFiles = [
+      {
+        id: 991001,
+        name: "LightFront.stl",
+        public_url: "https://www.thingiverse.com/download:991001",
+      },
+      {
+        id: 991002,
+        name: "LightBack.stl",
+        public_url: "https://www.thingiverse.com/download:991002",
+      },
+      {
+        id: 991003,
+        name: "BlackParts.stl",
+        public_url: "https://www.thingiverse.com/download:991003",
+      },
+      { id: 991004, name: "Stand.stl", public_url: "https://www.thingiverse.com/download:991004" },
+    ];
+    const fetchImpl = vi.fn(async (url: string, options: RequestInit = {}) => {
+      if (url.endsWith("/api/v2/auth/view")) {
+        return new Response(JSON.stringify({ access: viewToken }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (new Headers(options.headers).get("Authorization") === `Bearer ${viewToken}`) {
+        return new Response(JSON.stringify({ files: apiFiles }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response("Forbidden", { status: 403 });
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const isolated = new Function(
+      `return (${requestThingiverseFilesInMainWorld.toString()})`,
+    )() as typeof requestThingiverseFilesInMainWorld;
+
+    const result = await isolated({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "LightFront.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+        {
+          id: "991002",
+          filename: "LightBack.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991002",
+        },
+        {
+          id: "991003",
+          filename: "BlackParts.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991003",
+        },
+        {
+          id: "991004",
+          filename: "Stand.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991004",
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[1]?.[0]).toBe("https://www.thingiverse.com/api/v2/auth/view");
+    expect(JSON.stringify(result)).not.toContain(viewToken);
+  });
+
+  it("uses the verified tab's bounded Thingiverse view token without exposing it", async () => {
+    const viewToken = "eyJhbGciOiJIUzI1NiJ9.active-session.signature";
+    localStorage.setItem(
+      "tv_access_token",
+      JSON.stringify({ data: viewToken, expires: "2099-01-01T00:00:00.000Z" }),
+    );
+    const fetchImpl = vi.fn(async (_url: string, options: RequestInit = {}) => {
+      if (new Headers(options.headers).get("Authorization") !== `Bearer ${viewToken}`) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return new Response(
+        JSON.stringify({
+          files: [
+            {
+              id: 991001,
+              name: "LightFront.stl",
+              public_url: "https://www.thingiverse.com/download:991001",
+            },
+          ],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    const isolated = new Function(
+      `return (${requestThingiverseFilesInMainWorld.toString()})`,
+    )() as typeof requestThingiverseFilesInMainWorld;
+
+    const result = await isolated({
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+      maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      files: [
+        {
+          id: "991001",
+          filename: "LightFront.stl",
+          fileType: "stl",
+          url: "https://www.thingiverse.com/download:991001",
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain(viewToken);
+  });
+
+  it("rejects a malformed Thingiverse public view token", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Forbidden", { status: 403 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access: "not a bearer token" }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    await expect(
+      requestThingiverseFilesInMainWorld({
+        sourceItemId: "7398551",
+        endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
+        maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({ ok: false, code: "contract_changed" });
   });
 
   it("deduplicates legacy rendered download controls", async () => {

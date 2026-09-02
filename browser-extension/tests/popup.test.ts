@@ -1481,7 +1481,7 @@ describe("popup browser adapters", () => {
     expect(element("#status").textContent).toContain("Thingiverse file links could not be read");
   });
 
-  it("explains how to clear a Thingiverse browser challenge before retrying", async () => {
+  it("explains a blocked Thingiverse file service without blaming the visible page", async () => {
     fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
       {
         id: 42,
@@ -1523,7 +1523,10 @@ describe("popup browser adapters", () => {
     for (let attempt = 0; attempt < 12; attempt += 1) await settle();
 
     expect(element("#manual-file-panel").hidden).toBe(false);
-    expect(element("#status").textContent).toContain("Complete it in this tab, then try again");
+    expect(element("#status").textContent).toContain(
+      "Thingiverse blocked access to its file list. Refresh this page and try again",
+    );
+    expect(element("#status").textContent).not.toContain("Complete it in this tab");
   });
 
   it("uploads a user-selected Cults file through slots, PUT, and finalize without URL capture or retry", async () => {

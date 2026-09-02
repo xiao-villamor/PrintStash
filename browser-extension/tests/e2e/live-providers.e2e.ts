@@ -28,7 +28,7 @@ const itMakerWorldDownload =
   process.env.PRINTSTASH_MAKERWORLD_REQUIRE_DOWNLOAD === "1" ? it : it.skip;
 const makerWorldUrl =
   "https://makerworld.com/en/models/1574312-design-headphone-stand-swing-quickprint?from=recommend#profileId-1656140";
-const thingiverseUrl = "https://www.thingiverse.com/thing:7401604/files";
+const thingiverseUrl = "https://www.thingiverse.com/thing:7398551/files";
 
 describeLive("live provider capture contracts", () => {
   it("reads the supplied MakerWorld package list in Chromium", async () => {
@@ -66,13 +66,18 @@ describeLive("live provider capture contracts", () => {
   it("discovers individual files on the supplied Thingiverse page in Chromium", async () => {
     await browser.url(thingiverseUrl);
     const result = await browser.execute(requestThingiverseFilesInMainWorld, {
-      sourceItemId: "7401604",
-      endpoint: "https://www.thingiverse.com/api/v2/things/7401604/complete",
+      sourceItemId: "7398551",
+      endpoint: "https://www.thingiverse.com/api/v2/things/7398551/complete",
       maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
     });
 
     assert.equal(result.ok, true, `Thingiverse file discovery failed with ${result.code}`);
-    assert.ok(result.files?.length, "Thingiverse returned no individual file candidates");
+    assert.deepEqual(result.files?.map((file) => file.filename).sort(), [
+      "BlackParts.stl",
+      "LightBack.stl",
+      "LightFront.stl",
+      "Stand.stl",
+    ]);
     for (const file of result.files ?? []) {
       assert.match(new URL(file.url).hostname, /^(?:www\.|cdn\.|api\.)?thingiverse\.com$/);
       assert.doesNotMatch(file.url, /\/zip(?:[/?]|$)/);

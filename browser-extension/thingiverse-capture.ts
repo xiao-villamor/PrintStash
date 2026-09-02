@@ -171,53 +171,106 @@ export async function requestThingiverseFilesInMainWorld(args: {
   if (files.length > 0) return { ok: true, files };
 
   try {
-    const response = await fetch(args.endpoint, {
+    const readBoundedJson = async (
+      response: Response,
+    ): Promise<
+      | { ok: true; value: unknown }
+      | { ok: false; code: "challenge" | "contract_changed" | "response_too_large" }
+    > => {
+      const contentLengthValue = response.headers.get("Content-Length");
+      if (contentLengthValue !== null) {
+        const contentLength = Number(contentLengthValue);
+        if (
+          !Number.isSafeInteger(contentLength) ||
+          contentLength < 0 ||
+          contentLength > args.maxResponseBytes
+        ) {
+          return { ok: false, code: "response_too_large" };
+        }
+      }
+      const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
+      if (contentType.includes("text/html")) return { ok: false, code: "challenge" };
+      if (!response.body) return { ok: false, code: "contract_changed" };
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let total = 0;
+      let body = "";
+      try {
+        while (true) {
+          const next = await reader.read();
+          if (next.done) break;
+          total += next.value.byteLength;
+          if (total > args.maxResponseBytes) {
+            await reader.cancel();
+            return { ok: false, code: "response_too_large" };
+          }
+          body += decoder.decode(next.value, { stream: true });
+        }
+        body += decoder.decode();
+      } finally {
+        reader.releaseLock();
+      }
+      try {
+        return { ok: true, value: JSON.parse(body) };
+      } catch {
+        return { ok: false, code: "contract_changed" };
+      }
+    };
+    const safeAccessToken = (value: unknown): string | undefined =>
+      typeof value === "string" && /^[A-Za-z0-9._~-]{20,8192}$/.test(value) ? value : undefined;
+    let access: string | undefined;
+    try {
+      const stored = window.localStorage.getItem("tv_access_token");
+      if (stored && stored.length <= 12_000) {
+        const parsedStored: unknown = JSON.parse(stored);
+        access =
+          parsedStored && typeof parsedStored === "object" && !Array.isArray(parsedStored)
+            ? safeAccessToken((parsedStored as Record<string, unknown>).data)
+            : undefined;
+      }
+    } catch {
+      // Storage may be unavailable in hardened browser profiles; the public token fallback remains.
+    }
+
+    let response = await fetch(args.endpoint, {
       credentials: "include",
       cache: "no-store",
-      headers: { Accept: "application/json" },
+      headers: access
+        ? { Accept: "application/json", Authorization: `Bearer ${access}` }
+        : { Accept: "application/json" },
     });
+    if ([401, 403].includes(response.status)) {
+      const viewTokenResponse = await fetch(`${new URL(args.endpoint).origin}/api/v2/auth/view`, {
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      if ([401, 403, 418, 429].includes(viewTokenResponse.status)) {
+        return { ok: false, code: "challenge" };
+      }
+      if (!viewTokenResponse.ok) return { ok: false, code: "request_failed" };
+      const viewTokenResult = await readBoundedJson(viewTokenResponse);
+      if (!viewTokenResult.ok) return viewTokenResult;
+      access =
+        viewTokenResult.value &&
+        typeof viewTokenResult.value === "object" &&
+        !Array.isArray(viewTokenResult.value)
+          ? safeAccessToken((viewTokenResult.value as Record<string, unknown>).access)
+          : undefined;
+      if (!access) return { ok: false, code: "contract_changed" };
+      response = await fetch(args.endpoint, {
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json", Authorization: `Bearer ${access}` },
+      });
+    }
     if ([401, 403, 418, 429].includes(response.status)) {
       return { ok: false, code: "challenge" };
     }
-    if (!response.ok || !response.body) return { ok: false, code: "request_failed" };
-    const contentLengthValue = response.headers.get("Content-Length");
-    if (contentLengthValue !== null) {
-      const contentLength = Number(contentLengthValue);
-      if (
-        !Number.isSafeInteger(contentLength) ||
-        contentLength < 0 ||
-        contentLength > args.maxResponseBytes
-      ) {
-        return { ok: false, code: "response_too_large" };
-      }
-    }
-    const contentType = (response.headers.get("Content-Type") || "").toLowerCase();
-    if (contentType.includes("text/html")) return { ok: false, code: "challenge" };
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let total = 0;
-    let body = "";
-    try {
-      while (true) {
-        const next = await reader.read();
-        if (next.done) break;
-        total += next.value.byteLength;
-        if (total > args.maxResponseBytes) {
-          await reader.cancel();
-          return { ok: false, code: "response_too_large" };
-        }
-        body += decoder.decode(next.value, { stream: true });
-      }
-      body += decoder.decode();
-    } finally {
-      reader.releaseLock();
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return { ok: false, code: "contract_changed" };
-    }
+    if (!response.ok) return { ok: false, code: "request_failed" };
+    const responseResult = await readBoundedJson(response);
+    if (!responseResult.ok) return responseResult;
+    const parsed = responseResult.value;
     const queue: Array<{ value: unknown; depth: number }> = [{ value: parsed, depth: 0 }];
     let nodes = 0;
     let rawFiles: unknown[] | undefined;
