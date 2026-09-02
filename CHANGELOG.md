@@ -165,6 +165,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Multipart Model editing now keeps part actions, variants, metadata, and the
+  Save action in the mobile flow. Model-detail previews reserve a larger touch
+  surface, keep their file label clear of viewer controls, and use 44px mobile
+  targets without handing drag gestures to the page.
 - Selecting **None** while editing a Model now removes its Collection
   assignment instead of leaving the Model in its previous Collection
   ([#110](https://github.com/xiao-villamor/PrintStash/issues/110)).
