@@ -53,7 +53,12 @@ import {
   type MakerWorldMetadataPageResult,
   type MakerWorldPackageFile,
 } from "./makerworld-capture.ts";
-import { downloadThingiverseArchive, thingiverseCaptureFromPage } from "./thingiverse-capture.ts";
+import {
+  downloadThingiverseCandidate,
+  requestThingiverseFilesInMainWorld,
+  thingiverseCaptureFromPage,
+  validateThingiverseFiles,
+} from "./thingiverse-capture.ts";
 import {
   createBrowserProviderAdapter,
   type BrowserExtensionApi,
@@ -129,6 +134,7 @@ let importBusy = false;
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
 let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
+let pendingThingiverseLinks = new Map<string, string>();
 let pendingManualCapture: BrowserCaptureMessage | null = null;
 
 declare global {
@@ -294,6 +300,7 @@ function clearCandidateSelection() {
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
   pendingThingiverseCapture = null;
+  pendingThingiverseLinks.clear();
   candidatePanel.hidden = true;
   candidateList.replaceChildren();
   captureButton.textContent = "Send to Pending Imports";
@@ -310,6 +317,7 @@ function renderManualFileSelection(capture: BrowserCaptureMessage) {
   pendingPrintablesCapture = null;
   pendingMakerWorldCapture = null;
   pendingThingiverseCapture = null;
+  pendingThingiverseLinks.clear();
   candidatePanel.hidden = true;
   candidateList.replaceChildren();
   pendingManualCapture = capture;
@@ -346,7 +354,7 @@ function renderCandidateSelection(capture: BrowserCaptureMessage) {
     capture.source.provider === "makerworld"
       ? "Select MakerWorld packages"
       : capture.source.provider === "thingiverse"
-        ? "Select Thingiverse archive"
+        ? "Select Thingiverse files"
         : "Select Printables files";
   candidateList.replaceChildren();
   capture.candidates.forEach((candidate, index) => {
@@ -602,6 +610,12 @@ async function establishConnection(
 async function ensureOriginPermission(origin: string) {
   const granted = await browser.permissions.request({ origins: [origin] });
   if (!granted) throw new Error("Permission to download the selected source file was not granted.");
+}
+
+async function ensureOriginPermissions(origins: string[]) {
+  const granted = await browser.permissions.request({ origins });
+  if (!granted)
+    throw new Error("Permission to download the selected source files was not granted.");
 }
 
 async function ensureMetadataPermission(origin: string, provider: "Printables" | "MakerWorld") {
@@ -885,11 +899,36 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       );
     }
     if (provider === "Thingiverse") {
-      if (visible.challengeDetected) return capture;
+      if (visible.challengeDetected) {
+        return thingiverseCaptureFromPage({
+          pageUrl,
+          pageTitle: visible.pageTitle || pageTitle,
+          jsonLd: visible.jsonLd,
+          files: [],
+        });
+      }
+      const sourceItemId = capture.source.source_item_id;
+      if (!sourceItemId) return capture;
+      const fileResults = await browser.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: requestThingiverseFilesInMainWorld,
+        args: [{ sourceItemId }],
+      });
+      let files: ReturnType<typeof validateThingiverseFiles>;
+      try {
+        files = validateThingiverseFiles(fileResults[0]?.result);
+      } catch {
+        files = [];
+      }
+      pendingThingiverseLinks = new Map(
+        files.map((file) => [`thingiverse:${sourceItemId}:file:${file.id}`, file.url]),
+      );
       return thingiverseCaptureFromPage({
         pageUrl,
         pageTitle: visible.pageTitle || pageTitle,
         jsonLd: visible.jsonLd,
+        files,
       });
     }
     if (provider !== "Printables") return capture;
@@ -1269,39 +1308,45 @@ captureButton.addEventListener("click", async () => {
     if (pendingThingiverseCapture) {
       const selected = selectedPrintablesCandidates(pendingThingiverseCapture);
       if (selected.length === 0) {
-        showStatus("Select the Thingiverse archive to upload.", "error");
+        showStatus("Select at least one Thingiverse file to upload.", "error");
         return;
       }
       const authorization = accessToken || connectedConfig.deviceCredential;
       if (!authorization)
         throw new Error("The browser connection expired. Connect PrintStash again.");
-      const sourceItemId = pendingThingiverseCapture.source.source_item_id;
-      if (!sourceItemId) throw new Error("Thingiverse model identity changed.");
-      const file = await runCaptureStage(
-        (signal) =>
-          downloadThingiverseArchive({
-            sourceItemId,
-            ensureOriginPermission,
-            signal,
-          }),
-        "capture_download_timeout",
-        "capture_download_failed",
-        "The Thingiverse archive could not be downloaded. Attach it manually in Pending Imports.",
-      );
+      const files: BrowserCaptureFile[] = [];
+      for (const candidate of selected) {
+        const link = pendingThingiverseLinks.get(candidate.id);
+        if (!link) throw new Error("Thingiverse file mapping changed.");
+        files.push(
+          await runCaptureStage(
+            (signal) =>
+              downloadThingiverseCandidate({
+                candidate,
+                link,
+                ensureOriginPermissions,
+                signal,
+              }),
+            "capture_download_timeout",
+            "capture_download_failed",
+            "The selected Thingiverse file could not be downloaded. Attach it manually in Pending Imports.",
+          ),
+        );
+      }
       await captureRichFiles({
         vault: connectedConfig.vault,
         authorization,
         sourceUrl: pendingThingiverseCapture.source.canonical_url,
         title: activePage?.title,
         captureSource: pendingThingiverseCapture.source,
-        files: [file],
+        files,
         runStage: runVaultStage,
       });
       const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
-      showStatus("Thingiverse archive sent to Pending Imports.", "success");
+      showStatus("Selected Thingiverse files sent to Pending Imports.", "success");
       return;
     }
     const visibleCapture = (await readVisibleCapture()) ?? fallbackVisibleCapture();
@@ -1326,7 +1371,7 @@ captureButton.addEventListener("click", async () => {
         visibleCapture.source.provider === "makerworld"
           ? "Select MakerWorld packages, then confirm the upload."
           : visibleCapture.source.provider === "thingiverse"
-            ? "Confirm the Thingiverse archive upload."
+            ? "Select Thingiverse files, then confirm the upload."
             : "Review the selected Printables files, then confirm the upload.",
       );
       return;
@@ -1372,7 +1417,7 @@ captureButton.addEventListener("click", async () => {
           : capture.source.provider === "makerworld"
             ? makerWorldFailureMessage("contract_changed")
             : capture.source.provider === "thingiverse"
-              ? "Choose a downloaded Thingiverse archive to attach it in Pending Imports."
+              ? "Choose a downloaded Thingiverse file to attach it in Pending Imports."
               : printablesFailureMessage("contract_changed"),
         "error",
       );

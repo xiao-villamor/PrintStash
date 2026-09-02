@@ -8,6 +8,7 @@ import {
   requestMakerWorldLinksInMainWorld,
   requestMakerWorldMetadataInMainWorld,
 } from "../../makerworld-capture";
+import { requestThingiverseFilesInMainWorld } from "../../thingiverse-capture";
 
 interface LiveProviderBrowser {
   execute<Result, Argument>(
@@ -59,34 +60,17 @@ describeLive("live provider capture contracts", () => {
     },
   );
 
-  it("streams the supplied Thingiverse ZIP route in Chromium", async () => {
+  it("discovers individual files on the supplied Thingiverse page in Chromium", async () => {
     await browser.url(thingiverseUrl);
-    const result = await browser.execute(async (url) => {
-      try {
-        const response = await fetch(url, { credentials: "include", cache: "no-store" });
-        const contentType = response.headers.get("Content-Type") || "";
-        if (!response.ok || contentType.toLowerCase().includes("text/html") || !response.body) {
-          return { ok: false, status: response.status, contentType, finalUrl: response.url };
-        }
-        const reader = response.body.getReader();
-        const first = await reader.read();
-        await reader.cancel();
-        return {
-          ok: !first.done && first.value[0] === 0x50 && first.value[1] === 0x4b,
-          status: response.status,
-          contentType,
-          finalUrl: response.url,
-        };
-      } catch {
-        return { ok: false, status: 0, contentType: "", finalUrl: "" };
-      }
-    }, "https://www.thingiverse.com/thing:7401604/zip");
+    const result = await browser.execute(requestThingiverseFilesInMainWorld, {
+      sourceItemId: "7401604",
+    });
 
-    assert.equal(
-      result.ok,
-      true,
-      `Thingiverse ZIP failed with HTTP ${result.status} (${result.contentType})`,
-    );
-    assert.match(new URL(result.finalUrl).hostname, /^(?:www\.|cdn\.|api\.)?thingiverse\.com$/);
+    assert.equal(result.ok, true, `Thingiverse file discovery failed with ${result.code}`);
+    assert.ok(result.files?.length, "Thingiverse returned no individual file candidates");
+    for (const file of result.files ?? []) {
+      assert.match(new URL(file.url).hostname, /^(?:www\.|cdn\.|api\.)?thingiverse\.com$/);
+      assert.doesNotMatch(file.url, /\/zip(?:[/?]|$)/);
+    }
   });
 });

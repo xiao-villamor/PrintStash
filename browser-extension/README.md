@@ -65,10 +65,10 @@ pages individually. On Printables, the extension can use the signed-in page to
 let the user select files and transfer those bytes directly; server-side
 resolution remains available for the limited public fields and choices its
 supported endpoints expose. Direct URL capture uses PrintStash's SSRF
-protections. For Thingiverse model pages, the extension offers the site's
-official model ZIP as a bounded browser transfer. If Thingiverse requires a
-browser check or changes the response, the same metadata draft remains
-available for a manually downloaded file.
+protections. For Thingiverse model pages, the extension lists the individual
+files rendered by the active page and transfers only the files the user checks.
+If Thingiverse requires a browser check or changes the page, the same metadata
+draft remains available for a manually downloaded file.
 Direct URLs may point to `.zip`,
 `.3mf`, `.stl`, `.obj`, `.step`, `.stp`, `.gcode`, `.g`, `.gco`, or `.bgcode`
 files.

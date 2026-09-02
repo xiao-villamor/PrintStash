@@ -486,6 +486,36 @@ describe("MakerWorld MAIN-world seams", () => {
     expect(JSON.stringify(result)).toContain("signature=ephemeral");
   });
 
+  it("accepts the current root-level url response shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        response({
+          url: "https://makerworld.bblmw.com/1656140.3mf?signature=ephemeral",
+        }),
+      ),
+    );
+    const isolated = new Function(
+      `return (${requestMakerWorldLinksInMainWorld.toString()})`,
+    )() as typeof requestMakerWorldLinksInMainWorld;
+
+    await expect(
+      isolated({
+        endpoint: "https://makerworld.com/api/v1/design-service/instance",
+        selectedIds: ["1656140"],
+        maxResponseBytes: MAKERWORLD_MAX_RESPONSE_BYTES,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      links: [
+        {
+          id: "1656140",
+          url: "https://makerworld.bblmw.com/1656140.3mf?signature=ephemeral",
+        },
+      ],
+    });
+  });
+
   it("classifies MakerWorld HTTP 418 as a browser challenge", async () => {
     vi.stubGlobal(
       "fetch",

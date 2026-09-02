@@ -1227,7 +1227,7 @@ describe("popup browser adapters", () => {
     expect(element("#candidate-panel").hidden).toBe(true);
   });
 
-  it("uploads the Thingiverse model archive through durable slots", async () => {
+  it("uploads only the selected Thingiverse files through durable slots", async () => {
     fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
       {
         id: 42,
@@ -1235,14 +1235,40 @@ describe("popup browser adapters", () => {
         url: "https://www.thingiverse.com/thing:763622/files",
       },
     ]);
-    fakeBrowser.scripting.executeScript = vi.fn().mockResolvedValue([
-      {
-        result: {
-          pageTitle: "Whistle",
-          jsonLd: [JSON.stringify({ name: "Whistle", author: "Ada" })],
-        },
-      },
-    ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [
+            {
+              frameId: 0,
+              result: {
+                ok: true,
+                files: [
+                  {
+                    id: "991001",
+                    filename: "whistle.stl",
+                    fileType: "stl",
+                    url: "https://www.thingiverse.com/download:991001",
+                  },
+                  {
+                    id: "991002",
+                    filename: "whistle-source.scad",
+                    fileType: "other",
+                    url: "https://www.thingiverse.com/download:991002",
+                  },
+                ],
+              },
+            },
+          ]
+        : [
+            {
+              frameId: 0,
+              result: {
+                pageTitle: "Whistle",
+                jsonLd: [JSON.stringify({ name: "Whistle", author: "Ada" })],
+              },
+            },
+          ],
+    );
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",
       username: "owner",
@@ -1252,16 +1278,16 @@ describe("popup browser adapters", () => {
       if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
       if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
       if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
-      if (url === "https://www.thingiverse.com/thing:763622/zip") {
-        const archive = new Response("PK\u0003\u0004", {
+      if (url === "https://www.thingiverse.com/download:991001") {
+        const file = new Response("mesh", {
           status: 200,
-          headers: { "Content-Length": "4", "Content-Type": "application/zip" },
+          headers: { "Content-Length": "4", "Content-Type": "model/stl" },
         });
-        Object.defineProperty(archive, "url", {
+        Object.defineProperty(file, "url", {
           configurable: true,
-          value: "https://cdn.thingiverse.com/zip/763622.zip",
+          value: "https://cdn.thingiverse.com/assets/991001/whistle.stl",
         });
-        return archive;
+        return file;
       }
       if (url.endsWith("/capture-upload-slots")) {
         const body = JSON.parse(stringBody(options));
@@ -1272,9 +1298,9 @@ describe("popup browser adapters", () => {
               {
                 id: "slot-thingiverse",
                 role: "file",
-                source_file_id: "thingiverse:763622:archive",
-                filename: "thingiverse-763622.zip",
-                media_type: "application/zip",
+                source_file_id: "thingiverse:763622:file:991001",
+                filename: "whistle.stl",
+                media_type: "model/stl",
                 size_bytes: 4,
                 sha256: body.files[0].sha256,
               },
@@ -1292,14 +1318,20 @@ describe("popup browser adapters", () => {
     vi.stubGlobal("fetch", fetchImpl);
 
     await import("../popup.ts");
-    await settle();
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    expect(button("#capture").disabled).toBe(false);
     button("#capture").click();
-    await settle();
+    for (let attempt = 0; attempt < 6; attempt += 1) await settle();
 
-    expect(element("#status").textContent).toContain("Confirm the Thingiverse archive upload");
+    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
+    expect(button("#capture").disabled).toBe(false);
+    expect(element("#status").textContent).toContain("Select Thingiverse files");
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(element("#candidate-panel").hidden).toBe(false);
-    expect(element("#candidate-panel legend").textContent).toBe("Select Thingiverse archive");
+    expect(element("#candidate-panel legend").textContent).toBe("Select Thingiverse files");
+    const checkboxes = [...document.querySelectorAll<HTMLInputElement>("#candidate-list input")];
+    expect(checkboxes).toHaveLength(2);
+    checkboxes[1].checked = false;
     button("#capture").click();
     for (let attempt = 0; attempt < 8; attempt += 1) await settle();
 
@@ -1311,15 +1343,19 @@ describe("popup browser adapters", () => {
     }
     expect(JSON.parse(stringBody(createCall[1]))).toMatchObject({
       capture_source: { provider: "thingiverse", source_item_id: "763622" },
-      files: [
-        { id: "thingiverse:763622:archive", filename: "thingiverse-763622.zip", size_bytes: 4 },
-      ],
+      files: [{ id: "thingiverse:763622:file:991001", filename: "whistle.stl", size_bytes: 4 }],
     });
     expect(fetchImpl).toHaveBeenCalledTimes(7);
-    expect(element("#status").textContent).toContain("Thingiverse archive sent to Pending Imports");
+    expect(fetchImpl).not.toHaveBeenCalledWith(
+      "https://www.thingiverse.com/download:991002",
+      expect.anything(),
+    );
+    expect(element("#status").textContent).toContain(
+      "Selected Thingiverse files sent to Pending Imports",
+    );
   });
 
-  it("offers manual Thingiverse attachment after a browser challenge", async () => {
+  it("offers manual Thingiverse attachment when file links are unavailable", async () => {
     fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
       {
         id: 42,
@@ -1327,14 +1363,19 @@ describe("popup browser adapters", () => {
         url: "https://www.thingiverse.com/thing:7401604/files",
       },
     ]);
-    fakeBrowser.scripting.executeScript = vi.fn().mockResolvedValue([
-      {
-        result: {
-          pageTitle: "Cable Mount",
-          jsonLd: [JSON.stringify({ name: "Cable Mount", author: "INFINITY_D" })],
-        },
-      },
-    ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [{ frameId: 0, result: { ok: false, code: "contract_changed" } }]
+        : [
+            {
+              frameId: 0,
+              result: {
+                pageTitle: "Cable Mount",
+                jsonLd: [JSON.stringify({ name: "Cable Mount", author: "INFINITY_D" })],
+              },
+            },
+          ],
+    );
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",
       username: "owner",
@@ -1346,26 +1387,20 @@ describe("popup browser adapters", () => {
         if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
         if (url.endsWith("/login")) return response({ access_token: "vault-jwt" });
         if (url.endsWith("/me")) return response({ username: "owner", is_superuser: false });
-        if (url === "https://www.thingiverse.com/thing:7401604/zip") {
-          return new Response("<html>Just a moment...</html>", {
-            status: 429,
-            headers: { "Content-Type": "text/html" },
-          });
-        }
         throw new Error(`Unexpected Thingiverse request: ${url}`);
       }),
     );
 
     await import("../popup.ts");
-    await settle();
-    button("#capture").click();
-    await settle();
-    button("#capture").click();
     for (let attempt = 0; attempt < 6; attempt += 1) await settle();
+    expect(button("#capture").disabled).toBe(false);
+    button("#capture").click();
+    for (let attempt = 0; attempt < 12; attempt += 1) await settle();
 
+    expect(fakeBrowser.scripting.executeScript).toHaveBeenCalledTimes(3);
+    expect(button("#capture").disabled).toBe(false);
     expect(element("#manual-file-panel").hidden).toBe(false);
-    expect(element("#status").textContent).toContain("Thingiverse requires a browser check");
-    expect(element("#status").textContent).toContain("code: capture_download_failed");
+    expect(element("#status").textContent).toContain("Thingiverse file links could not be read");
   });
 
   it("uploads a user-selected Cults file through slots, PUT, and finalize without URL capture or retry", async () => {

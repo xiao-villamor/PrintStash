@@ -889,7 +889,7 @@ export async function requestMakerWorldLinksInMainWorld(args: {
         }
       }
       const root = asRecord(parsed);
-      const data = root ? asRecord(root.data) : root;
+      const data = root ? (root.data === undefined ? root : asRecord(root.data)) : null;
       const url = data
         ? safeUrl(data.url ?? data.downloadUrl ?? data.download_url ?? data.link)
         : undefined;

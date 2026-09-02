@@ -228,8 +228,9 @@ Follow [`vault-maintenance-and-capture.md`](./vault-maintenance-and-capture.md).
 - [ ] Printables server resolution displays only available data; richer browser
       capture does not overstate server support.
 - [ ] MakerWorld uses browser transfer, not server-side cookie reuse.
-- [ ] Thingiverse transfers the official model ZIP from the active browser and
-      offers manual attachment when the provider requires a browser check.
+- [ ] Thingiverse lists the page's individual files, transfers only the checked
+      files from the active browser, and offers manual attachment when its file
+      controls are unavailable.
 - [ ] MyMiniFactory OAuth connect/callback/disconnect works with test registration;
       tokens are user-scoped and redacted.
 - [ ] Cults credentials validate metadata access only; automatic file acquisition
