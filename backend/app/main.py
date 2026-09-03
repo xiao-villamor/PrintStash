@@ -49,6 +49,7 @@ from app.services.backup import (
     end_mutating_operation,
     inspect_restore_recovery,
 )
+from app.services.backup_schedule import run_due_backup
 from app.services.gc_planner import run_scheduled_gc
 from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
@@ -317,6 +318,7 @@ async def lifespan(app: FastAPI):
         _gc_loop(storage_maintenance_enabled=configured)
     )
     app.state.external_scan_task = asyncio.create_task(_external_scan_loop())
+    app.state.automatic_backup_task = asyncio.create_task(_automatic_backup_loop())
     app.state.notification_task = asyncio.create_task(run_dispatcher_loop())
     app.state.fleet_scheduler_task = asyncio.create_task(
         run_fleet_scheduler(task_queue, provider_builder)
@@ -332,6 +334,7 @@ async def lifespan(app: FastAPI):
     await _cancel_tasks(
         app.state.gc_task,
         app.state.external_scan_task,
+        app.state.automatic_backup_task,
         app.state.notification_task,
         app.state.fleet_scheduler_task,
     )
@@ -402,6 +405,21 @@ async def _external_scan_loop() -> None:
             await asyncio.to_thread(_run_due_external_scans)
         except Exception:
             logger.exception("external library scan tick failed")
+        finally:
+            end_mutating_operation()
+
+
+async def _automatic_backup_loop() -> None:
+    """Create at most one configured automatic backup for each UTC day."""
+    while True:
+        await asyncio.sleep(60)
+        if not begin_mutating_operation():
+            continue
+        try:
+            try:
+                await asyncio.to_thread(run_due_backup)
+            except Exception:
+                logger.exception("automatic backup failed")
         finally:
             end_mutating_operation()
 

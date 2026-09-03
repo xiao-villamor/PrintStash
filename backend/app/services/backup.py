@@ -50,6 +50,7 @@ from app.db.session import get_engine, get_session_factory
 from app.services import audit, storage
 from app.services.backup_destination import (
     BackupDestinationError,
+    BackupTrigger,
     RemoteBackupDestination,
     configured_destinations,
     destination_for_ownership,
@@ -881,7 +882,7 @@ def _validate_created_archive_payload(archive_path: Path) -> None:
 
 
 @_exclusive_backup_operation
-def create_backup() -> BackupMeta:
+def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMeta:
     """Create a full vault backup: DB + all stored files as a tar.gz.
 
     Always writes locally first. If ``backup_s3_bucket`` is configured,
@@ -1053,7 +1054,7 @@ def create_backup() -> BackupMeta:
     # Purpose-scoped connections are independent replicas. A failed remote
     # destination never invalidates the already committed local archive, and a
     # failure at one provider does not prevent the remaining replicas.
-    for destination in configured_destinations():
+    for destination in configured_destinations(trigger):
         try:
             remote_key = destination.key(archive_name)
             with get_session_factory().session() as remote_session:
@@ -1091,6 +1092,7 @@ def create_backup() -> BackupMeta:
                 "backup_id": backup_id,
                 "size_bytes": final_size,
                 "file_count": written_files,
+                "trigger": trigger.value,
             },
         )
         session.commit()

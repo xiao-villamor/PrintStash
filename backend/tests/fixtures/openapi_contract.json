@@ -11903,6 +11903,10 @@
       },
       "StorageConnectionRead": {
         "properties": {
+          "automatic_backup_enabled": {
+            "title": "Automatic Backup Enabled",
+            "type": "boolean"
+          },
           "configuration": {
             "additionalProperties": true,
             "title": "Configuration",
@@ -11918,6 +11922,10 @@
           },
           "kind": {
             "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "manual_backup_enabled": {
+            "title": "Manual Backup Enabled",
+            "type": "boolean"
           },
           "name": {
             "title": "Name",
@@ -11941,7 +11949,9 @@
           "purpose",
           "configuration",
           "secret_fields_set",
-          "enabled"
+          "enabled",
+          "manual_backup_enabled",
+          "automatic_backup_enabled"
         ],
         "title": "StorageConnectionRead",
         "type": "object"
@@ -11949,6 +11959,17 @@
       "StorageConnectionUpdate": {
         "additionalProperties": false,
         "properties": {
+          "automatic_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Enabled"
+          },
           "enabled": {
             "anyOf": [
               {
@@ -11959,6 +11980,17 @@
               }
             ],
             "title": "Enabled"
+          },
+          "manual_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Backup Enabled"
           },
           "purpose": {
             "anyOf": [
@@ -12977,6 +13009,28 @@
             "title": "Auto Mark Known Good",
             "type": "boolean"
           },
+          "automatic_backup_last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Last Attempt At"
+          },
+          "automatic_backup_time_utc": {
+            "default": "02:00",
+            "title": "Automatic Backup Time Utc",
+            "type": "string"
+          },
+          "automatic_backups_enabled": {
+            "default": false,
+            "title": "Automatic Backups Enabled",
+            "type": "boolean"
+          },
           "backup_retention_days": {
             "default": 30,
             "title": "Backup Retention Days",
@@ -13201,6 +13255,29 @@
               }
             ],
             "title": "Auto Mark Known Good"
+          },
+          "automatic_backup_time_utc": {
+            "anyOf": [
+              {
+                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Time Utc"
+          },
+          "automatic_backups_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backups Enabled"
           },
           "backup_retention_days": {
             "anyOf": [

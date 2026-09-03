@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -29,6 +30,9 @@ class VaultConfigRead(BaseModel):
     has_s3_access_key: bool = False
     has_s3_secret_key: bool = False
     backup_retention_days: int = 30
+    automatic_backups_enabled: bool = False
+    automatic_backup_time_utc: str = "02:00"
+    automatic_backup_last_attempt_at: datetime | None = None
     trash_retention_days: int = 30
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
@@ -92,6 +96,10 @@ class VaultConfigUpdate(BaseModel):
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
     backup_retention_days: Optional[int] = Field(default=None, ge=-1)
+    automatic_backups_enabled: Optional[bool] = None
+    automatic_backup_time_utc: Optional[str] = Field(
+        default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
     trash_retention_days: Optional[int] = Field(default=None, ge=-1)
     backup_s3_bucket: Optional[str] = None
     backup_s3_endpoint_url: Optional[str] = None
@@ -118,7 +126,9 @@ def enroll_storage_root(
     session: Session = Depends(get_session),
 ) -> dict[str, object]:
     if not body.confirm:
-        raise HTTPException(status_code=400, detail="storage_root_confirmation_required")
+        raise HTTPException(
+            status_code=400, detail="storage_root_confirmation_required"
+        )
     if settings.storage_backend != "local":
         raise HTTPException(status_code=409, detail="storage_backend_not_local")
     from app.services.storage_backend import enroll_legacy_local_root
@@ -365,6 +375,16 @@ def update_config(
     if body.external_libraries_enabled is not None:
         runtime_config.set_external_libraries_enabled(
             session, body.external_libraries_enabled
+        )
+
+    if (
+        body.automatic_backups_enabled is not None
+        or body.automatic_backup_time_utc is not None
+    ):
+        runtime_config.update_backup_schedule(
+            session,
+            enabled=body.automatic_backups_enabled,
+            time_utc=body.automatic_backup_time_utc,
         )
 
     if body.currency is not None:

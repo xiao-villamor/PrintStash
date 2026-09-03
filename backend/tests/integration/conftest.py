@@ -49,6 +49,7 @@ from tests.factories.protocols import (
     MakePrintJob,
     MakeProvenanceSource,
     MakeShareLink,
+    MakeStorageConnection,
     MakeSystemConfig,
     MakeUser,
     TagCollection,
@@ -329,6 +330,12 @@ def make_system_config(db_session: Session) -> MakeSystemConfig:
     return _bound(factories.build_system_config, db_session)
 
 
+@pytest.fixture
+def make_storage_connection(db_session: Session) -> MakeStorageConnection:
+    """One reusable remote location, selected for both backup modes by default."""
+    return _bound(factories.build_storage_connection, db_session)
+
+
 # --------------------------------------------------------------------------- #
 # Scenarios — promoted only once three files needed the same shape.
 # See `tests/factories/scenarios.py` for the promotion rules.
@@ -384,6 +391,7 @@ __all__ = [
     "MakeProvenanceSource",
     "MakeShareLink",
     "MakeSystemConfig",
+    "MakeStorageConnection",
     "MakeUser",
     "UserHeaders",
     "a_member_who_can_see_one_collection",
@@ -419,6 +427,7 @@ __all__ = [
     "make_provenance_source",
     "make_share_link",
     "make_system_config",
+    "make_storage_connection",
     "make_tag",
     "make_user",
     "tag_model",

@@ -25,11 +25,14 @@ from app.db.models import (
     DocumentKind,
     ExternalLibrary,
     FilamentProfile,
+    LibrarySourceKind,
     Model,
     NotificationChannel,
     NotificationTarget,
     RestoreMarker,
     ShareLink,
+    StorageConnection,
+    StorageConnectionPurpose,
     SystemConfig,
     User,
     VaultAuditFinding,
@@ -57,6 +60,42 @@ def build_system_config(
             storage_backend=storage_backend,
             storage_provider=storage_provider,
             s3_root=s3_root,
+            **overrides,
+        ),
+    )
+
+
+def build_storage_connection(
+    session: Session,
+    name: str | None = None,
+    *,
+    purpose: StorageConnectionPurpose = StorageConnectionPurpose.BACKUP,
+    manual_backup_enabled: bool = True,
+    automatic_backup_enabled: bool = True,
+    **overrides: Any,
+) -> StorageConnection:
+    """One enabled remote profile with independently selectable backup uses."""
+    return save(
+        session,
+        StorageConnection(
+            name=name or nth("storage-connection"),
+            kind=LibrarySourceKind.S3,
+            purpose=purpose,
+            config_json=json.dumps(
+                {
+                    "provider": "s3",
+                    "bucket": "test-backups",
+                    "root": "PrintStash",
+                    "region": "us-east-1",
+                    "endpoint_url": "",
+                    "addressing_style": "auto",
+                }
+            ),
+            secret_json=json.dumps(
+                {"access_key": "test-access", "secret_key": "test-secret"}
+            ),
+            manual_backup_enabled=manual_backup_enabled,
+            automatic_backup_enabled=automatic_backup_enabled,
             **overrides,
         ),
     )

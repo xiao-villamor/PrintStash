@@ -84,6 +84,66 @@ test.describe("settings", () => {
     await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
   });
 
+  test("configure automatic backups with independent destinations", async ({ page }) => {
+    const connectionName = `e2e-backup-policy-${Date.now()}`;
+    const created = await page.request.post("/api/v1/storage-connections", {
+      data: {
+        name: connectionName,
+        kind: "s3",
+        purpose: "backup",
+        configuration: {
+          provider: "s3",
+          bucket: "printstash-scheduled",
+          root: "PrintStash",
+          region: "us-east-1",
+          endpoint_url: "",
+          addressing_style: "auto",
+        },
+        secrets: { access_key: "e2e-access", secret_key: "e2e-secret" },
+      },
+    });
+    expect(created.status()).toBe(201);
+    const connection = await created.json();
+
+    try {
+      await page.goto("/settings?section=backup");
+      await expect(page.getByLabel(`Use ${connectionName} for manual backups`)).toBeVisible();
+      await page.getByLabel("Enable automatic backups").click();
+      await page.getByLabel("Daily time (UTC)").fill("04:30");
+      await page.getByLabel(`Use ${connectionName} for manual backups`).click();
+
+      await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().endsWith("/api/v1/config") && response.request().method() === "PUT",
+        ),
+        page.waitForResponse(
+          (response) =>
+            response.url().endsWith(`/api/v1/storage-connections/${connection.id}`) &&
+            response.request().method() === "PATCH",
+        ),
+        page.getByRole("button", { name: "Save backup settings" }).click(),
+      ]);
+
+      const [configResponse, connectionsResponse] = await Promise.all([
+        page.request.get("/api/v1/config"),
+        page.request.get("/api/v1/storage-connections"),
+      ]);
+      const config = await configResponse.json();
+      const connections = await connectionsResponse.json();
+      const saved = connections.find((item: { id: number }) => item.id === connection.id);
+      expect(config.automatic_backups_enabled).toBe(true);
+      expect(config.automatic_backup_time_utc).toBe("04:30");
+      expect(saved.manual_backup_enabled).toBe(false);
+      expect(saved.automatic_backup_enabled).toBe(true);
+    } finally {
+      await page.request.put("/api/v1/config", {
+        data: { automatic_backups_enabled: false, automatic_backup_time_utc: "02:00" },
+      });
+      await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
+    }
+  });
+
   test("upload an existing backup archive", async ({ page }) => {
     const createdResponse = await page.request.post("/api/v1/backups");
     expect(createdResponse.ok()).toBeTruthy();

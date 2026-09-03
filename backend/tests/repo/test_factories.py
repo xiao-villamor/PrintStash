@@ -91,6 +91,14 @@ class TestBuildSystemConfig:
         assert config.s3_root == "vault-data"
 
 
+class TestBuildStorageConnection:
+    def test_defaults_to_both_backup_modes(self, db_session: Session) -> None:
+        connection = factories.build_storage_connection(db_session)
+
+        assert connection.manual_backup_enabled is True
+        assert connection.automatic_backup_enabled is True
+
+
 class TestBuildModel:
     def test_is_visible_through_the_live_scope(self, db_session: Session) -> None:
         model = factories.build_model(db_session)

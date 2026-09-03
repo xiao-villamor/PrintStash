@@ -28,7 +28,12 @@ export function probeStorageConnection(id: number): Promise<{ ok: boolean }> {
 
 export function updateStorageConnection(
   id: number,
-  body: { enabled?: boolean; purpose?: StorageConnectionPurpose },
+  body: {
+    enabled?: boolean;
+    purpose?: StorageConnectionPurpose;
+    manual_backup_enabled?: boolean;
+    automatic_backup_enabled?: boolean;
+  },
 ): Promise<StorageConnection> {
   return sendJson<StorageConnection>(`/api/v1/storage-connections/${id}`, "PATCH", body);
 }

@@ -25,6 +25,8 @@ const connection = {
   },
   secret_fields_set: ["access_key", "secret_key"],
   enabled: true,
+  manual_backup_enabled: true,
+  automatic_backup_enabled: true,
 };
 
 beforeEach(() => {
@@ -95,6 +97,25 @@ describe("updateStorageConnection", () => {
 
     expectRequest("/api/v1/storage-connections/4", "PATCH");
     expect(lastBody()).toEqual({ purpose: "library" });
+  });
+
+  it("sends independent backup-selection fields", async () => {
+    respondWith({
+      ...connection,
+      manual_backup_enabled: false,
+      automatic_backup_enabled: true,
+    });
+
+    await updateStorageConnection(connection.id, {
+      manual_backup_enabled: false,
+      automatic_backup_enabled: true,
+    });
+
+    expectRequest("/api/v1/storage-connections/4", "PATCH");
+    expect(lastBody()).toEqual({
+      manual_backup_enabled: false,
+      automatic_backup_enabled: true,
+    });
   });
 });
 

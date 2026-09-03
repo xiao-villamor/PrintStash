@@ -6,6 +6,7 @@ import {
   Boxes,
   Check,
   CircleArrowUp,
+  Clock,
   Cloud,
   Database,
   Download,
@@ -42,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { inputClasses } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Localized, translateUiText } from "@/components/ui/localized";
 import { cn } from "@/lib/utils";
 import { useRouter, useSearchParams } from "@/lib/navigation";
@@ -90,6 +92,7 @@ import {
   listApiKeys,
   listAdminUsers,
   listTrash,
+  listStorageConnections,
   purgeModel,
   resetAdminUserPassword,
   restoreBackup,
@@ -100,6 +103,7 @@ import {
   updatePrinterPermission,
   updateAdminUser,
   updateVaultConfig,
+  updateStorageConnection,
   uploadBackup,
 } from "@/lib/api";
 import type {
@@ -110,6 +114,7 @@ import type {
   UnownedRemoteBackupCandidate,
   UnownedS3BackupCandidate,
 } from "@/lib/api";
+import type { StorageConnection } from "@/types";
 import { useAuth } from "@/lib/auth-context";
 import { useVaultStats } from "@/lib/queries";
 import {
@@ -356,6 +361,7 @@ function SettingsCard({
   action,
   children,
   className,
+  stackActionOnMobile = false,
 }: {
   icon?: typeof Server;
   title: string;
@@ -363,6 +369,7 @@ function SettingsCard({
   action?: React.ReactNode;
   children?: React.ReactNode;
   className?: string;
+  stackActionOnMobile?: boolean;
 }) {
   return (
     <div
@@ -373,7 +380,12 @@ function SettingsCard({
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+      <div
+        className={cn(
+          "flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5",
+          stackActionOnMobile && "flex-col sm:flex-row",
+        )}
+      >
         <div className="flex items-start gap-3 min-w-0">
           {Icon && (
             <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -385,7 +397,11 @@ function SettingsCard({
             {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
           </div>
         </div>
-        {action && <div className="flex-shrink-0">{action}</div>}
+        {action && (
+          <div className={cn("flex-shrink-0", stackActionOnMobile && "w-full sm:w-auto")}>
+            {action}
+          </div>
+        )}
       </div>
       {children}
     </div>
@@ -472,6 +488,10 @@ export function SettingsPanel() {
   const [backupsLoading, setBackupsLoading] = useState(false);
   const [backupRetentionDays, setBackupRetentionDays] = useState(30);
   const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
+  const [backupConnections, setBackupConnections] = useState<StorageConnection[]>([]);
+  const [automaticBackupsEnabled, setAutomaticBackupsEnabled] = useState(false);
+  const [automaticBackupTimeUtc, setAutomaticBackupTimeUtc] = useState("02:00");
+  const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [adoptTarget, setAdoptTarget] = useState<UnownedBackupCandidate | null>(null);
   const [adoptS3Target, setAdoptS3Target] = useState<UnownedS3BackupCandidate | null>(null);
@@ -627,13 +647,15 @@ export function SettingsPanel() {
     }
     setBackupsLoading(true);
     try {
-      const [owned, unowned, unownedS3, unownedRemote, config] = await Promise.allSettled([
-        listBackupSources(),
-        listUnownedLocalBackups(),
-        listUnownedS3Backups(),
-        listUnownedRemoteBackups(),
-        getVaultConfig(),
-      ]);
+      const [owned, unowned, unownedS3, unownedRemote, config, connections] =
+        await Promise.allSettled([
+          listBackupSources(),
+          listUnownedLocalBackups(),
+          listUnownedS3Backups(),
+          listUnownedRemoteBackups(),
+          getVaultConfig(),
+          listStorageConnections(),
+        ]);
       if (owned.status === "rejected") throw owned.reason;
       setBackups(owned.value);
       // The discovery endpoint is additive. Older servers may return 404, in
@@ -644,7 +666,16 @@ export function SettingsPanel() {
       setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
       if (config.status === "fulfilled") {
         setBackupRetentionDays(config.value.backup_retention_days ?? 30);
+        setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
+        setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
       }
+      setBackupConnections(
+        connections.status === "fulfilled"
+          ? connections.value.filter(
+              (connection) => connection.purpose === "backup" || connection.purpose === "both",
+            )
+          : [],
+      );
     } catch (e) {
       toast.error(e);
     } finally {
@@ -858,6 +889,44 @@ export function SettingsPanel() {
       toast.error(e);
     } finally {
       setBackupRetentionBusy(false);
+    }
+  }
+
+  function setBackupConnectionSelection(
+    connectionId: number,
+    field: "manual_backup_enabled" | "automatic_backup_enabled",
+    value: boolean,
+  ) {
+    setBackupConnections((current) =>
+      current.map((connection) =>
+        connection.id === connectionId ? { ...connection, [field]: value } : connection,
+      ),
+    );
+  }
+
+  async function saveBackupPolicy() {
+    setBackupPolicyBusy(true);
+    try {
+      const [config, ...connections] = await Promise.all([
+        updateVaultConfig({
+          automatic_backups_enabled: automaticBackupsEnabled,
+          automatic_backup_time_utc: automaticBackupTimeUtc,
+        }),
+        ...backupConnections.map((connection) =>
+          updateStorageConnection(connection.id, {
+            manual_backup_enabled: connection.manual_backup_enabled,
+            automatic_backup_enabled: connection.automatic_backup_enabled,
+          }),
+        ),
+      ]);
+      setAutomaticBackupsEnabled(config.automatic_backups_enabled);
+      setAutomaticBackupTimeUtc(config.automatic_backup_time_utc);
+      setBackupConnections(connections);
+      toast.success(t("settings.backupPolicySaved"));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBackupPolicyBusy(false);
     }
   }
 
@@ -2444,6 +2513,154 @@ export function SettingsPanel() {
                         className={cn(inputClasses, "mt-1.5 w-32 font-mono")}
                       />
                     </label>
+                  </div>
+                </SettingsCard>
+                <SettingsCard
+                  icon={Clock}
+                  title={t("settings.backupPolicyTitle")}
+                  description={t("settings.backupPolicyDescription")}
+                  stackActionOnMobile
+                  action={
+                    <button
+                      type="button"
+                      onClick={saveBackupPolicy}
+                      disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                      className={cn(BTN_PRIMARY, "w-full sm:w-auto")}
+                    >
+                      {backupPolicyBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      {t("settings.backupPolicySave")}
+                    </button>
+                  }
+                >
+                  <div className="space-y-5 p-4 sm:p-5">
+                    <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-end">
+                      <label className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
+                        <span>
+                          <span className="block text-sm font-medium text-foreground">
+                            {t("settings.backupAutomaticEnable")}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {t("settings.backupAutomaticEnableDescription")}
+                          </span>
+                        </span>
+                        <Checkbox
+                          checked={automaticBackupsEnabled}
+                          onChange={setAutomaticBackupsEnabled}
+                          ariaLabel={t("settings.backupAutomaticEnable")}
+                          disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                        />
+                      </label>
+                      <label className="text-xs text-muted-foreground">
+                        {t("settings.backupAutomaticTime")}
+                        <input
+                          type="time"
+                          value={automaticBackupTimeUtc}
+                          onChange={(event) => setAutomaticBackupTimeUtc(event.target.value)}
+                          disabled={
+                            !user?.is_superuser ||
+                            backupPolicyBusy ||
+                            !automaticBackupsEnabled ||
+                            backupsLoading
+                          }
+                          className={cn(inputClasses, "mt-1.5 w-full font-mono")}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="overflow-hidden rounded-md border border-border">
+                      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] gap-2 border-b bg-muted/30 px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        <span>{t("settings.backupDestination")}</span>
+                        <span className="text-center">{t("settings.backupManualColumn")}</span>
+                        <span className="text-center">{t("settings.backupAutomaticColumn")}</span>
+                      </div>
+                      <div className="divide-y divide-border">
+                        <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 px-3 py-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">
+                              {t("settings.backupLocalDestination")}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {t("settings.backupLocalRequired")}
+                            </p>
+                          </div>
+                          <div className="flex justify-center">
+                            <Checkbox
+                              checked
+                              onChange={() => undefined}
+                              ariaLabel={t("settings.backupLocalManual")}
+                              disabled
+                            />
+                          </div>
+                          <div className="flex justify-center">
+                            <Checkbox
+                              checked
+                              onChange={() => undefined}
+                              ariaLabel={t("settings.backupLocalAutomatic")}
+                              disabled
+                            />
+                          </div>
+                        </div>
+                        {backupConnections.map((connection) => (
+                          <div
+                            key={connection.id}
+                            className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 px-3 py-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium text-foreground">
+                                {connection.name}
+                              </p>
+                              <p className="text-xs uppercase text-muted-foreground">
+                                {connection.kind}
+                                {!connection.enabled
+                                  ? ` · ${t("settings.backupDestinationPaused")}`
+                                  : ""}
+                              </p>
+                            </div>
+                            <div className="flex justify-center">
+                              <Checkbox
+                                checked={connection.manual_backup_enabled}
+                                onChange={(value) =>
+                                  setBackupConnectionSelection(
+                                    connection.id,
+                                    "manual_backup_enabled",
+                                    value,
+                                  )
+                                }
+                                ariaLabel={t("settings.backupUseManual", {
+                                  name: connection.name,
+                                })}
+                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              />
+                            </div>
+                            <div className="flex justify-center">
+                              <Checkbox
+                                checked={connection.automatic_backup_enabled}
+                                onChange={(value) =>
+                                  setBackupConnectionSelection(
+                                    connection.id,
+                                    "automatic_backup_enabled",
+                                    value,
+                                  )
+                                }
+                                ariaLabel={t("settings.backupUseAutomatic", {
+                                  name: connection.name,
+                                })}
+                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                        {backupConnections.length === 0 ? (
+                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                            {t("settings.backupNoRemoteDestinations")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 </SettingsCard>
                 <SettingsCard

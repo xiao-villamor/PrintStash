@@ -53,6 +53,8 @@ class StorageConnectionRead(BaseModel):
     configuration: dict[str, object]
     secret_fields_set: list[str]
     enabled: bool
+    manual_backup_enabled: bool
+    automatic_backup_enabled: bool
 
 
 class StorageConnectionUpdate(BaseModel):
@@ -60,6 +62,8 @@ class StorageConnectionUpdate(BaseModel):
 
     enabled: bool | None = None
     purpose: StorageConnectionPurpose | None = None
+    manual_backup_enabled: bool | None = None
+    automatic_backup_enabled: bool | None = None
 
 
 _SECRET_FIELDS = {
@@ -98,6 +102,8 @@ def _read(row: StorageConnection) -> StorageConnectionRead:
         configuration=configuration,
         secret_fields_set=secret_fields,
         enabled=row.enabled,
+        manual_backup_enabled=row.manual_backup_enabled,
+        automatic_backup_enabled=row.automatic_backup_enabled,
     )
 
 
@@ -169,13 +175,25 @@ def update_connection(
     row = session.get(StorageConnection, connection_id)
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
-    if body.enabled is None and body.purpose is None:
+    if all(
+        value is None
+        for value in (
+            body.enabled,
+            body.purpose,
+            body.manual_backup_enabled,
+            body.automatic_backup_enabled,
+        )
+    ):
         raise HTTPException(status_code=400, detail="storage_connection_update_empty")
     if body.purpose is not None and body.purpose != row.purpose:
         _assert_removed_uses_are_free(row, body.purpose, session)
         row.purpose = body.purpose
     if body.enabled is not None:
         row.enabled = body.enabled
+    if body.manual_backup_enabled is not None:
+        row.manual_backup_enabled = body.manual_backup_enabled
+    if body.automatic_backup_enabled is not None:
+        row.automatic_backup_enabled = body.automatic_backup_enabled
     session.add(row)
     session.commit()
     session.refresh(row)

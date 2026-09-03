@@ -584,3 +584,32 @@ class TestStorageConnections:
             f"/api/v1/storage-connections/{created['id']}", headers=_headers(admin)
         )
         assert deleted.status_code == 204
+
+    def test_updates_independent_backup_selections(
+        self, client: TestClient, db_session: Session
+    ) -> None:
+        admin = build_user(db_session, "backup-selection-admin", superuser=True)
+        created = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Selective backup",
+                "kind": "s3",
+                "purpose": "backup",
+                "configuration": {"bucket": "printstash", "root": "PrintStash"},
+                "secrets": {"access_key": "access", "secret_key": "secret"},
+            },
+        ).json()
+
+        updated = client.patch(
+            f"/api/v1/storage-connections/{created['id']}",
+            headers=_headers(admin),
+            json={
+                "manual_backup_enabled": False,
+                "automatic_backup_enabled": True,
+            },
+        )
+
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["manual_backup_enabled"] is False
+        assert updated.json()["automatic_backup_enabled"] is True

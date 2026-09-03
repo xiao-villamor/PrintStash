@@ -1680,6 +1680,15 @@ class SystemConfig(SQLModel, table=True):
 
     # Backup
     backup_retention_days: Optional[int] = Field(default=None)
+    automatic_backups_enabled: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="0"),
+    )
+    automatic_backup_time_utc: str = Field(
+        default="02:00",
+        sa_column=Column(String(5), nullable=False, server_default="02:00"),
+    )
+    automatic_backup_last_attempt_at: Optional[datetime] = None
     trash_retention_days: Optional[int] = Field(default=None)
 
     # Backup S3 destination (separate from vault S3 — allows local vault + cloud backups)
@@ -2067,6 +2076,14 @@ class StorageConnection(SQLModel, table=True):
         default="{}", sa_column=Column(EncryptedText(), nullable=False)
     )
     enabled: bool = Field(default=True, index=True)
+    manual_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
+    automatic_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

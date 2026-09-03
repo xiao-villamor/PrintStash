@@ -18,6 +18,12 @@ remote connections can replicate each archive independently to S3, WebDAV, SFTP,
 or Google Drive; one remote failure never discards the local archive or prevents
 another destination from receiving its copy.
 
+Under **Settings → Backup**, administrators can enable one automatic backup per
+UTC day, choose its time, and independently select each remote connection for
+manual and automatic replicas. Automatic backups are disabled by default. The
+local archive is always created for both modes; excluding every remote
+destination therefore never removes the local recovery copy.
+
 Add those connections under **Settings → Remote storage** and allow **Backup
 replicas** (or both uses). Create, upload, retain, and restore archives under
 **Settings → Backup**. Backup archives use the reserved

@@ -6,6 +6,7 @@ import hashlib
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
@@ -29,6 +30,11 @@ from app.services.storage_providers import resolve_transport
 
 BACKUP_PREFIX = "printstash-backups"
 logger = logging.getLogger(__name__)
+
+
+class BackupTrigger(str, Enum):
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
 
 
 class BackupDestinationError(RuntimeError):
@@ -168,20 +174,28 @@ def destination_from_connection(
     )
 
 
-def configured_destinations() -> list[RemoteBackupDestination]:
+def configured_destinations(
+    trigger: BackupTrigger | None = None,
+) -> list[RemoteBackupDestination]:
     with get_session_factory().scoped_session() as session:
-        rows = session.exec(
-            select(StorageConnection)
-            .where(
-                StorageConnection.purpose.in_(
-                    [
-                        StorageConnectionPurpose.BACKUP,
-                        StorageConnectionPurpose.BOTH,
-                    ]
-                ),
-                StorageConnection.enabled.is_(True),
+        statement = select(StorageConnection).where(
+            StorageConnection.purpose.in_(
+                [
+                    StorageConnectionPurpose.BACKUP,
+                    StorageConnectionPurpose.BOTH,
+                ]
+            ),
+            StorageConnection.enabled.is_(True),
+        )
+        if trigger is not None:
+            selected = (
+                StorageConnection.manual_backup_enabled
+                if trigger is BackupTrigger.MANUAL
+                else StorageConnection.automatic_backup_enabled
             )
-            .order_by(StorageConnection.id.asc())  # type: ignore[attr-defined]
+            statement = statement.where(selected.is_(True))
+        rows = session.exec(
+            statement.order_by(StorageConnection.id.asc())  # type: ignore[attr-defined]
         ).all()
         # Encrypted values are materialized while the session is alive.
         snapshots = []

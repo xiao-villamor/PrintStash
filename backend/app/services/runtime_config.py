@@ -869,6 +869,17 @@ def external_libraries_enabled(session: Session) -> bool:
     return False if config is None else bool(config.external_libraries_enabled)
 
 
+def update_backup_schedule(
+    session: Session,
+    *,
+    enabled: bool | None = None,
+    time_utc: str | None = None,
+) -> SystemConfig:
+    from app.services.backup_schedule import update_schedule
+
+    return update_schedule(session, enabled=enabled, time_utc=time_utc)
+
+
 def notifications_enabled(session: Session) -> bool:
     """Master opt-in switch for outbound notifications. Off by default."""
     config = session.get(SystemConfig, 1)
@@ -1049,6 +1060,7 @@ def get_effective_config(session: Session) -> dict:
     ``settings`` is now a ConfigResolver — attribute reads already resolve
     overlay-preferred values. No manual merge needed.
     """
+    config = session.get(SystemConfig, 1)
     return {
         "storage_backend": str(settings.storage_backend),
         "data_dir": str(settings.data_dir),
@@ -1062,6 +1074,13 @@ def get_effective_config(session: Session) -> dict:
         "has_s3_access_key": bool(settings.s3_access_key),
         "has_s3_secret_key": bool(settings.s3_secret_key),
         "backup_retention_days": int(settings.backup_retention_days),
+        "automatic_backups_enabled": bool(config and config.automatic_backups_enabled),
+        "automatic_backup_time_utc": (
+            config.automatic_backup_time_utc if config else "02:00"
+        ),
+        "automatic_backup_last_attempt_at": (
+            config.automatic_backup_last_attempt_at if config else None
+        ),
         "trash_retention_days": int(settings.trash_retention_days),
         "model_thumbnail_width": int(settings.model_thumbnail_width),
         "backup_s3_bucket": str(settings.backup_s3_bucket),

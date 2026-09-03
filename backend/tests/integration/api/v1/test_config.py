@@ -95,6 +95,8 @@ class TestGetConfig:
         assert body["storage_backend"] == "local"
         assert body["backup_retention_days"] == 30
         assert body["oidc_enabled"] is False
+        assert body["automatic_backups_enabled"] is False
+        assert body["automatic_backup_time_utc"] == "02:00"
 
     def test_masks_a_stored_secret(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -210,6 +212,43 @@ class TestGetConfig:
 
 
 class TestUpdateConfig:
+    def test_persists_the_automatic_backup_schedule(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            json={
+                "automatic_backups_enabled": True,
+                "automatic_backup_time_utc": "03:45",
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["automatic_backups_enabled"] is True
+        assert response.json()["automatic_backup_time_utc"] == "03:45"
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("24:00", id="hour-overflow"),
+            pytest.param("3:00", id="short-hour"),
+        ],
+    )
+    def test_rejects_an_invalid_automatic_backup_time(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        value: str,
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            json={"automatic_backup_time_utc": value},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422, response.text
+
     def test_persists_the_currency(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:

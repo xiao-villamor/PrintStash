@@ -660,6 +660,7 @@ class TestLifespan:
                 "library_watcher",
                 "gc_task",
                 "external_scan_task",
+                "automatic_backup_task",
                 "notification_task",
                 "fleet_scheduler_task",
                 "task_queue",
@@ -690,6 +691,7 @@ class TestLifespan:
         assert app.state.fleet_scheduler_task.cancelled()
         assert app.state.gc_task.cancelled()
         assert app.state.external_scan_task.cancelled()
+        assert app.state.automatic_backup_task.cancelled()
         assert app.state.notification_task.cancelled()
 
     def test_lifespan_warns_once_for_every_nonzero_reconcile_count(
@@ -914,6 +916,44 @@ class TestExternalScanLoop:
         assert any(
             "external library scan tick failed" in r.getMessage()
             for r in caplog.records
+        )
+
+
+class TestAutomaticBackupLoop:
+    @pytest.mark.asyncio
+    async def test_failure_releases_the_mutation_slot(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        real_sleep = asyncio.sleep
+        calls = {"attempts": 0, "ends": 0}
+
+        async def tick(_seconds: float) -> None:
+            await real_sleep(0)
+
+        def fail_backup() -> None:
+            calls["attempts"] += 1
+            raise RuntimeError("backup failed")
+
+        def end_mutation() -> None:
+            calls["ends"] += 1
+
+        monkeypatch.setattr(app_main.asyncio, "sleep", tick)
+        monkeypatch.setattr(app_main, "begin_mutating_operation", lambda: True)
+        monkeypatch.setattr(app_main, "end_mutating_operation", end_mutation)
+        monkeypatch.setattr(app_main, "run_due_backup", fail_backup)
+
+        with caplog.at_level(logging.ERROR, logger=app_main.logger.name):
+            task = asyncio.create_task(app_main._automatic_backup_loop())
+            while calls["attempts"] < 2:
+                await real_sleep(0)
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert calls["ends"] == calls["attempts"]
+        assert calls["attempts"] >= 2
+        assert any(
+            "automatic backup failed" in record.getMessage()
+            for record in caplog.records
         )
 
 

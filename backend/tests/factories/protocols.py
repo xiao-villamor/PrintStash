@@ -50,6 +50,8 @@ from app.db.models import (
     PrintJobState,
     ProvenanceCapture,
     ShareLink,
+    StorageConnection,
+    StorageConnectionPurpose,
     SystemConfig,
     Tag,
     User,
@@ -77,6 +79,18 @@ class MakeSystemConfig(Protocol):
         s3_root: str | None = None,
         **overrides: Any,
     ) -> SystemConfig: ...
+
+
+class MakeStorageConnection(Protocol):
+    def __call__(
+        self,
+        name: str | None = None,
+        *,
+        purpose: StorageConnectionPurpose = StorageConnectionPurpose.BACKUP,
+        manual_backup_enabled: bool = True,
+        automatic_backup_enabled: bool = True,
+        **overrides: Any,
+    ) -> StorageConnection: ...
 
 
 class HeadersFor(Protocol):

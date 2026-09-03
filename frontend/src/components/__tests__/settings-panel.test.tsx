@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsPanel } from "@/components/settings-panel";
 import { queryKeys } from "@/lib/query-client";
-import { aCollection, aPrinter, vaultStats } from "@/test-support/factories";
+import { aCollection, aPrinter, aStorageConnection, vaultStats } from "@/test-support/factories";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { CollectionPermissionRead, PrinterPermissionRead, UserRead } from "@/types";
 
@@ -40,6 +40,10 @@ const HEALTH = {
 const VAULT_CONFIG = {
   storage_backend: "local",
   data_dir: "/data/files",
+  backup_retention_days: 30,
+  automatic_backups_enabled: false,
+  automatic_backup_time_utc: "02:00",
+  automatic_backup_last_attempt_at: null,
   trash_retention_days: 30,
   model_thumbnail_width: 640,
   currency: "USD",
@@ -808,6 +812,57 @@ describe("SettingsPanel", () => {
         expect(requestsWithMethod("PUT").some((call) => call.url.endsWith("/config"))).toBe(true),
       );
       expect(update).toEqual({ backup_retention_days: 14 });
+    });
+
+    it("saves the complete automatic-backup policy", async () => {
+      const user = userEvent.setup();
+      const connection = aStorageConnection({
+        id: 7,
+        name: "Off-site archive",
+        manual_backup_enabled: true,
+        automatic_backup_enabled: false,
+      });
+      const updates: unknown[] = [];
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([connection]),
+          "PUT /api/v1/config": (_url, init) => {
+            updates.push(JSON.parse(String(init?.body)));
+            return json({
+              ...VAULT_CONFIG,
+              automatic_backups_enabled: true,
+              automatic_backup_time_utc: "04:30",
+            });
+          },
+          "PATCH /api/v1/storage-connections/7": (_url, init) => {
+            const body = JSON.parse(String(init?.body));
+            updates.push(body);
+            return json({ ...connection, ...body });
+          },
+        },
+      });
+
+      await user.click(await screen.findByLabelText("Enable automatic backups"));
+      await user.clear(screen.getByLabelText("Daily time (UTC)"));
+      fireEvent.change(screen.getByLabelText("Daily time (UTC)"), {
+        target: { value: "04:30" },
+      });
+      await user.click(screen.getByLabelText("Use Off-site archive for manual backups"));
+      await user.click(screen.getByLabelText("Use Off-site archive for automatic backups"));
+      await user.click(screen.getByRole("button", { name: "Save backup settings" }));
+
+      await waitFor(() => expect(requestsWithMethod("PUT")).toHaveLength(1));
+      await waitFor(() => expect(requestsWithMethod("PATCH")).toHaveLength(1));
+      expect(updates).toEqual(
+        expect.arrayContaining([
+          {
+            automatic_backups_enabled: true,
+            automatic_backup_time_utc: "04:30",
+          },
+          { manual_backup_enabled: false, automatic_backup_enabled: true },
+        ]),
+      );
     });
 
     it("says so when nothing has been backed up", async () => {

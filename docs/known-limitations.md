@@ -72,6 +72,10 @@ manufacturing platform.
   and archive hash. Google Drive is beta and cannot prove an immutable delete,
   so automatic remote retention is disabled and its replicas never satisfy the
   independent S3 witness required for automatic Vault garbage collection.
+- The built-in scheduler supports one opt-in backup per UTC day. It records the
+  day's attempt before creating the archive so a failing destination cannot
+  trigger an unbounded retry loop; operators should monitor backup availability
+  and retry manually after correcting a failure.
 - Remote discovery is deliberately bounded and eventually consistent. A full
   epoch can span several scheduled slices, and provider failures apply a
   24-hour backoff. Absence is not applied until an epoch completes, and empty or

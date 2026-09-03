@@ -37,6 +37,12 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   without immutable delete identity are excluded from automatic retention and
   Vault-GC evidence.
 
+- **Scheduled backups with per-mode destinations.** Administrators can opt in
+  to one daily backup at a selected UTC time and independently choose which
+  enabled remote backup connections receive manual or automatic replicas. The
+  local recovery archive remains mandatory for both modes, and existing remote
+  backup connections remain selected for both after upgrade.
+
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.
   Both are Guarded: permanent deletion requires confirmation and scheduled

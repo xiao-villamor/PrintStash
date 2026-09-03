@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import backup
-from app.services.backup_destination import RemoteBackupDestination
+from app.services.backup_destination import BackupTrigger, RemoteBackupDestination
 from app.services.storage_backend import CreationReceipt, StorageObjectInfo
 from tests.integration._backup_harness import BackupEnv
 
@@ -97,10 +97,17 @@ class TestOpenDalBackupReplication:
             backend=Backend(),
             key=lambda archive_name: f"gdrive/PrintStash/{archive_name}",
         )
-        monkeypatch.setattr(backup, "configured_destinations", lambda: [destination])
+        triggers: list[BackupTrigger] = []
+
+        def destinations(trigger: BackupTrigger) -> list[object]:
+            triggers.append(trigger)
+            return [destination]
+
+        monkeypatch.setattr(backup, "configured_destinations", destinations)
 
         meta = backup.create_backup()
 
+        assert triggers == [BackupTrigger.MANUAL]
         assert Path(meta.path).is_file()
         assert len(writes) == 1
         assert writes[0][0].endswith(f"-{meta.id}.tar.gz")
@@ -118,7 +125,9 @@ class TestOpenDalBackupReplication:
             backend=SimpleNamespace(),
             key=lambda archive_name: archive_name,
         )
-        monkeypatch.setattr(backup, "configured_destinations", lambda: [failing])
+        monkeypatch.setattr(
+            backup, "configured_destinations", lambda _trigger: [failing]
+        )
 
         meta = backup.create_backup()
 

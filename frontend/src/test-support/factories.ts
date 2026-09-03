@@ -209,6 +209,8 @@ export function aStorageConnection(override?: Partial<StorageConnection>): Stora
     configuration: { bucket: "printstash", root: "PrintStash" },
     secret_fields_set: ["access_key", "secret_key"],
     enabled: true,
+    manual_backup_enabled: true,
+    automatic_backup_enabled: true,
     ...override,
   };
 }
