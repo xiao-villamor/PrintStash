@@ -39,9 +39,14 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 - **Scheduled backups with per-mode destinations.** Administrators can opt in
   to one daily backup at a selected UTC time and independently choose which
-  enabled remote backup connections receive manual or automatic replicas. The
-  local recovery archive remains mandatory for both modes, and existing remote
-  backup connections remain selected for both after upgrade.
+  enabled local or remote destinations receive manual or automatic copies.
+  Existing installations keep local storage selected after upgrade, but may
+  switch either mode to remote-only storage. Backup copies can be deleted from
+  Settings after exact-source verification.
+
+- **Reliable Google Drive backup uploads.** Google Drive archives are now sent
+  through OpenDAL's one-shot writer, so backups larger than one transfer chunk
+  no longer fail after their first chunk.
 
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.

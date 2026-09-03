@@ -48,6 +48,19 @@ def create_backup(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail=str(exc),
         ) from exc
+    except RuntimeError as exc:
+        detail = str(exc)
+        if detail == "backup_destination_required":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=detail,
+            ) from exc
+        if detail == "backup_all_destinations_failed":
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=detail,
+            ) from exc
+        raise
     background_tasks.add_task(backup.purge_old_backups)
     return {
         "backup_id": meta.id,
@@ -401,9 +414,13 @@ def download_backup(
 def delete_backup(backup_id: str, source_ref: str | None = None) -> dict:
     try:
         deleted = (
-            backup.delete_backup(backup_id)
+            backup.delete_backup(backup_id, allow_unversioned=True)
             if source_ref is None
-            else backup.delete_backup(backup_id, source_ref=source_ref)
+            else backup.delete_backup(
+                backup_id,
+                source_ref=source_ref,
+                allow_unversioned=True,
+            )
         )
     except backup.BackupOwnershipError as exc:
         raise HTTPException(

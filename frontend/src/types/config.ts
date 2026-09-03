@@ -74,6 +74,8 @@ export interface VaultConfigRead {
   automatic_backups_enabled: boolean;
   automatic_backup_time_utc: string;
   automatic_backup_last_attempt_at: string | null;
+  manual_local_backup_enabled: boolean;
+  automatic_local_backup_enabled: boolean;
   trash_retention_days: number;
   backup_s3_bucket: string;
   backup_s3_endpoint_url: string;
@@ -114,6 +116,8 @@ export interface VaultConfigUpdate {
   backup_retention_days?: number;
   automatic_backups_enabled?: boolean;
   automatic_backup_time_utc?: string;
+  manual_local_backup_enabled?: boolean;
+  automatic_local_backup_enabled?: boolean;
   trash_retention_days?: number;
   backup_s3_bucket?: string;
   backup_s3_endpoint_url?: string;

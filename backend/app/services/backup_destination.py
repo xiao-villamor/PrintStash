@@ -17,6 +17,7 @@ from app.db.models import (
     StorageConnection,
     StorageConnectionPurpose,
     StorageObjectState,
+    SystemConfig,
 )
 from app.db.session import get_session_factory
 from app.services.storage_backend import StorageConfigurationError
@@ -39,6 +40,18 @@ class BackupTrigger(str, Enum):
 
 class BackupDestinationError(RuntimeError):
     """A configured remote backup destination cannot satisfy an operation."""
+
+
+def local_destination_enabled(trigger: BackupTrigger) -> bool:
+    with get_session_factory().scoped_session() as session:
+        config = session.get(SystemConfig, 1)
+        if config is None:
+            return True
+        return bool(
+            config.manual_local_backup_enabled
+            if trigger is BackupTrigger.MANUAL
+            else config.automatic_local_backup_enabled
+        )
 
 
 @dataclass(frozen=True)
@@ -120,7 +133,9 @@ class RemoteBackupDestination:
             destination.unlink(missing_ok=True)
             raise BackupDestinationError("backup_download_digest_mismatch")
 
-    def delete_owned(self, row: OwnedStorageObject) -> bool:
+    def delete_owned(
+        self, row: OwnedStorageObject, *, allow_unversioned: bool = False
+    ) -> bool:
         """Delete only through an immutable version identity.
 
         Consumer-cloud and WebDAV transports deliberately return ``False``;
@@ -129,7 +144,15 @@ class RemoteBackupDestination:
         """
         self.require_owned(row)
         if not row.version_id:
-            return False
+            if not allow_unversioned:
+                return False
+            assert row.size_bytes is not None
+            self.backend.delete_owned_unversioned(
+                row.key,
+                expected_size=row.size_bytes,
+                expected_etag=row.etag,
+            )
+            return True
         try:
             self.backend.delete_versioned(row.key, row.version_id)
         except StorageConfigurationError:

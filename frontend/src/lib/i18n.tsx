@@ -326,7 +326,7 @@ const messages = {
     "settings.backupRetentionSaved": "Backup retention updated.",
     "settings.backupPolicyTitle": "Backup destinations and schedule",
     "settings.backupPolicyDescription":
-      "Choose remote replicas independently for manual and automatic backups. Every backup keeps a required local copy.",
+      "Choose local and remote destinations independently for manual and automatic backups.",
     "settings.backupPolicySave": "Save backup settings",
     "settings.backupPolicySaved": "Backup destinations and schedule updated.",
     "settings.backupAutomaticEnable": "Enable automatic backups",
@@ -337,7 +337,7 @@ const messages = {
     "settings.backupManualColumn": "Manual",
     "settings.backupAutomaticColumn": "Automatic",
     "settings.backupLocalDestination": "Local storage",
-    "settings.backupLocalRequired": "Required safety copy",
+    "settings.backupLocalRequired": "Optional on-server destination",
     "settings.backupLocalManual": "Use local storage for manual backups",
     "settings.backupLocalAutomatic": "Use local storage for automatic backups",
     "settings.backupDestinationPaused": "paused",
@@ -345,6 +345,14 @@ const messages = {
     "settings.backupUseAutomatic": "Use {name} for automatic backups",
     "settings.backupNoRemoteDestinations":
       "No remote backup destinations are connected. Add one in Remote storage.",
+    "settings.backupManualDestinationRequired": "Select at least one manual backup destination.",
+    "settings.backupAutomaticDestinationRequired":
+      "Select at least one automatic backup destination before enabling the schedule.",
+    "settings.backupDeleteAction": "Delete backup",
+    "settings.backupDeleteConfirmTitle": "Delete this backup copy?",
+    "settings.backupDeleteConfirmDescription":
+      "This permanently deletes only the selected source. Other copies of the same backup remain available. {source}",
+    "settings.backupDeleteSuccess": "Backup copy deleted.",
     "settings.storageConfigDescription": "Provider connection and active guarantees",
     "settings.trashCleanupCompleted": "Storage cleanup completed.",
     "settings.trashCleanupPending":
@@ -820,7 +828,7 @@ const messages = {
     "settings.backupRetentionSaved": "Retención de copias actualizada.",
     "settings.backupPolicyTitle": "Destinos y programación de copias",
     "settings.backupPolicyDescription":
-      "Elige réplicas remotas distintas para las copias manuales y automáticas. Cada copia conserva una copia local obligatoria.",
+      "Elige destinos locales y remotos distintos para las copias manuales y automáticas.",
     "settings.backupPolicySave": "Guardar configuración de copias",
     "settings.backupPolicySaved": "Destinos y programación de copias actualizados.",
     "settings.backupAutomaticEnable": "Activar copias automáticas",
@@ -831,7 +839,7 @@ const messages = {
     "settings.backupManualColumn": "Manual",
     "settings.backupAutomaticColumn": "Automática",
     "settings.backupLocalDestination": "Almacenamiento local",
-    "settings.backupLocalRequired": "Copia de seguridad obligatoria",
+    "settings.backupLocalRequired": "Destino opcional en el servidor",
     "settings.backupLocalManual": "Usar almacenamiento local para copias manuales",
     "settings.backupLocalAutomatic": "Usar almacenamiento local para copias automáticas",
     "settings.backupDestinationPaused": "pausada",
@@ -839,6 +847,15 @@ const messages = {
     "settings.backupUseAutomatic": "Usar {name} para copias automáticas",
     "settings.backupNoRemoteDestinations":
       "No hay destinos remotos conectados. Añade uno en Almacenamiento remoto.",
+    "settings.backupManualDestinationRequired":
+      "Selecciona al menos un destino para las copias manuales.",
+    "settings.backupAutomaticDestinationRequired":
+      "Selecciona al menos un destino automático antes de activar la programación.",
+    "settings.backupDeleteAction": "Eliminar copia",
+    "settings.backupDeleteConfirmTitle": "¿Eliminar esta copia de seguridad?",
+    "settings.backupDeleteConfirmDescription":
+      "Esto elimina permanentemente solo el origen seleccionado. Las demás copias de la misma copia de seguridad seguirán disponibles. {source}",
+    "settings.backupDeleteSuccess": "Copia de seguridad eliminada.",
     "settings.storageConfigDescription": "Conexión del proveedor y garantías activas",
     "settings.trashCleanupCompleted": "Limpieza de almacenamiento completada.",
     "settings.trashCleanupPending":

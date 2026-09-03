@@ -298,7 +298,30 @@ class OpenDALStorageBackend(StorageBackend):
                 if not hasattr(self._operator, "write_exclusive"):
                     raise StorageConfigurationError("sftp_exclusive_create_unavailable")
                 self._operator.write_exclusive(destination, src)
-            elif self._spec.kind in {TransportKind.S3, TransportKind.GDRIVE}:
+            elif self._spec.kind is TransportKind.GDRIVE:
+                # OpenDAL's Google Drive service uses a OneShotWriter: a second
+                # ``writer.write`` fails even though the first chunk was
+                # accepted. Stage to a temporary file, then hand the binding
+                # one contiguous buffer without loading a large backup into
+                # Python-managed memory.
+                if self._operator.exists(destination):
+                    raise StorageCollisionError(key)
+                with tempfile.TemporaryFile() as staged:
+                    while chunk := src.read(1024 * 1024):
+                        staged.write(chunk)
+                    size = staged.tell()
+                    staged.flush()
+                    if size:
+                        mapped = mmap.mmap(staged.fileno(), 0, access=mmap.ACCESS_READ)
+                        view = memoryview(mapped)
+                        try:
+                            self._operator.write(destination, view)
+                        finally:
+                            view.release()
+                            mapped.close()
+                    else:
+                        self._operator.write(destination, b"")
+            elif self._spec.kind is TransportKind.S3:
                 capabilities = self._operator.capability()
                 create_only = bool(
                     getattr(capabilities, "write_with_if_not_exists", False)
@@ -376,6 +399,26 @@ class OpenDALStorageBackend(StorageBackend):
         if not getattr(self.operator_capabilities, "delete_with_version", False):
             raise StorageConfigurationError("conditional_delete_unavailable")
         self._operator.delete(self._relative(key), version=version_id)
+
+    def delete_owned_unversioned(
+        self,
+        key: str,
+        *,
+        expected_size: int,
+        expected_etag: str | None,
+    ) -> None:
+        """Delete one explicitly confirmed object after a last identity check."""
+        relative = self._relative(key)
+        info = self.object_info(key)
+        if (
+            info is None
+            or info.size != expected_size
+            or (expected_etag is not None and info.etag != expected_etag)
+        ):
+            raise StorageConfigurationError("remote_object_identity_changed")
+        self._operator.delete(relative)
+        if self._operator.exists(relative):
+            raise StorageConfigurationError("remote_object_delete_failed")
 
     def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         if hasattr(self._operator, "stream_chunks"):

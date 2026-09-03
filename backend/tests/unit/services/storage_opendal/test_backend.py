@@ -144,6 +144,21 @@ class _OpenDALWriteOperator(_MemoryOperator):
         return super().open(key, mode)
 
 
+class _OneShotWriter(_Writer):
+    def write(self, data: bytes) -> None:
+        if self._parts:
+            raise OSError("OneShotWriter doesn't support multiple write")
+        super().write(data)
+
+
+class _GoogleDriveOperator(_OpenDALWriteOperator):
+    def open(self, key: str, mode: str, **options: object) -> _Writer | _Reader:
+        self.open_options.append(options)
+        if mode == "wb":
+            return _OneShotWriter(self, key)
+        return _Reader(self.objects[key])
+
+
 class _RenameFailureOperator(_MemoryOperator):
     def rename(self, source: str, destination: str) -> None:
         del source, destination
@@ -268,6 +283,62 @@ class TestOpenDALStorageBackend:
 
         assert operator.objects["thumbs/41.webp"] == b"existing"
         assert operator.open_options == []
+
+    def test_google_drive_publishes_a_multi_chunk_stream_with_one_write(self) -> None:
+        operator = _GoogleDriveOperator(conditional_create=False)
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.GDRIVE), operator=operator
+        )
+        payload = b"g" * (1024 * 1024 + 17)
+
+        receipt = backend.create_stream(BytesIO(payload), backend.thumbnail_key(42))
+
+        assert operator.objects["thumbs/42.webp"] == payload
+        assert receipt.size == len(payload)
+
+    def test_google_drive_publishes_an_empty_stream(self) -> None:
+        operator = _GoogleDriveOperator(conditional_create=False)
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.GDRIVE), operator=operator
+        )
+
+        receipt = backend.create_stream(BytesIO(), backend.thumbnail_key(45))
+
+        assert operator.objects["thumbs/45.webp"] == b""
+        assert receipt.size == 0
+
+    def test_explicitly_deletes_an_unversioned_owned_object(self) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.GDRIVE), operator=operator
+        )
+        key = backend.thumbnail_key(43)
+        operator.objects["thumbs/43.webp"] = b"owned"
+
+        backend.delete_owned_unversioned(
+            key,
+            expected_size=5,
+            expected_etag="etag:thumbs/43.webp",
+        )
+
+        assert not backend.exists(key)
+
+    def test_refuses_to_delete_a_changed_unversioned_object(self) -> None:
+        operator = _MemoryOperator()
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(TransportKind.GDRIVE), operator=operator
+        )
+        key = backend.thumbnail_key(44)
+        operator.objects["thumbs/44.webp"] = b"replacement"
+
+        with pytest.raises(StorageConfigurationError, match="identity_changed"):
+            backend.delete_owned_unversioned(
+                key,
+                expected_size=5,
+                expected_etag="old-etag",
+            )
+
+        assert backend.read_bytes(key) == b"replacement"
 
     def test_uses_a_stream_writer_when_the_operator_exposes_one(self) -> None:
         operator = _StreamOperator()

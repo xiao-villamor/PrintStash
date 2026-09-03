@@ -70,6 +70,7 @@ import {
   adoptRemoteBackup,
   adoptS3Backup,
   deactivateAdminUser,
+  deleteBackup,
   deleteCollectionPermission,
   deletePrinterPermission,
   downloadBackup,
@@ -491,8 +492,11 @@ export function SettingsPanel() {
   const [backupConnections, setBackupConnections] = useState<StorageConnection[]>([]);
   const [automaticBackupsEnabled, setAutomaticBackupsEnabled] = useState(false);
   const [automaticBackupTimeUtc, setAutomaticBackupTimeUtc] = useState("02:00");
+  const [manualLocalBackupEnabled, setManualLocalBackupEnabled] = useState(true);
+  const [automaticLocalBackupEnabled, setAutomaticLocalBackupEnabled] = useState(true);
   const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
+  const [deleteBackupTarget, setDeleteBackupTarget] = useState<BackupMeta | null>(null);
   const [adoptTarget, setAdoptTarget] = useState<UnownedBackupCandidate | null>(null);
   const [adoptS3Target, setAdoptS3Target] = useState<UnownedS3BackupCandidate | null>(null);
   const [adoptRemoteTarget, setAdoptRemoteTarget] = useState<UnownedRemoteBackupCandidate | null>(
@@ -503,6 +507,7 @@ export function SettingsPanel() {
   const [adoptingRemoteBackup, setAdoptingRemoteBackup] = useState(false);
   const [uploadingBackup, setUploadingBackup] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
+  const [deletingBackup, setDeletingBackup] = useState<string | null>(null);
 
   const [downloadingBackup, setDownloadingBackup] = useState<string | null>(null);
   const [metadataPrefs, setMetadataPrefs] = useState(readMetadataPreferences);
@@ -640,48 +645,59 @@ export function SettingsPanel() {
     }
   }, [activeSection, loadTrash]);
 
-  const loadBackups = useCallback(async () => {
-    if (!user?.is_superuser) {
-      setBackups([]);
-      return;
-    }
-    setBackupsLoading(true);
-    try {
-      const [owned, unowned, unownedS3, unownedRemote, config, connections] =
-        await Promise.allSettled([
-          listBackupSources(),
-          listUnownedLocalBackups(),
-          listUnownedS3Backups(),
-          listUnownedRemoteBackups(),
-          getVaultConfig(),
-          listStorageConnections(),
-        ]);
-      if (owned.status === "rejected") throw owned.reason;
-      setBackups(owned.value);
-      // The discovery endpoint is additive. Older servers may return 404, in
-      // which case owned backups remain fully usable and the candidate panel
-      // simply stays empty.
-      setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
-      setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
-      setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
-      if (config.status === "fulfilled") {
-        setBackupRetentionDays(config.value.backup_retention_days ?? 30);
-        setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
-        setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
+  const loadBackups = useCallback(
+    async (preserve?: BackupMeta) => {
+      if (!user?.is_superuser) {
+        setBackups([]);
+        return;
       }
-      setBackupConnections(
-        connections.status === "fulfilled"
-          ? connections.value.filter(
-              (connection) => connection.purpose === "backup" || connection.purpose === "both",
-            )
-          : [],
-      );
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBackupsLoading(false);
-    }
-  }, [user]);
+      setBackupsLoading(true);
+      try {
+        const [owned, unowned, unownedS3, unownedRemote, config, connections] =
+          await Promise.allSettled([
+            listBackupSources(),
+            listUnownedLocalBackups(),
+            listUnownedS3Backups(),
+            listUnownedRemoteBackups(),
+            getVaultConfig(),
+            listStorageConnections(),
+          ]);
+        if (owned.status === "rejected") throw owned.reason;
+        const refreshedBackups = owned.value;
+        setBackups(
+          preserve &&
+            !refreshedBackups.some((item) => backupSourceKey(item) === backupSourceKey(preserve))
+            ? [preserve, ...refreshedBackups]
+            : refreshedBackups,
+        );
+        // The discovery endpoint is additive. Older servers may return 404, in
+        // which case owned backups remain fully usable and the candidate panel
+        // simply stays empty.
+        setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
+        setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
+        setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
+        if (config.status === "fulfilled") {
+          setBackupRetentionDays(config.value.backup_retention_days ?? 30);
+          setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
+          setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
+          setManualLocalBackupEnabled(config.value.manual_local_backup_enabled ?? true);
+          setAutomaticLocalBackupEnabled(config.value.automatic_local_backup_enabled ?? true);
+        }
+        setBackupConnections(
+          connections.status === "fulfilled"
+            ? connections.value.filter(
+                (connection) => connection.purpose === "backup" || connection.purpose === "both",
+              )
+            : [],
+        );
+      } catch (e) {
+        toast.error(e);
+      } finally {
+        setBackupsLoading(false);
+      }
+    },
+    [user],
+  );
 
   async function confirmAdoptBackup() {
     if (!adoptTarget) return;
@@ -852,10 +868,7 @@ export function SettingsPanel() {
     try {
       const meta = await createBackup();
       const mb = (meta.size_bytes / 1024 / 1024).toFixed(1);
-      setBackups((current) => [
-        meta,
-        ...current.filter((item) => backupSourceKey(item) !== backupSourceKey(meta)),
-      ]);
+      await loadBackups(meta);
       toast.success(`Backup created — ${meta.file_count} files, ${mb} MB`);
     } catch (e) {
       toast.error(e);
@@ -905,12 +918,32 @@ export function SettingsPanel() {
   }
 
   async function saveBackupPolicy() {
+    const manualDestinationSelected =
+      manualLocalBackupEnabled ||
+      backupConnections.some(
+        (connection) => connection.enabled && connection.manual_backup_enabled,
+      );
+    if (!manualDestinationSelected) {
+      toast.error(t("settings.backupManualDestinationRequired"));
+      return;
+    }
+    const automaticDestinationSelected =
+      automaticLocalBackupEnabled ||
+      backupConnections.some(
+        (connection) => connection.enabled && connection.automatic_backup_enabled,
+      );
+    if (automaticBackupsEnabled && !automaticDestinationSelected) {
+      toast.error(t("settings.backupAutomaticDestinationRequired"));
+      return;
+    }
     setBackupPolicyBusy(true);
     try {
       const [config, ...connections] = await Promise.all([
         updateVaultConfig({
           automatic_backups_enabled: automaticBackupsEnabled,
           automatic_backup_time_utc: automaticBackupTimeUtc,
+          manual_local_backup_enabled: manualLocalBackupEnabled,
+          automatic_local_backup_enabled: automaticLocalBackupEnabled,
         }),
         ...backupConnections.map((connection) =>
           updateStorageConnection(connection.id, {
@@ -921,6 +954,8 @@ export function SettingsPanel() {
       ]);
       setAutomaticBackupsEnabled(config.automatic_backups_enabled);
       setAutomaticBackupTimeUtc(config.automatic_backup_time_utc);
+      setManualLocalBackupEnabled(config.manual_local_backup_enabled);
+      setAutomaticLocalBackupEnabled(config.automatic_local_backup_enabled);
       setBackupConnections(connections);
       toast.success(t("settings.backupPolicySaved"));
     } catch (e) {
@@ -956,6 +991,32 @@ export function SettingsPanel() {
       toast.error(e);
     } finally {
       setDownloadingBackup(null);
+    }
+  }
+
+  async function confirmDeleteBackup() {
+    if (!deleteBackupTarget) return;
+    const target = deleteBackupTarget;
+    const sourceKey = backupSourceKey(target);
+    setDeletingBackup(sourceKey);
+    try {
+      await deleteBackup(target.backup_id, target.source_ref);
+      setBackups((current) => current.filter((item) => backupSourceKey(item) !== sourceKey));
+      const deletedKey = target.key;
+      const deletedFilename = deletedKey?.split("/").at(-1);
+      setUnownedBackups((current) =>
+        current.filter((candidate) => candidate.filename !== deletedFilename),
+      );
+      setUnownedS3Backups((current) => current.filter((candidate) => candidate.key !== deletedKey));
+      setUnownedRemoteBackups((current) =>
+        current.filter((candidate) => candidate.key !== deletedKey),
+      );
+      setDeleteBackupTarget(null);
+      toast.success(t("settings.backupDeleteSuccess"));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setDeletingBackup(null);
     }
   }
 
@@ -1514,6 +1575,23 @@ export function SettingsPanel() {
               : t("settings.backupRestoreWarning")
           }
           confirmLabel="Restore"
+        />
+        <ConfirmModal
+          open={deleteBackupTarget !== null}
+          onClose={() => {
+            if (deletingBackup === null) setDeleteBackupTarget(null);
+          }}
+          onConfirm={confirmDeleteBackup}
+          busy={deletingBackup !== null}
+          title={t("settings.backupDeleteConfirmTitle")}
+          description={
+            deleteBackupTarget
+              ? t("settings.backupDeleteConfirmDescription", {
+                  source: restoreSourceDescription(deleteBackupTarget, t),
+                })
+              : ""
+          }
+          confirmLabel={t("settings.backupDeleteAction")}
         />
         <ConfirmModal
           open={adoptTarget !== null}
@@ -2589,18 +2667,18 @@ export function SettingsPanel() {
                           </div>
                           <div className="flex justify-center">
                             <Checkbox
-                              checked
-                              onChange={() => undefined}
+                              checked={manualLocalBackupEnabled}
+                              onChange={setManualLocalBackupEnabled}
                               ariaLabel={t("settings.backupLocalManual")}
-                              disabled
+                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
                             />
                           </div>
                           <div className="flex justify-center">
                             <Checkbox
-                              checked
-                              onChange={() => undefined}
+                              checked={automaticLocalBackupEnabled}
+                              onChange={setAutomaticLocalBackupEnabled}
                               ariaLabel={t("settings.backupLocalAutomatic")}
-                              disabled
+                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
                             />
                           </div>
                         </div>
@@ -2732,7 +2810,7 @@ export function SettingsPanel() {
                   action={
                     <button
                       type="button"
-                      onClick={loadBackups}
+                      onClick={() => void loadBackups()}
                       disabled={!user?.is_superuser || backupsLoading}
                       className={BTN_ICON}
                       title="Refresh backups"
@@ -3010,6 +3088,33 @@ export function SettingsPanel() {
                                 <RotateCcw className="h-3.5 w-3.5" />
                                 Restore
                               </button>
+                              <Button
+                                type="button"
+                                variant="destructive"
+                                size="xs"
+                                onClick={() => setDeleteBackupTarget(backup)}
+                                disabled={
+                                  downloadingBackup !== null ||
+                                  restoringBackup ||
+                                  backingUp ||
+                                  deletingBackup !== null ||
+                                  !backup.source_ref
+                                }
+                                title={
+                                  backup.source_ref
+                                    ? undefined
+                                    : t("settings.backupSourceUnavailable")
+                                }
+                                aria-label={t("settings.backupDeleteAction")}
+                                className="uppercase tracking-wider"
+                              >
+                                {deletingBackup === backupSourceKey(backup) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                )}
+                                {t("settings.backupDeleteAction")}
+                              </Button>
                             </div>
                           </div>
                         ))}

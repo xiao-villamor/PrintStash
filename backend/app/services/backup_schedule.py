@@ -63,6 +63,8 @@ def update_schedule(
     *,
     enabled: bool | None = None,
     time_utc: str | None = None,
+    manual_local_enabled: bool | None = None,
+    automatic_local_enabled: bool | None = None,
 ) -> SystemConfig:
     config = get_or_create(session, commit=False)
     if time_utc is not None:
@@ -70,6 +72,10 @@ def update_schedule(
         config.automatic_backup_time_utc = time_utc
     if enabled is not None:
         config.automatic_backups_enabled = enabled
+    if manual_local_enabled is not None:
+        config.manual_local_backup_enabled = manual_local_enabled
+    if automatic_local_enabled is not None:
+        config.automatic_local_backup_enabled = automatic_local_enabled
     config.updated_at = utcnow()
     session.add(config)
     session.commit()

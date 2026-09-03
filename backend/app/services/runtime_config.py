@@ -874,10 +874,18 @@ def update_backup_schedule(
     *,
     enabled: bool | None = None,
     time_utc: str | None = None,
+    manual_local_enabled: bool | None = None,
+    automatic_local_enabled: bool | None = None,
 ) -> SystemConfig:
     from app.services.backup_schedule import update_schedule
 
-    return update_schedule(session, enabled=enabled, time_utc=time_utc)
+    return update_schedule(
+        session,
+        enabled=enabled,
+        time_utc=time_utc,
+        manual_local_enabled=manual_local_enabled,
+        automatic_local_enabled=automatic_local_enabled,
+    )
 
 
 def notifications_enabled(session: Session) -> bool:
@@ -1080,6 +1088,12 @@ def get_effective_config(session: Session) -> dict:
         ),
         "automatic_backup_last_attempt_at": (
             config.automatic_backup_last_attempt_at if config else None
+        ),
+        "manual_local_backup_enabled": (
+            config.manual_local_backup_enabled if config else True
+        ),
+        "automatic_local_backup_enabled": (
+            config.automatic_local_backup_enabled if config else True
         ),
         "trash_retention_days": int(settings.trash_retention_days),
         "model_thumbnail_width": int(settings.model_thumbnail_width),

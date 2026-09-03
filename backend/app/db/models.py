@@ -1689,6 +1689,14 @@ class SystemConfig(SQLModel, table=True):
         sa_column=Column(String(5), nullable=False, server_default="02:00"),
     )
     automatic_backup_last_attempt_at: Optional[datetime] = None
+    manual_local_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
+    automatic_local_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
     trash_retention_days: Optional[int] = Field(default=None)
 
     # Backup S3 destination (separate from vault S3 — allows local vault + cloud backups)

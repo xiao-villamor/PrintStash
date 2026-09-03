@@ -13031,6 +13031,11 @@
             "title": "Automatic Backups Enabled",
             "type": "boolean"
           },
+          "automatic_local_backup_enabled": {
+            "default": true,
+            "title": "Automatic Local Backup Enabled",
+            "type": "boolean"
+          },
           "backup_retention_days": {
             "default": 30,
             "title": "Backup Retention Days",
@@ -13104,6 +13109,11 @@
           "has_s3_secret_key": {
             "default": false,
             "title": "Has S3 Secret Key",
+            "type": "boolean"
+          },
+          "manual_local_backup_enabled": {
+            "default": true,
+            "title": "Manual Local Backup Enabled",
             "type": "boolean"
           },
           "model_thumbnail_width": {
@@ -13279,6 +13289,17 @@
             ],
             "title": "Automatic Backups Enabled"
           },
+          "automatic_local_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Local Backup Enabled"
+          },
           "backup_retention_days": {
             "anyOf": [
               {
@@ -13380,6 +13401,17 @@
               }
             ],
             "title": "External Libraries Enabled"
+          },
+          "manual_local_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Local Backup Enabled"
           },
           "model_thumbnail_width": {
             "anyOf": [

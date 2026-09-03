@@ -170,6 +170,11 @@ const ERROR_MESSAGES = {
     "Google Drive isn't available in this server image. Upgrade or rebuild the full image, then try again.",
   storage_connection_probe_failed:
     "Couldn't reach the remote storage. Check its credentials and connection settings, then try again.",
+  backup_destination_required: "Select at least one available destination for this backup.",
+  backup_all_destinations_failed:
+    "The backup couldn't be saved to any selected destination. Check each destination and try again.",
+  backup_remote_delete_unverified:
+    "This remote backup changed or couldn't be verified, so it was not deleted.",
   // General
   duplicate_slug: "An item with that name already exists.",
   network_unreachable: "Couldn't reach the server. Check that PrintStash is running and try again.",

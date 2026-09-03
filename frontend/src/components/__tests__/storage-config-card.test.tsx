@@ -180,6 +180,8 @@ function aConfig(over: Partial<VaultConfigRead> = {}): VaultConfigRead {
     automatic_backups_enabled: false,
     automatic_backup_time_utc: "02:00",
     automatic_backup_last_attempt_at: null,
+    manual_local_backup_enabled: true,
+    automatic_local_backup_enabled: true,
     trash_retention_days: 30,
     backup_s3_bucket: "",
     backup_s3_endpoint_url: "",

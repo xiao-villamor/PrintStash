@@ -129,6 +129,44 @@ class TestCreateBackup:
         # A half-written archive would look restorable and is not.
         assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
 
+    def test_reports_a_missing_destination_as_a_conflict(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            backup,
+            "create_backup",
+            lambda: (_ for _ in ()).throw(RuntimeError("backup_destination_required")),
+        )
+
+        response = client.post("/api/v1/backups", headers=admin_headers)
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "backup_destination_required"
+
+    def test_reports_failed_destinations_as_bad_gateway(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            backup,
+            "create_backup",
+            lambda: (_ for _ in ()).throw(
+                RuntimeError("backup_all_destinations_failed")
+            ),
+        )
+
+        response = client.post("/api/v1/backups", headers=admin_headers)
+
+        assert response.status_code == 502, response.text
+        assert response.json()["detail"] == "backup_all_destinations_failed"
+
     def test_rejects_an_unauthenticated_caller(self, client: TestClient) -> None:
         assert client.post("/api/v1/backups").status_code == 401
 
@@ -788,7 +826,7 @@ class TestDeleteBackup:
         # Deleting a blob the vault cannot prove it owns is how another
         # application's data gets destroyed; the service refuses and the router
         # must surface that rather than reporting success.
-        def unverified(_backup_id: str):
+        def unverified(_backup_id: str, **_kwargs: object):
             raise backup.BackupOwnershipError("cannot verify ownership")
 
         monkeypatch.setattr(backup, "delete_backup", unverified)
@@ -812,10 +850,16 @@ class TestDeleteBackup:
     def test_forwards_exact_source_ref(
         self, client: TestClient, admin_headers, a_backup, monkeypatch
     ):
-        observed: dict[str, str | None] = {}
+        observed: dict[str, str | bool | None] = {}
 
-        def delete(_backup_id: str, *, source_ref: str | None = None) -> bool:
+        def delete(
+            _backup_id: str,
+            *,
+            source_ref: str | None = None,
+            allow_unversioned: bool = False,
+        ) -> bool:
             observed["source_ref"] = source_ref
+            observed["allow_unversioned"] = allow_unversioned
             return True
 
         monkeypatch.setattr(backup, "delete_backup", delete)
@@ -826,7 +870,10 @@ class TestDeleteBackup:
         )
 
         assert response.status_code == 200, response.text
-        assert observed == {"source_ref": "exact-source"}
+        assert observed == {
+            "source_ref": "exact-source",
+            "allow_unversioned": True,
+        }
 
     def test_maps_source_identity_conflict_to_http_conflict(
         self, client: TestClient, admin_headers, a_backup, monkeypatch

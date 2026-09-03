@@ -54,6 +54,7 @@ from app.services.backup_destination import (
     RemoteBackupDestination,
     configured_destinations,
     destination_for_ownership,
+    local_destination_enabled,
 )
 from app.services.jobs import registry
 from app.services.storage_backend import (
@@ -885,10 +886,16 @@ def _validate_created_archive_payload(archive_path: Path) -> None:
 def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMeta:
     """Create a full vault backup: DB + all stored files as a tar.gz.
 
-    Always writes locally first. If ``backup_s3_bucket`` is configured,
-    the archive is also uploaded to the S3 bucket.
+    The archive is staged locally while it is built, then published only to
+    the destinations selected for this trigger. At least one publication must
+    succeed; a remote-only backup never leaves a registered local copy.
     """
     _require_database_backup_support()
+    keep_local = local_destination_enabled(trigger)
+    remote_destinations = configured_destinations(trigger)
+    target = _get_backup_s3_target()
+    if not keep_local and target is None and not remote_destinations:
+        raise RuntimeError("backup_destination_required")
     backup_id = uuid.uuid4().hex[:12]
     timestamp = utcnow()
     ts = timestamp.isoformat()
@@ -956,36 +963,62 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                                 raise RuntimeError("backup_blob_size_changed")
                             written_files += 1
             _validate_created_archive_payload(archive_temp)
-            # Reserve and commit the local archive through the ownership ledger
-            # before it becomes listable. A crash leaves a pending reservation
-            # for reconciliation instead of a phantom backup.
-            with get_session_factory().session() as publish_session:
-                local_receipt = publish_file(
-                    publish_session,
-                    LocalStorageBackend(),
-                    str(archive_path),
-                    archive_temp,
-                    object_kind="backup",
-                    move=True,
-                )
-                publish_session.commit()
         except Exception:
             archive_temp.unlink(missing_ok=True)
             logger.exception("backup %s failed while streaming owned blobs", backup_id)
             raise
 
-    final_size = local_receipt.size
-    archive_sha256 = _sha256_path(archive_path)
+    final_size = archive_temp.stat().st_size
+    archive_sha256 = _sha256_path(archive_temp)
+    created_sources: list[BackupMeta] = []
 
-    logger.info(
-        "backup %s created locally: %d files, %.1f MiB",
-        backup_id,
-        written_files,
-        final_size / (1024 * 1024),
-    )
+    if keep_local:
+        try:
+            local_backend = LocalStorageBackend()
+            local_namespace = local_backend.namespace_for(str(archive_path))
+            local_provider_ref = provider_ref_for_backend(
+                local_backend, namespace=local_namespace
+            )
+            with get_session_factory().session() as publish_session:
+                local_receipt = publish_file(
+                    publish_session,
+                    local_backend,
+                    str(archive_path),
+                    archive_temp,
+                    object_kind="backup",
+                )
+                publish_session.commit()
+            created_sources.append(
+                BackupMeta(
+                    id=backup_id,
+                    created_at=ts,
+                    size_bytes=local_receipt.size,
+                    storage_backend=backend_name,
+                    file_count=len(file_entries),
+                    app_version=settings.app_version,
+                    path=str(archive_path),
+                    location="local",
+                    archive_sha256=archive_sha256,
+                    provider_ref=local_provider_ref,
+                    namespace=local_namespace,
+                    source_ref=_source_ref(
+                        location="local",
+                        namespace=local_namespace,
+                        path=str(archive_path),
+                        provider_ref=local_provider_ref,
+                    ),
+                )
+            )
+            logger.info(
+                "backup %s created locally: %d files, %.1f MiB",
+                backup_id,
+                written_files,
+                final_size / (1024 * 1024),
+            )
+        except Exception:
+            logger.warning("backup %s: local publication failed", backup_id, exc_info=True)
 
     # Upload to S3 if configured
-    target = _get_backup_s3_target()
     if target:
         s3 = target.client
         bucket = target.bucket
@@ -1007,7 +1040,7 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                 )
                 reservation_session.add(reservation)
                 reservation_session.commit()
-            with archive_path.open("rb") as source:
+            with archive_temp.open("rb") as source:
                 s3.put_object(
                     Bucket=bucket,
                     Key=s3_key,
@@ -1047,6 +1080,27 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                     provider_ref=target.provider_ref,
                 )
                 commit_session.commit()
+            created_sources.append(
+                BackupMeta(
+                    id=backup_id,
+                    created_at=ts,
+                    size_bytes=final_size,
+                    storage_backend=backend_name,
+                    file_count=len(file_entries),
+                    app_version=settings.app_version,
+                    path=s3_key,
+                    location="s3",
+                    archive_sha256=archive_sha256,
+                    provider_ref=target.provider_ref,
+                    namespace=namespace,
+                    source_ref=_source_ref(
+                        location="s3",
+                        namespace=namespace,
+                        path=s3_key,
+                        provider_ref=target.provider_ref,
+                    ),
+                )
+            )
             logger.info("backup %s uploaded to S3: %s", backup_id, s3_key)
         except Exception:
             logger.warning("backup %s: S3 upload failed", backup_id, exc_info=True)
@@ -1054,20 +1108,41 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
     # Purpose-scoped connections are independent replicas. A failed remote
     # destination never invalidates the already committed local archive, and a
     # failure at one provider does not prevent the remaining replicas.
-    for destination in configured_destinations(trigger):
+    for destination in remote_destinations:
         try:
             remote_key = destination.key(archive_name)
             with get_session_factory().session() as remote_session:
-                publish_file(
+                remote_receipt = publish_file(
                     remote_session,
                     destination.backend,
                     remote_key,
-                    archive_path,
+                    archive_temp,
                     object_kind="backup",
                     sha256=archive_sha256,
                     provider_ref=destination.provider_ref,
                 )
                 remote_session.commit()
+            created_sources.append(
+                BackupMeta(
+                    id=backup_id,
+                    created_at=ts,
+                    size_bytes=remote_receipt.size,
+                    storage_backend=backend_name,
+                    file_count=len(file_entries),
+                    app_version=settings.app_version,
+                    path=remote_key,
+                    location=destination.location,
+                    archive_sha256=archive_sha256,
+                    provider_ref=destination.provider_ref,
+                    namespace=destination.namespace,
+                    source_ref=_source_ref(
+                        location=destination.location,
+                        namespace=destination.namespace,
+                        path=remote_key,
+                        provider_ref=destination.provider_ref,
+                    ),
+                )
+            )
             logger.info(
                 "backup %s replicated through OpenDAL provider %s",
                 backup_id,
@@ -1081,7 +1156,11 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                 exc_info=True,
             )
 
-    # The destination ledger rows were committed immediately after each
+    archive_temp.unlink(missing_ok=True)
+    if not created_sources:
+        raise RuntimeError("backup_all_destinations_failed")
+
+    # Destination ledger rows were committed immediately after each
     # publication. Keep this audit transaction separate from ownership state.
     with get_session_factory().session() as session:
         audit.record(
@@ -1093,35 +1172,12 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                 "size_bytes": final_size,
                 "file_count": written_files,
                 "trigger": trigger.value,
+                "locations": [source.location for source in created_sources],
             },
         )
         session.commit()
 
-    return BackupMeta(
-        id=backup_id,
-        created_at=ts,
-        size_bytes=final_size,
-        storage_backend=backend_name,
-        file_count=len(file_entries),
-        app_version=settings.app_version,
-        path=str(archive_path),
-        location="local",
-        archive_sha256=archive_sha256,
-        provider_ref=provider_ref_for_backend(
-            LocalStorageBackend(),
-            namespace=LocalStorageBackend().namespace_for(str(archive_path)),
-        ),
-        namespace=LocalStorageBackend().namespace_for(str(archive_path)),
-        source_ref=_source_ref(
-            location="local",
-            namespace=LocalStorageBackend().namespace_for(str(archive_path)),
-            path=str(archive_path),
-            provider_ref=provider_ref_for_backend(
-                LocalStorageBackend(),
-                namespace=LocalStorageBackend().namespace_for(str(archive_path)),
-            ),
-        ),
-    )
+    return created_sources[0]
 
 
 # ---------------------------------------------------------------------------
@@ -2994,7 +3050,12 @@ def verify_backup_ownership(ownership_id: int) -> BackupOwnershipVerification:
 # ---------------------------------------------------------------------------
 
 
-def delete_backup(backup_id: str, *, source_ref: str | None = None) -> bool:
+def delete_backup(
+    backup_id: str,
+    *,
+    source_ref: str | None = None,
+    allow_unversioned: bool = False,
+) -> bool:
     """Delete exactly the source authorized by ``source_ref``."""
     meta = get_backup(backup_id, source_ref=source_ref)
     if meta is None:
@@ -3015,7 +3076,9 @@ def delete_backup(backup_id: str, *, source_ref: str | None = None) -> bool:
         elif meta.location.startswith("opendal:"):
             owned = _require_backup_archive_owned(meta)
             destination = destination_for_ownership(owned)
-            if destination is None or not destination.delete_owned(owned):
+            if destination is None or not destination.delete_owned(
+                owned, allow_unversioned=allow_unversioned
+            ):
                 raise BackupOwnershipError("backup_remote_delete_unverified")
             session.delete(owned)
             deleted = True

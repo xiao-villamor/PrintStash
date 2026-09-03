@@ -97,6 +97,8 @@ class TestGetConfig:
         assert body["oidc_enabled"] is False
         assert body["automatic_backups_enabled"] is False
         assert body["automatic_backup_time_utc"] == "02:00"
+        assert body["manual_local_backup_enabled"] is True
+        assert body["automatic_local_backup_enabled"] is True
 
     def test_masks_a_stored_secret(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -227,6 +229,22 @@ class TestUpdateConfig:
         assert response.status_code == 200, response.text
         assert response.json()["automatic_backups_enabled"] is True
         assert response.json()["automatic_backup_time_utc"] == "03:45"
+
+    def test_persists_the_local_backup_selections(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.put(
+            "/api/v1/config",
+            json={
+                "manual_local_backup_enabled": False,
+                "automatic_local_backup_enabled": False,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["manual_local_backup_enabled"] is False
+        assert response.json()["automatic_local_backup_enabled"] is False
 
     @pytest.mark.parametrize(
         "value",

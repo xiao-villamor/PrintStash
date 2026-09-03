@@ -33,6 +33,8 @@ class VaultConfigRead(BaseModel):
     automatic_backups_enabled: bool = False
     automatic_backup_time_utc: str = "02:00"
     automatic_backup_last_attempt_at: datetime | None = None
+    manual_local_backup_enabled: bool = True
+    automatic_local_backup_enabled: bool = True
     trash_retention_days: int = 30
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
@@ -100,6 +102,8 @@ class VaultConfigUpdate(BaseModel):
     automatic_backup_time_utc: Optional[str] = Field(
         default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
     )
+    manual_local_backup_enabled: Optional[bool] = None
+    automatic_local_backup_enabled: Optional[bool] = None
     trash_retention_days: Optional[int] = Field(default=None, ge=-1)
     backup_s3_bucket: Optional[str] = None
     backup_s3_endpoint_url: Optional[str] = None
@@ -380,11 +384,15 @@ def update_config(
     if (
         body.automatic_backups_enabled is not None
         or body.automatic_backup_time_utc is not None
+        or body.manual_local_backup_enabled is not None
+        or body.automatic_local_backup_enabled is not None
     ):
         runtime_config.update_backup_schedule(
             session,
             enabled=body.automatic_backups_enabled,
             time_utc=body.automatic_backup_time_utc,
+            manual_local_enabled=body.manual_local_backup_enabled,
+            automatic_local_enabled=body.automatic_local_backup_enabled,
         )
 
     if body.currency is not None:

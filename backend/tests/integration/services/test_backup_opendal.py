@@ -94,6 +94,8 @@ class TestOpenDalBackupReplication:
             name="Drive copies",
             provider="gdrive",
             provider_ref="drive-profile-ref",
+            location="opendal:gdrive",
+            namespace="gdrive/PrintStash",
             backend=Backend(),
             key=lambda archive_name: f"gdrive/PrintStash/{archive_name}",
         )
@@ -132,6 +134,95 @@ class TestOpenDalBackupReplication:
         meta = backup.create_backup()
 
         assert Path(meta.path).is_file()
+
+    def test_remote_only_backup_leaves_no_local_archive(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        writes: list[tuple[str, bytes]] = []
+
+        class Backend:
+            backend_name = "backup-opendal-gdrive"
+            provider_id = "gdrive"
+            transport = "gdrive"
+
+            def namespace_for(self, key: str) -> str:
+                assert key.startswith("gdrive/PrintStash/")
+                return "gdrive/PrintStash"
+
+            def create_stream(self, source, key: str) -> CreationReceipt:
+                payload = source.read()
+                writes.append((key, payload))
+                return CreationReceipt(
+                    key=key,
+                    size=len(payload),
+                    token="created",
+                    backend=self.backend_name,
+                    namespace="gdrive/PrintStash",
+                    etag="gdrive-etag",
+                )
+
+        destination = SimpleNamespace(
+            name="Remote only",
+            provider="gdrive",
+            provider_ref="drive-profile-ref",
+            location="opendal:gdrive",
+            namespace="gdrive/PrintStash",
+            backend=Backend(),
+            key=lambda archive_name: f"gdrive/PrintStash/{archive_name}",
+        )
+        monkeypatch.setattr(
+            backup, "local_destination_enabled", lambda _trigger: False, raising=False
+        )
+        monkeypatch.setattr(
+            backup, "configured_destinations", lambda _trigger: [destination]
+        )
+
+        meta = backup.create_backup()
+
+        assert meta.location == "opendal:gdrive"
+        assert writes[0][0] == meta.path
+        assert not list(backup_env.backup_dir.glob("*.tar.gz"))
+
+    def test_rejects_a_backup_without_any_destination(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            backup, "local_destination_enabled", lambda _trigger: False, raising=False
+        )
+        monkeypatch.setattr(backup, "configured_destinations", lambda _trigger: [])
+
+        with pytest.raises(RuntimeError, match="backup_destination_required"):
+            backup.create_backup()
+
+        assert not list(backup_env.backup_dir.glob("*.tar.gz"))
+
+    def test_remote_only_failure_leaves_no_local_archive(
+        self,
+        backup_env: BackupEnv,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        failing = SimpleNamespace(
+            name="Offline Drive",
+            provider="gdrive",
+            provider_ref="offline-profile-ref",
+            backend=SimpleNamespace(),
+            key=lambda archive_name: archive_name,
+        )
+        monkeypatch.setattr(
+            backup, "local_destination_enabled", lambda _trigger: False, raising=False
+        )
+        monkeypatch.setattr(
+            backup, "configured_destinations", lambda _trigger: [failing]
+        )
+
+        with pytest.raises(RuntimeError, match="backup_all_destinations_failed"):
+            backup.create_backup()
+
+        assert not list(backup_env.backup_dir.glob("*.tar.gz"))
 
 
 class TestDiscoverUnownedOpenDalBackups:

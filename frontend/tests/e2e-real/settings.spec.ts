@@ -73,15 +73,30 @@ test.describe("settings", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Backup", exact: true }).click();
 
-    await Promise.all([
+    const [created] = await Promise.all([
       page.waitForResponse(
         (r) => r.url().endsWith("/api/v1/backups") && r.request().method() === "POST",
       ),
       page.getByRole("button", { name: "Backup now" }).click(),
     ]);
+    const metadata = await created.json();
 
     // The new backup shows up in the Restore-backup list with a Download action.
-    await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
+    const backupRow = page.locator("div.grid").filter({ hasText: metadata.backup_id }).last();
+    await expect(backupRow.getByRole("button", { name: "Download" })).toBeVisible();
+
+    await backupRow.getByRole("button", { name: "Delete backup" }).click();
+    const deleted = page.waitForResponse(
+      (response) =>
+        response.url().includes(`/api/v1/backups/${metadata.backup_id}?`) &&
+        response.request().method() === "DELETE",
+    );
+    await page
+      .getByRole("dialog", { name: "Delete this backup copy?" })
+      .getByRole("button", { name: "Delete backup" })
+      .click();
+    expect((await deleted).ok()).toBeTruthy();
+    await expect(page.getByText(metadata.backup_id)).toHaveCount(0);
   });
 
   test("configure automatic backups with independent destinations", async ({ page }) => {
@@ -110,7 +125,7 @@ test.describe("settings", () => {
       await expect(page.getByLabel(`Use ${connectionName} for manual backups`)).toBeVisible();
       await page.getByLabel("Enable automatic backups").click();
       await page.getByLabel("Daily time (UTC)").fill("04:30");
-      await page.getByLabel(`Use ${connectionName} for manual backups`).click();
+      await page.getByLabel("Use local storage for manual backups").click();
 
       await Promise.all([
         page.waitForResponse(
@@ -134,11 +149,18 @@ test.describe("settings", () => {
       const saved = connections.find((item: { id: number }) => item.id === connection.id);
       expect(config.automatic_backups_enabled).toBe(true);
       expect(config.automatic_backup_time_utc).toBe("04:30");
-      expect(saved.manual_backup_enabled).toBe(false);
+      expect(config.manual_local_backup_enabled).toBe(false);
+      expect(config.automatic_local_backup_enabled).toBe(true);
+      expect(saved.manual_backup_enabled).toBe(true);
       expect(saved.automatic_backup_enabled).toBe(true);
     } finally {
       await page.request.put("/api/v1/config", {
-        data: { automatic_backups_enabled: false, automatic_backup_time_utc: "02:00" },
+        data: {
+          automatic_backups_enabled: false,
+          automatic_backup_time_utc: "02:00",
+          manual_local_backup_enabled: true,
+          automatic_local_backup_enabled: true,
+        },
       });
       await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
     }

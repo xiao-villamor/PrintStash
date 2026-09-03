@@ -44,6 +44,8 @@ const VAULT_CONFIG = {
   automatic_backups_enabled: false,
   automatic_backup_time_utc: "02:00",
   automatic_backup_last_attempt_at: null,
+  manual_local_backup_enabled: true,
+  automatic_local_backup_enabled: true,
   trash_retention_days: 30,
   model_thumbnail_width: 640,
   currency: "USD",
@@ -848,7 +850,7 @@ describe("SettingsPanel", () => {
       fireEvent.change(screen.getByLabelText("Daily time (UTC)"), {
         target: { value: "04:30" },
       });
-      await user.click(screen.getByLabelText("Use Off-site archive for manual backups"));
+      await user.click(screen.getByLabelText("Use local storage for manual backups"));
       await user.click(screen.getByLabelText("Use Off-site archive for automatic backups"));
       await user.click(screen.getByRole("button", { name: "Save backup settings" }));
 
@@ -859,10 +861,31 @@ describe("SettingsPanel", () => {
           {
             automatic_backups_enabled: true,
             automatic_backup_time_utc: "04:30",
+            manual_local_backup_enabled: false,
+            automatic_local_backup_enabled: true,
           },
-          { manual_backup_enabled: false, automatic_backup_enabled: true },
+          { manual_backup_enabled: true, automatic_backup_enabled: true },
         ]),
       );
+    });
+
+    it("refuses to save a manual policy without a destination", async () => {
+      const user = userEvent.setup();
+      const connection = aStorageConnection({ id: 7, name: "Off-site archive" });
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/storage-connections": json([connection]) },
+      });
+
+      await user.click(await screen.findByLabelText("Use local storage for manual backups"));
+      await user.click(screen.getByLabelText("Use Off-site archive for manual backups"));
+      await user.click(screen.getByRole("button", { name: "Save backup settings" }));
+
+      expect(
+        await screen.findByText("Select at least one manual backup destination."),
+      ).toBeVisible();
+      expect(requestsWithMethod("PUT")).toHaveLength(0);
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
     it("says so when nothing has been backed up", async () => {
@@ -880,6 +903,67 @@ describe("SettingsPanel", () => {
       expect(await screen.findByText("2026-01-01T000000Z")).toBeInTheDocument();
       expect(screen.getByText("Locator: vault-backups · local-source-ref")).toBeInTheDocument();
       expect(requests().some((call) => call.url.endsWith("/api/v1/backups/sources"))).toBe(true);
+    });
+
+    it("deletes the exact backup source after confirmation", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "GET /api/v1/backups/unowned-local": json([
+            {
+              ...BACKUP,
+              filename: "2026-01-01T000000Z.tar.gz",
+              source_ref: undefined,
+            },
+          ]),
+          "DELETE /api/v1/backups/2026-01-01T000000Z": json({
+            backup_id: BACKUP.backup_id,
+            deleted: true,
+          }),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Delete backup" }));
+      const dialog = screen.getByRole("dialog");
+      await user.click(within(dialog).getByRole("button", { name: "Delete backup" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("DELETE").some((call) =>
+            call.url.includes("/backups/2026-01-01T000000Z?source_ref=local-source-ref"),
+          ),
+        ).toBe(true),
+      );
+      expect(screen.queryByText("2026-01-01T000000Z")).toBeNull();
+      expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull();
+    });
+
+    it("keeps a backup visible when deletion fails", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "DELETE /api/v1/backups/2026-01-01T000000Z": json(
+            { detail: "backup_remote_delete_unverified" },
+            409,
+          ),
+        },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Delete backup" }));
+      await user.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Delete backup" }),
+      );
+
+      expect(
+        await screen.findByText(
+          "This remote backup changed or couldn't be verified, so it was not deleted.",
+        ),
+      ).toBeVisible();
+      expect(screen.getByText("2026-01-01T000000Z")).toBeVisible();
     });
 
     it("keeps same-id sources independent for exact downloads", async () => {

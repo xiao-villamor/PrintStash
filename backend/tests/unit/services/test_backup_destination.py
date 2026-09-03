@@ -32,6 +32,7 @@ class _Backend:
         self.payload = payload
         self.info = StorageObjectInfo(size=len(payload), etag="etag")
         self.check_error = check_error
+        self.deleted_keys: list[str] = []
 
     def check(self) -> None:
         if self.check_error is not None:
@@ -56,6 +57,13 @@ class _Backend:
 
     def delete_versioned(self, _key: str, _version: str) -> None:
         raise StorageConfigurationError("conditional_delete_unavailable")
+
+    def delete_owned_unversioned(
+        self, key: str, *, expected_size: int, expected_etag: str | None
+    ) -> None:
+        assert expected_size == len(self.payload)
+        assert expected_etag == "etag"
+        self.deleted_keys.append(key)
 
 
 def _destination(backend: _Backend) -> RemoteBackupDestination:
@@ -117,6 +125,17 @@ def test_unguarded_destination_is_never_deleted_by_retention() -> None:
     backend.info = StorageObjectInfo(size=7, etag="etag", version_id="version")
 
     assert _destination(backend).delete_owned(row) is False
+
+
+class TestDeleteOwned:
+    def test_explicitly_deletes_an_owned_unversioned_backup(self) -> None:
+        row = _row()
+        backend = _Backend()
+
+        deleted = _destination(backend).delete_owned(row, allow_unversioned=True)
+
+        assert deleted is True
+        assert backend.deleted_keys == [row.key]
 
 
 def test_probe_reports_a_remote_connection_failure() -> None:

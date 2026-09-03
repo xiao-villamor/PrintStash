@@ -42,3 +42,25 @@ class TestConfiguredDestinations:
         )
 
         assert [destination.name for destination in destinations] == ["Automatic"]
+
+
+class TestLocalDestinationEnabled:
+    def test_defaults_to_local_for_each_trigger(self) -> None:
+        assert backup_destination.local_destination_enabled(BackupTrigger.MANUAL)
+        assert backup_destination.local_destination_enabled(BackupTrigger.AUTOMATIC)
+
+    def test_reads_manual_selection(self, make_system_config) -> None:
+        make_system_config(
+            manual_local_backup_enabled=False,
+            automatic_local_backup_enabled=True,
+        )
+
+        assert not backup_destination.local_destination_enabled(BackupTrigger.MANUAL)
+
+    def test_reads_automatic_selection(self, make_system_config) -> None:
+        make_system_config(
+            manual_local_backup_enabled=True,
+            automatic_local_backup_enabled=False,
+        )
+
+        assert not backup_destination.local_destination_enabled(BackupTrigger.AUTOMATIC)
