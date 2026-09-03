@@ -409,7 +409,11 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Contents", "Contenido"],
   ["Delete model?", "¿Eliminar modelo?"],
   ["Delete tag?", "¿Eliminar etiqueta?"],
+  ["Delete filament preset?", "¿Eliminar el perfil de filamento?"],
+  ["Delete printer preset?", "¿Eliminar el perfil de impresora?"],
+  ["Delete preset", "Eliminar perfil"],
   ["Model name", "Nombre del modelo"],
+  ["Model name is required.", "El nombre del modelo es obligatorio."],
   ["Created", "Creado"],
   ["Resize details panel", "Cambiar el tamaño del panel de detalles"],
   ["Delete revision?", "¿Eliminar revisión?"],
@@ -1036,6 +1040,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Filament type", "Tipo de filamento"],
   ["Filament brand", "Marca del filamento"],
   ["Filament cost per kg", "Coste del filamento por kg"],
+  ["Cost must be 0 or more.", "El coste debe ser 0 o superior."],
   ["Filament notes", "Notas del filamento"],
   ["Printer preset name", "Nombre del perfil de impresora"],
   ["Printer nozzle diameter", "Diámetro de boquilla de la impresora"],
@@ -2018,6 +2023,15 @@ export function translateUiText(locale: Locale, value: string): string {
   const dynamic = message.match(/^(\d+) models? total$/i)?.[1];
   if (dynamic) return `${leading}${dynamic} modelos en total${trailing}`;
 
+  const shownItems = message.match(/^(\d+) items? shown$/i)?.[1];
+  if (shownItems) return `${leading}${shownItems} elementos mostrados${trailing}`;
+
+  const deletedPreset = message.match(
+    /^“(.+)” will be permanently deleted\. This action cannot be undone\.$/,
+  )?.[1];
+  if (deletedPreset)
+    return `${leading}“${deletedPreset}” se eliminará permanentemente. Esta acción no se puede deshacer.${trailing}`;
+
   const storedObjects = message.match(/^(\d+) stored objects?$/i)?.[1];
   if (storedObjects) return `${leading}${storedObjects} objetos guardados${trailing}`;
 
@@ -2114,8 +2128,10 @@ const DOM_TRANSLATED_ATTRIBUTES = [
  */
 export function DomLocalization() {
   const { locale } = useI18n();
-  const textSources = useRef(new WeakMap<Text, string>());
-  const attributeSources = useRef(new WeakMap<Element, Map<string, string>>());
+  const textSources = useRef(new WeakMap<Text, { source: string; applied: string }>());
+  const attributeSources = useRef(
+    new WeakMap<Element, Map<string, { source: string; applied: string }>>(),
+  );
 
   useEffect(() => {
     const root = document.getElementById("root");
@@ -2126,29 +2142,29 @@ export function DomLocalization() {
       if (!parent || parent.closest("script, style, code, pre, textarea, [contenteditable='true']"))
         return;
       const previous = textSources.current.get(node);
-      const expected = previous === undefined ? undefined : translateUiText(locale, previous);
       const source =
-        previous === undefined || (node.data !== previous && node.data !== expected)
+        previous === undefined || (node.data !== previous.source && node.data !== previous.applied)
           ? node.data
-          : previous;
-      textSources.current.set(node, source);
+          : previous.source;
       const translated = translateUiText(locale, source);
+      textSources.current.set(node, { source, applied: translated });
       if (node.data !== translated) node.data = translated;
     }
 
     function localizeAttribute(element: Element, name: string) {
       const current = element.getAttribute(name);
       if (current === null) return;
-      const sources = attributeSources.current.get(element) ?? new Map<string, string>();
+      const sources =
+        attributeSources.current.get(element) ??
+        new Map<string, { source: string; applied: string }>();
       const previous = sources.get(name);
-      const expected = previous === undefined ? undefined : translateUiText(locale, previous);
       const source =
-        previous === undefined || (current !== previous && current !== expected)
+        previous === undefined || (current !== previous.source && current !== previous.applied)
           ? current
-          : previous;
-      sources.set(name, source);
-      attributeSources.current.set(element, sources);
+          : previous.source;
       const translated = translateUiText(locale, source);
+      sources.set(name, { source, applied: translated });
+      attributeSources.current.set(element, sources);
       if (current !== translated) element.setAttribute(name, translated);
     }
 

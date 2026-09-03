@@ -816,6 +816,20 @@ describe("SettingsPanel", () => {
       expect(update).toEqual({ backup_retention_days: 14 });
     });
 
+    it.each([
+      { label: "empty", value: "" },
+      { label: "negative", value: "-1" },
+      { label: "above the maximum", value: "366" },
+    ])("refuses $label backup retention", async ({ value }) => {
+      renderSettings({ at: "/settings?section=backup" });
+      const input = await screen.findByLabelText("Retention (days)");
+
+      fireEvent.change(input, { target: { value } });
+
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(screen.getByText("Retention must be between 0 and 365 days.")).toBeVisible();
+    });
+
     it("saves the complete automatic-backup policy", async () => {
       const user = userEvent.setup();
       const connection = aStorageConnection({
@@ -938,6 +952,40 @@ describe("SettingsPanel", () => {
       );
       expect(screen.queryByText("2026-01-01T000000Z")).toBeNull();
       expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull();
+    });
+
+    it("describes deletion without restore consequences", async () => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Delete backup" }));
+
+      const dialog = screen.getByRole("dialog");
+      expect(dialog).toHaveTextContent("Delete this backup copy?");
+      expect(dialog).not.toHaveTextContent(
+        "This replaces the current database and stored files with the selected backup.",
+      );
+    });
+
+    it("labels an OpenDAL backup with its remote destination", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([
+            {
+              ...BACKUP,
+              location: "opendal:gdrive",
+              provider_ref: "gdrive",
+              source_ref: "remote-source-ref",
+            },
+          ]),
+        },
+      });
+
+      expect(await screen.findByText(/1\.0 MB · opendal:gdrive/i)).toBeVisible();
     });
 
     it("keeps a backup visible when deletion fails", async () => {

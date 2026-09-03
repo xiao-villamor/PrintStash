@@ -323,6 +323,16 @@ describe("ModelBrowser", () => {
   });
 
   describe("collection navigation", () => {
+    it("opens a collection from its grid card", async () => {
+      const user = userEvent.setup();
+      renderVault({ collections: [aCollection()] });
+
+      const main = await screen.findByRole("main");
+      await user.click(within(main).getByRole("button", { name: /Parts/ }));
+
+      expect(await screen.findByRole("heading", { name: "Parts" })).toBeVisible();
+    });
+
     it("shows multipart sets in the collection tree", async () => {
       renderVault({ multipartModels: [aMultipartSet()] });
 

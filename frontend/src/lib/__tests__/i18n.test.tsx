@@ -98,6 +98,20 @@ describe("I18nProvider", () => {
     );
   });
 
+  it("localizes the vault result count", () => {
+    localStorage.setItem("printstash.locale", "es");
+
+    render(
+      <I18nProvider>
+        <Localized>
+          <p>0 items shown</p>
+        </Localized>
+      </I18nProvider>,
+    );
+
+    expect(screen.getByText("0 elementos mostrados")).toBeInTheDocument();
+  });
+
   it("translates Library sources terminology into Spanish", () => {
     localStorage.setItem("printstash.locale", "es");
     render(
@@ -155,6 +169,34 @@ describe("I18nProvider", () => {
     await waitFor(() => expect(screen.getByText("No hay copias disponibles.")).toBeInTheDocument());
     expect(screen.getByText("My Models collection")).toBeInTheDocument();
     expect(screen.getByTitle("No hay copias disponibles.")).toBeInTheDocument();
+    container.remove();
+  });
+
+  it("restores legacy labels immediately when switching back to English", async () => {
+    localStorage.setItem("printstash.locale", "en");
+    const container = document.createElement("div");
+    container.id = "root";
+    document.body.append(container);
+
+    render(
+      <I18nProvider>
+        <LocaleToggle />
+        <button aria-label="Search models">Search models</button>
+        <DomLocalization />
+      </I18nProvider>,
+      { container },
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /Language/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Buscar modelos" })).toBeInTheDocument(),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Idioma/ }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Search models" })).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Buscar modelos" })).toBeNull();
     container.remove();
   });
 });

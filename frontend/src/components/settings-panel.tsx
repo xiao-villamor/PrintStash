@@ -297,13 +297,23 @@ function backupSourceKey(backup: BackupMeta): string {
   );
 }
 
-function restoreSourceDescription(backup: BackupMeta, t: ReturnType<typeof useI18n>["t"]): string {
+function parseBackupRetentionDays(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const days = Number(value);
+  return days <= 365 ? days : null;
+}
+
+function backupSourceDescription(backup: BackupMeta, t: ReturnType<typeof useI18n>["t"]): string {
   const source = backup.source_ref ?? "legacy source identity";
   const namespace = backup.namespace ? ` · namespace ${backup.namespace}` : "";
   const hash = backup.archive_sha256 ? ` · SHA-256 ${backup.archive_sha256.slice(0, 16)}…` : "";
-  return `${t("settings.backupRestoreWarning")} ${t("settings.backupExactSource", {
+  return t("settings.backupExactSource", {
     source: `${backup.location} · ${source}${namespace}${hash}`,
-  })}`;
+  });
+}
+
+function restoreSourceDescription(backup: BackupMeta, t: ReturnType<typeof useI18n>["t"]): string {
+  return `${t("settings.backupRestoreWarning")} ${backupSourceDescription(backup, t)}`;
 }
 
 function shortOpaque(value: string | null | undefined): string {
@@ -487,7 +497,8 @@ export function SettingsPanel() {
     [],
   );
   const [backupsLoading, setBackupsLoading] = useState(false);
-  const [backupRetentionDays, setBackupRetentionDays] = useState(30);
+  const [backupRetentionDays, setBackupRetentionDays] = useState("30");
+  const parsedBackupRetentionDays = parseBackupRetentionDays(backupRetentionDays);
   const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
   const [backupConnections, setBackupConnections] = useState<StorageConnection[]>([]);
   const [automaticBackupsEnabled, setAutomaticBackupsEnabled] = useState(false);
@@ -677,7 +688,7 @@ export function SettingsPanel() {
         setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
         setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
         if (config.status === "fulfilled") {
-          setBackupRetentionDays(config.value.backup_retention_days ?? 30);
+          setBackupRetentionDays(String(config.value.backup_retention_days ?? 30));
           setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
           setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
           setManualLocalBackupEnabled(config.value.manual_local_backup_enabled ?? true);
@@ -894,9 +905,10 @@ export function SettingsPanel() {
   }
 
   async function saveBackupRetention() {
+    if (parsedBackupRetentionDays === null) return;
     setBackupRetentionBusy(true);
     try {
-      await updateVaultConfig({ backup_retention_days: backupRetentionDays });
+      await updateVaultConfig({ backup_retention_days: parsedBackupRetentionDays });
       toast.success(t("settings.backupRetentionSaved"));
     } catch (e) {
       toast.error(e);
@@ -1587,7 +1599,7 @@ export function SettingsPanel() {
           description={
             deleteBackupTarget
               ? t("settings.backupDeleteConfirmDescription", {
-                  source: restoreSourceDescription(deleteBackupTarget, t),
+                  source: backupSourceDescription(deleteBackupTarget, t),
                 })
               : ""
           }
@@ -2566,7 +2578,11 @@ export function SettingsPanel() {
                     <button
                       type="button"
                       onClick={saveBackupRetention}
-                      disabled={!user?.is_superuser || backupRetentionBusy}
+                      disabled={
+                        !user?.is_superuser ||
+                        backupRetentionBusy ||
+                        parsedBackupRetentionDays === null
+                      }
                       className={BTN_PRIMARY}
                     >
                       {backupRetentionBusy ? (
@@ -2587,10 +2603,23 @@ export function SettingsPanel() {
                         max={365}
                         value={backupRetentionDays}
                         disabled={!user?.is_superuser || backupRetentionBusy}
-                        onChange={(event) => setBackupRetentionDays(Number(event.target.value))}
+                        onChange={(event) => setBackupRetentionDays(event.target.value)}
+                        aria-invalid={parsedBackupRetentionDays === null}
+                        aria-describedby={
+                          parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
+                        }
                         className={cn(inputClasses, "mt-1.5 w-32 font-mono")}
                       />
                     </label>
+                    {parsedBackupRetentionDays === null && (
+                      <p
+                        id="backup-retention-error"
+                        role="alert"
+                        className="mt-2 text-xs text-destructive"
+                      >
+                        {t("settings.backupRetentionError")}
+                      </p>
+                    )}
                   </div>
                 </SettingsCard>
                 <SettingsCard
@@ -3042,7 +3071,7 @@ export function SettingsPanel() {
                               )}
                               <p className="mt-1 text-xs text-muted-foreground">
                                 {backup.file_count} files · {formatBytes(backup.size_bytes)} ·{" "}
-                                {backup.storage_backend}
+                                {backup.location}
                               </p>
                             </div>
                             <div className="flex flex-wrap gap-2 lg:justify-end">

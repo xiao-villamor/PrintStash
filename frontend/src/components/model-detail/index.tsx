@@ -307,6 +307,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   async function saveEdit() {
+    if (!editName.trim()) return;
     setSaving(true);
     try {
       const updated = await updateModel(model.id, {
@@ -512,6 +513,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <input
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
+                  aria-invalid={!editName.trim()}
+                  aria-describedby={!editName.trim() ? "model-name-error" : undefined}
                   className="w-full bg-surface text-on-surface font-mono text-lg border border-outline-variant rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   placeholder="Model name"
                 />
@@ -527,6 +530,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 {gcodeFiles.length} G-code revision{gcodeFiles.length === 1 ? "" : "s"} · Last
                 updated {timeAgo(model.updated_at)}
               </span>
+              {editing && !editName.trim() && (
+                <p id="model-name-error" role="alert" className="mt-1 text-xs text-destructive">
+                  Model name is required.
+                </p>
+              )}
               {!editing && (recommendedGcode || meta?.material_type || meta?.printer_model) && (
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                   {recommendedGcode && (
@@ -562,7 +570,7 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <Button variant="outline" size="sm" onClick={cancelEdit}>
                   Cancel
                 </Button>
-                <Button size="sm" onClick={saveEdit} loading={saving}>
+                <Button size="sm" onClick={saveEdit} loading={saving} disabled={!editName.trim()}>
                   {!saving && <Check className="h-4 w-4" />} {saving ? "Saving…" : "Save"}
                 </Button>
               </>

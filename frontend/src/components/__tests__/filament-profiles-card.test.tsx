@@ -19,7 +19,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -231,7 +231,7 @@ describe("FilamentProfilesCard", () => {
       expect(requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
-    it("deletes a preset the user removes", async () => {
+    it("asks before deleting a filament preset", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({
         routes: { "DELETE /api/v1/filament-profiles/1": json(null, 204) },
@@ -240,11 +240,8 @@ describe("FilamentProfilesCard", () => {
 
       await user.click(screen.getByRole("button", { name: /Delete filament preset/ }));
 
-      await waitFor(() =>
-        expect(
-          requestsWithMethod("DELETE").some((call) => call.url.includes("filament-profiles/1")),
-        ).toBe(true),
-      );
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+      expect(screen.getByRole("dialog", { name: "Delete filament preset?" })).toBeInTheDocument();
     });
   });
 
@@ -346,6 +343,12 @@ describe("FilamentProfilesCard", () => {
       await screen.findByText("Filament presets");
 
       await user.click(screen.getByRole("button", { name: "Delete filament preset Everyday PLA" }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Delete filament preset?" })).getByRole(
+          "button",
+          { name: "Delete preset" },
+        ),
+      );
 
       await waitFor(() =>
         expect(
@@ -364,6 +367,11 @@ describe("FilamentProfilesCard", () => {
 
       await user.click(
         screen.getByRole("button", { name: "Delete printer preset Voron 2.4 — 0.4 mm" }),
+      );
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Delete printer preset?" })).getByRole("button", {
+          name: "Delete preset",
+        }),
       );
 
       await waitFor(() =>
@@ -385,6 +393,12 @@ describe("FilamentProfilesCard", () => {
       await screen.findByText("Filament presets");
 
       await user.click(screen.getByRole("button", { name: "Delete filament preset Everyday PLA" }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Delete filament preset?" })).getByRole(
+          "button",
+          { name: "Delete preset" },
+        ),
+      );
 
       expect(await screen.findByText("Profile in use.")).toBeInTheDocument();
     });
@@ -506,6 +520,20 @@ describe("FilamentProfilesCard", () => {
       await user.type(cost, "cheap");
       await user.click(screen.getByText("Filament presets"));
 
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+
+    it("refuses a negative filament cost visibly", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderCard();
+      const cost = await screen.findByLabelText("Filament cost per kg 1");
+
+      await user.clear(cost);
+      await user.type(cost, "-1");
+      await user.click(screen.getByText("Filament presets"));
+
+      expect(await screen.findByText("Cost must be 0 or more.")).toBeVisible();
+      expect(cost).toHaveAttribute("aria-invalid", "true");
       expect(requestsWithMethod("PATCH")).toHaveLength(0);
     });
   });

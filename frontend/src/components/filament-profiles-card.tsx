@@ -30,6 +30,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,6 +52,12 @@ type PrinterEdit = {
   model: string;
   nozzle: string;
   notes: string;
+};
+
+type DeletePresetTarget = {
+  kind: "filament" | "printer";
+  id: number;
+  name: string;
 };
 
 const compactInputClass = "h-9 text-sm";
@@ -165,6 +172,11 @@ export function FilamentProfilesCard() {
   const [error, setError] = useState<string | null>(null);
   // Per-row auto-save indicator, keyed "f{id}" / "p{id}".
   const [rowStatus, setRowStatus] = useState<Record<string, "saving" | "saved">>({});
+  const [filamentValidationErrors, setFilamentValidationErrors] = useState<Record<number, string>>(
+    {},
+  );
+  const [deleteTarget, setDeleteTarget] = useState<DeletePresetTarget | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   // Spoolman sync: when enabled, presets can be imported/refreshed from Spoolman
   // (the source of truth). Synced presets are read-only here.
@@ -213,6 +225,12 @@ export function FilamentProfilesCard() {
         ...patch,
       },
     }));
+    setFilamentValidationErrors((current) => {
+      if (!(id in current)) return current;
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
   }
 
   function updatePrinterEdit(id: number, patch: Partial<PrinterEdit>) {
@@ -308,9 +326,19 @@ export function FilamentProfilesCard() {
     if (!filamentDirty(profile, edit) || !edit.name.trim()) return;
     const parsedCost = parseOptionalNumber(edit.cost);
     if (parsedCost !== null && Number.isNaN(parsedCost)) {
+      setFilamentValidationErrors((current) => ({
+        ...current,
+        [profile.id]: "Cost must be 0 or more.",
+      }));
       toast.error("Invalid filament cost");
       return;
     }
+    setFilamentValidationErrors((current) => {
+      if (!(profile.id in current)) return current;
+      const next = { ...current };
+      delete next[profile.id];
+      return next;
+    });
     const key = `f${profile.id}`;
     setRowStatus((s) => ({ ...s, [key]: "saving" }));
     const payload = {
@@ -333,18 +361,28 @@ export function FilamentProfilesCard() {
     }
   }
 
-  async function handleDeleteFilament(id: number) {
+  async function confirmDeletePreset() {
+    if (!deleteTarget) return;
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
+    setDeleteBusy(true);
     try {
-      await deleteFilamentProfile(id);
-      toast.success("Filament preset removed");
-      refresh();
+      if (deleteTarget.kind === "filament") {
+        await deleteFilamentProfile(deleteTarget.id);
+        toast.success("Filament preset removed");
+      } else {
+        await deletePrinterProfile(deleteTarget.id);
+        toast.success("Printer preset removed");
+      }
+      setDeleteTarget(null);
+      await refresh();
     } catch (e: any) {
       setError(e.message);
       toast.error(e);
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -410,27 +448,29 @@ export function FilamentProfilesCard() {
     }
   }
 
-  async function handleDeletePrinter(id: number) {
-    if (!auth.isAuthenticated) {
-      auth.showAuthRequiredToast();
-      return;
-    }
-    try {
-      await deletePrinterProfile(id);
-      toast.success("Printer preset removed");
-      refresh();
-    } catch (e: any) {
-      setError(e.message);
-      toast.error(e);
-    }
-  }
-
   const tabClass =
     "flex min-w-32 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <Localized>
       <div className="animate-panel-in space-y-4">
+        <ConfirmModal
+          open={deleteTarget !== null}
+          onClose={() => {
+            if (!deleteBusy) setDeleteTarget(null);
+          }}
+          onConfirm={confirmDeletePreset}
+          busy={deleteBusy}
+          title={
+            deleteTarget?.kind === "printer" ? "Delete printer preset?" : "Delete filament preset?"
+          }
+          description={
+            deleteTarget
+              ? `“${deleteTarget.name}” will be permanently deleted. This action cannot be undone.`
+              : "This preset will be permanently deleted."
+          }
+          confirmLabel="Delete preset"
+        />
         {error && (
           <div
             role="alert"
@@ -698,9 +738,24 @@ export function FilamentProfilesCard() {
                               disabled={locked}
                               inputMode="decimal"
                               aria-label={`Filament cost per kg ${profile.id}`}
+                              aria-invalid={Boolean(filamentValidationErrors[profile.id])}
+                              aria-describedby={
+                                filamentValidationErrors[profile.id]
+                                  ? `filament-cost-error-${profile.id}`
+                                  : undefined
+                              }
                               placeholder="0.00"
                               className={compactInputClass}
                             />
+                            {filamentValidationErrors[profile.id] && (
+                              <span
+                                id={`filament-cost-error-${profile.id}`}
+                                role="alert"
+                                className="mt-1 block text-xs text-destructive"
+                              >
+                                {filamentValidationErrors[profile.id]}
+                              </span>
+                            )}
                           </label>
                           <label>
                             <RowLabel>Notes</RowLabel>
@@ -725,7 +780,13 @@ export function FilamentProfilesCard() {
                                   type="button"
                                   variant="ghost"
                                   size="icon-sm"
-                                  onClick={() => handleDeleteFilament(profile.id)}
+                                  onClick={() =>
+                                    setDeleteTarget({
+                                      kind: "filament",
+                                      id: profile.id,
+                                      name: edit.name,
+                                    })
+                                  }
                                   disabled={!auth.isAuthenticated}
                                   aria-label={`Delete filament preset ${edit.name}`}
                                   title="Delete"
@@ -928,7 +989,13 @@ export function FilamentProfilesCard() {
                               type="button"
                               variant="ghost"
                               size="icon-sm"
-                              onClick={() => handleDeletePrinter(profile.id)}
+                              onClick={() =>
+                                setDeleteTarget({
+                                  kind: "printer",
+                                  id: profile.id,
+                                  name: edit.name,
+                                })
+                              }
                               disabled={!auth.isAuthenticated}
                               aria-label={`Delete printer preset ${edit.name}`}
                               title="Delete"

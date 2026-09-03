@@ -179,6 +179,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Exploratory-QA fixes now keep live locale changes consistent, translate the
+  library result count, validate Model names, backup retention, and filament
+  costs visibly, identify remote backup destinations accurately, keep delete
+  and restore warnings distinct, and confirm preset deletion before removing
+  it.
 - Remote-only backups now restore archives containing both Artifact data and
   generated thumbnails, and missing rebuildable remote derivatives no longer
   abort backup creation with a provider-specific `NotFound` error.

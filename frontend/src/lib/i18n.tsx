@@ -324,6 +324,7 @@ const messages = {
     "settings.backupRetentionLabel": "Retention (days)",
     "settings.backupRetentionSave": "Save retention",
     "settings.backupRetentionSaved": "Backup retention updated.",
+    "settings.backupRetentionError": "Retention must be between 0 and 365 days.",
     "settings.backupPolicyTitle": "Backup destinations and schedule",
     "settings.backupPolicyDescription":
       "Choose local and remote destinations independently for manual and automatic backups.",
@@ -826,6 +827,7 @@ const messages = {
     "settings.backupRetentionLabel": "Retención (días)",
     "settings.backupRetentionSave": "Guardar retención",
     "settings.backupRetentionSaved": "Retención de copias actualizada.",
+    "settings.backupRetentionError": "La retención debe estar entre 0 y 365 días.",
     "settings.backupPolicyTitle": "Destinos y programación de copias",
     "settings.backupPolicyDescription":
       "Elige destinos locales y remotos distintos para las copias manuales y automáticas.",

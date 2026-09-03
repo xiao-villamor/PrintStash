@@ -295,6 +295,19 @@ describe("ModelDetail", () => {
       );
     });
 
+    it("refuses an empty model name", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderDetail();
+      await openEdit(user);
+
+      await user.clear(screen.getByPlaceholderText("Model name"));
+
+      expect(screen.getByPlaceholderText("Model name")).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByText("Model name is required.")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+
     it("shows the saved model without a reload", async () => {
       // The page owns the model it was handed, so a save that only reaches the
       // server leaves the user looking at the old values.
