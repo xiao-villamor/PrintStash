@@ -211,6 +211,14 @@ class TestOpenDALStorageBackend:
             == "vault/data/multipart-covers/12/cover.webp"
         )
 
+    def test_missing_remote_object_raises_file_not_found(self) -> None:
+        backend = storage_opendal.OpenDALStorageBackend(
+            _spec(), operator=_MemoryOperator()
+        )
+
+        with pytest.raises(FileNotFoundError, match="vault/data/missing.stl"):
+            backend.stat_size("vault/data/missing.stl")
+
     @pytest.mark.parametrize(
         "key",
         [

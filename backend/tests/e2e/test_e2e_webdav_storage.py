@@ -81,6 +81,7 @@ async def _await_job(api, headers: dict[str, str], job_id: str) -> dict:
 
 @pytest.mark.asyncio
 class TestArtifactUpload:
+    @pytest.mark.critical
     async def test_artifact_upload_is_committed_through_webdav(
         self, api, tmp_path: Path, e2e_db, webdav_endpoint: str
     ) -> None:

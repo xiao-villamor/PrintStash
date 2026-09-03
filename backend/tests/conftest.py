@@ -408,7 +408,7 @@ def backup_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     In the root conftest rather than `integration/` because the unit backup tests
     need it too — that is why `unit/services/test_backup.py` was importing the
-    fixture out of `integration/services/test_backup.py`, a coupling that made a
+    fixture out of `integration/services/backup/test_core.py`, a coupling that made a
     unit test fail to collect whenever the integration file was edited.
     """
     from tests.integration._backup_harness import build_backup_env

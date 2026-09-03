@@ -121,7 +121,7 @@ class TestMultipartModels:
 
         assert response.status_code == 422, response.text
 
-    def test_uploads_and_serves_a_private_cover_from_the_users_computer(
+    def test_uploaded_private_cover_is_served_as_webp(
         self, client, auth_headers
     ) -> None:
         created = client.post(

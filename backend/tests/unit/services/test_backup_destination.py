@@ -93,41 +93,39 @@ def _row(payload: bytes = b"archive") -> OwnedStorageObject:
     )
 
 
-def test_download_requires_identity_and_digest(tmp_path: Path) -> None:
-    destination = _destination(_Backend())
-    output = tmp_path / "backup.tar.gz"
+class TestDownloadOwned:
+    def test_requires_verified_ownership(self, tmp_path: Path) -> None:
+        destination = _destination(_Backend())
+        output = tmp_path / "backup.tar.gz"
 
-    destination.download_owned(_row(), output)
+        destination.download_owned(_row(), output)
 
-    assert output.read_bytes() == b"archive"
+        assert output.read_bytes() == b"archive"
 
+    def test_rejects_changed_remote_identity(self, tmp_path: Path) -> None:
+        backend = _Backend()
+        backend.info = StorageObjectInfo(size=7, etag="replacement")
 
-def test_download_rejects_changed_remote_identity(tmp_path: Path) -> None:
-    backend = _Backend()
-    backend.info = StorageObjectInfo(size=7, etag="replacement")
+        with pytest.raises(BackupDestinationError, match="identity_mismatch"):
+            _destination(backend).download_owned(_row(), tmp_path / "backup.tar.gz")
 
-    with pytest.raises(BackupDestinationError, match="identity_mismatch"):
-        _destination(backend).download_owned(_row(), tmp_path / "backup.tar.gz")
+    def test_requires_a_persisted_content_hash(self, tmp_path: Path) -> None:
+        row = _row()
+        row.sha256 = None
 
-
-def test_download_requires_a_persisted_content_hash(tmp_path: Path) -> None:
-    row = _row()
-    row.sha256 = None
-
-    with pytest.raises(BackupDestinationError, match="ownership_unverified"):
-        _destination(_Backend()).download_owned(row, tmp_path / "backup.tar.gz")
-
-
-def test_unguarded_destination_is_never_deleted_by_retention() -> None:
-    row = _row()
-    row.version_id = "version"
-    backend = _Backend()
-    backend.info = StorageObjectInfo(size=7, etag="etag", version_id="version")
-
-    assert _destination(backend).delete_owned(row) is False
+        with pytest.raises(BackupDestinationError, match="ownership_unverified"):
+            _destination(_Backend()).download_owned(row, tmp_path / "backup.tar.gz")
 
 
 class TestDeleteOwned:
+    def test_unguarded_destination_is_never_deleted_by_retention(self) -> None:
+        row = _row()
+        row.version_id = "version"
+        backend = _Backend()
+        backend.info = StorageObjectInfo(size=7, etag="etag", version_id="version")
+
+        assert _destination(backend).delete_owned(row) is False
+
     def test_explicitly_deletes_an_owned_unversioned_backup(self) -> None:
         row = _row()
         backend = _Backend()
@@ -138,105 +136,111 @@ class TestDeleteOwned:
         assert backend.deleted_keys == [row.key]
 
 
-def test_probe_reports_a_remote_connection_failure() -> None:
-    destination = _destination(_Backend(check_error=RuntimeError("oauth rejected")))
+class TestProbe:
+    def test_reports_a_remote_connection_failure(self) -> None:
+        destination = _destination(_Backend(check_error=RuntimeError("oauth rejected")))
 
-    with pytest.raises(BackupDestinationError, match="storage_connection_probe_failed"):
-        destination.probe()
+        with pytest.raises(
+            BackupDestinationError, match="storage_connection_probe_failed"
+        ):
+            destination.probe()
 
 
-def test_destination_identity_is_bound_to_the_saved_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        backup_destination,
-        "OpenDALStorageBackend",
-        lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
-    )
-    monkeypatch.setattr(
-        backup_destination,
-        "provider_ref_for_backend",
-        lambda _backend, *, namespace: f"transport:{namespace}",
-    )
+class TestDestinationFromConnection:
+    def test_identity_is_bound_to_the_saved_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            backup_destination,
+            "OpenDALStorageBackend",
+            lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
+        )
+        monkeypatch.setattr(
+            backup_destination,
+            "provider_ref_for_backend",
+            lambda _backend, *, namespace: f"transport:{namespace}",
+        )
 
-    def connection(connection_id: int) -> StorageConnection:
-        return StorageConnection(
-            id=connection_id,
-            name=f"Drive {connection_id}",
+        def connection(connection_id: int) -> StorageConnection:
+            return StorageConnection(
+                id=connection_id,
+                name=f"Drive {connection_id}",
+                kind=LibrarySourceKind.GDRIVE,
+                purpose=StorageConnectionPurpose.BACKUP,
+                config_json=json.dumps(
+                    {"client_id": "client", "root": "PrintStash"}
+                ),
+                secret_json=json.dumps(
+                    {"client_secret": "secret", "refresh_token": "refresh"}
+                ),
+            )
+
+        first = backup_destination.destination_from_connection(connection(1))
+        second = backup_destination.destination_from_connection(connection(2))
+
+        assert first.provider_ref != second.provider_ref
+        assert len(first.provider_ref) == 64
+
+    def test_accepts_a_shared_connection(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            backup_destination,
+            "OpenDALStorageBackend",
+            lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
+        )
+        monkeypatch.setattr(
+            backup_destination,
+            "provider_ref_for_backend",
+            lambda _backend, *, namespace: f"transport:{namespace}",
+        )
+        connection = StorageConnection(
+            id=9,
+            name="Shared Drive",
             kind=LibrarySourceKind.GDRIVE,
-            purpose=StorageConnectionPurpose.BACKUP,
+            purpose=StorageConnectionPurpose.BOTH,
             config_json=json.dumps({"client_id": "client", "root": "PrintStash"}),
             secret_json=json.dumps(
                 {"client_secret": "secret", "refresh_token": "refresh"}
             ),
         )
 
-    first = backup_destination.destination_from_connection(connection(1))
-    second = backup_destination.destination_from_connection(connection(2))
+        destination = backup_destination.destination_from_connection(connection)
 
-    assert first.provider_ref != second.provider_ref
-    assert len(first.provider_ref) == 64
+        assert destination.connection_id == 9
 
 
-def test_shared_connection_is_accepted_as_a_backup_destination(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        backup_destination,
-        "OpenDALStorageBackend",
-        lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
-    )
-    monkeypatch.setattr(
-        backup_destination,
-        "provider_ref_for_backend",
-        lambda _backend, *, namespace: f"transport:{namespace}",
-    )
-    connection = StorageConnection(
-        id=9,
-        name="Shared Drive",
-        kind=LibrarySourceKind.GDRIVE,
-        purpose=StorageConnectionPurpose.BOTH,
-        config_json=json.dumps({"client_id": "client", "root": "PrintStash"}),
-        secret_json=json.dumps({"client_secret": "secret", "refresh_token": "refresh"}),
-    )
+class TestConfiguredDestinations:
+    def test_one_invalid_profile_does_not_hide_other_destinations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rows = [
+            StorageConnection(
+                id=1,
+                name="Broken",
+                kind=LibrarySourceKind.GDRIVE,
+                purpose=StorageConnectionPurpose.BACKUP,
+            ),
+            StorageConnection(
+                id=2,
+                name="Working",
+                kind=LibrarySourceKind.GDRIVE,
+                purpose=StorageConnectionPurpose.BACKUP,
+            ),
+        ]
 
-    destination = backup_destination.destination_from_connection(connection)
+        class Factory:
+            @contextmanager
+            def scoped_session(self):
+                result = SimpleNamespace(all=lambda: rows)
+                yield SimpleNamespace(exec=lambda _statement: result)
 
-    assert destination.connection_id == 9
+        working = object()
 
+        def build(row: StorageConnection):
+            if row.id == 1:
+                raise BackupDestinationError("invalid")
+            return working
 
-def test_one_invalid_profile_does_not_hide_other_backup_destinations(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    rows = [
-        StorageConnection(
-            id=1,
-            name="Broken",
-            kind=LibrarySourceKind.GDRIVE,
-            purpose=StorageConnectionPurpose.BACKUP,
-        ),
-        StorageConnection(
-            id=2,
-            name="Working",
-            kind=LibrarySourceKind.GDRIVE,
-            purpose=StorageConnectionPurpose.BACKUP,
-        ),
-    ]
+        monkeypatch.setattr(backup_destination, "get_session_factory", Factory)
+        monkeypatch.setattr(backup_destination, "destination_from_connection", build)
 
-    class Factory:
-        @contextmanager
-        def scoped_session(self):
-            result = SimpleNamespace(all=lambda: rows)
-            yield SimpleNamespace(exec=lambda _statement: result)
-
-    working = object()
-
-    def build(row: StorageConnection):
-        if row.id == 1:
-            raise BackupDestinationError("invalid")
-        return working
-
-    monkeypatch.setattr(backup_destination, "get_session_factory", Factory)
-    monkeypatch.setattr(backup_destination, "destination_from_connection", build)
-
-    assert backup_destination.configured_destinations() == [working]
+        assert backup_destination.configured_destinations() == [working]

@@ -1264,9 +1264,7 @@ class TestUploadBackupArchive:
 
         assert list(backup_env.backup_dir.iterdir()) == []
 
-    def test_registers_a_valid_uploaded_archive(
-        self, backup_env: BackupEnv
-    ) -> None:
+    def test_registers_a_valid_uploaded_archive(self, backup_env: BackupEnv) -> None:
         original = backup.create_backup()
         archive = Path(original.path)
         payload = archive.read_bytes()
@@ -1276,7 +1274,9 @@ class TestUploadBackupArchive:
         uploaded = backup.upload_backup_archive(filename, io.BytesIO(payload))
 
         assert Path(uploaded.path).read_bytes() == payload
-        assert backup.get_backup(uploaded.id, source_ref=uploaded.source_ref) is not None
+        assert (
+            backup.get_backup(uploaded.id, source_ref=uploaded.source_ref) is not None
+        )
 
     def test_refuses_to_replace_an_existing_archive(
         self, backup_env: BackupEnv
@@ -1284,7 +1284,9 @@ class TestUploadBackupArchive:
         original = backup.create_backup()
 
         with pytest.raises(FileExistsError, match="backup_already_exists"):
-            backup.upload_backup_archive(Path(original.path).name, io.BytesIO(b"unused"))
+            backup.upload_backup_archive(
+                Path(original.path).name, io.BytesIO(b"unused")
+            )
 
     def test_removes_staging_bytes_when_validation_fails(
         self, backup_env: BackupEnv
@@ -1798,9 +1800,7 @@ class TestVerifyBackupOwnership:
         cache = tmp_path / "remote-cache.tar.gz"
         verification = self._verification(valid=True)
         cleaned: list[Path] = []
-        monkeypatch.setattr(
-            backup, "_download_backup_to_local", lambda _meta: cache
-        )
+        monkeypatch.setattr(backup, "_download_backup_to_local", lambda _meta: cache)
         monkeypatch.setattr(
             backup, "verify_backup", lambda *_args, **_kwargs: verification
         )
@@ -3206,6 +3206,7 @@ class TestRestoreDatabase:
         assert state.database_swap_intent is False
         assert state.database_active is False
 
+    @pytest.mark.critical
     def test_existing_swap_intent_with_inactive_marker_is_not_duplicated(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -3998,6 +3999,7 @@ class TestRestoreDatabase:
 
         assert not Path(key).exists()
 
+    @pytest.mark.critical
     def test_restore_retracts_a_vanished_publication_generation(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
     ) -> None:

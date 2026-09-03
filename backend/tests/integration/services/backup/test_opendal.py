@@ -62,7 +62,7 @@ def _remote_destination(key: str, payload: bytes) -> RemoteBackupDestination:
 
 
 class TestOpenDalBackupReplication:
-    def test_create_keeps_local_backup_and_replicates_to_each_destination(
+    def test_create_replicates_the_local_backup_to_each_destination(
         self,
         backup_env: BackupEnv,
         monkeypatch: pytest.MonkeyPatch,

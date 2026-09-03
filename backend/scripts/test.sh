@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
-# Test lanes. A lane is a directory (the tier) plus, at most, a marker that gates a
-# subset needing a resource — never a filename heuristic. `./scripts/test.sh --help`
-# prints the table below.
+# Test lanes. Ordinary lanes are a directory (the tier) plus, at most, a resource
+# marker. The release-blocking `critical` lane is the one explicit cross-tier
+# quality gate, selected by marker rather than a filename heuristic.
+# `./scripts/test.sh --help` prints the table below.
 set -euo pipefail
 
 usage() {
@@ -16,6 +17,8 @@ Lanes
              over a real loopback socket. Needs no external services; the
              container-backed provider contracts run in `full`.
   e2e        tests/e2e — the whole app over ASGITransport plus the fakes.
+  critical   release-blocking workflows across integration, contract and E2E.
+             Includes real remote providers and therefore needs Docker.
   full       everything, including `slow`, minus the coverage gate.
   coverage   `full` under branch coverage, then the coverage gate: aggregate
              ratchet plus a per-module floor (tests/repo/test_coverage_floors.py).
@@ -102,6 +105,14 @@ case "$lane" in
   e2e)
     add_paths tests/e2e
     exec uv run pytest "${parallel[@]}" -m "not coverage_gate" ${lane_paths[@]+"${lane_paths[@]}"} ${pytest_args[@]+"${pytest_args[@]}"}
+    ;;
+  critical)
+    add_paths tests
+    if [[ "$has_target" == true ]]; then
+      exec uv run pytest "${parallel[@]}" -m "critical and not coverage_gate" ${pytest_args[@]+"${pytest_args[@]}"}
+    fi
+    uv run pytest "${parallel[@]}" -m "critical and not coverage_gate and $non_resource_expression" tests ${pytest_args[@]+"${pytest_args[@]}"}
+    exec uv run pytest -m "critical and ($resource_expression)" tests ${pytest_args[@]+"${pytest_args[@]}"}
     ;;
   full)
     add_paths tests

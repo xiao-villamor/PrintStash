@@ -79,7 +79,9 @@ test.describe("uploads", () => {
     expect(bytes).toBeGreaterThan(100);
   });
 
-  test("upload an STL mesh-only model; the mesh lands as the source", async ({ page }) => {
+  test("@critical upload an STL mesh-only model; the mesh lands as the source", async ({
+    page,
+  }) => {
     const name = `e2e-stl-${Date.now()}`;
     await uploadModel(page, name, { mesh: true, gcode: false });
 
@@ -92,7 +94,7 @@ test.describe("uploads", () => {
     await expect(page.getByText(`${name}.stl`).first()).toBeVisible();
   });
 
-  test("upload a BGCODE model; its slicer metadata is available", async ({ page }) => {
+  test("@critical upload a BGCODE model; its slicer metadata is available", async ({ page }) => {
     const name = `e2e-bgcode-${Date.now()}`;
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -173,7 +175,7 @@ test.describe("uploads", () => {
     expect(thumbnailResponses.length).toBeGreaterThanOrEqual(3);
   });
 
-  test("upload into a chosen collection", async ({ page }) => {
+  test("@critical upload into a chosen collection", async ({ page }) => {
     const col = `e2e-upcol-${Date.now()}`;
     const name = `e2e-upmodel-${Date.now()}`;
 

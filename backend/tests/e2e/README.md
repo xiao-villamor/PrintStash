@@ -11,3 +11,9 @@ which is the failure no unit or integration test can see.
 Every new feature gets **one** e2e test for its headline capability (AGENTS.md rule 4).
 One — the rest of its coverage belongs at a cheaper tier. An e2e suite that grows a test
 per edge case becomes the slowest and flakiest thing in the repo, and stops being run.
+
+The release-blocking subset crosses tiers under the `critical` marker. Run its backend
+half with `./scripts/test.sh critical`, or run backend plus real-browser coverage from
+the repository root with `./scripts/test-critical.sh`. The lane includes real S3,
+Nextcloud and SFTP contracts, so Docker is a requirement and an unavailable daemon is
+a failure rather than a skip.

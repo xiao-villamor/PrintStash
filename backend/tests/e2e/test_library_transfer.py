@@ -75,6 +75,7 @@ def _switch_to_fresh_instance(tmp_path: Path, name: str) -> None:
 
 
 class TestLibraryTransfer:
+    @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_export_from_instance_a_import_into_instance_b_preserves_everything(
         self, api, tmp_path, e2e_db

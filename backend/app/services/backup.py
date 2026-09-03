@@ -918,6 +918,9 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
         total_size = db_snapshot.stat().st_size + sum(
             int(entry["size"]) for entry in file_entries
         )
+        manifest_namespaces = sorted(
+            {str(entry["namespace"]) for entry in file_entries}
+        )
         manifest = {
             "version": MANIFEST_VERSION,
             "created_at": ts,
@@ -929,8 +932,10 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
             "transport": str(
                 getattr(get_backend(), "transport", get_backend().backend_name)
             ),
-            "namespace": (str(file_entries[0]["namespace"]) if file_entries else None),
-            "namespaces": sorted({str(entry["namespace"]) for entry in file_entries}),
+            "namespace": (
+                manifest_namespaces[0] if len(manifest_namespaces) == 1 else None
+            ),
+            "namespaces": manifest_namespaces,
             "file_count": len(file_entries),
             "total_size_bytes": total_size,
             "files": file_entries,
@@ -1016,7 +1021,9 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
                 final_size / (1024 * 1024),
             )
         except Exception:
-            logger.warning("backup %s: local publication failed", backup_id, exc_info=True)
+            logger.warning(
+                "backup %s: local publication failed", backup_id, exc_info=True
+            )
 
     # Upload to S3 if configured
     if target:

@@ -83,7 +83,7 @@ async function previewExpiredTrashWithoutApproval(page: Page, modelName: string)
 test.describe("storage provider setup", () => {
   test.describe.configure({ mode: "serial" });
 
-  test("configures WebDAV through restart with safe GC preview", async ({ page }) => {
+  test("@critical configures WebDAV through restart with safe GC preview", async ({ page }) => {
     await page.goto("/setup");
     await page.getByLabel("Setup token").fill("playwright-storage-token-123");
     await page.getByLabel("Username").fill("storage-admin");
