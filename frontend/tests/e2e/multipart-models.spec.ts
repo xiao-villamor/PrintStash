@@ -267,7 +267,7 @@ test.describe("multipart models", () => {
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
     await page.getByRole("button", { name: /Long handle/ }).click();
     await page
-      .getByRole("textbox", { name: "Custom cover image URL" })
+      .getByRole("textbox", { name: "Or use an image URL" })
       .fill("https://images.example.test/desk-organiser.webp");
     await page.getByRole("button", { name: "Save changes" }).click();
 

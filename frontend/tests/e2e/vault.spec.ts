@@ -120,7 +120,7 @@ test.describe("vault route on a phone-width viewport", () => {
     await gotoMobileVault(page);
 
     await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
-    await expect(page.getByText(/^\d+ models? total$/)).toBeVisible();
+    await expect(page.getByText(/^\d+ items? shown$/)).toBeVisible();
   });
 
   test("offers exactly one Upload button", async ({ page }) => {

@@ -57,6 +57,7 @@ const model = {
       revision_status: null,
       revision_notes: null,
       is_recommended: false,
+      tags: [],
       uploaded_at: "2026-05-31T10:46:55.705202",
       metadata: null,
     },
@@ -73,6 +74,7 @@ const model = {
       revision_status: "known_good",
       revision_notes: null,
       is_recommended: true,
+      tags: [],
       uploaded_at: "2026-05-31T10:46:56.705262",
       metadata,
     },
@@ -967,6 +969,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (url.pathname === "/api/v1/models") {
     sendJson(res, modelList);
+    return;
+  }
+  if (url.pathname === "/api/v1/multipart-models") {
+    sendJson(res, []);
     return;
   }
   if (url.pathname === "/api/v1/models/page") {

@@ -67,6 +67,10 @@ test.describe("profiles", () => {
     await rowOf(reloaded)
       .getByRole("button", { name: `Delete filament preset ${name}` })
       .click();
+    await page
+      .getByRole("dialog", { name: "Delete filament preset?" })
+      .getByRole("button", { name: "Delete preset" })
+      .click();
     await expect
       .poll(async () => {
         const inputs = section.getByLabel(/^Filament preset name/);
@@ -97,6 +101,10 @@ test.describe("profiles", () => {
     const reloaded = await inputByValue(section, /^Printer preset name/, name);
     await rowOf(reloaded)
       .getByRole("button", { name: `Delete printer preset ${name}` })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Delete printer preset?" })
+      .getByRole("button", { name: "Delete preset" })
       .click();
     await expect
       .poll(async () => {

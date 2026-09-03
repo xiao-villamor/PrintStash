@@ -87,7 +87,14 @@ test.describe("uploads", () => {
 
     // The renderer is NumPy/Pillow-only, so a real authenticated thumbnail must
     // load even in the headless CI image (no GL/display dependency).
-    await expect(modelCard(page, name).getByRole("img", { name })).toBeVisible();
+    await expect(async () => {
+      await page.goto("/");
+      const thumbnail = modelCard(page, name).getByRole("img", { name });
+      await expect(thumbnail).toBeVisible({ timeout: 2_000 });
+      expect(
+        await thumbnail.evaluate((image: HTMLImageElement) => image.naturalWidth),
+      ).toBeGreaterThan(0);
+    }).toPass({ timeout: 60_000 });
     await modelCard(page, name).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await page.getByRole("tab", { name: /Files/ }).click();

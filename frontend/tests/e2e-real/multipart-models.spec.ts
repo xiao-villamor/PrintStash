@@ -63,10 +63,11 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: `Add tags to ${group}` }).click();
     const tagsDialog = page.getByRole("dialog");
     const setTag = `assembly-${stamp}`;
-    await tagsDialog.getByLabel("Tags to add").fill(setTag);
+    await tagsDialog.getByRole("textbox", { name: "Tags to add" }).fill(setTag);
     await tagsDialog.getByRole("button", { name: "Create tag" }).click();
     await tagsDialog.getByRole("button", { name: "Save tags" }).click();
     await expect(page.getByText(setTag.toUpperCase())).toBeVisible();
+    await page.locator("aside").getByRole("button", { name: "Organized" }).click();
     await expect(modelCard(page, base)).toHaveCount(0);
     await page.goto("/?favorites=true");
     await expect(page.getByRole("link", { name: group })).toBeVisible();

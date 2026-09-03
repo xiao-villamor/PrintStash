@@ -85,7 +85,7 @@ def restore_inline_foreign_key_rendering() -> None:
 
 @pytest.fixture(autouse=True)
 def _isolate_inline_foreign_key_rendering() -> Iterator[None]:
-    """Keep dialect-specific DDL compilation from leaking into later tests.
+    """Keep dialect-specific DDL compilation from leaking between test bodies.
 
     PostgreSQL ``create_all`` marks the foreign keys involved in the
     files/models cycle for separate ALTER emission by mutating the shared
@@ -93,8 +93,11 @@ def _isolate_inline_foreign_key_rendering() -> Iterator[None]:
     later test would otherwise create a database without the eight affected
     foreign keys. This must be suite-wide because mock PostgreSQL engines and
     future DDL tests can trigger the same SQLAlchemy mutation outside the
-    container-backed PostgreSQL directory.
+    container-backed PostgreSQL directory. Restore both before and after the
+    body: a module-scoped fixture can mutate metadata in its finalizer, after
+    the previous function-scoped cleanup has already run.
     """
+    restore_inline_foreign_key_rendering()
     yield
     restore_inline_foreign_key_rendering()
 
