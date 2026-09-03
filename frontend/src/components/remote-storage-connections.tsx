@@ -280,7 +280,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               {connections.map((connection) => (
                 <li
                   key={connection.id}
-                  className="grid gap-3 px-4 py-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,15rem)_auto] lg:items-center"
+                  className="grid gap-3 px-4 py-3 sm:px-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -298,59 +298,61 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                       {connection.secret_fields_set.length === 1 ? "" : "s"}
                     </p>
                   </div>
-                  <label className={FIELD_LABEL}>
-                    Use for
-                    <select
-                      className={SELECT}
-                      aria-label={`Use ${connection.name} for`}
-                      value={connection.purpose}
-                      disabled={disabled || busy !== null}
-                      onChange={(event) => {
-                        if (isPurpose(event.target.value)) {
-                          void changePurpose(connection, event.target.value);
-                        }
-                      }}
-                    >
-                      {PURPOSES.map((value) => (
-                        <option key={value} value={value}>
-                          {purposeLabel(value)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="flex flex-wrap gap-2 lg:justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={disabled || busy !== null || !connection.enabled}
-                      onClick={() => void probe(connection)}
-                    >
-                      <CheckCircle2 className="h-4 w-4" aria-hidden /> Test
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={disabled || busy !== null}
-                      onClick={() => void toggle(connection)}
-                    >
-                      {connection.enabled ? (
-                        <PauseCircle className="h-4 w-4" aria-hidden />
-                      ) : (
-                        <PlayCircle className="h-4 w-4" aria-hidden />
-                      )}
-                      {connection.enabled ? "Pause" : "Resume"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={disabled || busy !== null}
-                      onClick={() => setRemoveTarget(connection)}
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden /> Remove
-                    </Button>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(12rem,15rem)_auto] sm:items-end">
+                    <label className={FIELD_LABEL}>
+                      Use for
+                      <select
+                        className={SELECT}
+                        aria-label={`Use ${connection.name} for`}
+                        value={connection.purpose}
+                        disabled={disabled || busy !== null}
+                        onChange={(event) => {
+                          if (isPurpose(event.target.value)) {
+                            void changePurpose(connection, event.target.value);
+                          }
+                        }}
+                      >
+                        {PURPOSES.map((value) => (
+                          <option key={value} value={value}>
+                            {purposeLabel(value)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={disabled || busy !== null || !connection.enabled}
+                        onClick={() => void probe(connection)}
+                      >
+                        <CheckCircle2 className="h-4 w-4" aria-hidden /> Test
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={disabled || busy !== null}
+                        onClick={() => void toggle(connection)}
+                      >
+                        {connection.enabled ? (
+                          <PauseCircle className="h-4 w-4" aria-hidden />
+                        ) : (
+                          <PlayCircle className="h-4 w-4" aria-hidden />
+                        )}
+                        {connection.enabled ? "Pause" : "Resume"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={disabled || busy !== null}
+                        onClick={() => setRemoveTarget(connection)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden /> Remove
+                      </Button>
+                    </div>
                   </div>
                 </li>
               ))}

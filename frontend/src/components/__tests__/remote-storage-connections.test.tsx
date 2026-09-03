@@ -101,6 +101,30 @@ describe("RemoteStorageConnections", () => {
     expect(screen.getByRole("combobox", { name: "Use Workshop storage for" })).toHaveValue("both");
   });
 
+  it("explains unavailable Google Drive support", async () => {
+    const user = userEvent.setup();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage-connections": json([
+          aStorageConnection({ kind: "gdrive", name: "Recovery Drive" }),
+        ]),
+        "POST /api/v1/storage-connections/1/probe": json(
+          { detail: "gdrive_transport_unavailable" },
+          409,
+        ),
+      },
+    });
+    await screen.findByText("Recovery Drive");
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(
+      await screen.findByText(
+        "Google Drive isn't available in this server image. Upgrade or rebuild the full image, then try again.",
+      ),
+    ).toBeVisible();
+  });
+
   it("keeps save unavailable until the profile has a name", async () => {
     renderApp(<RemoteStorageConnections />, {
       routes: { "GET /api/v1/storage-connections": json([]) },

@@ -138,7 +138,9 @@ class TestComposeFiles:
             "docker-compose.manual-test.yml",
         ],
     )
-    def test_every_deployment_wires_the_runtime_file_owner(self, compose_file: str) -> None:
+    def test_every_deployment_wires_the_runtime_file_owner(
+        self, compose_file: str
+    ) -> None:
         """The container writes the vault as a uid the host has to be able to read.
 
         The image drops to an unprivileged user, so every file it creates in a
@@ -197,6 +199,21 @@ class TestBackendDockerfile:
         assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
         assert "/app/.venv/bin/python -m app.db.migrate" in entrypoint
 
+    def test_full_image_builds_every_advertised_opendal_transport(self) -> None:
+        dockerfile = (_root() / "backend" / "Dockerfile").read_text()
+
+        feature_line = next(
+            line for line in dockerfile.splitlines() if "--features" in line
+        )
+        for feature in (
+            "services-memory",
+            "services-webdav",
+            "services-sftp",
+            "services-gdrive",
+        ):
+            assert feature in feature_line
+        assert 'opendal.Operator("gdrive"' in dockerfile
+
     def test_runtime_images_use_unprivileged_users(self) -> None:
         """Neither runtime container may still be root when it serves traffic.
 
@@ -214,6 +231,9 @@ class TestBackendDockerfile:
         assert 'exec gosu "$requested_identity"' in entrypoint
         assert 'requested_identity="$PUID:$PGID"' in entrypoint
         # The re-exec is only a hand-off if the second pass verifies it landed.
-        assert 'if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then' in entrypoint
+        assert (
+            'if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then'
+            in entrypoint
+        )
         assert "useradd" in backend
         assert "nginxinc/nginx-unprivileged:alpine" in frontend

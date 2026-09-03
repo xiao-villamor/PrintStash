@@ -184,6 +184,37 @@ class TestOperatorFor:
             )
         ]
 
+    def test_reports_an_unregistered_google_drive_transport(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class Unsupported(Exception):
+            pass
+
+        fake_opendal = ModuleType("opendal")
+
+        def unregistered(_kind: str, **_options: str) -> object:
+            raise Unsupported("scheme is not registered")
+
+        fake_opendal.Operator = unregistered  # type: ignore[attr-defined]
+        fake_opendal.exceptions = ModuleType("opendal.exceptions")  # type: ignore[attr-defined]
+        fake_opendal.exceptions.Unsupported = Unsupported  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+
+        with pytest.raises(
+            StorageConfigurationError, match="gdrive_transport_unavailable"
+        ):
+            storage_opendal._operator_for(
+                _spec(
+                    TransportKind.GDRIVE,
+                    options={
+                        "root": "PrintStash",
+                        "client_id": "client",
+                        "client_secret": "secret",
+                        "refresh_token": "refresh",
+                    },
+                )
+            )
+
     def test_builds_a_key_based_sftp_operator(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

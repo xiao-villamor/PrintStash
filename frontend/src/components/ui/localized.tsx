@@ -622,6 +622,7 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Restore backup", "Restaurar copia"],
   ["Restore backup?", "¿Restaurar copia?"],
   ["Remote storage", "Almacenamiento remoto"],
+  ["Google Drive", "Google Drive"],
   ["Connections", "Conexiones"],
   ["Loading connections…", "Cargando conexiones…"],
   ["Add remote connection", "Añadir conexión remota"],
@@ -636,6 +637,22 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Remove remote connection?", "¿Eliminar conexión remota?"],
   ["Remove connection", "Eliminar conexión"],
   ["Pinned host key", "Clave de host fijada"],
+  ["protected credential", "credencial protegida"],
+  ["Workshop storage", "Almacenamiento del taller"],
+  ["Port", "Puerto"],
+  ["Use this or a password", "Usa esto o una contraseña"],
+  [
+    "Google Drive isn't available in this server image. Upgrade or rebuild the full image, then try again.",
+    "Google Drive no está disponible en esta imagen del servidor. Actualiza o recompila la imagen completa y vuelve a intentarlo.",
+  ],
+  [
+    "Couldn't reach the remote storage. Check its credentials and connection settings, then try again.",
+    "No se pudo acceder al almacenamiento remoto. Comprueba sus credenciales y la configuración de conexión y vuelve a intentarlo.",
+  ],
+  [
+    "After setup, connect S3, WebDAV, SFTP, or Google Drive under Settings → Remote storage, then choose whether each connection serves backups, Library sources, or both.",
+    "Después de la configuración, conecta S3, WebDAV, SFTP o Google Drive en Configuración → Almacenamiento remoto y elige si cada conexión sirve para copias, fuentes de biblioteca o ambas.",
+  ],
   [
     "Connect a remote location once, then use it for off-site backup replicas, read-only Library sources, or both. Credentials remain encrypted on this server.",
     "Conecta una ubicación remota una vez y úsala para réplicas externas, fuentes de biblioteca de solo lectura o ambas. Las credenciales permanecen cifradas en este servidor.",

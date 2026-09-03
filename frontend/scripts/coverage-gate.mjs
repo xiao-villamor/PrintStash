@@ -53,7 +53,7 @@ const SUITES = [
     name: "app",
     summary: "coverage/coverage-summary.json",
     command: "pnpm test:coverage",
-    total: { statements: 80.7, branches: 73.8 },
+    total: { statements: 80.7, branches: 74.5 },
     areas: [
       // The tested core: formatters, stores, query hooks, the api client. This is
       // the area where a unit test is the right tier, so it carries the real floor.
@@ -61,10 +61,10 @@ const SUITES = [
       // The bulk of the app, and where the remaining debt is. Route-level
       // behaviour is covered by Playwright, which v8 cannot see; component-level
       // behaviour is being brought up module by module.
-      { prefix: "src/components/", statements: 77.5, branches: 72.5 },
+      { prefix: "src/components/", statements: 77.5, branches: 73.0 },
       // Pages are exercised end-to-end by tests/e2e/*.spec.ts, which this cannot
       // see. The floor records what vitest reaches, not what is tested.
-      { prefix: "src/pages/", statements: 84.5, branches: 74.4 },
+      { prefix: "src/pages/", statements: 84.5, branches: 75.2 },
       // Root-level wiring: the router shell and the layout. Rendered by every
       // Playwright spec, unit-tested by nothing.
       { prefix: "src/", statements: 27.5, branches: 89.2 },

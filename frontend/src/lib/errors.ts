@@ -166,6 +166,10 @@ const ERROR_MESSAGES = {
   users_already_exist: "A user account already exists in this vault.",
   data_dir_not_writable: "Cannot write to the data directory. Check filesystem permissions.",
   thumb_dir_not_writable: "Cannot write to the thumbnail directory. Check filesystem permissions.",
+  gdrive_transport_unavailable:
+    "Google Drive isn't available in this server image. Upgrade or rebuild the full image, then try again.",
+  storage_connection_probe_failed:
+    "Couldn't reach the remote storage. Check its credentials and connection settings, then try again.",
   // General
   duplicate_slug: "An item with that name already exists.",
   network_unreachable: "Couldn't reach the server. Check that PrintStash is running and try again.",

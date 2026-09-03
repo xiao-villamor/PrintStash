@@ -146,6 +146,51 @@ test.describe("settings", () => {
     await expect(row).toHaveCount(0);
   });
 
+  test("remote connection controls align at intermediate widths", async ({ page }) => {
+    const connectionName = `e2e-remote-layout-${Date.now()}`;
+    const created = await page.request.post("/api/v1/storage-connections", {
+      data: {
+        name: connectionName,
+        kind: "s3",
+        purpose: "both",
+        configuration: {
+          provider: "s3",
+          bucket: "printstash-layout",
+          root: "PrintStash",
+          region: "us-east-1",
+          endpoint_url: "",
+          addressing_style: "auto",
+        },
+        secrets: { access_key: "e2e-access", secret_key: "e2e-secret" },
+      },
+    });
+    expect(created.status()).toBe(201);
+    const connection = await created.json();
+
+    await page.setViewportSize({ width: 1180, height: 800 });
+    await page.goto("/settings?section=remote-storage");
+    const row = page.getByRole("listitem").filter({ hasText: connectionName });
+    const usage = row.getByRole("combobox", { name: `Use ${connectionName} for` });
+    const testButton = row.getByRole("button", { name: "Test" });
+    await expect(row).toBeVisible();
+
+    const [rowBox, usageBox, buttonBox] = await Promise.all([
+      row.boundingBox(),
+      usage.boundingBox(),
+      testButton.boundingBox(),
+    ]);
+    expect(rowBox).not.toBeNull();
+    expect(usageBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
+    expect(
+      Math.abs(usageBox!.y + usageBox!.height - (buttonBox!.y + buttonBox!.height)),
+    ).toBeLessThan(2);
+    expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+
+    const removed = await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
+    expect(removed.status()).toBe(204);
+  });
+
   test("uses the exact source reference for a backup download", async ({ page }) => {
     await page.goto("/settings?section=backup");
 

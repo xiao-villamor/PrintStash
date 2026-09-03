@@ -15,7 +15,7 @@ RUN apt-get update \
 
 # OpenDAL v0.58.2 publishes Python distribution 0.47.6. Its upstream Linux
 # wheel omits the Unix-only SFTP service, so the full image builds the exact
-# release source with only PrintStash's WebDAV/SFTP contract surface enabled.
+# release source with only PrintStash's remote-storage contract surface enabled.
 RUN curl -fsSL \
       "https://github.com/apache/opendal/archive/refs/tags/v${OPENDAL_SOURCE_VERSION}.tar.gz" \
       -o /tmp/opendal.tar.gz \
@@ -26,7 +26,7 @@ RUN curl -fsSL \
  && /tmp/maturin/bin/pip install --no-cache-dir 'maturin==1.9.6' \
  && cd /src/bindings/python \
  && /tmp/maturin/bin/maturin build --release --no-default-features \
-      --features pyo3/extension-module,abi3,services-memory,services-webdav,services-sftp \
+      --features pyo3/extension-module,abi3,services-memory,services-webdav,services-sftp,services-gdrive \
       --out /wheels
 
 FROM scratch AS opendal-wheel
@@ -65,6 +65,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && uv sync --frozen --no-dev --no-editable --extra full \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
+ && .venv/bin/python -c 'import opendal; opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check")' \
  && rm -rf /tmp/opendal-wheels \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"

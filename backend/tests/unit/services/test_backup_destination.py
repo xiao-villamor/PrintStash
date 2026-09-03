@@ -26,9 +26,16 @@ class _Backend:
     backend_name = "backup-opendal-gdrive"
     source_namespace = "gdrive/PrintStash"
 
-    def __init__(self, payload: bytes = b"archive") -> None:
+    def __init__(
+        self, payload: bytes = b"archive", *, check_error: Exception | None = None
+    ) -> None:
         self.payload = payload
         self.info = StorageObjectInfo(size=len(payload), etag="etag")
+        self.check_error = check_error
+
+    def check(self) -> None:
+        if self.check_error is not None:
+            raise self.check_error
 
     def object_info(self, _key: str):
         return self.info
@@ -110,6 +117,13 @@ def test_unguarded_destination_is_never_deleted_by_retention() -> None:
     backend.info = StorageObjectInfo(size=7, etag="etag", version_id="version")
 
     assert _destination(backend).delete_owned(row) is False
+
+
+def test_probe_reports_a_remote_connection_failure() -> None:
+    destination = _destination(_Backend(check_error=RuntimeError("oauth rejected")))
+
+    with pytest.raises(BackupDestinationError, match="storage_connection_probe_failed"):
+        destination.probe()
 
 
 def test_destination_identity_is_bound_to_the_saved_profile(

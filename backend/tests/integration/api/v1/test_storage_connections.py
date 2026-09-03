@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -309,6 +310,51 @@ class TestStorageConnections:
         assert failed.status_code == 409
         assert failed.json()["detail"] == "library_source_list_failed"
         assert missing.status_code == 404
+
+    def test_probe_reports_an_unavailable_google_drive_transport(
+        self,
+        client: TestClient,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        class Unsupported(Exception):
+            pass
+
+        admin = build_user(db_session, "gdrive-probe-admin", superuser=True)
+        created = client.post(
+            "/api/v1/storage-connections",
+            headers=_headers(admin),
+            json={
+                "name": "Recovery Drive",
+                "kind": "gdrive",
+                "purpose": "backup",
+                "configuration": {
+                    "client_id": "google-client",
+                    "root": "PrintStash",
+                },
+                "secrets": {
+                    "client_secret": "google-secret",
+                    "refresh_token": "google-refresh",
+                },
+            },
+        ).json()
+        fake_opendal = ModuleType("opendal")
+
+        def unregistered(_kind: str, **_options: str) -> object:
+            raise Unsupported("scheme is not registered")
+
+        fake_opendal.Operator = unregistered  # type: ignore[attr-defined]
+        fake_opendal.exceptions = ModuleType("opendal.exceptions")  # type: ignore[attr-defined]
+        fake_opendal.exceptions.Unsupported = Unsupported  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "opendal", fake_opendal)
+
+        response = client.post(
+            f"/api/v1/storage-connections/{created['id']}/probe",
+            headers=_headers(admin),
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "gdrive_transport_unavailable"
 
     def test_backup_connection_cannot_be_attached_as_a_library(
         self, client: TestClient, db_session: Session

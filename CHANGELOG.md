@@ -168,6 +168,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Full container images now register OpenDAL's advertised Google Drive
+  transport. Remote-connection tests align their controls at intermediate
+  widths and report unavailable provider support explicitly instead of an
+  internal server error.
 - Multipart Model editing now keeps part actions, variants, metadata, and the
   Save action in the mobile flow. Model-detail previews reserve a larger touch
   surface, keep their file label clear of viewer controls, and use 44px mobile

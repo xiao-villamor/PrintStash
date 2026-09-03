@@ -55,7 +55,10 @@ class RemoteBackupDestination:
         return self.backend.source_key(f"{BACKUP_PREFIX}/{archive_name}")
 
     def probe(self) -> dict[str, object]:
-        self.backend.check()
+        try:
+            self.backend.check()
+        except Exception as exc:
+            raise BackupDestinationError("storage_connection_probe_failed") from exc
         capabilities = self.backend.operator_capabilities
         return {
             "ok": True,
@@ -138,12 +141,11 @@ def destination_from_connection(
     try:
         parsed = load_connection_config(connection)
         backend = OpenDALStorageBackend(resolve_transport(parsed))
-    except (
-        StorageConnectionConfigError,
-        StorageConfigurationError,
-        ValueError,
-        RuntimeError,
-    ) as exc:
+    except StorageConfigurationError as exc:
+        if str(exc) == "gdrive_transport_unavailable":
+            raise BackupDestinationError(str(exc)) from exc
+        raise BackupDestinationError("storage_connection_invalid") from exc
+    except (StorageConnectionConfigError, ValueError, RuntimeError) as exc:
         raise BackupDestinationError("storage_connection_invalid") from exc
     backend.backend_name = f"backup-opendal-{connection.kind.value}"
     if connection.id is None:

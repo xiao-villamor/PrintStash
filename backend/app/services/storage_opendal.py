@@ -705,13 +705,16 @@ def _operator_for(spec: TransportSpec):
             import opendal
         except ImportError as exc:
             raise StorageConfigurationError("Requires the full image") from exc
-        return opendal.Operator(
-            "gdrive",
-            root=str(options["root"]),
-            client_id=str(options["client_id"]),
-            client_secret=str(options["client_secret"]),
-            refresh_token=str(options["refresh_token"]),
-        )
+        try:
+            return opendal.Operator(
+                "gdrive",
+                root=str(options["root"]),
+                client_id=str(options["client_id"]),
+                client_secret=str(options["client_secret"]),
+                refresh_token=str(options["refresh_token"]),
+            )
+        except opendal.exceptions.Unsupported as exc:
+            raise StorageConfigurationError("gdrive_transport_unavailable") from exc
     if spec.kind is TransportKind.SFTP:
         # The OpenDAL SFTP service only accepts a strategy (and uses the
         # process-wide OpenSSH catalogue), while PrintStash accepts a mounted
