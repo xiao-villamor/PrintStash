@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from sqlmodel import Session
 
 from app.db.models import (
@@ -61,6 +62,7 @@ def _supported_files(root: Path) -> list[Path]:
 
 
 class TestScanLibrary:
+    @pytest.mark.critical
     def test_scan_real_world_folder(self, tmp_path: Path, db_session: Session) -> None:
         """Scan the engine against real STL/3MF/OBJ/g-code files (repo ``testdata/``).
 

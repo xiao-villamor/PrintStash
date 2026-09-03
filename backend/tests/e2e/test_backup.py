@@ -64,6 +64,7 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
 
 
 class TestBackupRestore:
+    @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_backup_wipe_restore_round_trips_through_the_real_api(
         self, api, tmp_path, e2e_db

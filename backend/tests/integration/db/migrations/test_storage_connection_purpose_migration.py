@@ -21,60 +21,62 @@ def _config(db_path: Path) -> Config:
     return config
 
 
-def test_existing_profiles_become_library_connections_and_downgrade_cleanly(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "storage-connection-purpose.sqlite"
-    config = _config(db_path)
-    command.upgrade(config, PREVIOUS)
-    engine = create_engine(f"sqlite:///{db_path}")
-    try:
-        with engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO storage_connections (
-                        name, kind, config_json, secret_json, enabled,
-                        created_at, updated_at
-                    ) VALUES (
-                        'Existing library', 'S3', '{}', '{}', 1,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+class TestPurposeMigration:
+    def test_existing_profiles_round_trip_as_library_connections(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "storage-connection-purpose.sqlite"
+        config = _config(db_path)
+        command.upgrade(config, PREVIOUS)
+        engine = create_engine(f"sqlite:///{db_path}")
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO storage_connections (
+                            name, kind, config_json, secret_json, enabled,
+                            created_at, updated_at
+                        ) VALUES (
+                            'Existing library', 'S3', '{}', '{}', 1,
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                        """
                     )
-                    """
                 )
-            )
 
-        command.upgrade(config, REVISION)
+            command.upgrade(config, REVISION)
 
-        with engine.connect() as connection:
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT purpose FROM storage_connections "
-                        "WHERE name = 'Existing library'"
-                    )
-                ).scalar_one()
-                == "LIBRARY"
-            )
-        assert "ix_storage_connections_purpose" in {
-            row["name"] for row in inspect(engine).get_indexes("storage_connections")
-        }
+            with engine.connect() as connection:
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT purpose FROM storage_connections "
+                            "WHERE name = 'Existing library'"
+                        )
+                    ).scalar_one()
+                    == "LIBRARY"
+                )
+            assert "ix_storage_connections_purpose" in {
+                row["name"]
+                for row in inspect(engine).get_indexes("storage_connections")
+            }
 
-        command.downgrade(config, PREVIOUS)
+            command.downgrade(config, PREVIOUS)
 
-        assert "purpose" not in {
-            column["name"]
-            for column in inspect(engine).get_columns("storage_connections")
-        }
-        with engine.connect() as connection:
-            assert (
-                connection.execute(
-                    text(
-                        "SELECT kind FROM storage_connections "
-                        "WHERE name = 'Existing library'"
-                    )
-                ).scalar_one()
-                == "S3"
-            )
-    finally:
-        engine.dispose()
+            assert "purpose" not in {
+                column["name"]
+                for column in inspect(engine).get_columns("storage_connections")
+            }
+            with engine.connect() as connection:
+                assert (
+                    connection.execute(
+                        text(
+                            "SELECT kind FROM storage_connections "
+                            "WHERE name = 'Existing library'"
+                        )
+                    ).scalar_one()
+                    == "S3"
+                )
+        finally:
+            engine.dispose()

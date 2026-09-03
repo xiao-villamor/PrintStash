@@ -9,7 +9,7 @@ product, so it refuses while ingestion work is in flight rather than replacing t
 database underneath it.
 
 Everything here is superuser-only. The archive format, the round-trip, and what a
-restore actually recovers live in `integration/services/test_backup.py`.
+restore actually recovers live in `integration/services/backup/test_core.py`.
 """
 
 from __future__ import annotations

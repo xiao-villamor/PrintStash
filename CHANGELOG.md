@@ -179,6 +179,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Remote-only backups now restore archives containing both Artifact data and
+  generated thumbnails, and missing rebuildable remote derivatives no longer
+  abort backup creation with a provider-specific `NotFound` error.
 - Full container images now register OpenDAL's advertised Google Drive
   transport. Remote-connection tests align their controls at intermediate
   widths and report unavailable provider support explicitly instead of an

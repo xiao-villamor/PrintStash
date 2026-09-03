@@ -56,6 +56,16 @@ def _is_collision(exc: Exception) -> bool:
     )
 
 
+def _is_not_found(exc: Exception) -> bool:
+    """Normalize provider-specific absence into the StorageBackend contract."""
+    text = str(exc).lower()
+    return (
+        isinstance(exc, (FileNotFoundError, KeyError))
+        or exc.__class__.__name__ == "NotFound"
+        or "404 not found" in text
+    )
+
+
 class OpenDALStorageBackend(StorageBackend):
     """Synchronous adapter for explicitly supported remote transports."""
 
@@ -368,7 +378,12 @@ class OpenDALStorageBackend(StorageBackend):
         self._operator.rename(source, destination)
 
     def stat_size(self, key: str) -> int:
-        return int(self._operator.stat(self._relative(key)).content_length)
+        try:
+            return int(self._operator.stat(self._relative(key)).content_length)
+        except Exception as exc:
+            if _is_not_found(exc):
+                raise FileNotFoundError(key) from exc
+            raise
 
     def object_info(self, key: str) -> StorageObjectInfo | None:
         relative = self._relative(key)

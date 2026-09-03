@@ -25,7 +25,7 @@ function modelCard(page: import("@playwright/test").Page, name: string) {
 // Full lifecycle on the REAL backend: upload G-code → real ingestion creates the
 // model → edit it → soft-delete to trash → restore → purge forever.
 test.describe("model library", () => {
-  test("upload, edit, trash, restore, and purge a model", async ({ page }) => {
+  test("@critical upload, edit, trash, restore, and purge a model", async ({ page }) => {
     const name = `e2e-model-${Date.now()}`;
     const renamed = `${name}-renamed`;
 

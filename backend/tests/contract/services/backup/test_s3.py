@@ -60,6 +60,7 @@ class TestBackupS3:
         assert restored.source_ref != meta.source_ref
 
     @requires_s3
+    @pytest.mark.critical
     def test_restore_downloads_s3_only_backup_before_restoring(
         self, backup_s3_env: BackupEnv
     ) -> None:

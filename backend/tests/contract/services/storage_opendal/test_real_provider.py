@@ -85,6 +85,7 @@ class TestOpenDALStorageBackend:
 
 
 class TestOpenDalLibrarySource:
+    @pytest.mark.critical
     @pytest.mark.parametrize("provider", ["nextcloud", "sftp"])
     def test_real_provider_content_is_materializable(self, provider: str) -> None:
         if provider == "nextcloud":

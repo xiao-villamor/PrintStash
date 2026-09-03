@@ -198,6 +198,7 @@ def _embedded_3mf() -> tuple[bytes, tuple[int, int, int]]:
 
 
 class TestMetadata:
+    @pytest.mark.critical
     @pytest.mark.asyncio
     async def test_a_repeated_gcode_upload_dedupes_by_content_hash(
         self, api, tmp_path, e2e_db

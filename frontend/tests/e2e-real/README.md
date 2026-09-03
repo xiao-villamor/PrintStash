@@ -8,6 +8,13 @@ This is the difference from `tests/e2e/` (the fast mock-API smoke suite).
 pnpm test:e2e:real
 ```
 
+For the release-blocking subset (backup recovery, ingestion, organisation,
+trash, scans and remote storage), run the repository-level lane instead:
+
+```bash
+./scripts/test-critical.sh
+```
+
 `playwright.real.config.ts` boots the application plus its printer emulator:
 
 - `scripts/start-backend.sh` — wipes state, runs Alembic, launches uvicorn on
@@ -45,6 +52,13 @@ the port, username, and password can be overridden with the corresponding
 `PLAYWRIGHT_STORAGE_SFTP_*` variables. It verifies guarded confirmation and a
 blocked retained cleanup outcome.
 
+`playwright.critical-backup.config.ts` owns a third clean instance for the
+remote-only backup recovery contract. The browser creates the WebDAV backup
+destination, disables local backup creation, purges an uploaded Model, restores
+the remote archive, and verifies the downloaded Artifact bytes exactly. It is
+part of `pnpm test:e2e:critical`, not the ordinary serial real-backend suite, so
+state from another scenario cannot make recovery pass accidentally.
+
 `helpers.ts` seeds the first admin via `/setup` once and injects a real JWT into
 the browser, so tests boot authenticated. The suite runs serially on one DB, so
 tests use unique (timestamped) names and clean up after themselves.
@@ -58,7 +72,8 @@ vault (search, tag filter, list/grid toggle, empty state, narrow responsive tool
 (create / nest / delete / recursive-delete non-empty from the sidebar) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
-uploads (mesh-only source, BGCODE metadata, into a collection) · filament & printer presets
+uploads (mesh-only source, BGCODE metadata, into a collection) · full backup recovery
+(purge → UI restore → byte-for-byte download) · filament & printer presets
 (create / edit / delete) · model lifecycle (upload → edit → trash → restore →
 purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,

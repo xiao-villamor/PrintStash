@@ -16,6 +16,25 @@ def _ci_workflow() -> dict:
     return _workflow("ci.yml")
 
 
+class TestCriticalCapabilitiesJob:
+    """Critical behavior has one visible, independently rerunnable CI signal."""
+
+    def test_job_runs_the_repository_critical_lane(self) -> None:
+        job = _ci_workflow()["jobs"]["critical-capabilities"]
+        commands = [step.get("run") for step in job["steps"]]
+
+        assert job.get("continue-on-error", False) is False
+        assert "./scripts/test-critical.sh" in commands
+        assert any(
+            command == "uv sync --extra dev --extra full --frozen"
+            for command in commands
+        )
+        assert any(
+            command == "pnpm exec playwright install --with-deps chromium"
+            for command in commands
+        )
+
+
 class TestMultiArchWorkflows:
     """The release workflows build each architecture where it is native.
 

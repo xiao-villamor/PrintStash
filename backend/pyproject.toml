@@ -98,6 +98,7 @@ markers = [
     # the path. unit/ and integration/ carry no marker — the lanes select them by path.
     "contract: our client against a contract-enforcing fake over a real loopback socket (lane: contract)",
     "e2e: the whole app over ASGITransport against the fakes (lane: e2e)",
+    "critical: release-blocking workflows whose observable outcome must survive the whole stack (lane: critical)",
     # Resources. These gate a subset *inside* a tier and skip when the resource is absent.
     "postgres: runs against a real PostgreSQL container (tests/containers.py)",
     "remote_storage: runs against real Nextcloud and OpenSSH containers (tests/containers.py)",

@@ -22,7 +22,7 @@ def _config(database: Path) -> Config:
 
 
 class TestMultipartUploadedCoverMigration:
-    def test_round_trip_preserves_existing_set_and_cover_metadata(
+    def test_round_trip_preserves_existing_multipart_metadata(
         self, tmp_path: Path
     ) -> None:
         database = tmp_path / "multipart-uploaded-cover.sqlite"
