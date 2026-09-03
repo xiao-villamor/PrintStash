@@ -183,7 +183,8 @@ Current intentional lint warnings:
 
 ## Feature Smoke Checks
 
-- Open Settings, confirm vault stats load, create a backup, and export JSON/CSV.
+- Open Settings, confirm vault stats load, create and upload a backup from the
+  Backup section, and export JSON/CSV.
 - Create and revoke an API key, then verify username plus API key can log in.
 - Upload a mesh and G-code pair, open model detail, toggle mesh/G-code viewer,
   edit revision fields, and mark a recommended G-code.

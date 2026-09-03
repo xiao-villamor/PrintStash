@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, RefreshCw, Save } from "lucide-react";
+import { AlertTriangle, Save } from "lucide-react";
 import {
   enrollStorageRoot,
   getStorageProviders,
@@ -36,7 +36,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
   const [providers, setProviders] = useState<StorageProvider[]>([]);
   const [providerId, setProviderId] = useState("local");
   const [providerValues, setProviderValues] = useState<ProviderValues>({});
-  const [backupDays, setBackupDays] = useState(30);
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [enrollRole, setEnrollRole] = useState<StorageRootRole | null>(null);
@@ -49,7 +48,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       setProviders(providerCatalogue);
       setProviderId(c.storage_provider || (c.storage_backend === "s3" ? "s3" : "local"));
       setProviderValues(c.storage_provider_config ?? {});
-      setBackupDays(c.backup_retention_days ?? 30);
     } catch {
       // ignore — show empty form
     } finally {
@@ -76,7 +74,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
             ),
           ),
         },
-        backup_retention_days: backupDays,
       };
 
       await updateVaultConfig(body);
@@ -88,7 +85,7 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
       setSaveState("error");
       setErrorMsg(e?.message || "Save failed");
     }
-  }, [providerId, providerValues, backupDays, load]);
+  }, [providerId, providerValues, load]);
 
   if (loading) {
     return (
@@ -138,7 +135,7 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">Storage configuration</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Provider connection, active guarantees, and backup retention
+              {t("settings.storageConfigDescription")}
             </p>
           </div>
           {cfg && (
@@ -240,33 +237,6 @@ export function StorageConfigCard({ storageHealth }: { storageHealth?: StorageHe
             Provider changes require an application restart. Storage risk acknowledgement remains
             environment-only.
           </p>
-
-          {/* Backup settings */}
-          <div className="space-y-3 rounded-lg bg-muted/40 p-3 sm:p-4">
-            <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
-              <RefreshCw className="h-3 w-3" /> Backup
-            </p>
-            <div className="max-w-xs">
-              <label className="block text-2xs text-muted-foreground mb-1">Retention (days)</label>
-              <input
-                type="number"
-                disabled={!canEdit}
-                min={0}
-                max={365}
-                value={backupDays}
-                onChange={(e) => setBackupDays(Number(e.target.value))}
-                className="w-32 px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground disabled:opacity-50 font-mono"
-              />
-              <p className="text-3xs text-muted-foreground mt-0.5">
-                Set to 0 to keep backups forever. Old backups are purged after each new backup.
-              </p>
-            </div>
-
-            <p className="border-t border-border pt-3 text-xs leading-relaxed text-muted-foreground">
-              Configure off-site S3, WebDAV, SFTP, or Google Drive replicas in Remote storage.
-              Connections can also be reused by Library sources.
-            </p>
-          </div>
 
           {/* Save row */}
           {canEdit && (

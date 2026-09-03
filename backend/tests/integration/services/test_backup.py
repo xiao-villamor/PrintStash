@@ -1247,6 +1247,56 @@ class TestListLocalBackups:
         assert [candidate["filename"] for candidate in candidates] == [archive.name]
 
 
+class TestUploadBackupArchive:
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "../printstash-backup-escaped.tar.gz",
+            "printstash-backup-bad\\name.tar.gz",
+            "ordinary-archive.tar.gz",
+        ],
+    )
+    def test_rejects_an_unsafe_or_unrecognized_filename(
+        self, backup_env: BackupEnv, filename: str
+    ) -> None:
+        with pytest.raises(ValueError, match="backup_filename_invalid"):
+            backup.upload_backup_archive(filename, io.BytesIO(b"unused"))
+
+        assert list(backup_env.backup_dir.iterdir()) == []
+
+    def test_registers_a_valid_uploaded_archive(
+        self, backup_env: BackupEnv
+    ) -> None:
+        original = backup.create_backup()
+        archive = Path(original.path)
+        payload = archive.read_bytes()
+        filename = archive.name
+        assert backup.delete_backup(original.id, source_ref=original.source_ref)
+
+        uploaded = backup.upload_backup_archive(filename, io.BytesIO(payload))
+
+        assert Path(uploaded.path).read_bytes() == payload
+        assert backup.get_backup(uploaded.id, source_ref=uploaded.source_ref) is not None
+
+    def test_refuses_to_replace_an_existing_archive(
+        self, backup_env: BackupEnv
+    ) -> None:
+        original = backup.create_backup()
+
+        with pytest.raises(FileExistsError, match="backup_already_exists"):
+            backup.upload_backup_archive(Path(original.path).name, io.BytesIO(b"unused"))
+
+    def test_removes_staging_bytes_when_validation_fails(
+        self, backup_env: BackupEnv
+    ) -> None:
+        filename = "printstash-backup-20260101-000000-invalid.tar.gz"
+
+        with pytest.raises((RuntimeError, gzip.BadGzipFile, tarfile.TarError)):
+            backup.upload_backup_archive(filename, io.BytesIO(b"not an archive"))
+
+        assert list(backup_env.backup_dir.iterdir()) == []
+
+
 class TestListBackups:
     def test_list_backups_skips_archive_with_unreadable_manifest(
         self, backup_env: BackupEnv, caplog: pytest.LogCaptureFixture

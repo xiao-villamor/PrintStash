@@ -31,8 +31,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   read-only source, and reusable remote connections can serve Library sources,
   replicate locally committed archives, or do both. Settings keeps these S3,
   WebDAV, SFTP and Google Drive profiles together under Remote storage. Remote
-  restore verifies provider identity and SHA-256; providers without immutable
-  delete identity are excluded from automatic retention and Vault-GC evidence.
+  restore verifies provider identity and SHA-256. Backup management now has its
+  own Settings section, accepts validated archive uploads, and can discover and
+  adopt existing archives from configured OpenDAL backup connections. Providers
+  without immutable delete identity are excluded from automatic retention and
+  Vault-GC evidence.
 
 - **Guarded remote storage hardening.** WebDAV publishes through atomic
   `MOVE`/`Overwrite: F`; SFTP uses exclusive create with pinned host keys.

@@ -34,7 +34,7 @@ test.describe("settings route", () => {
   });
 
   test("discovers an exact legacy S3 source for adoption", async ({ page }) => {
-    await page.goto("/settings?section=storage");
+    await page.goto("/settings?section=backup");
 
     await expect(page.getByText("nexus3d-backups/legacy-2025.tar.gz")).toBeVisible();
     await expect(page.getByText(/SHA-256 a{16}/)).toBeVisible();
@@ -82,7 +82,7 @@ test.describe("settings route", () => {
         ],
       });
     });
-    await page.goto("/settings?section=storage");
+    await page.goto("/settings?section=backup");
     await page.getByRole("button", { name: "Restore", exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: "Restore backup?" });

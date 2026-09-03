@@ -15,6 +15,7 @@ restore actually recovers live in `integration/services/test_backup.py`.
 from __future__ import annotations
 
 import asyncio
+import io
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -136,6 +137,92 @@ class TestCreateBackup:
     ) -> None:
         response = client.post(
             "/api/v1/backups", headers=user_headers_in_env(backup_env)
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestUploadBackup:
+    def test_registers_a_valid_archive(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers: dict[str, str],
+    ) -> None:
+        original = backup.create_backup()
+        archive = Path(original.path)
+        payload = archive.read_bytes()
+        filename = archive.name
+        assert backup.delete_backup(original.id, source_ref=original.source_ref)
+
+        response = client.post(
+            "/api/v1/backups/upload",
+            headers=admin_headers,
+            files={"file": (filename, io.BytesIO(payload), "application/gzip")},
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["backup_id"] == original.id
+
+    def test_rejects_an_invalid_archive_without_publishing_it(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers: dict[str, str],
+    ) -> None:
+        response = client.post(
+            "/api/v1/backups/upload",
+            headers=admin_headers,
+            files={
+                "file": (
+                    "printstash-backup-20260101-000000-invalid.tar.gz",
+                    b"not an archive",
+                    "application/gzip",
+                )
+            },
+        )
+
+        assert response.status_code == 409, response.text
+        assert list(backup_env.backup_dir.glob("*.tar.gz")) == []
+
+    def test_rejects_an_oversized_archive(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "max_upload_mb", 1)
+
+        response = client.post(
+            "/api/v1/backups/upload",
+            headers=admin_headers,
+            files={
+                "file": (
+                    "printstash-backup-20260101-000000-large.tar.gz",
+                    b"x" * (1024 * 1024 + 1),
+                    "application/gzip",
+                )
+            },
+        )
+
+        assert response.status_code == 413, response.text
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, backup_env: BackupEnv
+    ) -> None:
+        response = client.post(
+            "/api/v1/backups/upload",
+            headers=user_headers_in_env(backup_env),
+            files={
+                "file": (
+                    "printstash-backup-20260101-000000-denied.tar.gz",
+                    b"archive",
+                    "application/gzip",
+                )
+            },
         )
 
         assert response.status_code == 403, response.text
@@ -999,3 +1086,123 @@ class TestAdoptS3Backup:
 
         assert response.status_code == 409, response.text
         assert response.json()["detail"] == "backup_source_ref_mismatch"
+
+
+class TestDiscoverUnownedRemoteBackups:
+    def test_lists_opendal_candidates(
+        self,
+        client: TestClient,
+        admin_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        candidate = {
+            "connection_id": 7,
+            "connection_name": "Recovery Drive",
+            "provider": "gdrive",
+            "key": "gdrive/PrintStash/printstash-backups/printstash-backup-old.tar.gz",
+            "backup_id": "old",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "size_bytes": 12,
+            "file_count": 1,
+            "storage_backend": "local",
+            "app_version": "0.13.0",
+            "location": "opendal:gdrive",
+            "namespace": "gdrive/PrintStash",
+            "prefix": "gdrive/PrintStash/printstash-backups",
+            "archive_sha256": "a" * 64,
+            "source_ref": "source-ref",
+        }
+        monkeypatch.setattr(
+            backup, "discover_unowned_opendal_backups", lambda: [candidate]
+        )
+
+        response = client.get("/api/v1/backups/unowned-remote", headers=admin_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json() == [candidate]
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, backup_env: BackupEnv
+    ) -> None:
+        response = client.get(
+            "/api/v1/backups/unowned-remote",
+            headers=user_headers_in_env(backup_env),
+        )
+
+        assert response.status_code == 403, response.text
+
+
+class TestAdoptRemoteBackup:
+    def test_forwards_the_exact_opendal_candidate(
+        self,
+        client: TestClient,
+        admin_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        key = "gdrive/PrintStash/printstash-backups/printstash-backup-old.tar.gz"
+        observed: dict[str, object] = {}
+
+        def adopt(
+            connection_id: int,
+            candidate_key: str,
+            *,
+            source_ref: str,
+            expected_archive_sha256: str,
+        ) -> backup.BackupMeta:
+            observed.update(
+                connection_id=connection_id,
+                key=candidate_key,
+                source_ref=source_ref,
+                expected_archive_sha256=expected_archive_sha256,
+            )
+            return backup.BackupMeta(
+                id="old",
+                created_at="2026-01-01T00:00:00+00:00",
+                size_bytes=12,
+                storage_backend="local",
+                file_count=1,
+                app_version="0.13.0",
+                path=key,
+                location="opendal:gdrive",
+                archive_sha256="a" * 64,
+                source_ref="source-ref",
+                provider_ref="provider-ref",
+                namespace="gdrive/PrintStash",
+            )
+
+        monkeypatch.setattr(backup, "adopt_opendal_backup", adopt)
+
+        response = client.post(
+            "/api/v1/backups/adopt-remote",
+            params={
+                "connection_id": 7,
+                "key": key,
+                "source_ref": "source-ref",
+                "expected_archive_sha256": "a" * 64,
+            },
+            headers=admin_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert observed == {
+            "connection_id": 7,
+            "key": key,
+            "source_ref": "source-ref",
+            "expected_archive_sha256": "a" * 64,
+        }
+
+    def test_rejects_a_non_superuser(
+        self, client: TestClient, backup_env: BackupEnv
+    ) -> None:
+        response = client.post(
+            "/api/v1/backups/adopt-remote",
+            params={
+                "connection_id": 7,
+                "key": "gdrive/PrintStash/printstash-backups/printstash-backup-old.tar.gz",
+                "source_ref": "source-ref",
+                "expected_archive_sha256": "a" * 64,
+            },
+            headers=user_headers_in_env(backup_env),
+        )
+
+        assert response.status_code == 403, response.text

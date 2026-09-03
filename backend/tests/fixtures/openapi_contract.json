@@ -754,6 +754,20 @@
         "title": "Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put",
         "type": "object"
       },
+      "Body_upload_backup_api_v1_backups_upload_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_backup_api_v1_backups_upload_post",
+        "type": "object"
+      },
       "Body_upload_collection_image_api_v1_collections__collection_id__images_post": {
         "properties": {
           "file": {
@@ -14855,6 +14869,87 @@
         ]
       }
     },
+    "/api/v1/backups/adopt-remote": {
+      "post": {
+        "operationId": "adopt_remote_backup_api_v1_backups_adopt_remote_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Source Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_archive_sha256",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "title": "Expected Archive Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adopt Remote Backup Api V1 Backups Adopt Remote Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Adopt one existing OpenDAL backup",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
     "/api/v1/backups/adopt-s3": {
       "post": {
         "operationId": "adopt_s3_backup_api_v1_backups_adopt_s3_post",
@@ -15026,6 +15121,37 @@
         ]
       }
     },
+    "/api/v1/backups/unowned-remote": {
+      "get": {
+        "operationId": "discover_unowned_remote_backups_api_v1_backups_unowned_remote_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Discover Unowned Remote Backups Api V1 Backups Unowned Remote Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover valid unowned OpenDAL backups",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
     "/api/v1/backups/unowned-s3": {
       "get": {
         "operationId": "discover_unowned_s3_backups_api_v1_backups_unowned_s3_get",
@@ -15052,6 +15178,54 @@
           }
         ],
         "summary": "Discover valid unowned legacy S3 backups",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/upload": {
+      "post": {
+        "operationId": "upload_backup_api_v1_backups_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_backup_api_v1_backups_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Backup Api V1 Backups Upload Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Upload an existing backup archive",
         "tags": [
           "backups"
         ]

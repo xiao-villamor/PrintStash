@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   adoptLocalBackup,
+  adoptRemoteBackup,
   adoptS3Backup,
   createBackup,
   downloadBackup,
@@ -26,8 +27,10 @@ import {
   listBackupSources,
   listBackups,
   listUnownedLocalBackups,
+  listUnownedRemoteBackups,
   listUnownedS3Backups,
   restoreBackup,
+  uploadBackup,
 } from "@/lib/api/backup";
 import { invalidateApiCache } from "@/lib/api/request";
 
@@ -78,6 +81,20 @@ describe("createBackup", () => {
     await createBackup();
 
     expectRequest("/api/v1/backups", "POST");
+  });
+});
+
+describe("uploadBackup", () => {
+  it("posts the archive as multipart form data", async () => {
+    respondWith({ backup_id: "uploaded" });
+    const archive = new File(["archive"], "printstash-backup-upload.tar.gz", {
+      type: "application/gzip",
+    });
+
+    await uploadBackup(archive);
+
+    expectRequest("/api/v1/backups/upload", "POST");
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.body).toBeInstanceOf(FormData);
   });
 });
 
@@ -141,6 +158,30 @@ describe("adoptS3Backup", () => {
     expectRequest(
       "/api/v1/backups/adopt-s3?key=nexus3d-backups%2Flegacy+one.tar.gz&source_ref=s3%2Fref&expected_archive_sha256=" +
         "a".repeat(64),
+      "POST",
+    );
+  });
+});
+
+describe("listUnownedRemoteBackups", () => {
+  it("lists validated OpenDAL candidates", async () => {
+    respondWith([{ connection_id: 7, key: "remote/backup.tar.gz" }]);
+
+    await listUnownedRemoteBackups();
+
+    expectRequest("/api/v1/backups/unowned-remote");
+  });
+});
+
+describe("adoptRemoteBackup", () => {
+  it("serializes the exact remote identity", async () => {
+    respondWith({ backup_id: "remote" });
+
+    await adoptRemoteBackup(7, "remote/backup one.tar.gz", "remote/ref", "b".repeat(64));
+
+    expectRequest(
+      "/api/v1/backups/adopt-remote?connection_id=7&key=remote%2Fbackup+one.tar.gz&source_ref=remote%2Fref&expected_archive_sha256=" +
+        "b".repeat(64),
       "POST",
     );
   });

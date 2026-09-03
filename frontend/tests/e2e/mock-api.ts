@@ -1478,6 +1478,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     );
     return;
   }
+  if (url.pathname === "/api/v1/backups/unowned-remote" && req.method === "GET") {
+    sendJson(res, []);
+    return;
+  }
   if (url.pathname === "/api/v1/backups" && req.method === "GET") {
     sendJson(res, []);
     return;

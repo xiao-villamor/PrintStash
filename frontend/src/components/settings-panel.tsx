@@ -34,6 +34,7 @@ import {
   Tag,
   UserPlus,
   Users,
+  Upload,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { PageHeader } from "@/components/ui/page-header";
@@ -64,6 +65,7 @@ import {
   abortGcPlan,
   finalizeGcPlan,
   adoptLocalBackup,
+  adoptRemoteBackup,
   adoptS3Backup,
   deactivateAdminUser,
   deleteCollectionPermission,
@@ -80,6 +82,7 @@ import {
   listBackupSources,
   listUnownedS3Backups,
   listUnownedLocalBackups,
+  listUnownedRemoteBackups,
   listCollectionPermissions,
   listCollections,
   listPrinterPermissions,
@@ -97,12 +100,14 @@ import {
   updatePrinterPermission,
   updateAdminUser,
   updateVaultConfig,
+  uploadBackup,
 } from "@/lib/api";
 import type {
   BackupMeta,
   GcPlan,
   ReleaseStatus,
   UnownedBackupCandidate,
+  UnownedRemoteBackupCandidate,
   UnownedS3BackupCandidate,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -158,6 +163,7 @@ type SettingsSection =
   | "overview"
   | "access"
   | "storage"
+  | "backup"
   | "remote-storage"
   | "imports"
   | "maintenance"
@@ -178,6 +184,7 @@ const SETTINGS_SECTIONS: {
   { id: "overview", labelKey: "settings.overview", icon: Server },
   { id: "access", labelKey: "settings.access", icon: Users },
   { id: "storage", labelKey: "settings.storage", icon: HardDrive },
+  { id: "backup", labelKey: "settings.backup", icon: Database },
   { id: "remote-storage", labelKey: "settings.remoteStorage", icon: Cloud },
   { id: "imports", labelKey: "settings.imports", icon: Download },
   { id: "maintenance", labelKey: "settings.maintenance", icon: HeartPulse },
@@ -459,12 +466,22 @@ export function SettingsPanel() {
   const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
   const [unownedS3Backups, setUnownedS3Backups] = useState<UnownedS3BackupCandidate[]>([]);
+  const [unownedRemoteBackups, setUnownedRemoteBackups] = useState<UnownedRemoteBackupCandidate[]>(
+    [],
+  );
   const [backupsLoading, setBackupsLoading] = useState(false);
+  const [backupRetentionDays, setBackupRetentionDays] = useState(30);
+  const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [adoptTarget, setAdoptTarget] = useState<UnownedBackupCandidate | null>(null);
   const [adoptS3Target, setAdoptS3Target] = useState<UnownedS3BackupCandidate | null>(null);
+  const [adoptRemoteTarget, setAdoptRemoteTarget] = useState<UnownedRemoteBackupCandidate | null>(
+    null,
+  );
   const [adoptingBackup, setAdoptingBackup] = useState(false);
   const [adoptingS3Backup, setAdoptingS3Backup] = useState(false);
+  const [adoptingRemoteBackup, setAdoptingRemoteBackup] = useState(false);
+  const [uploadingBackup, setUploadingBackup] = useState(false);
   const [restoringBackup, setRestoringBackup] = useState(false);
 
   const [downloadingBackup, setDownloadingBackup] = useState<string | null>(null);
@@ -610,10 +627,12 @@ export function SettingsPanel() {
     }
     setBackupsLoading(true);
     try {
-      const [owned, unowned, unownedS3] = await Promise.allSettled([
+      const [owned, unowned, unownedS3, unownedRemote, config] = await Promise.allSettled([
         listBackupSources(),
         listUnownedLocalBackups(),
         listUnownedS3Backups(),
+        listUnownedRemoteBackups(),
+        getVaultConfig(),
       ]);
       if (owned.status === "rejected") throw owned.reason;
       setBackups(owned.value);
@@ -622,6 +641,10 @@ export function SettingsPanel() {
       // simply stays empty.
       setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
       setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
+      setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
+      if (config.status === "fulfilled") {
+        setBackupRetentionDays(config.value.backup_retention_days ?? 30);
+      }
     } catch (e) {
       toast.error(e);
     } finally {
@@ -665,9 +688,34 @@ export function SettingsPanel() {
     }
   }
 
+  async function confirmAdoptRemoteBackup() {
+    if (!adoptRemoteTarget) return;
+    const target = adoptRemoteTarget;
+    if (!target.source_ref || !target.archive_sha256) {
+      toast.error(t("settings.backupLegacySourceUnavailable"));
+      return;
+    }
+    setAdoptingRemoteBackup(true);
+    try {
+      await adoptRemoteBackup(
+        target.connection_id,
+        target.key,
+        target.source_ref,
+        target.archive_sha256,
+      );
+      toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
+      setAdoptRemoteTarget(null);
+      await loadBackups();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setAdoptingRemoteBackup(false);
+    }
+  }
+
   useEffect(() => {
-    if (activeSection === "storage") {
-      // Same shape as the trash listing above: opening Storage starts the backup fetch,
+    if (activeSection === "backup") {
+      // Same shape as the trash listing above: opening Backup starts the listing fetch,
       // and only the loading flag is written before the await.
       // oxlint-disable-next-line react/set-state-in-effect -- fetch-on-open of an external listing
       loadBackups();
@@ -782,6 +830,34 @@ export function SettingsPanel() {
       toast.error(e);
     } finally {
       setBackingUp(false);
+    }
+  }
+
+  async function handleBackupUpload(file: File) {
+    setUploadingBackup(true);
+    try {
+      const meta = await uploadBackup(file);
+      setBackups((current) => [
+        meta,
+        ...current.filter((item) => backupSourceKey(item) !== backupSourceKey(meta)),
+      ]);
+      toast.success(`Backup uploaded — ${meta.file_count} files`);
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setUploadingBackup(false);
+    }
+  }
+
+  async function saveBackupRetention() {
+    setBackupRetentionBusy(true);
+    try {
+      await updateVaultConfig({ backup_retention_days: backupRetentionDays });
+      toast.success(t("settings.backupRetentionSaved"));
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBackupRetentionBusy(false);
     }
   }
 
@@ -1403,6 +1479,25 @@ export function SettingsPanel() {
                   key: adoptS3Target.key,
                   namespace: adoptS3Target.namespace ?? "unavailable",
                   hash: adoptS3Target.archive_sha256?.slice(0, 16) ?? "unavailable",
+                })
+              : ""
+          }
+          confirmLabel={t("settings.backupLegacyAdoptAction")}
+        />
+        <ConfirmModal
+          open={adoptRemoteTarget !== null}
+          onClose={() => {
+            if (!adoptingRemoteBackup) setAdoptRemoteTarget(null);
+          }}
+          onConfirm={confirmAdoptRemoteBackup}
+          busy={adoptingRemoteBackup}
+          title={t("settings.backupRemoteConfirmTitle")}
+          description={
+            adoptRemoteTarget
+              ? t("settings.backupRemoteConfirmDescription", {
+                  key: adoptRemoteTarget.key,
+                  connection: adoptRemoteTarget.connection_name,
+                  hash: adoptRemoteTarget.archive_sha256?.slice(0, 16) ?? "unavailable",
                 })
               : ""
           }
@@ -2311,10 +2406,50 @@ export function SettingsPanel() {
             {activeSection === "storage" && (
               <div className="space-y-6 animate-panel-in">
                 <StorageConfigCard storageHealth={storageHealth} />
+              </div>
+            )}
+
+            {activeSection === "backup" && (
+              <div className="space-y-6 animate-panel-in">
+                <SettingsCard
+                  icon={RefreshCw}
+                  title={t("settings.backupRetentionTitle")}
+                  description={t("settings.backupRetentionDescription")}
+                  action={
+                    <button
+                      type="button"
+                      onClick={saveBackupRetention}
+                      disabled={!user?.is_superuser || backupRetentionBusy}
+                      className={BTN_PRIMARY}
+                    >
+                      {backupRetentionBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      {t("settings.backupRetentionSave")}
+                    </button>
+                  }
+                >
+                  <div className="p-4 sm:p-5">
+                    <label className="block max-w-xs text-xs text-muted-foreground">
+                      {t("settings.backupRetentionLabel")}
+                      <input
+                        type="number"
+                        min={0}
+                        max={365}
+                        value={backupRetentionDays}
+                        disabled={!user?.is_superuser || backupRetentionBusy}
+                        onChange={(event) => setBackupRetentionDays(Number(event.target.value))}
+                        className={cn(inputClasses, "mt-1.5 w-32 font-mono")}
+                      />
+                    </label>
+                  </div>
+                </SettingsCard>
                 <SettingsCard
                   icon={HardDrive}
                   title="Manual backup"
-                  description="Create a full backup of the database and all stored files right now."
+                  description={t("settings.backupManualDescription")}
                   action={
                     <button
                       type="button"
@@ -2333,7 +2468,46 @@ export function SettingsPanel() {
                       )}
                     </button>
                   }
-                />
+                >
+                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {t("settings.backupUploadTitle")}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("settings.backupUploadDescription")}
+                      </p>
+                    </div>
+                    <label
+                      className={cn(
+                        BTN_SECONDARY,
+                        "cursor-pointer",
+                        uploadingBackup && "pointer-events-none opacity-50",
+                      )}
+                    >
+                      {uploadingBackup ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Upload className="h-3.5 w-3.5" />
+                      )}
+                      {uploadingBackup
+                        ? t("settings.backupUploading")
+                        : t("settings.backupUploadAction")}
+                      <input
+                        type="file"
+                        className="sr-only"
+                        aria-label={t("settings.backupUploadTitle")}
+                        accept=".tar.gz,application/gzip"
+                        disabled={!user?.is_superuser || uploadingBackup}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void handleBackupUpload(file);
+                        }}
+                      />
+                    </label>
+                  </div>
+                </SettingsCard>
                 <SettingsCard
                   icon={RotateCcw}
                   title="Restore backup"
@@ -2359,7 +2533,8 @@ export function SettingsPanel() {
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">Loading...</p>
                     ) : backups.length === 0 &&
                       unownedBackups.length === 0 &&
-                      unownedS3Backups.length === 0 ? (
+                      unownedS3Backups.length === 0 &&
+                      unownedRemoteBackups.length === 0 ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">No backups found.</p>
                     ) : (
                       <>
@@ -2455,6 +2630,54 @@ export function SettingsPanel() {
                                     adoptingS3Backup ||
                                     restoringBackup ||
                                     backingUp ||
+                                    !candidate.source_ref ||
+                                    !candidate.archive_sha256
+                                  }
+                                  className={BTN_SECONDARY}
+                                >
+                                  {t("settings.backupLegacyAdoptAction")}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {unownedRemoteBackups.length > 0 && (
+                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">
+                                {t("settings.backupRemoteTitle")}
+                              </p>
+                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                {t("settings.backupRemoteDescription")}
+                              </p>
+                            </div>
+                            {unownedRemoteBackups.map((candidate) => (
+                              <div
+                                key={`${candidate.connection_id}:${candidate.key}`}
+                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                              >
+                                <div className="min-w-0">
+                                  <p className="truncate font-mono text-xs text-foreground">
+                                    {candidate.key}
+                                  </p>
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {candidate.connection_name} · {candidate.provider.toUpperCase()}{" "}
+                                    · {formatBytes(candidate.size_bytes)} · v{candidate.app_version}
+                                  </p>
+                                  <p className="mt-1 truncate font-mono text-2xs text-muted-foreground">
+                                    {t("settings.backupSha256", {
+                                      digest: `${candidate.archive_sha256?.slice(0, 16) ?? "unavailable"}…`,
+                                    })}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setAdoptRemoteTarget(candidate)}
+                                  disabled={
+                                    adoptingRemoteBackup ||
+                                    restoringBackup ||
+                                    backingUp ||
+                                    uploadingBackup ||
                                     !candidate.source_ref ||
                                     !candidate.archive_sha256
                                   }

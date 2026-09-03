@@ -1,4 +1,12 @@
-import { authHeaders, expectOk, getJson, getUrl, sendAction, sendJson } from "@/lib/api/request";
+import {
+  authHeaders,
+  expectOk,
+  getJson,
+  getUrl,
+  sendAction,
+  sendForm,
+  sendJson,
+} from "@/lib/api/request";
 
 export interface BackupMeta {
   backup_id: string;
@@ -37,6 +45,15 @@ export interface UnownedS3BackupCandidate extends BackupMeta {
   candidate_kind?: string | null;
 }
 
+/** A validated archive found through a configured OpenDAL connection. */
+export interface UnownedRemoteBackupCandidate extends BackupMeta {
+  connection_id: number;
+  connection_name: string;
+  provider: string;
+  key: string;
+  prefix: string;
+}
+
 export interface BackupRestoreResult {
   backup_id: string;
   restored_files: number;
@@ -44,6 +61,12 @@ export interface BackupRestoreResult {
 
 export function createBackup(): Promise<BackupMeta> {
   return sendJson<BackupMeta>("/api/v1/backups", "POST", undefined);
+}
+
+export function uploadBackup(file: File): Promise<BackupMeta> {
+  const body = new FormData();
+  body.append("file", file);
+  return sendForm<BackupMeta>("/api/v1/backups/upload", body);
 }
 
 export function listBackups(): Promise<BackupMeta[]> {
@@ -71,6 +94,10 @@ export function listUnownedS3Backups(): Promise<UnownedS3BackupCandidate[]> {
   return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3");
 }
 
+export function listUnownedRemoteBackups(): Promise<UnownedRemoteBackupCandidate[]> {
+  return getJson<UnownedRemoteBackupCandidate[]>("/api/v1/backups/unowned-remote");
+}
+
 export function adoptS3Backup(
   key: string,
   sourceRef: string,
@@ -82,6 +109,25 @@ export function adoptS3Backup(
     expected_archive_sha256: expectedArchiveSha256,
   });
   return sendJson<BackupMeta>(`/api/v1/backups/adopt-s3?${params.toString()}`, "POST", undefined);
+}
+
+export function adoptRemoteBackup(
+  connectionId: number,
+  key: string,
+  sourceRef: string,
+  expectedArchiveSha256: string,
+): Promise<BackupMeta> {
+  const params = new URLSearchParams({
+    connection_id: String(connectionId),
+    key,
+    source_ref: sourceRef,
+    expected_archive_sha256: expectedArchiveSha256,
+  });
+  return sendJson<BackupMeta>(
+    `/api/v1/backups/adopt-remote?${params.toString()}`,
+    "POST",
+    undefined,
+  );
 }
 
 function sourceQuery(sourceRef?: string | null): string {

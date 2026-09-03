@@ -19,7 +19,8 @@ or Google Drive; one remote failure never discards the local archive or prevents
 another destination from receiving its copy.
 
 Add those connections under **Settings → Remote storage** and allow **Backup
-replicas** (or both uses). Backup archives use the reserved
+replicas** (or both uses). Create, upload, retain, and restore archives under
+**Settings → Backup**. Backup archives use the reserved
 `printstash-backups` folder; do not select that path as a Library source. Remote
 restores are accepted only when the saved ownership receipt, provider profile,
 object identity, size, and SHA-256 still agree. Google Drive is beta: restore is
@@ -42,8 +43,7 @@ curl -X POST \
   http://localhost:8000/api/v1/backups
 ```
 
-Via UI: open Settings, review backup storage, then create a backup before
-upgrading.
+Via UI: open **Settings → Backup**, then create a backup before upgrading.
 
 Automatic GC approval has a stricter requirement than an ordinary recovery
 backup. Its witness must be no more than 24 hours old, fully verified,
@@ -69,9 +69,17 @@ curl \
   http://localhost:8000/api/v1/backups/sources
 ```
 
-   Older validated local or S3 archives that are not yet owned remain untouched
-   until an administrator explicitly adopts the exact candidate in Settings.
+   Older validated local, legacy S3, or OpenDAL archives that are not yet owned
+   remain untouched until an administrator explicitly adopts the exact candidate
+   in **Settings → Backup**. Recreate the matching connection under **Remote
+   storage** first if this is a fresh installation. PrintStash re-downloads the
+   archive and verifies the exact connection identity and SHA-256 before adoption.
    Never infer a source from backup id alone.
+
+   If the archive is on another machine or provider that is not configured as a
+   remote connection, download it yourself and use **Upload backup archive** in
+   **Settings → Backup**. Uploaded archives are size-bounded and fully validated
+   before they are registered or offered for restore.
 
 6. Restore the chosen backup. Pass `source_ref` when the id is present in more
    than one location:

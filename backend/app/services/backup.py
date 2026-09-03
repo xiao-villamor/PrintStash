@@ -28,7 +28,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterator, Literal, ParamSpec, TypeVar
+from typing import Any, BinaryIO, Callable, Iterator, Literal, ParamSpec, TypeVar
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.engine import URL
@@ -47,9 +47,10 @@ from app.db.models import (
     User,
 )
 from app.db.session import get_engine, get_session_factory
-from app.services import audit
+from app.services import audit, storage
 from app.services.backup_destination import (
     BackupDestinationError,
+    RemoteBackupDestination,
     configured_destinations,
     destination_for_ownership,
 )
@@ -576,6 +577,15 @@ def _backup_id_from_archive_name(name: str) -> str:
     if not backup_id:
         raise ValueError("backup_key_invalid")
     return backup_id
+
+
+def _is_direct_remote_backup_key(key: str, prefix: str) -> bool:
+    """Accept only a portable archive name directly under the reserved prefix."""
+    if not key or "\\" in key:
+        return False
+    path = PurePosixPath(key)
+    root = PurePosixPath(prefix.rstrip("/"))
+    return not path.is_absolute() and ".." not in path.parts and path.parent == root
 
 
 def _s3_object_kwargs(
@@ -1642,7 +1652,7 @@ def _list_opendal_backups() -> list[BackupMeta]:
                         OwnedStorageObject.backend == destination.backend.backend_name,
                         OwnedStorageObject.namespace == destination.namespace,
                         OwnedStorageObject.provider_ref == destination.provider_ref,
-                        OwnedStorageObject.object_kind == "backup",
+                        OwnedStorageObject.object_kind.in_(("backup", "backup-legacy")),
                         OwnedStorageObject.state == StorageObjectState.COMMITTED,
                     )
                 ).all()
@@ -2001,6 +2011,218 @@ def discover_unowned_s3_backups() -> list[dict[str, object]]:
     return result
 
 
+def _download_opendal_candidate(
+    destination: RemoteBackupDestination, key: str
+) -> tuple[Path, str, CreationReceipt]:
+    """Download one unowned remote archive while pinning observable identity."""
+    before = destination.backend.object_info(key)
+    if before is None:
+        raise FileNotFoundError(key)
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    fd, raw = tempfile.mkstemp(
+        prefix=".printstash-opendal-adopt-", dir=settings.backup_dir
+    )
+    os.close(fd)
+    path = Path(raw)
+    digest = hashlib.sha256()
+    written = 0
+    try:
+        with path.open("wb") as output:
+            for chunk in destination.backend.stream_chunks(key):
+                output.write(chunk)
+                digest.update(chunk)
+                written += len(chunk)
+        after = destination.backend.object_info(key)
+        if (
+            after is None
+            or written != before.size
+            or after.size != before.size
+            or (before.etag and after.etag != before.etag)
+            or (before.version_id and after.version_id != before.version_id)
+        ):
+            raise RuntimeError("backup_remote_changed")
+        return (
+            path,
+            digest.hexdigest(),
+            CreationReceipt(
+                key=key,
+                size=written,
+                token=digest.hexdigest(),
+                backend=destination.backend.backend_name,
+                namespace=destination.namespace,
+                etag=after.etag,
+                version_id=after.version_id,
+                provider_ref=destination.provider_ref,
+            ),
+        )
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def discover_unowned_opendal_backups() -> list[dict[str, object]]:
+    """Find validated archives under every configured OpenDAL backup root."""
+    result: list[dict[str, object]] = []
+    for destination in configured_destinations():
+        try:
+            with get_session_factory().scoped_session() as session:
+                committed = {
+                    row.key
+                    for row in session.exec(
+                        select(OwnedStorageObject).where(
+                            OwnedStorageObject.backend
+                            == destination.backend.backend_name,
+                            OwnedStorageObject.namespace == destination.namespace,
+                            OwnedStorageObject.provider_ref == destination.provider_ref,
+                            OwnedStorageObject.object_kind.in_(  # type: ignore[union-attr]
+                                ("backup", "backup-legacy")
+                            ),
+                            OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                        )
+                    ).all()
+                }
+            prefix_key = destination.key("")
+            for key in destination.backend.list_prefix(prefix_key):
+                name = key.rsplit("/", 1)[-1]
+                if (
+                    key in committed
+                    or not _is_direct_remote_backup_key(key, prefix_key)
+                    or not name.startswith(
+                        (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
+                    )
+                    or not name.endswith(".tar.gz")
+                ):
+                    continue
+                temp: Path | None = None
+                try:
+                    temp, digest, receipt = _download_opendal_candidate(
+                        destination, key
+                    )
+                    meta = _validate_archive_for_adoption(temp)
+                    meta.id = _backup_id_from_archive_name(name)
+                    source_ref = _source_ref(
+                        location=destination.location,
+                        namespace=destination.namespace,
+                        path=key,
+                        provider_ref=destination.provider_ref,
+                    )
+                    result.append(
+                        {
+                            "connection_id": destination.connection_id,
+                            "connection_name": destination.name,
+                            "provider": destination.provider,
+                            "key": key,
+                            "backup_id": meta.id,
+                            "created_at": meta.created_at,
+                            "size_bytes": receipt.size,
+                            "file_count": meta.file_count,
+                            "storage_backend": meta.storage_backend,
+                            "app_version": meta.app_version,
+                            "location": destination.location,
+                            "namespace": destination.namespace,
+                            "prefix": prefix_key,
+                            "archive_sha256": digest,
+                            "source_ref": source_ref,
+                            "provider_ref": destination.provider_ref,
+                            "candidate_kind": "unowned_archive",
+                        }
+                    )
+                except Exception:
+                    logger.info(
+                        "backup: unowned OpenDAL archive failed validation: %s",
+                        key,
+                    )
+                finally:
+                    if temp is not None:
+                        temp.unlink(missing_ok=True)
+        except Exception:
+            logger.warning(
+                "backup: failed to discover OpenDAL backups from %s",
+                destination.name,
+                exc_info=True,
+            )
+    return result
+
+
+def adopt_opendal_backup(
+    connection_id: int,
+    key: str,
+    *,
+    source_ref: str,
+    expected_archive_sha256: str,
+) -> BackupMeta:
+    """Validate and ledger-adopt one exact OpenDAL archive in place."""
+    destination = next(
+        (
+            item
+            for item in configured_destinations()
+            if item.connection_id == connection_id
+        ),
+        None,
+    )
+    if destination is None:
+        raise RuntimeError("backup_remote_connection_unavailable")
+    prefix_key = destination.key("")
+    name = key.rsplit("/", 1)[-1]
+    if (
+        not _is_direct_remote_backup_key(key, prefix_key)
+        or not name.startswith((_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX))
+        or not name.endswith(".tar.gz")
+    ):
+        raise ValueError("backup_key_invalid")
+    expected_source_ref = _source_ref(
+        location=destination.location,
+        namespace=destination.namespace,
+        path=key,
+        provider_ref=destination.provider_ref,
+    )
+    if source_ref != expected_source_ref:
+        raise ValueError("backup_source_ref_mismatch")
+    with get_session_factory().scoped_session() as session:
+        existing = session.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.backend == destination.backend.backend_name,
+                OwnedStorageObject.namespace == destination.namespace,
+                OwnedStorageObject.key == key,
+                OwnedStorageObject.provider_ref == destination.provider_ref,
+                OwnedStorageObject.object_kind.in_(  # type: ignore[union-attr]
+                    ("backup", "backup-legacy")
+                ),
+                OwnedStorageObject.state == StorageObjectState.COMMITTED,
+            )
+        ).first()
+    if existing is not None:
+        raise ValueError("backup_already_adopted")
+
+    temp: Path | None = None
+    try:
+        temp, digest, receipt = _download_opendal_candidate(destination, key)
+        if digest != expected_archive_sha256:
+            raise RuntimeError("backup_archive_digest_mismatch")
+        meta = _validate_archive_for_adoption(temp)
+        meta.id = _backup_id_from_archive_name(name)
+        with get_session_factory().session() as session:
+            record_creation(
+                session,
+                receipt,
+                object_kind="backup-legacy",
+                sha256=digest,
+                provider_ref=destination.provider_ref,
+            )
+            session.commit()
+        meta.path = key
+        meta.location = destination.location
+        meta.size_bytes = receipt.size
+        meta.archive_sha256 = digest
+        meta.provider_ref = destination.provider_ref
+        meta.namespace = destination.namespace
+        meta.source_ref = expected_source_ref
+        return meta
+    finally:
+        if temp is not None:
+            temp.unlink(missing_ok=True)
+
+
 def adopt_s3_backup(
     key: str,
     *,
@@ -2163,6 +2385,71 @@ def adopt_local_backup(filename: str) -> BackupMeta:
     return meta
 
 
+@_exclusive_backup_operation
+def upload_backup_archive(filename: str, source: BinaryIO) -> BackupMeta:
+    """Validate and register a backup archive uploaded by an administrator."""
+    if not filename or "\\" in filename or Path(filename).name != filename:
+        raise ValueError("backup_filename_invalid")
+    if not filename.startswith((_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)):
+        raise ValueError("backup_filename_invalid")
+    backup_id = _backup_id_from_archive_name(filename)
+    settings.backup_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = settings.backup_dir / filename
+    if archive_path.exists():
+        raise FileExistsError("backup_already_exists")
+    fd, raw_staged = tempfile.mkstemp(
+        prefix=".printstash-backup-upload-", dir=settings.backup_dir
+    )
+    os.close(fd)
+    staged = Path(raw_staged)
+    staged.unlink()
+    digest = hashlib.sha256()
+    try:
+        storage.stream_to_path(
+            source,
+            staged,
+            max_bytes=settings.max_upload_bytes,
+            digest=digest,
+        )
+        meta = _validate_archive_for_adoption(staged)
+        backend = LocalStorageBackend()
+        with get_session_factory().session() as session:
+            receipt = publish_file(
+                session,
+                backend,
+                str(archive_path),
+                staged,
+                object_kind="backup",
+                sha256=digest.hexdigest(),
+                move=True,
+            )
+            audit.record(
+                session,
+                action="backup.upload",
+                resource_type="backup",
+                diff={"backup_id": backup_id, "size_bytes": receipt.size},
+            )
+            session.commit()
+        namespace = backend.namespace_for(str(archive_path))
+        provider_ref = provider_ref_for_backend(backend, namespace=namespace)
+        meta.id = backup_id
+        meta.path = str(archive_path)
+        meta.location = "local"
+        meta.size_bytes = receipt.size
+        meta.archive_sha256 = digest.hexdigest()
+        meta.provider_ref = provider_ref
+        meta.namespace = namespace
+        meta.source_ref = _source_ref(
+            location="local",
+            namespace=namespace,
+            path=str(archive_path),
+            provider_ref=provider_ref,
+        )
+        return meta
+    finally:
+        staged.unlink(missing_ok=True)
+
+
 def discover_unowned_local_backups() -> list[dict[str, object]]:
     """Describe valid legacy archives awaiting explicit administrator adoption.
 
@@ -2265,7 +2552,9 @@ def _require_backup_archive_owned(
                     OwnedStorageObject.namespace == meta.namespace,
                     OwnedStorageObject.key == meta.path,
                     OwnedStorageObject.provider_ref == meta.provider_ref,
-                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.object_kind.in_(  # type: ignore[union-attr]
+                        ("backup", "backup-legacy")
+                    ),
                     OwnedStorageObject.state == StorageObjectState.COMMITTED,
                 )
             ).all()

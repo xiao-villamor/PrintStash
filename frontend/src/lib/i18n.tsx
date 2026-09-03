@@ -204,6 +204,7 @@ const messages = {
     "settings.overview": "Overview",
     "settings.access": "Users & Access",
     "settings.storage": "Storage",
+    "settings.backup": "Backup",
     "settings.remoteStorage": "Remote storage",
     "settings.imports": "Imports",
     "settings.maintenance": "Maintenance",
@@ -304,6 +305,26 @@ const messages = {
     "settings.backupRestoreWarning":
       "This replaces the current database and stored files with the selected backup.",
     "settings.backupExactSource": "Exact source: {source}",
+    "settings.backupRemoteTitle": "Remote backups are ready to import",
+    "settings.backupRemoteDescription":
+      "These validated archives were found through your enabled remote storage connections. Adopt one before restoring it.",
+    "settings.backupRemoteConfirmTitle": "Adopt remote backup?",
+    "settings.backupRemoteConfirmDescription":
+      "Register {key} from {connection} after rechecking its exact source and SHA-256 {hash}…",
+    "settings.backupManualDescription":
+      "Create a new archive or upload one exported from another PrintStash installation.",
+    "settings.backupUploadTitle": "Upload backup archive",
+    "settings.backupUploadDescription":
+      "The archive is fully validated before it is registered or offered for restore.",
+    "settings.backupUploading": "Uploading…",
+    "settings.backupUploadAction": "Upload backup",
+    "settings.backupRetentionTitle": "Backup retention",
+    "settings.backupRetentionDescription":
+      "Choose how long local backups are kept. Set this to 0 to keep them forever.",
+    "settings.backupRetentionLabel": "Retention (days)",
+    "settings.backupRetentionSave": "Save retention",
+    "settings.backupRetentionSaved": "Backup retention updated.",
+    "settings.storageConfigDescription": "Provider connection and active guarantees",
     "settings.trashCleanupCompleted": "Storage cleanup completed.",
     "settings.trashCleanupPending":
       "Catalog purge completed; {count} storage object(s) remain pending cleanup.",
@@ -656,6 +677,7 @@ const messages = {
     "settings.overview": "Resumen",
     "settings.access": "Usuarios y acceso",
     "settings.storage": "Almacenamiento",
+    "settings.backup": "Copias de seguridad",
     "settings.remoteStorage": "Almacenamiento remoto",
     "settings.imports": "Importaciones",
     "settings.maintenance": "Mantenimiento",
@@ -756,6 +778,26 @@ const messages = {
     "settings.backupRestoreWarning":
       "Esto reemplaza la base de datos actual y los archivos almacenados con la copia seleccionada.",
     "settings.backupExactSource": "Origen exacto: {source}",
+    "settings.backupRemoteTitle": "Hay copias remotas listas para importar",
+    "settings.backupRemoteDescription":
+      "Estos archivos validados se encontraron mediante las conexiones remotas activas. Registra uno antes de restaurarlo.",
+    "settings.backupRemoteConfirmTitle": "¿Registrar copia remota?",
+    "settings.backupRemoteConfirmDescription":
+      "Registrar {key} desde {connection} tras comprobar de nuevo su origen exacto y SHA-256 {hash}…",
+    "settings.backupManualDescription":
+      "Crea un archivo nuevo o sube uno exportado desde otra instalación de PrintStash.",
+    "settings.backupUploadTitle": "Subir copia de seguridad",
+    "settings.backupUploadDescription":
+      "El archivo se valida por completo antes de registrarlo u ofrecerlo para restauración.",
+    "settings.backupUploading": "Subiendo…",
+    "settings.backupUploadAction": "Subir copia",
+    "settings.backupRetentionTitle": "Retención de copias",
+    "settings.backupRetentionDescription":
+      "Elige cuánto tiempo se conservan las copias locales. Usa 0 para conservarlas para siempre.",
+    "settings.backupRetentionLabel": "Retención (días)",
+    "settings.backupRetentionSave": "Guardar retención",
+    "settings.backupRetentionSaved": "Retención de copias actualizada.",
+    "settings.storageConfigDescription": "Conexión del proveedor y garantías activas",
     "settings.trashCleanupCompleted": "Limpieza de almacenamiento completada.",
     "settings.trashCleanupPending":
       "La purga del catálogo terminó; quedan {count} objeto(s) de almacenamiento pendientes de limpieza.",

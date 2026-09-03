@@ -149,6 +149,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/backups": json([]),
       "GET /api/v1/backups/sources": json([]),
       "GET /api/v1/backups/unowned-local": json([]),
+      "GET /api/v1/backups/unowned-remote": json([]),
       "GET /api/v1/storage-connections": json([]),
       "GET /api/v1/models/stats": json(VAULT_STATS),
       ...routes,
@@ -184,6 +185,7 @@ describe("SettingsPanel", () => {
     it.each([
       "access",
       "storage",
+      "backup",
       "remote-storage",
       "imports",
       "maintenance",
@@ -769,15 +771,54 @@ describe("SettingsPanel", () => {
       archive_sha256: "a".repeat(64),
     };
 
-    it("says so when nothing has been backed up", async () => {
+    it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
+
+      expect(await screen.findByRole("button", { name: "Save configuration" })).toBeVisible();
+      expect(screen.queryByRole("button", { name: /Backup now/ })).toBeNull();
+    });
+
+    it("opens backup controls in their own section", async () => {
+      renderSettings({ at: "/settings?section=backup" });
+
+      expect(await screen.findByRole("button", { name: /Backup now/ })).toBeVisible();
+      expect(screen.getByLabelText("Upload backup archive")).toBeInTheDocument();
+      expect(screen.getByLabelText("Retention (days)")).toHaveValue(30);
+    });
+
+    it("saves backup retention from the backup section", async () => {
+      const user = userEvent.setup();
+      let update: unknown;
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "PUT /api/v1/config": (_url, init) => {
+            update = JSON.parse(String(init?.body));
+            return json(VAULT_CONFIG);
+          },
+        },
+      });
+
+      const input = await screen.findByLabelText("Retention (days)");
+      await user.clear(input);
+      await user.type(input, "14");
+      await user.click(screen.getByRole("button", { name: "Save retention" }));
+
+      await waitFor(() =>
+        expect(requestsWithMethod("PUT").some((call) => call.url.endsWith("/config"))).toBe(true),
+      );
+      expect(update).toEqual({ backup_retention_days: 14 });
+    });
+
+    it("says so when nothing has been backed up", async () => {
+      renderSettings({ at: "/settings?section=backup" });
 
       expect(await screen.findByText("No backups found.")).toBeInTheDocument();
     });
 
     it("lists the backups taken", async () => {
       const { requests } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
@@ -789,7 +830,7 @@ describe("SettingsPanel", () => {
     it("keeps same-id sources independent for exact downloads", async () => {
       const user = userEvent.setup();
       const { requests } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([
             { ...BACKUP, source_ref: "local-source", location: "local" },
@@ -816,7 +857,7 @@ describe("SettingsPanel", () => {
 
     it("surfaces validated legacy candidates", async () => {
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/unowned-local": json([
             {
@@ -839,7 +880,7 @@ describe("SettingsPanel", () => {
 
     it("surfaces validated legacy S3 candidates with their exact locator", async () => {
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/unowned-s3": json([
             {
@@ -865,10 +906,54 @@ describe("SettingsPanel", () => {
       expect(screen.getByText(/SHA-256 a{16}/)).toBeInTheDocument();
     });
 
+    it("adopts a validated OpenDAL candidate from its exact connection", async () => {
+      const user = userEvent.setup();
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/unowned-remote": json([
+            {
+              connection_id: 7,
+              connection_name: "Recovery Drive",
+              provider: "gdrive",
+              key: "gdrive/PrintStash/printstash-backups/printstash-backup-old.tar.gz",
+              prefix: "gdrive/PrintStash/printstash-backups",
+              namespace: "gdrive/PrintStash",
+              source_ref: "remote-source",
+              archive_sha256: "b".repeat(64),
+              backup_id: "old",
+              created_at: "2025-01-01T00:00:00Z",
+              location: "opendal:gdrive",
+              app_version: "0.12.1",
+              file_count: 8,
+              size_bytes: 2048,
+              storage_backend: "local",
+            },
+          ]),
+          "POST /api/v1/backups/adopt-remote": json({ backup_id: "old" }),
+        },
+      });
+
+      expect(await screen.findByText(/Recovery Drive.*GDRIVE/)).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Adopt backup" }));
+      const dialog = screen.getByRole("dialog", { name: "Adopt remote backup?" });
+      await user.click(within(dialog).getByRole("button", { name: "Adopt backup" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) =>
+            call.url.includes(
+              "/backups/adopt-remote?connection_id=7&key=gdrive%2FPrintStash%2Fprintstash-backups%2Fprintstash-backup-old.tar.gz&source_ref=remote-source&expected_archive_sha256=",
+            ),
+          ),
+        ).toBe(true),
+      );
+    });
+
     it("adopts one S3 candidate only after confirmation", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/unowned-s3": json([
             {
@@ -911,7 +996,7 @@ describe("SettingsPanel", () => {
     it("confirms one legacy candidate before adopting", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/unowned-local": json([
             {
@@ -949,7 +1034,7 @@ describe("SettingsPanel", () => {
       // Restoring a backup written by a newer app is how a vault ends up with a
       // schema its code cannot read.
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
@@ -959,7 +1044,7 @@ describe("SettingsPanel", () => {
     it("takes a backup on demand", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: { "POST /api/v1/backups": json(BACKUP) },
       });
 
@@ -970,10 +1055,37 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("uploads the selected backup archive", async () => {
+      const user = userEvent.setup();
+      let uploaded: FormDataEntryValue | null = null;
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "POST /api/v1/backups/upload": (_url, init) => {
+            if (init?.body instanceof FormData) uploaded = init.body.get("file");
+            return json(BACKUP, 201);
+          },
+        },
+      });
+      const archive = new File(["archive"], "printstash-backup-upload.tar.gz", {
+        type: "application/gzip",
+      });
+
+      await user.upload(await screen.findByLabelText("Upload backup archive"), archive);
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST").some((call) => call.url.endsWith("/backups/upload")),
+        ).toBe(true),
+      );
+      expect(uploaded).toBeInstanceOf(File);
+      expect(uploaded).toHaveProperty("name", "printstash-backup-upload.tar.gz");
+    });
+
     it("reports a backup failure", async () => {
       const user = userEvent.setup();
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "POST /api/v1/backups": json({ detail: "backup_blob_missing" }, 409),
         },
@@ -987,7 +1099,7 @@ describe("SettingsPanel", () => {
     it("allows retrying after a backup failure", async () => {
       const user = userEvent.setup();
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "POST /api/v1/backups": json({ detail: "backup_blob_missing" }, 409),
         },
@@ -1016,7 +1128,7 @@ describe("SettingsPanel", () => {
         namespace: undefined,
       };
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([olderLocal, olderCloud]),
           "POST /api/v1/backups": json({
@@ -1042,7 +1154,7 @@ describe("SettingsPanel", () => {
       // click is unrecoverable.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
       });
 
@@ -1052,7 +1164,7 @@ describe("SettingsPanel", () => {
     });
 
     it("tells a non-admin they cannot see the backups", async () => {
-      renderSettings({ at: "/settings?section=storage", auth: memberSession() });
+      renderSettings({ at: "/settings?section=backup", auth: memberSession() });
 
       expect(await screen.findByText("Superuser access is required.")).toBeInTheDocument();
     });
@@ -1554,7 +1666,7 @@ describe("SettingsPanel", () => {
     it("restores the backup once confirmed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([BACKUP_META]),
           "POST /api/v1/backups/2026-01-01T000000Z/restore": json({ restored_files: 42 }),
@@ -1580,7 +1692,7 @@ describe("SettingsPanel", () => {
       // only warning between a click and that.
       const user = userEvent.setup();
       renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: { "GET /api/v1/backups/sources": json([BACKUP_META]) },
       });
 
@@ -1599,7 +1711,7 @@ describe("SettingsPanel", () => {
     it("downloads a backup off the server", async () => {
       const user = userEvent.setup();
       const { requests } = renderSettings({
-        at: "/settings?section=storage",
+        at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([BACKUP_META]),
           "GET /api/v1/backups/2026-01-01T000000Z/download": json([]),

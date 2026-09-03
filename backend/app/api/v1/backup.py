@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import tarfile
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 
 from app.core.logging import get_logger
 from app.core.security import require_superuser
 from app.services import backup
+from app.services.storage import UploadTooLarge
 
 logger = get_logger(__name__)
 
@@ -38,6 +49,39 @@ def create_backup(
             detail=str(exc),
         ) from exc
     background_tasks.add_task(backup.purge_old_backups)
+    return {
+        "backup_id": meta.id,
+        "created_at": meta.created_at,
+        "size_bytes": meta.size_bytes,
+        "file_count": meta.file_count,
+        "storage_backend": meta.storage_backend,
+        "app_version": meta.app_version,
+        "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
+    }
+
+
+@router.post(
+    "/upload",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_superuser)],
+    summary="Upload an existing backup archive",
+)
+def upload_backup(file: UploadFile = File(...)) -> dict:
+    try:
+        meta = backup.upload_backup_archive(file.filename or "", file.file)
+    except UploadTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail="upload_too_large",
+        ) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail="backup_already_exists") from exc
+    except (ValueError, RuntimeError, OSError, tarfile.TarError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
         "backup_id": meta.id,
         "created_at": meta.created_at,
@@ -163,6 +207,15 @@ def discover_unowned_s3_backups() -> list[dict[str, object]]:
     return backup.discover_unowned_s3_backups()
 
 
+@router.get(
+    "/unowned-remote",
+    dependencies=[Depends(require_superuser)],
+    summary="Discover valid unowned OpenDAL backups",
+)
+def discover_unowned_remote_backups() -> list[dict[str, object]]:
+    return backup.discover_unowned_opendal_backups()
+
+
 @router.post(
     "/adopt-s3",
     dependencies=[Depends(require_superuser)],
@@ -175,6 +228,41 @@ def adopt_s3_backup(
 ) -> dict:
     try:
         meta = backup.adopt_s3_backup(
+            key,
+            source_ref=source_ref,
+            expected_archive_sha256=expected_archive_sha256,
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "backup_id": meta.id,
+        "created_at": meta.created_at,
+        "size_bytes": meta.size_bytes,
+        "file_count": meta.file_count,
+        "storage_backend": meta.storage_backend,
+        "app_version": meta.app_version,
+        "location": meta.location,
+        "archive_sha256": meta.archive_sha256,
+        "source_ref": meta.source_ref,
+        "provider_ref": meta.provider_ref,
+        "namespace": meta.namespace,
+    }
+
+
+@router.post(
+    "/adopt-remote",
+    dependencies=[Depends(require_superuser)],
+    summary="Adopt one existing OpenDAL backup",
+)
+def adopt_remote_backup(
+    connection_id: int = Query(..., ge=1),
+    key: str = Query(..., min_length=1),
+    source_ref: str = Query(..., min_length=1),
+    expected_archive_sha256: str = Query(..., min_length=64, max_length=64),
+) -> dict:
+    try:
+        meta = backup.adopt_opendal_backup(
+            connection_id,
             key,
             source_ref=source_ref,
             expected_archive_sha256=expected_archive_sha256,

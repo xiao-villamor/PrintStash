@@ -71,7 +71,7 @@ test.describe("settings", () => {
 
   test("create a manual backup", async ({ page }) => {
     await page.goto("/settings");
-    await page.getByRole("button", { name: "Storage", exact: true }).click();
+    await page.getByRole("button", { name: "Backup", exact: true }).click();
 
     await Promise.all([
       page.waitForResponse(
@@ -82,6 +82,38 @@ test.describe("settings", () => {
 
     // The new backup shows up in the Restore-backup list with a Download action.
     await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
+  });
+
+  test("upload an existing backup archive", async ({ page }) => {
+    const createdResponse = await page.request.post("/api/v1/backups");
+    expect(createdResponse.ok()).toBeTruthy();
+    const metadata = await createdResponse.json();
+    const source = new URLSearchParams({ source_ref: metadata.source_ref });
+    const archiveResponse = await page.request.get(
+      `/api/v1/backups/${metadata.backup_id}/download?${source}`,
+    );
+    expect(archiveResponse.ok()).toBeTruthy();
+    const disposition = archiveResponse.headers()["content-disposition"] ?? "";
+    const filename = disposition.match(/filename="?([^";]+)"?/)?.[1];
+    expect(filename).toBeTruthy();
+    const archive = await archiveResponse.body();
+
+    const deleted = await page.request.delete(`/api/v1/backups/${metadata.backup_id}?${source}`);
+    expect(deleted.ok()).toBeTruthy();
+
+    await page.goto("/settings?section=backup");
+    const uploadedResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/v1/backups/upload") && response.request().method() === "POST",
+    );
+    await page.getByLabel("Upload backup archive").setInputFiles({
+      name: filename!,
+      mimeType: "application/gzip",
+      buffer: archive,
+    });
+    const uploaded = await uploadedResponse;
+    expect(uploaded.status()).toBe(201);
+    await expect(page.getByRole("button", { name: "Restore", exact: true }).first()).toBeVisible();
   });
 
   test("create one remote connection for backups and Library sources", async ({ page }) => {
@@ -115,7 +147,7 @@ test.describe("settings", () => {
   });
 
   test("uses the exact source reference for a backup download", async ({ page }) => {
-    await page.goto("/settings?section=storage");
+    await page.goto("/settings?section=backup");
 
     const created = page.waitForResponse(
       (response) =>
