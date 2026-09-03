@@ -387,6 +387,59 @@ describe("ModelBrowser", () => {
   });
 
   describe("display preferences", () => {
+    it("starts in the everything library view when no preference exists", async () => {
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+
+      await screen.findByText("Benchy");
+      expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("remembers a library view choice", async () => {
+      const user = userEvent.setup();
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+      await screen.findByText("Benchy");
+
+      await user.click(screen.getAllByRole("button", { name: "Organized" })[0]);
+
+      expect(window.localStorage.getItem("ps-vault-library-view")).toBe("organized");
+    });
+
+    it("starts in the remembered library view", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "components");
+
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+
+      const partsOnly = await screen.findAllByRole("button", { name: "Parts only" });
+      expect(partsOnly[0]).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("falls back to everything when the remembered library view is unknown", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "unknown");
+
+      renderVault({ models: [aModelListItem({ name: "Benchy" })] });
+
+      await screen.findByText("Benchy");
+      expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
+    it("lets the URL override the remembered library view", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "components");
+
+      renderVault({ at: "/?type=all", models: [aModelListItem({ name: "Benchy" })] });
+
+      await screen.findByText("Benchy");
+      expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+    });
+
     it("starts in the grid the user last chose", async () => {
       window.localStorage.setItem("ps-vault-view", "list");
 
@@ -441,7 +494,8 @@ describe("ModelBrowser", () => {
   });
 
   describe("the unified model library", () => {
-    it("groups component models below their multipart set by default", async () => {
+    it("groups component models below their multipart set in the organized view", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         models: [
           aModelListItem({ id: 1, name: "Dragon body" }),
@@ -458,6 +512,7 @@ describe("ModelBrowser", () => {
     });
 
     it("groups a root component under a multipart set stored in a collection", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "organized");
       const nestedSet = aMultipartSet({ collection: "figures", collection_id: 1 });
       renderVault({
         collections: [aCollection({ id: 1, name: "Figures", slug: "figures", path: "figures" })],
@@ -479,6 +534,7 @@ describe("ModelBrowser", () => {
 
     it("reveals reusable component models in the everything view", async () => {
       const user = userEvent.setup();
+      window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         models: [aModelListItem({ id: 1, name: "Dragon body" })],
         multipartModels: [aMultipartSet()],
@@ -528,6 +584,7 @@ describe("ModelBrowser", () => {
     });
 
     it("reveals a matching component model while searching the organised view", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         at: "/?q=dragon",
         models: [aModelListItem({ id: 1, name: "Dragon body" })],
@@ -538,6 +595,7 @@ describe("ModelBrowser", () => {
     });
 
     it("surfaces a failed multipart grouping request in the organised view", async () => {
+      window.localStorage.setItem("ps-vault-library-view", "organized");
       renderVault({
         models: [aModelListItem({ id: 1, name: "Dragon body" })],
         routes: {

@@ -179,6 +179,8 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Library view now remembers the user's selection, and new browsers default to
+  Everything instead of Organized.
 - Exploratory-QA fixes now keep live locale changes consistent, translate the
   library result count, validate Model names, backup retention, and filament
   costs visibly, identify remote backup destinations accurately, keep delete

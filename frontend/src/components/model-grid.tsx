@@ -341,6 +341,7 @@ type StructuredFilterKey = (typeof STRUCTURED_FILTER_KEYS)[number];
 
 const RECENT_FOLDERS_KEY = "ps-recent-folders";
 const RECENT_FOLDERS_LIMIT = 6;
+const LIBRARY_VIEW_KEY = "ps-vault-library-view";
 // A signed-out session has no saved views; a shared constant keeps the derived
 // list referentially stable across renders.
 const NO_SAVED_VIEWS: SavedViewRead[] = [];
@@ -407,6 +408,20 @@ function writeRecentFolders(paths: string[]): void {
 function readSortKey(): SortKey {
   const stored = readVaultPreference("ps-vault-sort");
   return SORT_OPTIONS.find((option) => option.value === stored)?.value ?? "date-desc";
+}
+
+/** Decode the persisted Library view without trusting browser-owned storage. */
+function readLibraryView(): LibraryViewMode | null {
+  const stored = readVaultPreference(LIBRARY_VIEW_KEY);
+  if (
+    stored === "organized" ||
+    stored === "all" ||
+    stored === "multipart" ||
+    stored === "components"
+  ) {
+    return stored;
+  }
+  return null;
 }
 
 function childCollections(
@@ -524,7 +539,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     ) {
       return requestedLibraryView;
     }
-    return requestedVaultView === "multipart" ? "multipart" : "organized";
+    if (requestedVaultView === "multipart") return "multipart";
+    return readLibraryView() ?? "all";
   });
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -718,6 +734,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function handleLibraryViewChange(view: LibraryViewMode) {
     setLibraryView(view);
+    localStorage.setItem(LIBRARY_VIEW_KEY, view);
     setDocView("models");
     setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());

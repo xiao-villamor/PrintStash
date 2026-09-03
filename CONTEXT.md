@@ -46,10 +46,11 @@ Guides may be Markdown, PDF or raster images, remain visible in Documents, and
 survive deletion of the grouping as ordinary Documents.
 _Avoid_: Model file, Artifact, attachment
 
-Multipart Models and ordinary Models share one library. Organized is the
-default presentation: it shows each Multipart Model once and suppresses
-duplicate top-level cards for the Models it references. Everything shows both,
-Multipart sets only shows groupings, and Parts only shows referenced Models.
+Multipart Models and ordinary Models share one library. Everything is the
+default presentation: it shows Multipart Models and ordinary Models together.
+Organized shows each Multipart Model once and suppresses duplicate top-level
+cards for the Models it references. Multipart sets only shows groupings, and
+Parts only shows referenced Models.
 Search always reveals a matching Model, including in Organized. This is a
 presentation rule, not ownership: adding a piece or alternative never transfers
 or duplicates that Model's Files, and removing a piece or deleting the grouping
