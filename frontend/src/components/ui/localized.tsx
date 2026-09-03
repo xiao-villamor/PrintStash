@@ -21,8 +21,8 @@ const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
   ["Captured", "Capturado"],
   ["· Checked", "· Comprobado"],
   [
-    "Create a durable capture, then choose files and destination on the review page.",
-    "Crea una captura duradera y elige archivos y destino en la página de revisión.",
+    "Create a durable capture, then review its files and confirm or change the collection and tags.",
+    "Crea una captura duradera, revisa sus archivos y confirma o cambia la colección y las etiquetas.",
   ],
   ["Pending Import", "Importación pendiente"],
   [

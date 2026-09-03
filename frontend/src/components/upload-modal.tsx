@@ -844,7 +844,8 @@ export function UploadModal({
                 placeholder="Model page, collection, or direct .stl/.zip link"
               />
               <p className="mt-1.5 font-mono text-3xs text-on-surface-variant/70">
-                Create a durable capture, then choose files and destination on the review page.
+                Create a durable capture, then review its files and confirm or change the collection
+                and tags.
               </p>
             </div>
           ) : (

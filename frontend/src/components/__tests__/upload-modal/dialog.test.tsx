@@ -105,14 +105,18 @@ describe("UploadModal", () => {
       expect(screen.getByRole("button", { name: /Upload to vault/ })).toBeDisabled();
     });
 
-    it("offers a URL import", async () => {
+    it("explains that URL destination values remain editable during review", async () => {
       const user = userEvent.setup();
       renderUpload();
       await screen.findByText(".stl .3mf .obj .step");
 
       await user.click(mode("From URL"));
 
-      expect(screen.getByPlaceholderText(/Model page, collection/)).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Create a durable capture, then review its files and confirm or change the collection and tags.",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("offers an archive import", async () => {
