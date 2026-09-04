@@ -3798,12 +3798,13 @@ def _apply_staged_blobs(
     journal_path: Path | None = None,
     journal_state: _RestoreJournalState | None = None,
 ) -> tuple[list[_AppliedBlob], list[_AppliedBlob]]:
-    """Publish a restore only into empty, in-bound destinations.
+    """Publish a restore into empty or byte-identical, in-bound destinations.
 
     Restore used to overwrite every manifest key and then attempt a best-effort
     rollback. A malicious/stale manifest or remapped root could therefore
-    clobber unrelated bytes. Colliding restores now fail before the first write;
-    operators must restore into dedicated empty storage.
+    clobber unrelated bytes. Conflicting restores now fail before the first
+    write. Existing bytes are reused only when their size and SHA-256 match the
+    archive, and that adoption is journalled before it can affect ownership.
     """
     del rollback_dir
     backend = get_backend()
@@ -3811,6 +3812,7 @@ def _apply_staged_blobs(
     created: list[_AppliedBlob] = []
 
     seen: set[str] = set()
+    matching_existing: list[_StagedBlob] = []
     for blob in blobs:
         _validate_restore_key(blob.key)
         if blob.key in seen:
@@ -3819,10 +3821,35 @@ def _apply_staged_blobs(
         if not backend.exists(blob.key):
             continue
         intent = journal_state.intents.get(blob.key) if journal_state else None
-        if intent is None or not _journal_intent_matches(intent, blob):
+        if intent is None:
+            if not _stored_blob_matches(blob):
+                raise RestoreConflictError("restore_destination_exists")
+            matching_existing.append(blob)
+            continue
+        if not _journal_intent_matches(intent, blob):
             raise RestoreConflictError("restore_destination_exists")
         if not _stored_blob_matches(blob):
             raise RestoreConflictError("restore_destination_changed")
+
+    # Complete collision preflight before recording adoption intent. This
+    # keeps a later conflicting key from leaving partial restore evidence.
+    for blob in matching_existing:
+        if journal_path is None or journal_state is None:
+            raise RestoreConflictError("restore_destination_exists")
+        generation = journal_state.generations.get(blob.key, 0) + 1
+        adoption_intent: dict[str, object] = {
+            "event": "intent",
+            "key": blob.key,
+            "size": blob.size,
+            "sha256": blob.sha256,
+            "namespace": blob.namespace,
+            "generation": generation,
+        }
+        if journal_state.started.get("version") == _RESTORE_JOURNAL_VERSION:
+            adoption_intent.update(_journal_binding(journal_state.started))
+        _append_restore_journal(journal_path, adoption_intent)
+        journal_state.intents[blob.key] = adoption_intent
+        journal_state.generations[blob.key] = generation
 
     try:
         for blob in blobs:
@@ -3942,6 +3969,22 @@ class _RestoreJournalState:
     database_active: bool = False
     complete: bool = False
     cache_paths: set[str] = field(default_factory=set)
+
+
+def _journal_has_mutation_evidence(state: _RestoreJournalState) -> bool:
+    """Return whether a restore journal must remain for recovery.
+
+    A validated journal containing only ``started`` (and an optional cache pin)
+    cannot have authorized a storage write or database swap. It is therefore
+    safe to remove after deterministic preflight rejection.
+    """
+    return bool(
+        state.intents
+        or state.published
+        or state.database_swap_intent
+        or state.database_active
+        or state.complete
+    )
 
 
 def _restore_provider_ref(blobs: list[_StagedBlob] | None = None) -> str:
@@ -4526,8 +4569,9 @@ def restore_backup(backup_id: str, *, source_ref: str | None = None) -> dict:
     """Restore a backup with staged blobs and SQLite's online backup API.
 
     Downloads from S3 if the backup is only in cloud storage.
-    WARNING: This replaces the current database, but publishes archived files
-    only into empty destinations and refuses conflicting live storage keys.
+    WARNING: This replaces the current database. Archived files are created or
+    reused when byte-identical; conflicting live storage keys are never
+    overwritten.
 
     Sets a process-wide gate so background loops (GC, external scans, printer
     sync) skip their tick instead of racing the restore. Refuses with
@@ -4755,12 +4799,17 @@ def restore_backup(backup_id: str, *, source_ref: str | None = None) -> dict:
                     # permission to publish a replacement generation.
                     maintenance_required = True
                     raise RestoreConflictError("restore_destination_changed")
-                applied, created = _apply_staged_blobs(
-                    staged_blobs,
-                    rollback_dir,
-                    journal_path=journal_path,
-                    journal_state=journal_state,
-                )
+                try:
+                    applied, created = _apply_staged_blobs(
+                        staged_blobs,
+                        rollback_dir,
+                        journal_path=journal_path,
+                        journal_state=journal_state,
+                    )
+                except Exception:
+                    if not _journal_has_mutation_evidence(journal_state):
+                        _remove_restore_journal(journal_path)
+                    raise
                 db_swapped = False
                 try:
                     if any(not _stored_blob_matches(blob) for blob in staged_blobs):

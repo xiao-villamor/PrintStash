@@ -181,6 +181,11 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Restoring a backup now safely reuses storage objects whose size and SHA-256
+  already match the archive, so an in-place recovery no longer fails merely
+  because its immutable files are still present. A genuine destination
+  conflict still fails before any write, but now removes its preflight journal
+  and releases maintenance mode instead of leaving the vault read-only.
 - Interrupted OpenDAL backup publications can now reconcile their persisted
   ownership receipt instead of failing while constructing the verification
   copy.

@@ -3688,6 +3688,26 @@ class TestRestoreDatabase:
         assert Path(key).exists(), "restored blob is missing at its storage key"
         assert Path(key).read_bytes() == content
 
+    def test_restore_reuses_a_matching_destination(self, backup_env: BackupEnv):
+        content = b"solid matching widget\nendsolid\n"
+        _model_id, key = seed_model_with_blob(
+            backup_env, name="Matching Widget", content=content
+        )
+        meta = backup.create_backup()
+        with backup_env.new_session() as session:
+            model = session.exec(
+                select(Model).where(Model.name == "Matching Widget")
+            ).one()
+            model.name = "Post-backup name"
+            session.add(model)
+            session.commit()
+
+        result = backup.restore_backup(meta.id)
+
+        assert result == {"backup_id": meta.id, "restored_files": 1}
+        assert _read_model_names(backup_env) == ["Matching Widget"]
+        assert Path(key).read_bytes() == content
+
     def test_restore_writes_complete_row_on_success(self, backup_env: BackupEnv):
         from app.db.models import AuditLog
 
@@ -3752,6 +3772,39 @@ class TestRestoreDatabase:
         assert Path(first_key).read_bytes() == b"current-first"
         assert Path(second_key).read_bytes() == b"current-second"
         assert "Current First" in _read_model_names(backup_env)
+
+    def test_restore_collision_removes_its_preflight_journal(
+        self, backup_env: BackupEnv
+    ):
+        _, matching_key = seed_model_with_blob(
+            backup_env, name="Matching before collision", content=b"matching"
+        )
+        _, conflicting_key = seed_model_with_blob(
+            backup_env, name="Journal collision", content=b"backup"
+        )
+        meta = backup.create_backup()
+        Path(conflicting_key).write_bytes(b"current")
+        journal = backup_env.backup_dir / f".restore-{meta.id}.journal"
+
+        with pytest.raises(backup.RestoreConflictError, match="destination_exists"):
+            backup.restore_backup(meta.id)
+
+        assert Path(matching_key).read_bytes() == b"matching"
+        assert not journal.exists()
+
+    def test_restore_collision_releases_the_mutation_gate(self, backup_env: BackupEnv):
+        _, key = seed_model_with_blob(
+            backup_env, name="Gate collision", content=b"backup"
+        )
+        meta = backup.create_backup()
+        Path(key).write_bytes(b"current")
+
+        with pytest.raises(backup.RestoreConflictError, match="destination_exists"):
+            backup.restore_backup(meta.id)
+
+        assert backup.restore_in_progress() is False
+        assert backup.begin_mutating_operation() is True
+        backup.end_mutating_operation()
 
     def test_failed_blob_restore_removes_only_receipted_partial_creates(
         self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
