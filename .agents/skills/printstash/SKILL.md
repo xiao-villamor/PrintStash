@@ -12,9 +12,9 @@ Redis/queues/cloud. `AGENTS.md` (layout, commands, hard rules) is binding.
 ## Where we are
 
 <!-- Update this block when a release ships. -->
-Latest shipped: v0.12.1 (container startup compatibility for legacy or
-operator-supplied uv commands), merged to `main` and tagged. Next: gather
-upgrade and hardware feedback. `CHANGELOG.md` `Unreleased` is the canonical
+Latest shipped: v0.13.0 (storage safety, browser capture, and multipart
+models), merged to `main` and tagged. Next: gather upgrade and hardware
+feedback. `CHANGELOG.md` `Unreleased` is the canonical
 summary of work not yet shipped; a branch name or roadmap entry is not a release.
 
 Private plans live in `reports/`. They are local-only: never commit, publish,
