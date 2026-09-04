@@ -184,6 +184,7 @@ async def oidc_callback(
 )
 def login(
     body: LoginRequest,
+    request: Request,
     response: Response,
     session: Session = Depends(get_session),
 ) -> TokenResponse:
@@ -197,10 +198,21 @@ def login(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="provide_password_or_api_key",
         )
+    recovery_login = bool(getattr(request.state, "restore_recovery_login", False))
     user = (
-        authenticate_user(session, body.username, body.password)
+        authenticate_user(
+            session,
+            body.username,
+            body.password,
+            persist_password_upgrade=not recovery_login,
+        )
         if body.password
-        else authenticate_api_key(session, body.username, body.api_key or "")
+        else authenticate_api_key(
+            session,
+            body.username,
+            body.api_key or "",
+            persist_usage=not recovery_login,
+        )
     )
     if user is None:
         raise HTTPException(
@@ -218,7 +230,9 @@ def login(
         expires_delta=expires_delta,
         auth_version=user.auth_version,
     )
-    refresh_token = create_refresh_token(session, user_id=user.id)
+    refresh_token = (
+        None if recovery_login else create_refresh_token(session, user_id=user.id)
+    )
     max_age = (
         int(timedelta(days=settings.remember_me_days).total_seconds())
         if body.remember_me
