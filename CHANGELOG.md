@@ -179,6 +179,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Interrupted OpenDAL backup publications can now reconcile their persisted
+  ownership receipt instead of failing while constructing the verification
+  copy.
 - Library view now remembers the user's selection, and new browsers default to
   Everything instead of Organized.
 - Exploratory-QA fixes now keep live locale changes consistent, translate the

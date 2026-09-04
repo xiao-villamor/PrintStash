@@ -1654,6 +1654,57 @@ class TestVerifyBackupOwnership:
         assert result.status == "missing"
         assert result.error == "backup_ownership_not_found"
 
+    def test_unavailable_opendal_destination_is_an_identity_failure(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-opendal-gdrive",
+            namespace="gdrive/PrintStash",
+            key="gdrive/PrintStash/printstash-backups/unavailable.tar.gz",
+            object_kind="backup",
+            provider_ref="unavailable-profile",
+        )
+        monkeypatch.setattr(backup, "destination_for_ownership", lambda _row: None)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == "identity"
+        assert result.error == "backup_storage_ownership_unverified"
+
+    def test_available_opendal_destination_verifies_its_owned_archive(
+        self,
+        db_session: Session,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-opendal-gdrive",
+            namespace="gdrive/PrintStash",
+            key="gdrive/PrintStash/printstash-backups/available.tar.gz",
+            object_kind="backup",
+            provider_ref="available-profile",
+        )
+        cache = tmp_path / "available.tar.gz"
+        verification = self._verification(valid=True)
+        cleaned: list[Path] = []
+        destination = type("Destination", (), {"location": "opendal:gdrive"})()
+        monkeypatch.setattr(
+            backup, "destination_for_ownership", lambda _row: destination
+        )
+        monkeypatch.setattr(backup, "_download_backup_to_local", lambda _meta: cache)
+        monkeypatch.setattr(
+            backup, "verify_backup", lambda *_args, **_kwargs: verification
+        )
+        monkeypatch.setattr(backup, "cleanup_backup_cache", cleaned.append)
+
+        result = backup.verify_backup_ownership(row.id)
+
+        assert result.status == "valid"
+        assert result.verification is verification
+        assert cleaned == [cache]
+
     def test_unrecognized_archive_name_uses_the_ledger_identity(
         self,
         db_session: Session,
@@ -1821,6 +1872,136 @@ class TestDeleteBackup:
         assert backup.delete_backup(meta.id) is True
         assert not Path(meta.path).exists()
         assert backup.get_backup(meta.id) is None
+
+    def test_delete_backup_removes_an_owned_opendal_archive(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        namespace = "gdrive/PrintStash"
+        key = "gdrive/PrintStash/printstash-backups/remote.tar.gz"
+        provider_ref = "saved-profile"
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-opendal-gdrive",
+            namespace=namespace,
+            key=key,
+            object_kind="backup",
+            provider_ref=provider_ref,
+            sha256="a" * 64,
+        )
+        ownership_id = row.id
+        source_ref = backup._source_ref(
+            location="opendal:gdrive",
+            namespace=namespace,
+            path=key,
+            provider_ref=provider_ref,
+        )
+        meta = backup.BackupMeta(
+            id="remote",
+            created_at=row.created_at.isoformat(),
+            size_bytes=1,
+            storage_backend=row.backend,
+            file_count=0,
+            app_version="unknown",
+            path=key,
+            location="opendal:gdrive",
+            archive_sha256=row.sha256,
+            provider_ref=provider_ref,
+            source_ref=source_ref,
+            namespace=namespace,
+        )
+        deleted_keys: list[str] = []
+
+        class Destination:
+            def require_owned(self, owned: OwnedStorageObject) -> None:
+                assert owned.id == ownership_id
+
+            def delete_owned(
+                self, owned: OwnedStorageObject, *, allow_unversioned: bool = False
+            ) -> bool:
+                assert allow_unversioned is False
+                deleted_keys.append(owned.key)
+                return True
+
+        destination = Destination()
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: meta)
+        monkeypatch.setattr(
+            backup, "destination_for_ownership", lambda _row: destination
+        )
+
+        assert backup.delete_backup(meta.id, source_ref=source_ref) is True
+        assert deleted_keys == [key]
+        with backup.get_session_factory().session() as session:
+            assert session.get(OwnedStorageObject, ownership_id) is None
+
+    def test_delete_backup_refuses_an_unverified_opendal_delete(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        row = build_owned_storage_object(
+            db_session,
+            backend="backup-opendal-gdrive",
+            namespace="gdrive/PrintStash",
+            key="gdrive/PrintStash/printstash-backups/refused.tar.gz",
+            object_kind="backup",
+            provider_ref="saved-profile",
+            sha256="b" * 64,
+        )
+        meta = backup.BackupMeta(
+            id="refused",
+            created_at=row.created_at.isoformat(),
+            size_bytes=1,
+            storage_backend=row.backend,
+            file_count=0,
+            app_version="unknown",
+            path=row.key,
+            location="opendal:gdrive",
+            archive_sha256=row.sha256,
+            provider_ref=row.provider_ref,
+            namespace=row.namespace,
+        )
+
+        class Destination:
+            def delete_owned(
+                self, _owned: OwnedStorageObject, *, allow_unversioned: bool = False
+            ) -> bool:
+                assert allow_unversioned is False
+                return False
+
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: meta)
+        monkeypatch.setattr(backup, "_require_backup_archive_owned", lambda _meta: row)
+        monkeypatch.setattr(
+            backup, "destination_for_ownership", lambda _row: Destination()
+        )
+
+        with pytest.raises(
+            backup.BackupOwnershipError, match="backup_remote_delete_unverified"
+        ):
+            backup.delete_backup(meta.id)
+
+    def test_delete_backup_refuses_s3_when_its_target_is_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        meta = backup.BackupMeta(
+            id="unavailable-s3",
+            created_at="2026-01-01T00:00:00+00:00",
+            size_bytes=1,
+            storage_backend="backup-s3",
+            file_count=0,
+            app_version="unknown",
+            path="printstash-backups/unavailable-s3.tar.gz",
+            location="s3",
+        )
+        monkeypatch.setattr(backup, "get_backup", lambda *_args, **_kwargs: meta)
+        monkeypatch.setattr(backup, "_get_backup_s3_target", lambda: None)
+
+        with pytest.raises(
+            backup.BackupOwnershipError,
+            match="backup_storage_ownership_unverified",
+        ):
+            backup.delete_backup(meta.id)
 
     def test_delete_backup_aborts_on_permission_error(self, backup_env: BackupEnv):
         seed_model_with_blob(backup_env, name="Widget", content=b"x")
@@ -5299,6 +5480,168 @@ class TestReconcileBackupPublications:
             ).one()
             assert row.state is StorageObjectState.COMMITTED
             assert row.last_error is None
+
+    def test_reconciles_an_opendal_archive_with_matching_object_proof(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Reconcile OpenDAL", content=b"remote")
+        meta = backup.create_backup()
+        payload = Path(meta.path).read_bytes()
+        namespace = "gdrive/PrintStash"
+        key = "gdrive/PrintStash/printstash-backups/reconcile-opendal.tar.gz"
+        provider_ref = "saved-profile"
+
+        class Backend:
+            def object_info(self, requested_key: str):
+                assert requested_key == key
+                return storage_backend.StorageObjectInfo(
+                    size=len(payload), etag='"opendal-etag"', version_id="version-1"
+                )
+
+        class Destination:
+            backend = Backend()
+
+            def download_owned(
+                self, owned: OwnedStorageObject, candidate: Path
+            ) -> None:
+                assert owned.state is StorageObjectState.COMMITTED
+                candidate.write_bytes(payload)
+
+        monkeypatch.setattr(
+            backup, "destination_for_ownership", lambda _row: Destination()
+        )
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-opendal-gdrive"
+            row.namespace = namespace
+            row.key = key
+            row.provider_ref = provider_ref
+            row.state = StorageObjectState.PENDING
+            row.token = "opendal-token"
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        reconciled = backup.reconcile_backup_publications()
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+            assert reconciled == 1, (row.state, row.last_error)
+            assert row.state is StorageObjectState.COMMITTED
+            assert row.etag == '"opendal-etag"'
+            assert row.version_id == "version-1"
+            assert row.provider_ref == provider_ref
+
+    def test_keeps_an_opendal_archive_pending_when_the_target_changes(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Changed OpenDAL", content=b"remote")
+        meta = backup.create_backup()
+        key = "gdrive/PrintStash/printstash-backups/changed-opendal.tar.gz"
+        monkeypatch.setattr(backup, "destination_for_ownership", lambda _row: None)
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-opendal-gdrive"
+            row.namespace = "gdrive/PrintStash"
+            row.key = key
+            row.provider_ref = "old-profile"
+            row.state = StorageObjectState.PENDING
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+            assert row.state is StorageObjectState.PENDING
+            assert row.last_error == "retryable:backup_target_changed"
+
+    def test_blocks_an_opendal_archive_with_mismatched_object_proof(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Mismatched OpenDAL", content=b"remote")
+        meta = backup.create_backup()
+        key = "gdrive/PrintStash/printstash-backups/mismatched-opendal.tar.gz"
+
+        class Backend:
+            def object_info(self, _key: str):
+                return storage_backend.StorageObjectInfo(
+                    size=Path(meta.path).stat().st_size + 1
+                )
+
+        destination = type("Destination", (), {"backend": Backend()})()
+        monkeypatch.setattr(
+            backup, "destination_for_ownership", lambda _row: destination
+        )
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "backup-opendal-gdrive"
+            row.namespace = "gdrive/PrintStash"
+            row.key = key
+            row.provider_ref = "saved-profile"
+            row.state = StorageObjectState.PENDING
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
+
+    def test_blocks_a_pending_archive_from_an_unknown_backend(
+        self, backup_env: BackupEnv
+    ) -> None:
+        seed_model_with_blob(backup_env, name="Unknown backend", content=b"archive")
+        meta = backup.create_backup()
+        key = "printstash-backups/unknown-backend.tar.gz"
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            row.backend = "unknown-backup-backend"
+            row.namespace = "unknown/backups"
+            row.key = key
+            row.state = StorageObjectState.PENDING
+            row.committed_at = None
+            session.add(row)
+            session.commit()
+
+        assert backup.reconcile_backup_publications() == 0
+
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+            ).one()
+            assert row.state is StorageObjectState.BLOCKED
+            assert row.last_error == "RuntimeError"
 
     def test_blocks_a_local_archive_without_publication_evidence(
         self, backup_env: BackupEnv

@@ -118,6 +118,13 @@ class TestDownloadOwned:
 
 
 class TestDeleteOwned:
+    def test_retention_refuses_an_unversioned_backup(self) -> None:
+        row = _row()
+        backend = _Backend()
+
+        assert _destination(backend).delete_owned(row) is False
+        assert backend.deleted_keys == []
+
     def test_unguarded_destination_is_never_deleted_by_retention(self) -> None:
         row = _row()
         row.version_id = "version"
@@ -137,6 +144,16 @@ class TestDeleteOwned:
 
 
 class TestProbe:
+    def test_reports_remote_capabilities(self) -> None:
+        assert _destination(_Backend()).probe() == {
+            "ok": True,
+            "provider": "gdrive",
+            "read": False,
+            "write": False,
+            "conditional_create": False,
+            "versioned_delete": False,
+        }
+
     def test_reports_a_remote_connection_failure(self) -> None:
         destination = _destination(_Backend(check_error=RuntimeError("oauth rejected")))
 
@@ -147,6 +164,31 @@ class TestProbe:
 
 
 class TestDestinationFromConnection:
+    def test_rejects_a_disabled_connection(self) -> None:
+        connection = StorageConnection(
+            id=7,
+            name="Disabled Drive",
+            kind=LibrarySourceKind.GDRIVE,
+            purpose=StorageConnectionPurpose.BACKUP,
+            enabled=False,
+        )
+
+        with pytest.raises(BackupDestinationError, match="storage_connection_disabled"):
+            backup_destination.destination_from_connection(connection)
+
+    def test_rejects_a_library_only_connection(self) -> None:
+        connection = StorageConnection(
+            id=8,
+            name="Library Drive",
+            kind=LibrarySourceKind.GDRIVE,
+            purpose=StorageConnectionPurpose.LIBRARY,
+        )
+
+        with pytest.raises(
+            BackupDestinationError, match="storage_connection_not_backup"
+        ):
+            backup_destination.destination_from_connection(connection)
+
     def test_identity_is_bound_to_the_saved_profile(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -167,9 +209,7 @@ class TestDestinationFromConnection:
                 name=f"Drive {connection_id}",
                 kind=LibrarySourceKind.GDRIVE,
                 purpose=StorageConnectionPurpose.BACKUP,
-                config_json=json.dumps(
-                    {"client_id": "client", "root": "PrintStash"}
-                ),
+                config_json=json.dumps({"client_id": "client", "root": "PrintStash"}),
                 secret_json=json.dumps(
                     {"client_secret": "secret", "refresh_token": "refresh"}
                 ),

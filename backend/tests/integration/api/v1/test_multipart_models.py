@@ -150,6 +150,23 @@ class TestMultipartModels:
         assert content.headers["content-type"] == "image/webp"
         assert content.content.startswith(b"RIFF")
 
+    def test_missing_uploaded_cover_content_is_reported(
+        self, client, auth_headers
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "No uploaded cover"},
+        ).json()
+
+        response = client.get(
+            f"/api/v1/multipart-models/{created['id']}/cover/content",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "multipart_cover_not_found"
+
     def test_upload_cover_rejects_bytes_that_are_not_a_supported_image(
         self, client, auth_headers
     ) -> None:
@@ -207,6 +224,43 @@ class TestMultipartModels:
         assert second.json()["cover_image_uploaded"] is True
         assert second.json()["cover_thumbnail_url"] != first_url
         assert not backend.exists(first_key)
+
+    def test_external_cover_replacement_removes_the_uploaded_blob(
+        self, client, auth_headers, db_session
+    ) -> None:
+        created = client.post(
+            "/api/v1/multipart-models",
+            headers=auth_headers,
+            json={"name": "Replace upload with URL"},
+        ).json()
+        uploaded = client.put(
+            f"/api/v1/multipart-models/{created['id']}/cover",
+            headers=auth_headers,
+            files={"file": ("private.png", png(width=8, height=8), "image/png")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+        aggregate = db_session.get(MultipartModel, created["id"])
+        assert aggregate is not None
+        db_session.refresh(aggregate)
+        assert aggregate.cover_filename is not None
+        backend = get_backend()
+        uploaded_key = backend.multipart_model_cover_key(
+            created["id"], aggregate.cover_filename
+        )
+        assert backend.exists(uploaded_key)
+        cover_url = "https://images.example.test/assemblies/replacement.webp"
+
+        response = client.patch(
+            f"/api/v1/multipart-models/{created['id']}",
+            headers=auth_headers,
+            json={"cover_image_url": cover_url},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["cover_image_url"] == cover_url
+        assert response.json()["cover_image_uploaded"] is False
+        assert response.json()["cover_thumbnail_url"] == cover_url
+        assert not backend.exists(uploaded_key)
 
     def test_removing_uploaded_cover_restores_the_member_thumbnail_fallback(
         self, client, auth_headers, db_session, make_model, make_file

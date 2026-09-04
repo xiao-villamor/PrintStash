@@ -1340,9 +1340,9 @@ def reconcile_backup_publications(limit: int = 100) -> int:
                     candidate = Path(raw_name)
                     candidate.unlink()
                     try:
-                        destination.download_owned(
-                            replace(row, state=StorageObjectState.COMMITTED), candidate
-                        )
+                        committed = OwnedStorageObject.model_validate(row.model_dump())
+                        committed.state = StorageObjectState.COMMITTED
+                        destination.download_owned(committed, candidate)
                         _validate_created_archive_payload(candidate)
                     finally:
                         candidate.unlink(missing_ok=True)
