@@ -134,6 +134,27 @@ class TestMultiArchWorkflows:
         assert "docker buildx imagetools create" in merge_step["run"]
         assert "docker buildx imagetools inspect" in merge_step["run"]
 
+    def test_publish_digest_artifacts_use_an_exact_image_delimiter(self) -> None:
+        workflow = _workflow("container-publish.yml")
+        build_steps = workflow["jobs"]["build"]["steps"]
+        merge_steps = workflow["jobs"]["merge"]["steps"]
+
+        upload_step = next(
+            step
+            for step in build_steps
+            if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        )
+        download_step = next(
+            step
+            for step in merge_steps
+            if str(step.get("uses", "")).startswith("actions/download-artifact@")
+        )
+
+        assert upload_step["with"]["name"] == (
+            "digests-${{ matrix.image }}--${{ matrix.arch }}"
+        )
+        assert download_step["with"]["pattern"] == "digests-${{ matrix.image }}--*"
+
     def test_publish_entrypoints_share_the_native_multiarch_workflow(self) -> None:
         expected = "./.github/workflows/container-publish.yml"
         release = _workflow("ghcr.yml")
