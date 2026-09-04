@@ -188,7 +188,9 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
   and releases maintenance mode instead of leaving the vault read-only. If an
   interrupted restore outlives the browser session, administrators can sign in
   through an access-only recovery session and resume it without admitting a
-  concurrent database write.
+  concurrent database write. Container restarts preserve valid local ownership
+  receipts, and backups affected by an earlier metadata-only ownership repair
+  can restore after exact SHA-256 and inode verification.
 - Interrupted OpenDAL backup publications can now reconcile their persisted
   ownership receipt instead of failing while constructing the verification
   copy.

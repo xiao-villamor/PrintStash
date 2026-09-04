@@ -2594,22 +2594,69 @@ def _require_backup_archive_owned(
     with get_session_factory().session() as session:
         if meta.location == "local":
             backend = LocalStorageBackend()
-            try:
-                require_owned_key(session, backend, meta.path)
-            except Exception as exc:
-                raise BackupOwnershipError(
-                    "backup_storage_ownership_unverified"
-                ) from exc
-            row = session.exec(
+            rows = session.exec(
                 select(OwnedStorageObject).where(
                     OwnedStorageObject.backend == "local",
                     OwnedStorageObject.namespace == backend.namespace_for(meta.path),
                     OwnedStorageObject.key == meta.path,
+                    OwnedStorageObject.provider_ref
+                    == provider_ref_for_backend(
+                        backend, namespace=backend.namespace_for(meta.path)
+                    ),
+                    OwnedStorageObject.object_kind.in_(  # type: ignore[union-attr]
+                        ("backup", "backup-legacy")
+                    ),
                     OwnedStorageObject.state == StorageObjectState.COMMITTED,
                 )
-            ).first()
-            assert row is not None
-            return row
+            ).all()
+            for row in rows:
+                if row.token is None or row.size_bytes is None:
+                    continue
+                receipt = CreationReceipt(
+                    key=row.key,
+                    size=row.size_bytes,
+                    token=row.token,
+                    backend=row.backend,
+                    namespace=row.namespace,
+                    etag=row.etag,
+                    version_id=row.version_id,
+                    device=row.device,
+                    inode=row.inode,
+                    ctime_ns=row.ctime_ns,
+                    provider_ref=row.provider_ref,
+                )
+                try:
+                    if backend.creation_matches(receipt):
+                        return row
+                    if (
+                        row.sha256 is None
+                        or row.device is None
+                        or row.inode is None
+                    ):
+                        continue
+                    refreshed = backend.adopt_existing(
+                        row.key,
+                        expected_size=row.size_bytes,
+                        expected_sha256=row.sha256,
+                    )
+                except Exception:
+                    continue
+                # A root-level metadata repair can change ctime, but it cannot
+                # replace the directory entry. Require the original inode in
+                # addition to exact bytes before refreshing the receipt.
+                if (refreshed.device, refreshed.inode) != (row.device, row.inode):
+                    continue
+                owned = record_creation(
+                    session,
+                    refreshed,
+                    object_kind=row.object_kind,
+                    sha256=row.sha256,
+                    provider_ref=row.provider_ref,
+                )
+                session.commit()
+                session.refresh(owned)
+                return owned
+            raise BackupOwnershipError("backup_storage_ownership_unverified")
 
         if meta.location.startswith("opendal:"):
             candidates = session.exec(

@@ -3640,6 +3640,55 @@ class TestRestoreDatabase:
             )
             assert get_backend().creation_matches(receipt)
 
+    def test_restore_refreshes_archive_receipt_after_metadata_only_change(
+        self, backup_env: BackupEnv
+    ) -> None:
+        content = b"metadata-only-recovery"
+        _, key = seed_model_with_blob(
+            backup_env, name="Metadata recovery", content=content
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        before = archive.stat()
+
+        os.chown(archive, before.st_uid, before.st_gid)
+        after = archive.stat()
+        assert (after.st_dev, after.st_ino, after.st_size) == (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+        )
+        assert after.st_ctime_ns != before.st_ctime_ns
+        Path(key).unlink()
+
+        result = backup.restore_backup(meta.id)
+
+        assert result == {"backup_id": meta.id, "restored_files": 1}
+        assert Path(key).read_bytes() == content
+
+    def test_restore_rejects_identical_archive_at_a_replaced_inode(
+        self, backup_env: BackupEnv
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Replaced archive", content=b"same archive bytes"
+        )
+        meta = backup.create_backup()
+        archive = Path(meta.path)
+        original_inode = archive.stat().st_ino
+        replacement = archive.with_suffix(".replacement")
+        replacement.write_bytes(archive.read_bytes())
+        os.replace(replacement, archive)
+        assert archive.stat().st_ino != original_inode
+        Path(key).unlink()
+
+        with pytest.raises(
+            backup.BackupOwnershipError,
+            match="backup_storage_ownership_unverified",
+        ):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
     def test_restore_replaces_live_wal_state_without_replay(
         self, backup_env: BackupEnv
     ):

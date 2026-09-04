@@ -169,13 +169,35 @@ class TestDockerEntrypointIdentity:
         )
 
         assert result.returncode == 0, result.stderr
-        ownership_repair = next(
+        ownership_repairs = [
             line
             for line in log.read_text().splitlines()
-            if line.startswith("chown:-hR 1234:2345 ")
-        )
+            if line.startswith("chown:-h 1234:2345 ")
+        ]
         for root in ("files", "thumbs", "staging", "backups", "db"):
-            assert str(tmp_path / root) in ownership_repair
+            assert any(str(tmp_path / root) in line for line in ownership_repairs)
+
+    def test_preserves_metadata_for_entries_already_owned_by_runtime_identity(
+        self, tmp_path: Path
+    ) -> None:
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+        archive = tmp_path / "backups" / "owned-backup.tar.gz"
+        archive.parent.mkdir()
+        archive.write_bytes(b"owned")
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            puid=str(os.getuid()),
+            pgid=str(os.getgid()),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert not any(
+            line.startswith("chown:") for line in log.read_text().splitlines()
+        )
 
     def test_passes_the_operator_command_through_unchanged(
         self, tmp_path: Path
@@ -223,10 +245,10 @@ class TestDockerEntrypointIdentity:
         ownership_repairs = [
             line
             for line in log.read_text().splitlines()
-            if line.startswith("chown:-hR ")
+            if line.startswith("chown:-h ")
         ]
-        assert sum("1111:2222" in line for line in ownership_repairs) == 1
-        assert sum("3333:4444" in line for line in ownership_repairs) == 1
+        assert any("1111:2222" in line for line in ownership_repairs)
+        assert any("3333:4444" in line for line in ownership_repairs)
 
     def test_managed_descendant_symlink_cannot_clobber_target(
         self, tmp_path: Path
