@@ -40,12 +40,14 @@ usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
 as the primary install path. SQLite plus local disk is the default; Postgres and
 S3/R2-compatible storage are optional.
 
-The `0.13.0` branch is the upcoming release. It adds runtime-probed storage
-safety tiers, typed S3/WebDAV/SFTP provider setup, paired-browser marketplace
-capture with Model Source provenance, richer Bambu LAN history evidence,
-GitHub-flavoured Markdown tables, and safer 3MF/STL preview handling. It is not
-yet a tagged release; see the [unreleased changelog](./CHANGELOG.md#unreleased)
-and [0.13.0 upgrade notes](./UPGRADE.md#0130-notes) before testing an upgrade.
+PrintStash 0.13.0 is merged to `main` and has passed CI. The release tag and
+images are still pending. It adds runtime-probed storage safety tiers, reusable
+remote storage connections, paired-browser marketplace capture with Model
+Source provenance, richer Bambu LAN history evidence, Multipart Models, and
+safer 3MF/STL preview handling. Read the
+[0.13.0 changelog](./CHANGELOG.md#0130) and
+[upgrade notes](./UPGRADE.md#0130-notes) before testing an upgrade. Keep 0.12.1
+in service until the 0.13.0 tag and images are published.
 
 Hardware reports, parser fixtures, install notes, docs fixes, and UX feedback
 are welcome in
@@ -72,9 +74,9 @@ are welcome in
   sorting, breadcrumbs, and drag-and-drop between collections.
 
 **Library sources (mounted folders, NAS, and remote protocols)**
-- Point PrintStash at a mounted folder, S3 prefix, WebDAV collection, or SFTP
-  directory and it indexes files **in place**. Only thumbnails and metadata are
-  stored in the Vault.
+- Point PrintStash at a mounted folder, S3 prefix, WebDAV collection, SFTP
+  directory, or Google Drive folder and it indexes files **in place**. Only
+  thumbnails and metadata are stored in the Vault.
 - Discovery picks up added, removed, and edited files without a recursive
   full-download loop. Remote sources are read-only. Mounted folders may accept
   create-only web uploads and revisions without overwriting existing bytes.
@@ -187,17 +189,20 @@ are welcome in
 - Full backup/restore of the database plus stored files and thumbnails.
 - Backup verification checks archive structure and manifest membership, while
   creation fails closed if a vault-owned blob cannot be read consistently.
-- Backups can mirror to S3/R2-compatible storage, independent of where vault
-  files live.
+- Backups can replicate to S3-compatible storage, WebDAV, SFTP, or Google Drive,
+  independent of where Vault files live. Restore rechecks the provider identity
+  and archive hash before replacing data.
 - Export or import a versioned, hash-verified portable library archive with
   Models, Artifacts, metadata, taxonomy, history, favorites, and saved views.
 - Metadata export to JSON or CSV for analysis, migration planning, or audits.
 - Model-card metrics and the metadata fields shown on detail pages are
   configurable.
-- Local disk by default, with optional S3/R2, B2, Wasabi, self-hosted S3,
-  Nextcloud/WebDAV, or SFTP storage and optional Postgres. Storage support
-  maturity is distinct from the Verified/Guarded/Unguarded tier measured at
-  runtime; remote presets remain beta except the generic/native S3 path.
+- Local disk is the default Vault storage, with optional S3/R2, B2, Wasabi,
+  self-hosted S3, Nextcloud/WebDAV, or SFTP and optional Postgres. Reusable
+  remote connections also support Google Drive for Library sources and backup
+  replicas. Storage support maturity is distinct from the
+  Verified/Guarded/Unguarded tier measured at runtime; remote presets remain
+  beta except the generic/native S3 path.
 - Health checks report database, measured storage capabilities, backup, and
   printer-provider readiness.
 
@@ -301,7 +306,7 @@ build overlay: `docker compose -f docker-compose.yml -f docker-compose.build.yml
 `PRINTSTASH_VERSION` (the image tag); set it in `.env` and bump it to upgrade:
 
 ```bash
-echo "PRINTSTASH_VERSION=0.9.0" >> .env   # pin latest shipped release; omit to track latest
+echo "PRINTSTASH_VERSION=0.12.1" >> .env   # pin the current release; omit to track latest
 ```
 
 By default the compose files track `latest`. Pin `PRINTSTASH_VERSION` when you

@@ -8,21 +8,18 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Upcoming Release: 0.13.0 — Storage Safety And Capture Provenance
+## Release candidate: 0.13.0, storage safety and capture provenance
 
-The latest tagged release remains 0.12.1. The `0.13.0` branch is the upcoming
-minor release and is not yet shipped. Production hardening is in place. The app
-is useful for local-first 3D print
-library workflows, installable through Docker Compose (the default compose pulls
-prebuilt GHCR images; a build overlay is available for contributors), and ready
-for real homelab feedback. SQLite plus local filesystem storage remain the
-default path. Postgres, S3/R2-compatible storage, cloud backups, and provider
-adapters are available as optional deployment paths. The upcoming release adds
-runtime-probed storage safety tiers and typed remote providers, paired-browser
-marketplace capture and Model Source provenance, richer Bambu job evidence,
-safer mesh/3MF previews, and stricter storage ownership and recovery boundaries.
-See the canonical [unreleased changelog](../CHANGELOG.md#unreleased) for the
-complete scope.
+The latest tagged release remains 0.12.1. Version 0.13.0 is merged to `main` and
+has passed CI; its release tag and images are still pending. The app is useful
+for local-first 3D print library workflows and installs through Docker Compose.
+SQLite plus local filesystem storage remain the default path. Postgres,
+S3/R2-compatible storage, cloud backups, and provider adapters are optional.
+Version 0.13.0 adds runtime-probed storage safety tiers and typed remote
+providers, paired-browser marketplace capture and Model Source provenance,
+richer Bambu job evidence, safer mesh/3MF previews, and stricter storage
+ownership and recovery boundaries. See the canonical
+[0.13.0 changelog](../CHANGELOG.md#0130) for the complete scope.
 
 Developed features in the current app:
 
@@ -32,8 +29,9 @@ Developed features in the current app:
   capture; server resolution remains SSRF-guarded and archives remain
   zip-slip/zip-bomb protected
 - Library sources: index mounted folders with optional create-only write-back,
-  or read-only S3/WebDAV/SFTP namespaces, with bounded discovery, durable
-  cursors, tombstones, per-source scheduling, and local-only event watching
+  or read-only S3/WebDAV/SFTP/Google Drive namespaces, with bounded discovery,
+  durable cursors, tombstones, per-source scheduling, and local-only event
+  watching
 - Public, expiring, read-only share links to a single model (view-only by default; opt-in original-file download)
 - Print statistics dashboard (cost, filament, prints, print time; time series + top collections/filaments) with a configurable display currency
 - Measured prints: real filament + duration and per-print cost captured from Moonraker, with auto known-good revision promotion
@@ -66,6 +64,8 @@ Developed features in the current app:
 - Globally sorted cursor browsing for large libraries, including SQL-backed print metrics and a lightweight desktop outliner
 - Bounded, hash-verified portable archive export/import with matching entry and uncompressed-size limits
 - Transactionally consistent SQLite backup/restore, explicit PostgreSQL backup capabilities, and structural orphan-schema validation
+- Independent backup replicas on S3-compatible storage, WebDAV, SFTP, or Google
+  Drive, with provider-identity and archive-hash checks before restore
 - Elegoo Centauri Carbon and Carbon 2 Vault upload, with capability limits and hardware-validation status kept explicit
 - Durable session invalidation, atomic refresh-token rotation, final-superuser protection, and atomic first-run setup
 - One supported API process per vault, enforced at startup and reported through detailed health
@@ -251,13 +251,17 @@ queue manager.
 - A verified, non-destructive MinIO-to-SeaweedFS migration helper, with MinIO
   removed from the normal Compose stack
 
-## 0.13 — Storage Safety And Capture Provenance (upcoming)
+## 0.13: Storage safety and capture provenance (release candidate)
 
 - Runtime-probed Verified, Guarded, and Unguarded storage tiers, durable
   publication intents, provider-bound ownership, and fail-closed recovery
 - Typed setup for generic/native S3, Cloudflare R2, Backblaze B2, Wasabi,
   self-hosted S3, Nextcloud, WebDAV, and SFTP; the remote presets remain beta
   while local and generic/native S3 remain stable
+- Read-only Google Drive Library sources and backup replicas, with hash-verified
+  restore and fail-closed retention limits
+- Multipart Models that group reusable Models into ordered parts and alternatives
+  without moving or deleting the underlying files
 - Paired, named, revocable browsers for authenticated Printables file selection
   and MakerWorld package transfer without sharing marketplace cookies
 - Per-user MyMiniFactory OAuth and Cults metadata connections, bounded Model
