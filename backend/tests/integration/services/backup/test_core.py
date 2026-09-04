@@ -3689,6 +3689,37 @@ class TestRestoreDatabase:
 
         assert not Path(key).exists()
 
+    @pytest.mark.parametrize(
+        "missing_field",
+        [pytest.param("token", id="token"), pytest.param("size_bytes", id="size")],
+    )
+    def test_restore_refuses_incomplete_archive_ownership(
+        self, backup_env: BackupEnv, missing_field: str
+    ) -> None:
+        _, key = seed_model_with_blob(
+            backup_env, name="Incomplete ownership", content=b"owned bytes"
+        )
+        meta = backup.create_backup()
+        with backup_env.new_session() as session:
+            ownership = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.object_kind == "backup",
+                    OwnedStorageObject.key == meta.path,
+                )
+            ).one()
+            setattr(ownership, missing_field, None)
+            session.add(ownership)
+            session.commit()
+        Path(key).unlink()
+
+        with pytest.raises(
+            backup.BackupOwnershipError,
+            match="backup_storage_ownership_unverified",
+        ):
+            backup.restore_backup(meta.id)
+
+        assert not Path(key).exists()
+
     def test_restore_replaces_live_wal_state_without_replay(
         self, backup_env: BackupEnv
     ):
