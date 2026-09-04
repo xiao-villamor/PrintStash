@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -44,6 +44,26 @@ logger = get_logger(__name__)
 
 def _safe_name(blob: OwnedBlob) -> str:
     return (blob.display_name or Path(blob.key.replace("\\", "/")).name)[:255]
+
+
+def _unowned_storage_details(key: str) -> dict[str, int | str]:
+    """Describe an unclaimed object without widening ownership or exposing its key."""
+    backend = get_backend()
+    details: dict[str, int | str] = {}
+    try:
+        details["actual_size"] = backend.stat_size(key)
+    except Exception:
+        pass
+    try:
+        direct = backend.direct_path(key)
+        if direct is not None:
+            stat = direct.stat(follow_symlinks=False)
+            details["modified_at"] = datetime.fromtimestamp(
+                stat.st_mtime, tz=UTC
+            ).isoformat()
+    except Exception:
+        pass
+    return details
 
 
 def _details(row: VaultAuditFinding) -> dict:
@@ -708,6 +728,7 @@ def execute_run(run_id: int) -> None:
                     severity=VaultAuditSeverity.INFO,
                     resource_type="storage_object",
                     identifier=Path(key.replace("\\", "/")).name,
+                    details=_unowned_storage_details(key),
                 )
             _check_background_jobs(session, run)
             if run.mode == VaultAuditMode.FULL:

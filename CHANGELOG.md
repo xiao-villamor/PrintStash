@@ -181,6 +181,10 @@ be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
 
 ### Fixed
 
+- Vault Audit now explains why unlinked files are retained, shows their type,
+  size, and modification time when available, totals the space they may reclaim
+  after review, and makes clear that marking a finding reviewed never deletes
+  its file.
 - Restoring a backup now safely reuses storage objects whose size and SHA-256
   already match the archive, so an in-place recovery no longer fails merely
   because its immutable files are still present. A genuine destination

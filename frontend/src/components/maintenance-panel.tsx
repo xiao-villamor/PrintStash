@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Database,
+  HardDrive,
   RefreshCw,
   ShieldCheck,
   Wrench,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { useI18n } from "@/lib/i18n";
+import { formatBytes } from "@/lib/format";
 import type { BackupMeta } from "@/lib/api";
 import type { BackupVerification, VaultAuditFinding, VaultAuditRun } from "@/types";
 
@@ -35,7 +37,6 @@ const FINDING_LABELS = new Map([
   ["owned_blob_unreadable", "Owned Artifact cannot be read"],
   ["owned_blob_size_mismatch", "Artifact size differs from database"],
   ["owned_blob_hash_mismatch", "Artifact checksum differs from database"],
-  ["unowned_blob_detected", "Unclaimed storage object"],
   ["external_root_unavailable", "Library source is unavailable"],
   ["linked_file_missing", "Linked file is missing"],
   ["thumbnail_missing", "Thumbnail is missing"],
@@ -65,6 +66,21 @@ function sourceKey(item: BackupMeta): string {
 
 function shortOpaque(value: string | null | undefined): string {
   return value ? `${value.slice(0, 16)}…` : "unavailable";
+}
+
+function formatAuditDate(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function storageFileType(identifier: string): string {
+  const name = identifier.split(/[\\/]/).at(-1) ?? identifier;
+  const separator = name.lastIndexOf(".");
+  return separator > -1 && separator < name.length - 1
+    ? name.slice(separator + 1).toUpperCase()
+    : "stored";
 }
 
 export function MaintenancePanel() {
@@ -106,6 +122,19 @@ export function MaintenancePanel() {
     () => (run?.findings ?? []).filter((item) => severity === "all" || item.severity === severity),
     [run, severity],
   );
+  const unlinkedFindings = useMemo(
+    () => (run?.findings ?? []).filter((item) => item.code === "unowned_blob_detected"),
+    [run],
+  );
+  const measuredUnlinkedBytes = useMemo(
+    () =>
+      unlinkedFindings.reduce((total, finding) => total + (finding.details.actual_size ?? 0), 0),
+    [unlinkedFindings],
+  );
+  const measuredUnlinkedCount = useMemo(
+    () => unlinkedFindings.filter((finding) => finding.details.actual_size != null).length,
+    [unlinkedFindings],
+  );
 
   async function start(mode: "quick" | "full") {
     setBusy(true);
@@ -123,7 +152,7 @@ export function MaintenancePanel() {
       if (action === "repair") await repairAuditFinding(finding.id);
       else await ignoreAuditFinding(finding.id);
       if (run) setRun(await getVaultAudit(run.id));
-      toast.success(action === "repair" ? "Repair completed" : "Finding ignored");
+      toast.success(action === "repair" ? "Repair completed" : t("settings.auditMarkedReviewed"));
     } catch (error) {
       toast.error(error);
     }
@@ -249,46 +278,115 @@ export function MaintenancePanel() {
                   </Button>
                 ))}
               </div>
+              {unlinkedFindings.length > 0 && (severity === "all" || severity === "info") && (
+                <div className="rounded-md border border-border bg-muted/30 p-3">
+                  <div className="flex items-start gap-3">
+                    <HardDrive className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-semibold">{t("settings.auditUnlinkedTitle")}</p>
+                      <p className="text-xs font-medium text-foreground">
+                        {measuredUnlinkedCount === 0
+                          ? t(
+                              unlinkedFindings.length === 1
+                                ? "settings.auditUnlinkedSummaryUnknownOne"
+                                : "settings.auditUnlinkedSummaryUnknownMany",
+                              { count: String(unlinkedFindings.length) },
+                            )
+                          : measuredUnlinkedCount === unlinkedFindings.length
+                            ? t(
+                                unlinkedFindings.length === 1
+                                  ? "settings.auditUnlinkedSummaryOne"
+                                  : "settings.auditUnlinkedSummaryMany",
+                                {
+                                  count: String(unlinkedFindings.length),
+                                  size: formatBytes(measuredUnlinkedBytes),
+                                },
+                              )
+                            : t("settings.auditUnlinkedSummaryPartial", {
+                                count: String(unlinkedFindings.length),
+                                size: formatBytes(measuredUnlinkedBytes),
+                              })}
+                      </p>
+                      <p className="max-w-3xl text-xs text-muted-foreground">
+                        {t("settings.auditUnlinkedDescription")}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 {findings.length === 0 ? (
                   <div className="flex items-center gap-2 rounded-md border border-border p-3 text-sm text-muted-foreground">
                     <CheckCircle2 className="h-4 w-4 text-success" /> No findings in this category.
                   </div>
                 ) : (
-                  findings.map((finding) => (
-                    <div
-                      key={finding.id}
-                      className="flex flex-col gap-3 rounded-md border border-border p-3 sm:flex-row sm:items-center"
-                    >
-                      <AlertTriangle
-                        className={`h-4 w-4 flex-shrink-0 ${finding.severity === "critical" ? "text-destructive" : finding.severity === "warning" ? "text-warning" : "text-muted-foreground"}`}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">
-                          {FINDING_LABELS.get(finding.code) ?? finding.code}
-                        </p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {finding.resource_identifier}
-                        </p>
-                      </div>
-                      {finding.state === "open" && (
-                        <div className="flex gap-2">
-                          {finding.repair_action && (
-                            <Button size="xs" onClick={() => setRepairTarget(finding)}>
-                              <Wrench className="h-3.5 w-3.5" /> Repair
-                            </Button>
+                  findings.map((finding) => {
+                    const isUnlinked = finding.code === "unowned_blob_detected";
+                    const fileType = t("settings.auditFileType", {
+                      type: storageFileType(finding.resource_identifier),
+                    });
+                    const size = finding.details.actual_size;
+                    const modifiedAt = finding.details.modified_at;
+                    const metadata =
+                      size != null && modifiedAt
+                        ? t("settings.auditFileMetadata", {
+                            type: fileType,
+                            size: formatBytes(size),
+                            modified: formatAuditDate(modifiedAt),
+                          })
+                        : size != null
+                          ? t("settings.auditFileMetadataSize", {
+                              type: fileType,
+                              size: formatBytes(size),
+                            })
+                          : modifiedAt
+                            ? t("settings.auditFileMetadataModified", {
+                                type: fileType,
+                                modified: formatAuditDate(modifiedAt),
+                              })
+                            : t("settings.auditFileMetadataUnavailable", { type: fileType });
+                    return (
+                      <div
+                        key={finding.id}
+                        className="flex flex-col gap-3 rounded-md border border-border p-3 sm:flex-row sm:items-center"
+                      >
+                        <AlertTriangle
+                          className={`h-4 w-4 flex-shrink-0 ${finding.severity === "critical" ? "text-destructive" : finding.severity === "warning" ? "text-warning" : "text-muted-foreground"}`}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">
+                            {isUnlinked
+                              ? t("settings.auditUnlinkedFinding")
+                              : (FINDING_LABELS.get(finding.code) ?? finding.code)}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {finding.resource_identifier}
+                          </p>
+                          {isUnlinked && (
+                            <p className="text-xs text-muted-foreground">{metadata}</p>
                           )}
-                          <Button
-                            size="xs"
-                            variant="ghost"
-                            onClick={() => void act(finding, "ignore")}
-                          >
-                            Ignore
-                          </Button>
                         </div>
-                      )}
-                    </div>
-                  ))
+                        {finding.state === "open" ? (
+                          <div className="flex gap-2">
+                            {finding.repair_action && (
+                              <Button size="xs" onClick={() => setRepairTarget(finding)}>
+                                <Wrench className="h-3.5 w-3.5" /> Repair
+                              </Button>
+                            )}
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => void act(finding, "ignore")}
+                            >
+                              {t("settings.auditMarkReviewed")}
+                            </Button>
+                          </div>
+                        ) : finding.state === "ignored" ? (
+                          <Badge variant="secondary">{t("settings.auditReviewed")}</Badge>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </>

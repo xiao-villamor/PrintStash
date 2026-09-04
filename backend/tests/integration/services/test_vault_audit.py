@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -326,6 +327,74 @@ class TestExecuteRun:
         assert "unowned_blob_detected" in codes
         db_session.refresh(run)
         assert run.state == VaultAuditRunState.COMPLETED
+
+    def test_unowned_finding_reports_storage_metadata(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        user = _make_user(db_session, "unowned-metadata")
+        run = _make_run(db_session, user)
+        orphan = tmp_path / "retained.stl"
+        orphan.write_bytes(b"x" * 2048)
+        os.utime(orphan, (1767225600, 1767225600))
+        snapshot = StorageOwnershipSnapshot(discovered_keys={str(orphan)})
+        backend = get_backend()
+        monkeypatch.setattr(
+            vault_audit, "ownership_snapshot", lambda _session: snapshot
+        )
+        monkeypatch.setattr(backend, "stat_size", lambda _key: 2048)
+        monkeypatch.setattr(backend, "direct_path", lambda _key: orphan)
+
+        vault_audit.execute_run(run.id)
+
+        result = vault_audit.read_run(
+            db_session, db_session.get(VaultAuditRun, run.id)
+        )
+        finding = next(
+            item for item in result.findings if item.code == "unowned_blob_detected"
+        )
+        assert finding.details == {
+            "actual_size": 2048,
+            "modified_at": "2026-01-01T00:00:00+00:00",
+        }
+
+    def test_unowned_finding_survives_unavailable_storage_metadata(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        user = _make_user(db_session, "unowned-unavailable")
+        run = _make_run(db_session, user)
+        snapshot = StorageOwnershipSnapshot(discovered_keys={"retained.stl"})
+        backend = get_backend()
+        monkeypatch.setattr(
+            vault_audit, "ownership_snapshot", lambda _session: snapshot
+        )
+        real_stat_size = backend.stat_size
+        real_direct_path = backend.direct_path
+
+        def unavailable_size(key: str):
+            if key == "retained.stl":
+                raise OSError("storage unavailable")
+            return real_stat_size(key)
+
+        def unavailable_path(key: str):
+            if key == "retained.stl":
+                raise OSError("storage unavailable")
+            return real_direct_path(key)
+
+        monkeypatch.setattr(backend, "stat_size", unavailable_size)
+        monkeypatch.setattr(backend, "direct_path", unavailable_path)
+
+        vault_audit.execute_run(run.id)
+
+        db_session.refresh(run)
+        result = vault_audit.read_run(db_session, run)
+        finding = next(
+            item for item in result.findings if item.code == "unowned_blob_detected"
+        )
+        assert result.state == VaultAuditRunState.COMPLETED
+        assert finding.details == {}
 
     def test_execute_run_full_mode_runs_backup_check(
         self, db_session: Session, monkeypatch: pytest.MonkeyPatch
