@@ -190,6 +190,81 @@ describe("MaintenancePanel", () => {
       expect(await screen.findByText(/files\/1\/cube\.stl/)).toBeInTheDocument();
     });
 
+    it("explains the space retained by unlinked files", async () => {
+      renderPanel({
+        audit: anAudit({
+          critical_count: 0,
+          info_count: 2,
+          findings: [
+            aFinding({
+              code: "unowned_blob_detected",
+              severity: "info",
+              resource_identifier: "retained.stl",
+              repair_action: null,
+              details: { actual_size: 2048 },
+            }),
+            aFinding({
+              id: 12,
+              code: "unowned_blob_detected",
+              severity: "info",
+              resource_identifier: "retained.gcode",
+              repair_action: null,
+              details: { actual_size: 2048 },
+            }),
+          ],
+        }),
+      });
+
+      expect(await screen.findByText("Retained unlinked files")).toBeInTheDocument();
+      expect(screen.getByText("2 files · 4 KB potentially reclaimable after review")).toBeVisible();
+      expect(
+        screen.getByText(/PrintStash keeps them because it cannot prove they are safe to delete/),
+      ).toBeVisible();
+    });
+
+    it("describes retained file metadata in human terms", async () => {
+      renderPanel({
+        audit: anAudit({
+          critical_count: 0,
+          info_count: 1,
+          findings: [
+            aFinding({
+              code: "unowned_blob_detected",
+              severity: "info",
+              resource_identifier: "retained.stl",
+              repair_action: null,
+              details: {
+                actual_size: 2048,
+                modified_at: "2026-01-01T00:00:00Z",
+              },
+            }),
+          ],
+        }),
+      });
+
+      expect(await screen.findByText(/STL file · 2 KB · Modified/)).toBeVisible();
+    });
+
+    it("admits when retained file metadata is unavailable", async () => {
+      renderPanel({
+        audit: anAudit({
+          critical_count: 0,
+          info_count: 1,
+          findings: [
+            aFinding({
+              code: "unowned_blob_detected",
+              severity: "info",
+              resource_identifier: "retained.stl",
+              repair_action: null,
+            }),
+          ],
+        }),
+      });
+
+      expect(await screen.findByText("1 file · Size unavailable")).toBeVisible();
+      expect(screen.getByText("STL file · Size and modification time unavailable")).toBeVisible();
+    });
+
     it("says so when the audit found nothing", async () => {
       renderPanel({ audit: anAudit({ critical_count: 0, findings: [] }) });
 
@@ -251,8 +326,8 @@ describe("MaintenancePanel", () => {
       );
     });
 
-    it("ignores a finding without asking", async () => {
-      // Ignoring only silences it; nothing on disk changes, so a confirmation
+    it("marks a finding reviewed without asking", async () => {
+      // Review only acknowledges it; nothing on disk changes, so a confirmation
       // would train the operator to click through the one that matters.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderPanel({
@@ -263,13 +338,14 @@ describe("MaintenancePanel", () => {
       });
       await screen.findByText("Owned Artifact is missing");
 
-      await user.click(screen.getByRole("button", { name: /Ignore/ }));
+      await user.click(screen.getByRole("button", { name: "Mark reviewed" }));
 
       await waitFor(() =>
         expect(
           requestsWithMethod("POST").some((call) => call.url.endsWith("/findings/11/ignore")),
         ).toBe(true),
       );
+      expect(await screen.findByText("Marked as reviewed. No files were changed.")).toBeVisible();
     });
 
     it("offers no repair for a finding nothing can fix", async () => {

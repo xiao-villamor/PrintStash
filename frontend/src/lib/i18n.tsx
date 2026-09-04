@@ -222,6 +222,25 @@ const messages = {
       "The API will be unavailable briefly while your container or service supervisor starts it again.",
     "settings.restartConfirm": "Restart now",
     "settings.restartSuccess": "Restart requested. PrintStash will be back shortly.",
+    "settings.auditUnlinkedTitle": "Retained unlinked files",
+    "settings.auditUnlinkedFinding": "Retained unlinked file",
+    "settings.auditUnlinkedSummaryOne": "1 file · {size} potentially reclaimable after review",
+    "settings.auditUnlinkedSummaryMany":
+      "{count} files · {size} potentially reclaimable after review",
+    "settings.auditUnlinkedSummaryPartial":
+      "{count} files · At least {size} measured; some sizes unavailable",
+    "settings.auditUnlinkedSummaryUnknownOne": "1 file · Size unavailable",
+    "settings.auditUnlinkedSummaryUnknownMany": "{count} files · Sizes unavailable",
+    "settings.auditUnlinkedDescription":
+      "These files exist in managed storage but are not referenced by the current library. This can happen after restoring an older backup. PrintStash keeps them because it cannot prove they are safe to delete.",
+    "settings.auditFileType": "{type} file",
+    "settings.auditFileMetadata": "{type} · {size} · Modified {modified}",
+    "settings.auditFileMetadataSize": "{type} · {size} · Modification time unavailable",
+    "settings.auditFileMetadataModified": "{type} · Size unavailable · Modified {modified}",
+    "settings.auditFileMetadataUnavailable": "{type} · Size and modification time unavailable",
+    "settings.auditMarkReviewed": "Mark reviewed",
+    "settings.auditMarkedReviewed": "Marked as reviewed. No files were changed.",
+    "settings.auditReviewed": "Reviewed",
     "settings.providerConnections.title": "Provider connections",
     "settings.providerConnections.mmf": "MyMiniFactory",
     "settings.providerConnections.cults": "Cults",
@@ -725,6 +744,27 @@ const messages = {
       "La API no estará disponible durante unos instantes mientras el contenedor o supervisor del servicio la inicia de nuevo.",
     "settings.restartConfirm": "Reiniciar ahora",
     "settings.restartSuccess": "Reinicio solicitado. PrintStash volverá en breve.",
+    "settings.auditUnlinkedTitle": "Archivos sin vincular conservados",
+    "settings.auditUnlinkedFinding": "Archivo sin vincular conservado",
+    "settings.auditUnlinkedSummaryOne":
+      "1 archivo · {size} potencialmente recuperable tras revisarlo",
+    "settings.auditUnlinkedSummaryMany":
+      "{count} archivos · {size} potencialmente recuperables tras revisarlos",
+    "settings.auditUnlinkedSummaryPartial":
+      "{count} archivos · Al menos {size} medidos; algunos tamaños no están disponibles",
+    "settings.auditUnlinkedSummaryUnknownOne": "1 archivo · Tamaño no disponible",
+    "settings.auditUnlinkedSummaryUnknownMany": "{count} archivos · Tamaños no disponibles",
+    "settings.auditUnlinkedDescription":
+      "Estos archivos existen en el almacenamiento gestionado, pero la biblioteca actual no los referencia. Esto puede ocurrir después de restaurar una copia de seguridad anterior. PrintStash los conserva porque no puede demostrar que sea seguro eliminarlos.",
+    "settings.auditFileType": "Archivo {type}",
+    "settings.auditFileMetadata": "{type} · {size} · Modificado {modified}",
+    "settings.auditFileMetadataSize": "{type} · {size} · Fecha de modificación no disponible",
+    "settings.auditFileMetadataModified": "{type} · Tamaño no disponible · Modificado {modified}",
+    "settings.auditFileMetadataUnavailable":
+      "{type} · Tamaño y fecha de modificación no disponibles",
+    "settings.auditMarkReviewed": "Marcar como revisado",
+    "settings.auditMarkedReviewed": "Marcado como revisado. No se modificó ningún archivo.",
+    "settings.auditReviewed": "Revisado",
     "settings.providerConnections.title": "Conexiones de proveedores",
     "settings.providerConnections.mmf": "MyMiniFactory",
     "settings.providerConnections.cults": "Cults",

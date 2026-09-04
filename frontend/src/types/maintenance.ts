@@ -30,6 +30,8 @@ export interface VaultAuditFindingDetails {
   member?: string;
   expected_size?: number;
   actual_size?: number;
+  /** Filesystem modification time, available for directly mounted storage. */
+  modified_at?: string;
   /** Destructive object-storage lifecycle rule overlapping the vault prefix. */
   rule_id?: string;
   prefix?: string;
