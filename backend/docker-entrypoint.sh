@@ -67,16 +67,22 @@ if [ "$(id -u)" = "0" ]; then
     /data/db
 
   # Numeric ownership works for host-created bind mounts even when the
-  # requested uid/gid has no matching /etc/passwd entry in the image. Re-own
-  # every startup: the data paths are runtime-writable, so a persistent marker
-  # there could be replaced by an unprivileged process (including a symlink)
-  # before the next root startup.
-  chown -hR "$requested_identity" \
+  # requested uid/gid has no matching /etc/passwd entry in the image. Inspect
+  # every startup because a persistent marker is unsafe, but chown only entries
+  # that actually differ: even a no-op chown changes ctime and would invalidate
+  # PrintStash's inode-bound ownership receipts. `find` does not follow symlinks
+  # and `chown -h` changes a mismatched symlink itself, never its target.
+  for managed_root in \
     "${VAULT_DATA_DIR:-/data/files}" \
     "${VAULT_THUMB_DIR:-/data/thumbs}" \
     "${VAULT_STAGING_DIR:-/data/staging}" \
     "${VAULT_BACKUP_DIR:-/data/backups}" \
     /data/db
+  do
+    find "$managed_root" -xdev \
+      \( ! -uid "$PUID" -o ! -gid "$PGID" \) \
+      -exec chown -h "$requested_identity" {} +
+  done
   # Re-exec the same entrypoint as the requested numeric identity. This keeps
   # migration and operator-supplied commands in the exact existing order while
   # allowing arbitrary positive host IDs without mutating the image's user DB.

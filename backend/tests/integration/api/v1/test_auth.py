@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from app.db.models import ApiKey, User
-from app.services import oidc
+from app.db.models import ApiKey, RefreshToken, User
+from app.services import backup, oidc
 from app.services.auth import ACCESS_BLOCKLIST, create_api_key
 from tests.factories import build_user
 
@@ -76,6 +76,46 @@ class TestAuthProviders:
 
 
 class TestLogin:
+    def test_returns_an_access_only_session_during_restore_recovery(
+        self, client: TestClient, db_session: Session, account
+    ) -> None:
+        account("recovery-owner", is_superuser=True)
+        backup._restore_gate.set()
+        try:
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": "recovery-owner", "password": PASSWORD},
+            )
+            me = client.get("/api/v1/auth/me")
+        finally:
+            backup._restore_gate.clear()
+
+        assert response.status_code == 200, response.text
+        assert response.json()["refresh_token"] is None
+        assert me.status_code == 200, me.text
+        assert db_session.exec(select(RefreshToken)).all() == []
+
+    def test_keeps_api_key_login_read_only_during_restore_recovery(
+        self, client: TestClient, db_session: Session, account
+    ) -> None:
+        user = account("recovery-script", is_superuser=True)
+        key, raw_key = create_api_key(db_session, user.id, "Recovery key")
+        backup._restore_gate.set()
+        try:
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": "recovery-script", "api_key": raw_key},
+            )
+        finally:
+            backup._restore_gate.clear()
+
+        db_session.expire_all()
+        stored_key = db_session.get(ApiKey, key.id)
+        assert response.status_code == 200, response.text
+        assert response.json()["refresh_token"] is None
+        assert stored_key is not None
+        assert stored_key.last_used_at is None
+
     def test_returns_an_access_token(
         self, client: TestClient, account, sign_in
     ) -> None:

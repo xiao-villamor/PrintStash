@@ -48,6 +48,7 @@ from app.services.backup import (
     begin_mutating_operation,
     end_mutating_operation,
     inspect_restore_recovery,
+    restore_in_progress,
 )
 from app.services.backup_schedule import run_due_backup
 from app.services.gc_planner import run_scheduled_gc
@@ -522,6 +523,13 @@ async def quiesce_writes_during_restore(request: Request, call_next):
         and path.endswith("/restore")
     )
     if is_restore_request:
+        return await call_next(request)
+    is_login_request = request.method == "POST" and path == "/api/v1/auth/login"
+    if is_login_request and restore_in_progress():
+        # An interrupted restore may outlive the browser session. Permit the
+        # router's access-only recovery login without admitting a database
+        # mutation; every other POST remains quiesced.
+        request.state.restore_recovery_login = True
         return await call_next(request)
     if not begin_mutating_operation():
         return JSONResponse(

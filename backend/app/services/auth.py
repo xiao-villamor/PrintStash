@@ -310,7 +310,13 @@ def get_user_by_id(session: Session, user_id: int) -> Optional[User]:
     return session.get(User, user_id)
 
 
-def authenticate_user(session: Session, username: str, password: str) -> Optional[User]:
+def authenticate_user(
+    session: Session,
+    username: str,
+    password: str,
+    *,
+    persist_password_upgrade: bool = True,
+) -> Optional[User]:
     user = get_user_by_username(session, username)
     if not user or not user.is_active:
         logger.info("login failed: user=%s not found or inactive", username)
@@ -322,7 +328,7 @@ def authenticate_user(session: Session, username: str, password: str) -> Optiona
     if not valid:
         logger.info("login failed: user=%s bad password", username)
         return None
-    if updated_hash is not None:
+    if updated_hash is not None and persist_password_upgrade:
         user.hashed_password = updated_hash
         session.add(user)
         # The credential upgrade must be durable before a token can be issued.
@@ -369,7 +375,11 @@ def revoke_api_key(session: Session, user_id: int, key_id: int) -> bool:
 
 
 def authenticate_api_key(
-    session: Session, username: str, api_key: str
+    session: Session,
+    username: str,
+    api_key: str,
+    *,
+    persist_usage: bool = True,
 ) -> Optional[User]:
     user = get_user_by_username(session, username)
     if not user or not user.is_active:
@@ -384,8 +394,9 @@ def authenticate_api_key(
     if record is None:
         logger.info("api key login failed: user=%s bad key", username)
         return None
-    record.last_used_at = utcnow()
-    session.add(record)
-    session.commit()
+    if persist_usage:
+        record.last_used_at = utcnow()
+        session.add(record)
+        session.commit()
     logger.info("api key login success: user=%s", username)
     return user
