@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.13.0",
+    date: "Sep 2026",
+    changes: [
+      "Multipart Models now group reusable Models into named pieces and alternatives with independent tags, covers, favorites, and PDF, Markdown, or image guides without moving or deleting the underlying files",
+      "Remote Library sources can index S3-compatible, WebDAV, SFTP, and Google Drive storage through bounded resumable scans while preserving source ownership and preventing Vault cleanup from deleting user-owned bytes",
+      "Storage now reports Verified, Guarded, or Unguarded capability tiers and requires durable ownership evidence, explicit approval, quarantine, and final revalidation before destructive garbage collection",
+      "Backups can replicate to reusable S3, WebDAV, SFTP, and Google Drive destinations, restore only after provider-identity and SHA-256 verification, and run once daily to independently selected manual or automatic destinations",
+      "URL capture and Pending Imports now support durable review, per-file selection and retry, complete or partial outcomes, provenance snapshots, explicit overrides, and portable archive sidecars",
+      "The browser extension now supports guided pairing, revocable devices, Printables file selection, MakerWorld package selection, and clear partial or failed transfer states without sending marketplace cookies to PrintStash",
+      "Bambu LAN beta now preserves printer-reported reproducibility evidence and makes a bounded best-effort capture of exact cached G-code or project 3MF files",
+      "Model tags are directly editable from library cards and details, while multipart sets and matching members share the main searchable Models library with clearer mobile workflows",
+      "Thumbnail and viewer paths now share a deterministic versioned recipe, bound dense-STL and embedded-3MF work, preserve 3MF transforms, and recover PDF guides more reliably on mobile browsers",
+      "BGCODE uploads now work across browser upload and revision flows, exact-limit uploads reach precise validation, and completed ingestion refreshes the library without stale tasks or previews",
+      "Remote storage, capture, authentication, sharing, printer administration, and cleanup paths now fail closed around credentials, ownership, provider identity, and deletion authority",
+      "API startup, shared domain packages, frontend tooling, and release gates now validate local-first SQLite, PostgreSQL, storage-provider contracts, browser workflows, and amd64 or arm64 full and lite images",
+    ],
+  },
+  {
     version: "0.12.1",
     date: "Aug 2026",
     changes: [

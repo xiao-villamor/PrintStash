@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.0
+
 **Back up before upgrading. This release includes additive database migrations
 and storage configuration/safety changes. Existing S3-compatible buckets must
 be provisioned before startup; review [UPGRADE.md](./UPGRADE.md).**
