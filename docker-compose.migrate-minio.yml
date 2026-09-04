@@ -12,9 +12,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     command: server /data --console-address ":9001"
-    ports:
-      - "${MINIO_MIGRATION_API_PORT:-19000}:9000"
-      - "${MINIO_MIGRATION_CONSOLE_PORT:-19001}:9001"
+    # Migration traffic stays on printstash_net; source objects and the MinIO
+    # console are never published to host interfaces.
     volumes:
       - printstash_minio:/data
     networks:

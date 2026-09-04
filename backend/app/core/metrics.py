@@ -118,6 +118,80 @@ fleet_dispatches = Counter(
     registry=registry,
 )
 
+capture_operations = Counter(
+    "printstash_capture_operations_total",
+    "Capture operations by bounded provider/transport/outcome.",
+    labelnames=("provider", "transport", "outcome"),
+    registry=registry,
+)
+capture_operation_duration = Histogram(
+    "printstash_capture_operation_duration_seconds",
+    "Capture operation duration.",
+    labelnames=("provider", "transport", "outcome"),
+    registry=registry,
+)
+capture_uploaded_bytes = Counter(
+    "printstash_capture_uploaded_bytes_total",
+    "Validated capture upload bytes.",
+    labelnames=("provider",),
+    registry=registry,
+)
+capture_contract_errors = Counter(
+    "printstash_capture_contract_errors_total",
+    "Capture contract failures.",
+    labelnames=("provider", "category"),
+    registry=registry,
+)
+
+_CAPTURE_PROVIDERS = frozenset(
+    {"myminifactory", "cults", "makerworld", "printables", "thingiverse", "unknown"}
+)
+_CAPTURE_TRANSPORTS = frozenset(
+    {"provider_api", "browser_upload", "upload_slots", "unknown"}
+)
+_CAPTURE_OUTCOMES = frozenset(
+    {"success", "error", "rate_limited", "contract_changed", "required"}
+)
+_CAPTURE_CATEGORIES = frozenset(
+    {
+        "provider_connection_required",
+        "provider_rate_limited",
+        "provider_contract_changed",
+        "user_file_required",
+        "extension_capture_required",
+        "unknown",
+    }
+)
+
+
+def record_capture_operation(
+    provider: str,
+    transport: str,
+    outcome: str,
+    duration_seconds: float,
+    *,
+    uploaded_bytes: int = 0,
+    error_category: str | None = None,
+) -> None:
+    """Best-effort capture telemetry with fixed label vocabularies only."""
+    try:
+        provider = provider if provider in _CAPTURE_PROVIDERS else "unknown"
+        transport = transport if transport in _CAPTURE_TRANSPORTS else "unknown"
+        outcome = outcome if outcome in _CAPTURE_OUTCOMES else "error"
+        capture_operations.labels(provider, transport, outcome).inc()
+        capture_operation_duration.labels(provider, transport, outcome).observe(
+            max(0.0, duration_seconds)
+        )
+        if uploaded_bytes > 0:
+            capture_uploaded_bytes.labels(provider).inc(uploaded_bytes)
+        if error_category is not None:
+            capture_contract_errors.labels(
+                provider,
+                error_category if error_category in _CAPTURE_CATEGORIES else "unknown",
+            ).inc()
+    except Exception:
+        pass
+
 
 def observe_request(
     method: str, path: str, status: int, duration_seconds: float

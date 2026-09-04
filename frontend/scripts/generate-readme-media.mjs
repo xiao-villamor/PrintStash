@@ -66,7 +66,9 @@ async function api(path, options = {}) {
     body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
   });
   if (!response.ok) {
-    throw new Error(`${options.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`);
+    throw new Error(
+      `${options.method ?? "GET"} ${path}: ${response.status} ${await response.text()}`,
+    );
   }
   if (response.status === 204) return undefined;
   return response.json();
@@ -155,7 +157,8 @@ async function seedData() {
       gcode: "benchy/3dbenchy_PLA_1h12m.gcode",
       collection: collections["Calibration Lab"].path,
       tags: ["calibration", "PLA", "featured"],
-      description: "Reliable calibration print used to validate cooling, bridging, and dimensional accuracy.",
+      description:
+        "Reliable calibration print used to validate cooling, bridging, and dimensional accuracy.",
       sourceUrl: "https://www.3dbenchy.com/",
     },
     {
@@ -250,14 +253,30 @@ async function seedData() {
     method: "POST",
     json: {
       name: "Ready to print",
-      filters: { collection: null, direct: false, tag: ["PLA"], q: null, printer_id: null, printer_presence: null, favorites: false },
+      filters: {
+        collection: null,
+        direct: false,
+        tag: ["PLA"],
+        q: null,
+        printer_id: null,
+        printer_presence: null,
+        favorites: false,
+      },
     },
   });
   await api("/api/v1/saved-views", {
     method: "POST",
     json: {
       name: "Favorites",
-      filters: { collection: null, direct: false, tag: [], q: null, printer_id: null, printer_presence: null, favorites: true },
+      filters: {
+        collection: null,
+        direct: false,
+        tag: [],
+        q: null,
+        printer_id: null,
+        printer_presence: null,
+        favorites: true,
+      },
     },
   });
 
@@ -323,15 +342,57 @@ const stats = {
   avg_filament_g: 39.05,
   total_print_time_s: 462960,
   top_collections: [
-    { collection_id: 1, name: "Calibration Lab", path: "calibration-lab", print_count: 28, total_cost: 11.8 },
-    { collection_id: 2, name: "Workshop Tools", path: "workshop-tools", print_count: 21, total_cost: 18.2 },
-    { collection_id: 3, name: "Display Pieces", path: "display-pieces", print_count: 19, total_cost: 23.1 },
-    { collection_id: 4, name: "Miniatures", path: "miniatures", print_count: 16, total_cost: 14.32 },
+    {
+      collection_id: 1,
+      name: "Calibration Lab",
+      path: "calibration-lab",
+      print_count: 28,
+      total_cost: 11.8,
+    },
+    {
+      collection_id: 2,
+      name: "Workshop Tools",
+      path: "workshop-tools",
+      print_count: 21,
+      total_cost: 18.2,
+    },
+    {
+      collection_id: 3,
+      name: "Display Pieces",
+      path: "display-pieces",
+      print_count: 19,
+      total_cost: 23.1,
+    },
+    {
+      collection_id: 4,
+      name: "Miniatures",
+      path: "miniatures",
+      print_count: 16,
+      total_cost: 14.32,
+    },
   ],
   top_filaments: [
-    { material_type: "PLA", material_brand: "Polymaker", print_count: 46, total_g: 1690, total_cost: 32.4 },
-    { material_type: "PETG", material_brand: "Prusament", print_count: 22, total_g: 960, total_cost: 22.1 },
-    { material_type: "ABS", material_brand: "eSUN", print_count: 16, total_g: 630, total_cost: 12.92 },
+    {
+      material_type: "PLA",
+      material_brand: "Polymaker",
+      print_count: 46,
+      total_g: 1690,
+      total_cost: 32.4,
+    },
+    {
+      material_type: "PETG",
+      material_brand: "Prusament",
+      print_count: 22,
+      total_g: 960,
+      total_cost: 22.1,
+    },
+    {
+      material_type: "ABS",
+      material_brand: "eSUN",
+      print_count: 16,
+      total_g: 630,
+      total_cost: 12.92,
+    },
   ],
   top_models: [
     { model_id: 1, name: "3D Benchy", print_count: 15, total_g: 180 },
@@ -345,10 +406,18 @@ const stats = {
     { printer_id: 93, name: "Bambu P1S", print_count: 12, print_time_s: 56160 },
   ],
   cost_over_time: [
-    ["2026-04-20", 3.4, 180, 5], ["2026-04-27", 5.8, 270, 7], ["2026-05-04", 4.9, 240, 6],
-    ["2026-05-11", 7.6, 360, 9], ["2026-05-18", 5.3, 260, 7], ["2026-05-25", 8.8, 420, 11],
-    ["2026-06-01", 6.7, 330, 8], ["2026-06-08", 9.4, 455, 12], ["2026-06-15", 4.5, 225, 6],
-    ["2026-06-22", 5.9, 290, 7], ["2026-06-29", 3.8, 190, 4], ["2026-07-06", 5.32, 240, 2],
+    ["2026-04-20", 3.4, 180, 5],
+    ["2026-04-27", 5.8, 270, 7],
+    ["2026-05-04", 4.9, 240, 6],
+    ["2026-05-11", 7.6, 360, 9],
+    ["2026-05-18", 5.3, 260, 7],
+    ["2026-05-25", 8.8, 420, 11],
+    ["2026-06-01", 6.7, 330, 8],
+    ["2026-06-08", 9.4, 455, 12],
+    ["2026-06-15", 4.5, 225, 6],
+    ["2026-06-22", 5.9, 290, 7],
+    ["2026-06-29", 3.8, 190, 4],
+    ["2026-07-06", 5.32, 240, 2],
   ].map(([bucket, cost, filament_g, print_count]) => ({ bucket, cost, filament_g, print_count })),
 };
 
@@ -367,26 +436,93 @@ async function installExternalMocks(page, modelId, recommendedFileId) {
   await page.route("**/api/v1/printers**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
-    const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    if (path === "/api/v1/printers/dashboard") return json({ total_printers: 1, status_counts: { printing: 1 }, active_jobs: 1, groups: [{ name: "Workshop", count: 1, status_counts: { printing: 1 } }] });
+    const json = (body, status = 200) =>
+      route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (path === "/api/v1/printers/dashboard")
+      return json({
+        total_printers: 1,
+        status_counts: { printing: 1 },
+        active_jobs: 1,
+        groups: [{ name: "Workshop", count: 1, status_counts: { printing: 1 } }],
+      });
     if (path === "/api/v1/printers") return json([printer]);
     if (path === "/api/v1/printers/91/status") return json({ printer, snapshot });
-    if (path === "/api/v1/printers/91/diagnostics") return json({ printer_id: 91, provider: "moonraker", support_level: "stable", capabilities, unsupported_actions: [], notes: [], checks: [{ name: "configuration", ok: true }, { name: "provider_info", ok: true }, { name: "live_status", ok: true }], ok: true });
-    if (path === "/api/v1/printers/91/files") return json([{ id: 901, printer_id: 91, printer_name: printer.name, file_id: recommendedFileId, model_id: modelId, model_name: "Mario Coin", original_filename: "Mario_Coin_PLA_28m17s.gcode", remote_filename: "Mario_Coin_PLA_28m17s.gcode", size_bytes: 2228224, sha256: "demo", matched_by: "sha256", modified_at: now, last_seen_at: now, missing_since: null, created_at: now, updated_at: now }]);
-    if (path === "/api/v1/printers/91/jobs") return json([{ id: 501, printer_id: 91, file_id: recommendedFileId, model_id: modelId, remote_filename: "Mario_Coin_PLA_28m17s.gcode", state: "printing", progress: 64, source: "vault", error: null, spool_id: null, spool_name: "Polymaker PLA — Orange", started_at: "2026-07-14T10:12:00Z", finished_at: null, created_at: "2026-07-14T10:12:00Z", updated_at: now }]);
-    if (path === "/api/v1/printers/91/ws-ticket") return json({ ticket: "readme-demo", expires_in: 30 });
+    if (path === "/api/v1/printers/91/diagnostics")
+      return json({
+        printer_id: 91,
+        provider: "moonraker",
+        support_level: "stable",
+        capabilities,
+        unsupported_actions: [],
+        notes: [],
+        checks: [
+          { name: "configuration", ok: true },
+          { name: "provider_info", ok: true },
+          { name: "live_status", ok: true },
+        ],
+        ok: true,
+      });
+    if (path === "/api/v1/printers/91/files")
+      return json([
+        {
+          id: 901,
+          printer_id: 91,
+          printer_name: printer.name,
+          file_id: recommendedFileId,
+          model_id: modelId,
+          model_name: "Mario Coin",
+          original_filename: "Mario_Coin_PLA_28m17s.gcode",
+          remote_filename: "Mario_Coin_PLA_28m17s.gcode",
+          size_bytes: 2228224,
+          sha256: "demo",
+          matched_by: "sha256",
+          modified_at: now,
+          last_seen_at: now,
+          missing_since: null,
+          created_at: now,
+          updated_at: now,
+        },
+      ]);
+    if (path === "/api/v1/printers/91/jobs")
+      return json([
+        {
+          id: 501,
+          printer_id: 91,
+          file_id: recommendedFileId,
+          model_id: modelId,
+          remote_filename: "Mario_Coin_PLA_28m17s.gcode",
+          state: "printing",
+          progress: 64,
+          source: "vault",
+          error: null,
+          spool_id: null,
+          spool_name: "Polymaker PLA — Orange",
+          started_at: "2026-07-14T10:12:00Z",
+          finished_at: null,
+          created_at: "2026-07-14T10:12:00Z",
+          updated_at: now,
+        },
+      ]);
+    if (path === "/api/v1/printers/91/ws-ticket")
+      return json({ ticket: "readme-demo", expires_in: 30 });
     if (path === "/api/v1/printers/91/send") return json({ job_id: 501, state: "uploading" }, 202);
     if (path === "/api/v1/printers/91") return json(printer);
     return route.continue();
   });
-  await page.route("**/api/v1/models/stats/prints**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stats) }));
-  await page.route(`**/api/v1/models/${modelId}/printer-files`, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }));
+  await page.route("**/api/v1/models/stats/prints**", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(stats) }),
+  );
+  await page.route(`**/api/v1/models/${modelId}/printer-files`, (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
+  );
 }
 
 async function settle(page) {
   await page.waitForLoadState("networkidle").catch(() => {});
   await page.evaluate(() => document.fonts.ready);
-  await page.addStyleTag({ content: ".tsqd-parent-container { display: none !important; }" }).catch(() => {});
+  await page
+    .addStyleTag({ content: ".tsqd-parent-container { display: none !important; }" })
+    .catch(() => {});
   await page.waitForTimeout(700);
 }
 
@@ -395,11 +531,18 @@ async function shot(page, filename) {
   await page.screenshot({ path: join(outputDir, filename), animations: "disabled" });
 }
 
-async function record(page, name, action, { interval = 170, frameDuration = Math.round(interval * 4.5), hold = 500 } = {}) {
+async function record(
+  page,
+  name,
+  action,
+  { interval = 170, frameDuration = Math.round(interval * 4.5), hold = 500 } = {},
+) {
   const frameDir = join(frameRoot, name);
   await rm(frameDir, { recursive: true, force: true });
   await mkdir(frameDir, { recursive: true });
-  await page.addStyleTag({ content: ".tsqd-parent-container { display: none !important; }" }).catch(() => {});
+  await page
+    .addStyleTag({ content: ".tsqd-parent-container { display: none !important; }" })
+    .catch(() => {});
   let active = true;
   let frame = 0;
   const loop = (async () => {
@@ -416,10 +559,17 @@ async function record(page, name, action, { interval = 170, frameDuration = Math
     await loop.catch(() => {});
   }
   const python = resolve(repoDir, "backend/.venv/bin/python");
-  const result = spawnSync(python, [
-    join(scriptDir, "build-readme-gif.py"), frameDir, join(outputDir, `${name}.gif`),
-    "--duration", String(frameDuration),
-  ], { stdio: "inherit" });
+  const result = spawnSync(
+    python,
+    [
+      join(scriptDir, "build-readme-gif.py"),
+      frameDir,
+      join(outputDir, `${name}.gif`),
+      "--duration",
+      String(frameDuration),
+    ],
+    { stdio: "inherit" },
+  );
   if (result.status !== 0) throw new Error(`GIF build failed for ${name}`);
 }
 
@@ -432,7 +582,9 @@ async function openModel(page, modelId) {
 async function captureMedia(page, seed) {
   const modelId = seed.models.mario;
   const currentModel = await api(`/api/v1/models/${modelId}`);
-  const recommended = currentModel.files.find((file) => file.file_type === "gcode" && file.is_recommended);
+  const recommended = currentModel.files.find(
+    (file) => file.file_type === "gcode" && file.is_recommended,
+  );
   await installExternalMocks(page, modelId, recommended.id);
 
   await page.goto(`${webBase}/?tag=featured`);
@@ -445,7 +597,10 @@ async function captureMedia(page, seed) {
   await shot(page, "02-model-detail.png");
 
   await page.getByTitle("G-code toolpath preview").click();
-  await page.getByText(/G-code toolpath/i).first().waitFor();
+  await page
+    .getByText(/G-code toolpath/i)
+    .first()
+    .waitFor();
   await page.waitForTimeout(1800);
   await shot(page, "03-gcode-viewer.png");
 
@@ -469,50 +624,65 @@ async function captureMedia(page, seed) {
   await page.addStyleTag({ content: "main [data-collection-path] { display: none !important; }" });
   await page.locator('a[href^="/models/"]').filter({ hasText: "Mario Coin" }).waitFor();
   await settle(page);
-  await record(page, "00-demo-v010", async () => {
-    const search = page.getByPlaceholder(/Search PrintStash/i);
-    await search.fill("Mario");
-    await page.waitForTimeout(700);
-    await page.locator('a[href^="/models/"]').filter({ hasText: "Mario Coin" }).click();
-    await page.getByRole("heading", { name: "Mario Coin" }).waitFor();
-    await page.waitForTimeout(700);
-    await page.getByTitle("G-code toolpath preview").click();
-    await page.waitForTimeout(1500);
-    await page.getByRole("tab", { name: "Overview" }).click();
-    await page.getByRole("button", { name: "Send to printer" }).first().click();
-    await page.getByRole("dialog", { name: "Send to printer" }).waitFor();
-    await page.getByLabel("Select Workshop Voron").check();
-    await page.getByLabel("Start print immediately").check();
-    await page.waitForTimeout(900);
-  }, { interval: 180, hold: 800 });
+  await record(
+    page,
+    "00-demo-v010",
+    async () => {
+      const search = page.getByPlaceholder(/Search PrintStash/i);
+      await search.fill("Mario");
+      await page.waitForTimeout(700);
+      await page.locator('a[href^="/models/"]').filter({ hasText: "Mario Coin" }).click();
+      await page.getByRole("heading", { name: "Mario Coin" }).waitFor();
+      await page.waitForTimeout(700);
+      await page.getByTitle("G-code toolpath preview").click();
+      await page.waitForTimeout(1500);
+      await page.getByRole("tab", { name: "Overview" }).click();
+      await page.getByRole("button", { name: "Send to printer" }).first().click();
+      await page.getByRole("dialog", { name: "Send to printer" }).waitFor();
+      await page.getByLabel("Select Workshop Voron").check();
+      await page.getByLabel("Start print immediately").check();
+      await page.waitForTimeout(900);
+    },
+    { interval: 180, hold: 800 },
+  );
 
   await page.goto(`${webBase}/?tag=featured`);
   await page.getByRole("heading", { name: "All Models" }).waitFor();
   await page.addStyleTag({ content: "main [data-collection-path] { display: none !important; }" });
   await page.locator('a[href^="/models/"]').filter({ hasText: "Mario Coin" }).waitFor();
-  await record(page, "07-organize-library", async () => {
-    await page.getByRole("button", { name: "Select", exact: true }).click();
-    await page.getByRole("checkbox", { name: "Select Mario Coin" }).click();
-    await page.getByRole("checkbox", { name: "Select Mandalorian Miniature" }).click();
-    await page.getByRole("checkbox", { name: "Select Calibration Cube" }).click();
-    await page.waitForTimeout(600);
-    await page.locator("div.fixed.bottom-4").getByRole("button", { name: "Tag" }).click();
-    const dialog = page.getByRole("dialog", { name: /Tag .* models/ });
-    await dialog.getByPlaceholder("Search or create — press Enter").first().fill("README-ready");
-    await dialog.getByPlaceholder("Search or create — press Enter").first().press("Enter");
-    await page.waitForTimeout(500);
-    await dialog.getByRole("button", { name: "Apply" }).click();
-    await page.waitForTimeout(900);
-  }, { interval: 170, hold: 650 });
+  await record(
+    page,
+    "07-organize-library",
+    async () => {
+      await page.getByRole("button", { name: "Select", exact: true }).click();
+      await page.getByRole("checkbox", { name: "Select Mario Coin" }).click();
+      await page.getByRole("checkbox", { name: "Select Mandalorian Miniature" }).click();
+      await page.getByRole("checkbox", { name: "Select Calibration Cube" }).click();
+      await page.waitForTimeout(600);
+      await page.locator("div.fixed.bottom-4").getByRole("button", { name: "Tag" }).click();
+      const dialog = page.getByRole("dialog", { name: /Tag .* models/ });
+      await dialog.getByPlaceholder("Search or create — press Enter").first().fill("README-ready");
+      await dialog.getByPlaceholder("Search or create — press Enter").first().press("Enter");
+      await page.waitForTimeout(500);
+      await dialog.getByRole("button", { name: "Apply" }).click();
+      await page.waitForTimeout(900);
+    },
+    { interval: 170, hold: 650 },
+  );
 
   await openModel(page, modelId);
-  await record(page, "08-revision-compare", async () => {
-    await page.getByRole("tab", { name: /Revisions/ }).click();
-    await page.waitForTimeout(800);
-    const panel = page.getByRole("heading", { name: "Compare Artifacts" });
-    await panel.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(1100);
-  }, { interval: 170, hold: 900 });
+  await record(
+    page,
+    "08-revision-compare",
+    async () => {
+      await page.getByRole("tab", { name: /Revisions/ }).click();
+      await page.waitForTimeout(800);
+      const panel = page.getByRole("heading", { name: "Compare Artifacts" });
+      await panel.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(1100);
+    },
+    { interval: 170, hold: 900 },
+  );
 }
 
 async function main() {
@@ -527,10 +697,14 @@ async function main() {
       VAULT_SETUP_TOKEN: setupToken,
     },
   });
-  const vite = start("pnpm", ["exec", "vite", "--port", String(webPort), "--strictPort", "--host", "127.0.0.1"], {
-    cwd: frontendDir,
-    env: { ...process.env, VITE_API_URL: apiBase },
-  });
+  const vite = start(
+    "pnpm",
+    ["exec", "vite", "--port", String(webPort), "--strictPort", "--host", "127.0.0.1"],
+    {
+      cwd: frontendDir,
+      env: { ...process.env, VITE_API_URL: apiBase },
+    },
+  );
   backend.stderr.on("data", (chunk) => process.stderr.write(`[backend] ${chunk}`));
   vite.stderr.on("data", (chunk) => process.stderr.write(`[vite] ${chunk}`));
 
@@ -546,14 +720,25 @@ async function main() {
       colorScheme: "dark",
       deviceScaleFactor: 1,
     });
-    await context.addCookies([{ name: "printstash_session", value: token, url: apiBase, httpOnly: true, sameSite: "Strict" }]);
-    await context.addInitScript(({ storedUser }) => {
-      localStorage.setItem("printstash.user", storedUser);
-      localStorage.setItem("printstash.theme", "dark");
-      const style = document.createElement("style");
-      style.textContent = ".tsqd-parent-container { display: none !important; }";
-      document.documentElement.appendChild(style);
-    }, { storedUser: JSON.stringify(user) });
+    await context.addCookies([
+      {
+        name: "printstash_session",
+        value: token,
+        url: apiBase,
+        httpOnly: true,
+        sameSite: "Strict",
+      },
+    ]);
+    await context.addInitScript(
+      ({ storedUser }) => {
+        localStorage.setItem("printstash.user", storedUser);
+        localStorage.setItem("printstash.theme", "dark");
+        const style = document.createElement("style");
+        style.textContent = ".tsqd-parent-container { display: none !important; }";
+        document.documentElement.appendChild(style);
+      },
+      { storedUser: JSON.stringify(user) },
+    );
     const page = await context.newPage();
     await captureMedia(page, seed);
     await context.close();

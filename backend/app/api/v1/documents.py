@@ -34,7 +34,14 @@ from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_auth, require_superuser, require_user
 from app.core.time import utcnow
-from app.db.models import Collection, CollectionRole, Document, DocumentKind, User
+from app.db.models import (
+    Collection,
+    CollectionRole,
+    Document,
+    DocumentKind,
+    MultipartModel,
+    User,
+)
 from app.db.scopes import live, trashed
 from app.db.session import get_session
 from app.schemas.documents import (
@@ -44,11 +51,19 @@ from app.schemas.documents import (
     DocumentRead,
     DocumentUpdate,
 )
-from app.services import rbac
+from app.services import multipart_models, rbac
 from app.services.storage_backend import StorageCollisionError, get_backend
 from app.services.storage_deletion import process_storage_delete_intents
-from app.services.storage_ownership import UnsafeStorageDeleteError, record_creation
-from app.services.trash import hard_delete_document, restore_document
+from app.services.storage_ownership import (
+    UnsafeStorageDeleteError,
+    publish_bytes,
+    publish_stream,
+)
+from app.services.trash import (
+    StorageRiskConfirmationRequired,
+    hard_delete_document,
+    restore_document,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -63,7 +78,7 @@ _IMAGE_TYPES = {
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{64}\.(png|jpe?g|gif|webp)$")
 
 _MARKDOWN_EXTS = {".md", ".markdown", ".txt"}
-_BINARY_TYPES = {".pdf": "application/pdf"}
+_BINARY_TYPES = {".pdf": "application/pdf", **_IMAGE_TYPES}
 
 
 def _kind_for(ext: str) -> DocumentKind:
@@ -95,6 +110,7 @@ def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
         kind=doc.kind,
         collection=_collection_path(session, doc.collection_id),
         collection_id=doc.collection_id,
+        multipart_model_id=doc.multipart_model_id,
         filename=doc.filename,
         effective_role=rbac.effective_collection_role(session, user, doc.collection_id),
         updated_at=doc.updated_at,
@@ -124,6 +140,25 @@ def _require_collection_edit(
     if collection_id is not None:
         get_or_404(session, Collection, collection_id, "collection_not_found")
     rbac.require_collection_role(session, user, collection_id, CollectionRole.EDIT)
+
+
+def _guide_collection(
+    session: Session,
+    user: User,
+    multipart_model_id: int | None,
+    collection_id: int | None,
+) -> tuple[int | None, MultipartModel | None]:
+    if multipart_model_id is None:
+        _require_collection_edit(session, user, collection_id)
+        return collection_id, None
+    aggregate = multipart_models.require(
+        session, user, multipart_model_id, CollectionRole.EDIT
+    )
+    if collection_id is not None and collection_id != aggregate.collection_id:
+        raise HTTPException(
+            status_code=400, detail="multipart_guide_collection_mismatch"
+        )
+    return aggregate.collection_id, aggregate
 
 
 @router.get("", response_model=List[DocumentListItem], summary="List documents")
@@ -177,11 +212,17 @@ def create_document(
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_collection_edit(session, current_user, payload.collection_id)
+    collection_id, _aggregate = _guide_collection(
+        session,
+        current_user,
+        payload.multipart_model_id,
+        payload.collection_id,
+    )
     doc = Document(
         name=payload.name.strip(),
         kind=DocumentKind.MARKDOWN,
-        collection_id=payload.collection_id,
+        collection_id=collection_id,
+        multipart_model_id=payload.multipart_model_id,
         body=payload.body or "",
         created_by=current_user.id,
         updated_by=current_user.id,
@@ -237,6 +278,7 @@ def restore_trashed_document(
 )
 def permanently_delete_document(
     document_id: int,
+    confirm_storage_risk: bool = Query(False),
     _current_user: User = Depends(require_superuser),
     session: Session = Depends(get_session),
 ) -> Response:
@@ -246,7 +288,16 @@ def permanently_delete_document(
     if document is None:
         raise HTTPException(status_code=404, detail="document_not_found")
     try:
-        hard_delete_document(session, document)
+        hard_delete_document(
+            session,
+            document,
+            confirm_storage_risk=confirm_storage_risk,
+        )
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -269,11 +320,14 @@ async def upload_document(
     file: UploadFile = FileParam(...),
     name: Optional[str] = Form(None),
     collection_id: Optional[int] = Form(None),
+    multipart_model_id: Optional[int] = Form(None),
     current_user: User = Depends(require_user),
     _: None = Depends(require_auth),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_collection_edit(session, current_user, collection_id)
+    collection_id, aggregate = _guide_collection(
+        session, current_user, multipart_model_id, collection_id
+    )
     raw = file.filename or "document"
     ext = ("." + raw.rsplit(".", 1)[-1].lower()) if "." in raw else ""
     kind = _kind_for(ext)
@@ -286,6 +340,7 @@ async def upload_document(
         name=display,
         kind=kind,
         collection_id=collection_id,
+        multipart_model_id=multipart_model_id,
         created_by=current_user.id,
         updated_by=current_user.id,
     )
@@ -299,26 +354,48 @@ async def upload_document(
         session.add(doc)
         session.commit()
         session.refresh(doc)
+        if aggregate is not None:
+            aggregate.updated_at = utcnow()
+            aggregate.updated_by = current_user.id
+            session.add(aggregate)
+            session.commit()
         return _read(session, current_user, doc)
 
-    # Binary doc — store the blob keyed by the new row id.
+    # Binary docs need their row id in the storage key. Persist that small,
+    # recoverable intent before publication so SQLite's caller transaction does
+    # not hold a write lock while the ownership ledger commits its reservation.
     session.add(doc)
-    session.flush()
+    session.commit()
+    session.refresh(doc)
     safe = _safe_filename(raw)
     backend = get_backend()
     key = backend.document_file_key(doc.id, safe)
     receipt = None
     try:
-        receipt = await run_in_threadpool(backend.create_stream, file.file, key)
+        receipt = await run_in_threadpool(
+            publish_stream,
+            session,
+            backend,
+            key,
+            file.file,
+            object_kind="document_file",
+            expected_size=file.size,
+            sha256=None,
+        )
         if receipt.size > settings.max_upload_bytes:
             raise HTTPException(status_code=413, detail="upload_too_large")
         doc.filename = safe
         doc.size_bytes = receipt.size
         session.add(doc)
-        record_creation(session, receipt, object_kind="document")
+        if aggregate is not None:
+            aggregate.updated_at = utcnow()
+            aggregate.updated_by = current_user.id
+            session.add(aggregate)
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()
+        session.delete(doc)
+        session.commit()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="storage_destination_exists",
@@ -327,6 +404,10 @@ async def upload_document(
         session.rollback()
         if receipt is not None:
             backend.rollback_create(receipt)
+        persisted = session.get(Document, doc.id)
+        if persisted is not None:
+            session.delete(persisted)
+            session.commit()
         raise
     session.refresh(doc)
     return _read(session, current_user, doc)
@@ -447,8 +528,13 @@ async def upload_document_image(
     key = backend.document_image_key(doc.id, name)
     receipt = None
     try:
-        receipt = backend.create_bytes(data, key)
-        record_creation(session, receipt, object_kind="document_image")
+        receipt = publish_bytes(
+            session,
+            backend,
+            key,
+            data,
+            object_kind="document_image",
+        )
         session.commit()
     except StorageCollisionError as exc:
         session.rollback()

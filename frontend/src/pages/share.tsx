@@ -6,12 +6,7 @@ import { AlertTriangle, Box, Download, Layers, Loader2 } from "lucide-react";
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import { getAssetUrl } from "@/lib/api";
-import {
-  getSharedModel,
-  sharedDownloadUrl,
-  sharedGcodeUrl,
-  sharedStlUrl,
-} from "@/lib/api/share";
+import { getSharedModel, sharedDownloadUrl, sharedGcodeUrl, sharedStlUrl } from "@/lib/api/share";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { PublicFileRead, PublicModelRead } from "@/types";
 
@@ -24,6 +19,7 @@ const GcodeViewer = lazy(() =>
 );
 
 const MESH_TYPES = new Set(["stl", "3mf", "obj", "step"]);
+const DISPLAY_MODES: readonly ViewerDisplayMode[] = ["solid", "xray", "wireframe"];
 type ShareViewerMode = "model" | "gcode";
 
 function value(value: string | number | null | undefined, suffix = "") {
@@ -45,9 +41,18 @@ export default function SharePage() {
   const [showGrid, setShowGrid] = useState(true);
   const viewerControls = useRef<STLViewerControls | null>(null);
 
+  // The share token comes from the route, so a new token is a new fetch: reset to
+  // the loading state (and back to the 3D view) on the render that first sees it
+  // rather than from an effect that would show the previous model in between.
+  const [fetchedToken, setFetchedToken] = useState(token);
+  if (fetchedToken !== token) {
+    setFetchedToken(token);
+    setLoading(true);
+    setViewerMode("model");
+  }
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     getSharedModel(token)
       .then((m) => {
         if (!cancelled) setModel(m);
@@ -64,9 +69,7 @@ export default function SharePage() {
   }, [token]);
 
   useEffect(() => {
-    document.title = model
-      ? `${model.name} · Shared · PrintStash`
-      : "Shared model · PrintStash";
+    document.title = model ? `${model.name} · Shared · PrintStash` : "Shared model · PrintStash";
   }, [model]);
 
   const meshFile = useMemo(
@@ -82,14 +85,15 @@ export default function SharePage() {
     [gcodeFiles],
   );
   const canShowModel = !!meshFile;
-  const canShowGcode = !!selectedGcode;
-  const activeViewerMode: ShareViewerMode =
-    viewerMode === "gcode" && canShowGcode ? "gcode" : canShowModel ? "model" : "gcode";
-
-  useEffect(() => {
-    if (!model) return;
-    setViewerMode(meshFile ? "model" : "gcode");
-  }, [model, meshFile]);
+  const canShowGcode = !!selectedGcode && model?.allow_download === true;
+  const activeViewerMode: ShareViewerMode | null =
+    viewerMode === "gcode" && canShowGcode
+      ? "gcode"
+      : canShowModel
+        ? "model"
+        : canShowGcode
+          ? "gcode"
+          : null;
 
   if (loading) {
     return (
@@ -103,9 +107,7 @@ export default function SharePage() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-surface px-6 text-center">
         <AlertTriangle className="h-8 w-8 text-amber-500" />
-        <p className="font-mono text-sm text-on-surface-variant">
-          {error ?? "Not found."}
-        </p>
+        <p className="font-mono text-sm text-on-surface-variant">{error ?? "Not found."}</p>
       </div>
     );
   }
@@ -155,9 +157,7 @@ export default function SharePage() {
           </div>
         </div>
         {model.description && (
-          <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">
-            {model.description}
-          </p>
+          <p className="text-sm text-on-surface-variant mt-1 max-w-2xl">{model.description}</p>
         )}
       </header>
 
@@ -186,7 +186,9 @@ export default function SharePage() {
             >
               <STLViewer
                 url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
-                onControlsReady={(api) => { viewerControls.current = api; }}
+                onControlsReady={(api) => {
+                  viewerControls.current = api;
+                }}
                 displayMode={displayMode}
                 showGrid={showGrid}
                 screenshotName={model.name}
@@ -195,16 +197,14 @@ export default function SharePage() {
           ) : (
             <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-2 text-on-surface-variant">
               <Box className="h-8 w-8" />
-              <p className="font-mono text-xs">
-                No previewable mesh or G-code in this share.
-              </p>
+              <p className="font-mono text-xs">No previewable mesh or G-code in this share.</p>
             </div>
           )}
 
           {activeViewerMode === "model" && meshFile && (
             <div className="absolute top-4 left-4 z-10 flex flex-wrap items-center gap-1.5">
               <div className="flex rounded border border-outline-variant bg-surface-container-lowest/90 backdrop-blur overflow-hidden shadow-sm">
-                {(["solid", "xray", "wireframe"] as ViewerDisplayMode[]).map((mode) => (
+                {DISPLAY_MODES.map((mode) => (
                   <button
                     key={mode}
                     type="button"
@@ -261,9 +261,7 @@ export default function SharePage() {
                 <h2 className="font-mono text-3xs uppercase tracking-widest text-on-surface-variant">
                   Shared revision
                 </h2>
-                <span className="font-mono text-3xs uppercase text-primary">
-                  G-code preview
-                </span>
+                <span className="font-mono text-3xs uppercase text-primary">G-code preview</span>
               </div>
               <p className="mt-2 text-sm font-medium text-on-surface">
                 {revisionTitle(selectedGcode)}
@@ -275,31 +273,45 @@ export default function SharePage() {
               )}
               <div className="mt-3 grid grid-cols-2 gap-2 text-2xs">
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Status</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Status
+                  </span>
                   <span>{selectedGcode.revision_status?.replace("_", " ") ?? "—"}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Print time</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Print time
+                  </span>
                   <span>{formatDuration(selectedGcode.estimated_time_s)}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Layer</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Layer
+                  </span>
                   <span>{value(selectedGcode.layer_height_mm, " mm")}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Nozzle</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Nozzle
+                  </span>
                   <span>{value(selectedGcode.nozzle_diameter_mm, " mm")}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Material</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Material
+                  </span>
                   <span>{selectedGcode.material_type ?? "—"}</span>
                 </div>
                 <div>
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Filament</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Filament
+                  </span>
                   <span>{value(selectedGcode.filament_weight_g, " g")}</span>
                 </div>
                 <div className="col-span-2">
-                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">Printer</span>
+                  <span className="block font-mono text-3xs uppercase text-on-surface-variant">
+                    Printer
+                  </span>
                   <span>{selectedGcode.printer_model ?? "—"}</span>
                 </div>
               </div>
@@ -330,9 +342,7 @@ export default function SharePage() {
               <div className="mt-1 flex items-center justify-between gap-2">
                 <span className="font-mono text-3xs text-on-surface-variant">
                   {formatBytes(f.size_bytes)}
-                  {f.triangle_count
-                    ? ` · ${f.triangle_count.toLocaleString()} tris`
-                    : ""}
+                  {f.triangle_count ? ` · ${f.triangle_count.toLocaleString()} tris` : ""}
                 </span>
                 {model.allow_download && (
                   <a

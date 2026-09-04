@@ -104,6 +104,7 @@ backend/
 | `VAULT_MAX_UPLOAD_MB` | Upload size limit | `512` |
 | `VAULT_MODEL_THUMBNAIL_WIDTH` | Generated Model preview width (320–1280; Settings offers 320/640/1280 presets) | `640` |
 | `VAULT_LOG_LEVEL` | Python log level | `INFO` |
+| `VAULT_RESTART_ENABLED` | Allow admins to restart from Settings; enable only under a process/container supervisor | `false` |
 
 > The first admin user is created via the web-based first-run wizard at
 > `/setup`; there is no env-driven default account. Storage paths above are
@@ -120,6 +121,13 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 The compose file mounts named volumes under `/data/` so your files and DB
 survive container rebuilds.
+
+The image runs the API as unprivileged `10001:10001` by default. For bind
+mounted data directories, set `PUID` and `PGID` to the positive numeric host
+UID/GID that should own the files (for example, `PUID=1000 PGID=1000` in `.env`)
+before starting Compose. Startup repairs ownership when either value changes,
+then runs migrations and the operator-supplied command as that identity. Zero,
+negative, non-numeric, and out-of-range values fail before migrations run.
 
 The image entrypoint runs migrations before the API starts. Upgrade by pulling
 and recreating the services; do not override the entrypoint with a manual
@@ -204,10 +212,18 @@ endpoint. The compatibility helper is scheduled for removal in 1.0.
   - `GET /api/v1/files/{id}/stl`
 - Thumbnail rebuild job:
   - `POST /api/v1/files/thumbnails/rebuild`
-- Optional bucket lifecycle policy:
-  - `VAULT_S3_LIFECYCLE_EXPIRATION_DAYS`
-  - `VAULT_S3_LIFECYCLE_TRANSITION_DAYS`
-  - `VAULT_S3_TRANSITION_STORAGE_CLASS`
+- Read-only bucket versioning and lifecycle inspection for runtime safety
+  diagnostics. PrintStash never creates S3 buckets or changes lifecycle
+  policies; provision the bucket and its policy outside the application.
+
+New deployments can select typed S3-compatible, Nextcloud/WebDAV, or SFTP
+providers through Setup or Settings. Environment-only deployments use scalar
+`VAULT_STORAGE_PROVIDER`/`VAULT_STORAGE_ROOT` and transport-specific fields;
+the checked-in Compose files require an explicit environment override for the
+new provider, WebDAV, and SFTP fields. Existing `VAULT_STORAGE_BACKEND`/S3
+variables remain supported for upgrades. See
+[`docs/storage-providers.md`](../docs/storage-providers.md) for provider support,
+credentials, and runtime Verified/Guarded/Unguarded tiers.
 
 ## Tests
 

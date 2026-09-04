@@ -1,0 +1,326 @@
+# Pre-release manual test stack.
+#
+# This file is intentionally standalone. It builds PrintStash from the checked
+# out source and runs every dependency in a project-scoped network/volume set.
+# Do not combine it with another PrintStash Compose file.
+#
+# Start with:
+#   docker compose -p printstash-manual \
+#     -f docker-compose.manual-test.yml \
+#     --env-file deploy/manual-testing/.env up --wait --build
+name: printstash-manual
+
+services:
+  frontend:
+    image: printstash-manual-frontend:${PRINTSTASH_IMAGE_TAG:-candidate}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PRINTSTASH_HTTP_PORT:-3100}:3000"
+    environment:
+      NGINX_CLIENT_MAX_BODY_SIZE: "${VAULT_MAX_REQUEST_MB:-528}m"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  api:
+    image: printstash-manual-api:${PRINTSTASH_IMAGE_TAG:-candidate}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PRINTSTASH_API_PORT:-8100}:8000"
+    environment:
+      VAULT_STORAGE_BACKEND: "${VAULT_STORAGE_BACKEND:-s3}"
+      VAULT_DATA_DIR: /data/files
+      VAULT_THUMB_DIR: /data/thumbs
+      VAULT_STAGING_DIR: /data/staging
+      # PostgreSQL is the default. Set VAULT_DB_URL in deploy/manual-testing/.env
+      # to sqlite:////data/db/printstash.sqlite for the SQLite backup/restore mode.
+      VAULT_DB_URL: "${VAULT_DB_URL:-postgresql+psycopg://printstash:printstash-manual-db@printstash-db:5432/printstash}"
+      VAULT_BACKUP_DIR: /data/backups
+      VAULT_BACKUP_RETENTION_DAYS: "${VAULT_BACKUP_RETENTION_DAYS:-30}"
+      VAULT_S3_BUCKET: "${VAULT_S3_BUCKET:-printstash-manual}"
+      VAULT_S3_ENDPOINT_URL: "${VAULT_S3_ENDPOINT_URL:-http://seaweedfs.localhost:8333}"
+      VAULT_S3_REGION: "${VAULT_S3_REGION:-us-east-1}"
+      VAULT_S3_ACCESS_KEY: "${SEAWEEDFS_ACCESS_KEY:-printstash-manual}"
+      VAULT_S3_SECRET_KEY: "${SEAWEEDFS_SECRET_KEY:-printstash-manual-s3-secret}"
+      VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS: "${VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS:-900}"
+      VAULT_S3_MULTIPART_THRESHOLD_MB: "${VAULT_S3_MULTIPART_THRESHOLD_MB:-50}"
+      VAULT_JWT_SECRET: "${VAULT_JWT_SECRET:-printstash-manual-only-jwt-secret-change-me}"
+      VAULT_SETUP_TOKEN: "${VAULT_SETUP_TOKEN:-printstash-manual-setup-token}"
+      VAULT_SECRETS_KEY: "${VAULT_SECRETS_KEY:-printstash-manual-only-secrets-key-change-me}"
+      VAULT_SESSION_COOKIE_SECURE: "false"
+      VAULT_ACCESS_TOKEN_EXPIRE_MINUTES: "${VAULT_ACCESS_TOKEN_EXPIRE_MINUTES:-60}"
+      VAULT_REMEMBER_ME_DAYS: "${VAULT_REMEMBER_ME_DAYS:-2}"
+      VAULT_OIDC_ENABLED: "${VAULT_OIDC_ENABLED:-true}"
+      VAULT_OIDC_ISSUER_URL: "${PRINTSTASH_OIDC_ISSUER_URL:-http://authentik.localhost:9000/application/o/printstash}"
+      VAULT_OIDC_CLIENT_ID: "${PRINTSTASH_OIDC_CLIENT_ID:-printstash-manual}"
+      VAULT_OIDC_CLIENT_SECRET: "${PRINTSTASH_OIDC_CLIENT_SECRET:-printstash-manual-client-secret}"
+      VAULT_OIDC_SCOPES: "openid profile email groups"
+      VAULT_OIDC_USERNAME_CLAIM: preferred_username
+      VAULT_OIDC_GROUPS_CLAIM: groups
+      VAULT_OIDC_ADMIN_GROUPS: "${PRINTSTASH_OIDC_ADMIN_GROUP:-printstash-admins}"
+      VAULT_OIDC_DISPLAY_NAME: Authentik
+      VAULT_OIDC_REDIRECT_URI: "${PRINTSTASH_OIDC_REDIRECT_URI:-http://localhost:3100/api/v1/auth/oidc/callback}"
+      # HTTP is acceptable only because this stack is local and test-only.
+      VAULT_OIDC_ALLOW_INSECURE_HTTP: "true"
+      VAULT_MAX_UPLOAD_MB: "${VAULT_MAX_UPLOAD_MB:-512}"
+      VAULT_LOG_LEVEL: "${VAULT_LOG_LEVEL:-INFO}"
+      VAULT_RESTART_ENABLED: "${VAULT_RESTART_ENABLED:-true}"
+      PUID: "${PUID:-10001}"
+      PGID: "${PGID:-10001}"
+      TZ: UTC
+    volumes:
+      - printstash_manual_files:/data/files
+      - printstash_manual_thumbs:/data/thumbs
+      - printstash_manual_staging:/data/staging
+      - printstash_manual_backups:/data/backups
+      - printstash_manual_db:/data/db
+      - ${MANUAL_EXTERNAL_LIBRARY_PATH:-./deploy/manual-testing/external-library}:/manual-external
+    depends_on:
+      printstash-db:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  printstash-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PRINTSTASH_DB_PORT:-5433}:5432"
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:-printstash}"
+      POSTGRES_USER: "${POSTGRES_USER:-printstash}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-printstash-manual-db}"
+    volumes:
+      - printstash_manual_postgres:/var/lib/postgresql/data
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.41@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d
+    restart: unless-stopped
+    ports:
+      # Fixed: this host/container port is part of the signed S3 endpoint URL.
+      - "127.0.0.1:8333:8333"
+      - "127.0.0.1:${SEAWEEDFS_MASTER_PORT:-9333}:9333"
+    environment:
+      AWS_ACCESS_KEY_ID: "${SEAWEEDFS_ACCESS_KEY:-printstash-manual}"
+      AWS_SECRET_ACCESS_KEY: "${SEAWEEDFS_SECRET_KEY:-printstash-manual-s3-secret}"
+    command: ["mini", "-dir=/data", "-master.telemetry=false"]
+    volumes:
+      - printstash_manual_seaweedfs:/data
+    networks:
+      printstash:
+        aliases:
+          - seaweedfs.localhost
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9333/cluster/status"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  spoolman:
+    image: ghcr.io/donkie/spoolman:0.26.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SPOOLMAN_PORT:-7912}:8000"
+    environment:
+      TZ: UTC
+      SPOOLMAN_ALLOWED_HOSTS: "${SPOOLMAN_ALLOWED_HOSTS:-spoolman,localhost,127.0.0.1}"
+    volumes:
+      - printstash_manual_spoolman:/home/app/.local/share/spoolman
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/info', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  authentik-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: [identity]
+    environment:
+      POSTGRES_DB: "${AUTHENTIK_POSTGRES_DB:-authentik}"
+      POSTGRES_USER: "${AUTHENTIK_POSTGRES_USER:-authentik}"
+      POSTGRES_PASSWORD: "${AUTHENTIK_POSTGRES_PASSWORD:-authentik-manual-db}"
+    volumes:
+      - printstash_manual_authentik_postgres:/var/lib/postgresql/data
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  authentik:
+    image: ghcr.io/goauthentik/server:2026.5.5
+    restart: unless-stopped
+    profiles: [identity]
+    command: server
+    ports:
+      # Fixed: this host/container port is part of the OIDC issuer URL.
+      - "127.0.0.1:9000:9000"
+    environment: &authentik-environment
+      AUTHENTIK_POSTGRESQL__HOST: authentik-db
+      AUTHENTIK_POSTGRESQL__PORT: "5432"
+      AUTHENTIK_POSTGRESQL__NAME: "${AUTHENTIK_POSTGRES_DB:-authentik}"
+      AUTHENTIK_POSTGRESQL__USER: "${AUTHENTIK_POSTGRES_USER:-authentik}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "${AUTHENTIK_POSTGRES_PASSWORD:-authentik-manual-db}"
+      AUTHENTIK_SECRET_KEY: "${AUTHENTIK_SECRET_KEY:-printstash-manual-only-authentik-secret-change-me}"
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_BOOTSTRAP_PASSWORD: "${AUTHENTIK_BOOTSTRAP_PASSWORD:-authentik-admin-test}"
+      AUTHENTIK_BOOTSTRAP_EMAIL: "${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@example.test}"
+      PRINTSTASH_OIDC_CLIENT_ID: "${PRINTSTASH_OIDC_CLIENT_ID:-printstash-manual}"
+      PRINTSTASH_OIDC_CLIENT_SECRET: "${PRINTSTASH_OIDC_CLIENT_SECRET:-printstash-manual-client-secret}"
+      PRINTSTASH_OIDC_REDIRECT_URI: "${PRINTSTASH_OIDC_REDIRECT_URI:-http://localhost:3100/api/v1/auth/oidc/callback}"
+      PRINTSTASH_OIDC_ADMIN_GROUP: "${PRINTSTASH_OIDC_ADMIN_GROUP:-printstash-admins}"
+      PRINTSTASH_OIDC_ADMIN_USERNAME: "${PRINTSTASH_OIDC_ADMIN_USERNAME:-printstash-admin}"
+      PRINTSTASH_OIDC_ADMIN_PASSWORD: "${PRINTSTASH_OIDC_ADMIN_PASSWORD:-printstash-admin-test}"
+      PRINTSTASH_OIDC_ADMIN_EMAIL: "${PRINTSTASH_OIDC_ADMIN_EMAIL:-printstash-admin@example.test}"
+      PRINTSTASH_OIDC_USER_USERNAME: "${PRINTSTASH_OIDC_USER_USERNAME:-printstash-user}"
+      PRINTSTASH_OIDC_USER_PASSWORD: "${PRINTSTASH_OIDC_USER_PASSWORD:-printstash-user-test}"
+      PRINTSTASH_OIDC_USER_EMAIL: "${PRINTSTASH_OIDC_USER_EMAIL:-printstash-user@example.test}"
+      PRINTSTASH_OIDC_ISSUER_URL: "${PRINTSTASH_OIDC_ISSUER_URL:-http://authentik.localhost:9000/application/o/printstash}"
+    volumes:
+      - printstash_manual_authentik_media:/media
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+    networks:
+      printstash:
+        aliases:
+          - "${PRINTSTASH_OIDC_HOSTNAME:-authentik.localhost}"
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2026.5.5
+    restart: unless-stopped
+    profiles: [identity]
+    command: worker
+    environment:
+      <<: *authentik-environment
+    volumes:
+      - printstash_manual_authentik_media:/media
+      - ./deploy/manual-testing/authentik/blueprints/printstash.yaml:/blueprints/printstash-manual.yaml:ro
+    depends_on:
+      authentik-db:
+        condition: service_healthy
+      authentik:
+        condition: service_healthy
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+
+  mock-moonraker:
+    build:
+      context: .
+      dockerfile: deploy/manual-testing/emulators/Dockerfile
+    restart: unless-stopped
+    profiles: [emulators]
+    command: ["python", "-m", "printstash_core_testkit.mock_printer", "--host", "0.0.0.0", "--port", "7125", "--print-seconds", "${MOCK_PRINT_SECONDS:-5}"]
+    ports:
+      - "127.0.0.1:${MOONRAKER_PORT:-7125}:7125"
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7125/server/info', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mock-octoprint:
+    build:
+      context: .
+      dockerfile: deploy/manual-testing/emulators/Dockerfile
+    restart: unless-stopped
+    profiles: [emulators]
+    command: ["python", "-m", "printstash_core_testkit.mock_octoprint", "--host", "0.0.0.0", "--port", "5000", "--api-key", "${MOCK_OCTOPRINT_API_KEY:-printstash-manual-octoprint-key}", "--print-seconds", "${MOCK_PRINT_SECONDS:-5}"]
+    ports:
+      - "127.0.0.1:${OCTOPRINT_PORT:-5000}:5000"
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:5000/api/version', headers={'X-Api-Key': '${MOCK_OCTOPRINT_API_KEY:-printstash-manual-octoprint-key}'}); urllib.request.urlopen(request, timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  mock-prusalink:
+    build:
+      context: .
+      dockerfile: deploy/manual-testing/emulators/Dockerfile
+    restart: unless-stopped
+    profiles: [emulators]
+    command: ["python", "-m", "printstash_core_testkit.mock_prusalink", "--host", "0.0.0.0", "--port", "8080", "--auth-mode", "api_key", "--api-key", "${MOCK_PRUSALINK_API_KEY:-printstash-manual-prusalink-key}", "--print-seconds", "${MOCK_PRINT_SECONDS:-5}"]
+    ports:
+      - "127.0.0.1:${PRUSALINK_PORT:-8080}:8080"
+    networks:
+      - printstash
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8080/api/v1/status', headers={'X-Api-Key': '${MOCK_PRUSALINK_API_KEY:-printstash-manual-prusalink-key}'}); urllib.request.urlopen(request, timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+networks:
+  printstash:
+    driver: bridge
+
+volumes:
+  printstash_manual_files:
+  printstash_manual_thumbs:
+  printstash_manual_staging:
+  printstash_manual_backups:
+  printstash_manual_db:
+  printstash_manual_postgres:
+  printstash_manual_seaweedfs:
+  printstash_manual_spoolman:
+  printstash_manual_authentik_postgres:
+  printstash_manual_authentik_media:

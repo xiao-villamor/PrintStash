@@ -1,4 +1,4 @@
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { Button } from "@/components/ui/button";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";

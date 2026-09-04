@@ -462,9 +462,6 @@ def build_provider_registry() -> ProviderRegistry:
     )
 
 
-_DEFAULT_PROVIDER_REGISTRY = build_provider_registry()
-
-
 _BAMBU_SERIAL_MODEL_PREFIXES: dict[str, str] = {
     "00M": "Bambu Lab P1P",
     "01S": "Bambu Lab X1",
@@ -500,9 +497,15 @@ def provider_diagnostic_summary(provider: PrinterProvider) -> dict[str, object]:
 
 
 def get_provider_client(
-    printer: Printer, *, registry: ProviderRegistry | None = None
+    printer: Printer, *, registry: ProviderRegistry
 ) -> PrinterProviderClient:
-    selected_registry = registry or _DEFAULT_PROVIDER_REGISTRY
+    """Build a provider through the registry owned by the composition root.
+
+    Callers must receive the registry from their runtime boundary rather than
+    relying on a module-level default.  This keeps provider construction
+    isolated per application instance and makes alternate compositions
+    straightforward in tests and embedded deployments.
+    """
     config = printer_config_from_model(printer)
-    client = selected_registry.build(config.provider_id, config)
+    client = registry.build(config.provider_id, config)
     return cast(PrinterProviderClient, client)

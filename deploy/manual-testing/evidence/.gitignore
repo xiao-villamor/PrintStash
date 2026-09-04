@@ -1,0 +1,3 @@
+# Database/object-store exports are local release evidence and must not be committed.
+*
+!.gitignore

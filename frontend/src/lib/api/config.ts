@@ -1,20 +1,22 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import { getJson, sendJson } from "@/lib/api/request";
 import {
-  MakerWorldLoginRequest,
-  MakerWorldLoginResponse,
-  MakerWorldStatus,
-  MakerWorldTokenRequest,
-  MakerWorldVerifyRequest,
   SetupRequest,
   SetupResponse,
   SetupStatus,
   VaultConfigRead,
   VaultConfigUpdate,
+  StorageProvider,
+  StorageRootEnrollmentRead,
+  StorageRootRole,
   IngestResponse,
 } from "@/types";
 
 export function getSetupStatus(): Promise<SetupStatus> {
   return getJson<SetupStatus>("/api/v1/setup/status");
+}
+
+export function getStorageProviders(): Promise<StorageProvider[]> {
+  return getJson<StorageProvider[]>("/api/v1/storage/providers");
 }
 
 export function completeSetup(body: SetupRequest): Promise<SetupResponse> {
@@ -27,6 +29,13 @@ export function getVaultConfig(): Promise<VaultConfigRead> {
 
 export function getHealthDetails<T>(): Promise<T> {
   return getJson<T>("/api/v1/health/details", { fresh: true });
+}
+
+export function enrollStorageRoot(role: StorageRootRole): Promise<StorageRootEnrollmentRead> {
+  return sendJson<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", "POST", {
+    role,
+    confirm: true,
+  });
 }
 
 export interface ReleaseStatus {
@@ -49,47 +58,5 @@ export function updateVaultConfig(body: VaultConfigUpdate): Promise<VaultConfigR
 }
 
 export function rebuildModelThumbnails(): Promise<IngestResponse> {
-  return sendJson<IngestResponse>(
-    "/api/v1/files/thumbnails/rebuild?force=true",
-    "POST",
-    {},
-  );
-}
-
-export function getMakerWorldStatus(): Promise<MakerWorldStatus> {
-  return getJson<MakerWorldStatus>("/api/v1/config/makerworld");
-}
-
-export function makerWorldLogin(
-  body: MakerWorldLoginRequest,
-): Promise<MakerWorldLoginResponse> {
-  return sendJson<MakerWorldLoginResponse>(
-    "/api/v1/config/makerworld/login",
-    "POST",
-    body,
-  );
-}
-
-export function makerWorldVerify(
-  body: MakerWorldVerifyRequest,
-): Promise<MakerWorldLoginResponse> {
-  return sendJson<MakerWorldLoginResponse>(
-    "/api/v1/config/makerworld/verify",
-    "POST",
-    body,
-  );
-}
-
-export function makerWorldSetToken(
-  body: MakerWorldTokenRequest,
-): Promise<MakerWorldStatus> {
-  return sendJson<MakerWorldStatus>(
-    "/api/v1/config/makerworld/token",
-    "POST",
-    body,
-  );
-}
-
-export function makerWorldDisconnect(): Promise<void> {
-  return sendAction("/api/v1/config/makerworld", "DELETE");
+  return sendJson<IngestResponse>("/api/v1/files/thumbnails/rebuild?force=true", "POST", {});
 }

@@ -487,6 +487,51 @@
         "title": "Body_add_gcode_revision_api_v1_models__model_id__gcode_revisions_post",
         "type": "object"
       },
+      "Body_capture_browser_upload_api_v1_inbox_browser_upload_post": {
+        "properties": {
+          "capture_source": {
+            "anyOf": [
+              {
+                "maxLength": 262144,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Source"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "source_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "file",
+          "source_url"
+        ],
+        "title": "Body_capture_browser_upload_api_v1_inbox_browser_upload_post",
+        "type": "object"
+      },
       "Body_import_library_archive_api_v1_models_library_import_post": {
         "properties": {
           "file": {
@@ -681,6 +726,48 @@
         "title": "Body_inspect_archive_background_api_v1_ingest_archive_inspect_post",
         "type": "object"
       },
+      "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put",
+        "type": "object"
+      },
+      "Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put",
+        "type": "object"
+      },
+      "Body_upload_backup_api_v1_backups_upload_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_backup_api_v1_backups_upload_post",
+        "type": "object"
+      },
       "Body_upload_collection_image_api_v1_collections__collection_id__images_post": {
         "properties": {
           "file": {
@@ -714,6 +801,17 @@
             "title": "File",
             "type": "string"
           },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
           "name": {
             "anyOf": [
               {
@@ -744,6 +842,509 @@
           "file"
         ],
         "title": "Body_upload_document_image_api_v1_documents__document_id__images_post",
+        "type": "object"
+      },
+      "BrowserDevicePatch": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BrowserDevicePatch",
+        "type": "object"
+      },
+      "BrowserDeviceRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at"
+        ],
+        "title": "BrowserDeviceRead",
+        "type": "object"
+      },
+      "BrowserPairingClaim": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 256,
+            "minLength": 8,
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "BrowserPairingClaim",
+        "type": "object"
+      },
+      "BrowserPairingClaimRead": {
+        "properties": {
+          "credential": {
+            "title": "Credential",
+            "type": "string"
+          },
+          "device": {
+            "$ref": "#/components/schemas/BrowserDeviceRead"
+          }
+        },
+        "required": [
+          "credential",
+          "device"
+        ],
+        "title": "BrowserPairingClaimRead",
+        "type": "object"
+      },
+      "BrowserPairingCreateRead": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "expires_at"
+        ],
+        "title": "BrowserPairingCreateRead",
+        "type": "object"
+      },
+      "CaptureFieldDraft": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "enum": [
+              "confirmed",
+              "inferred"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "origin"
+        ],
+        "title": "CaptureFieldDraft",
+        "type": "object"
+      },
+      "CaptureManifestFileRead": {
+        "additionalProperties": false,
+        "properties": {
+          "file_type": {
+            "title": "File Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "file_type"
+        ],
+        "title": "CaptureManifestFileRead",
+        "type": "object"
+      },
+      "CaptureManifestV2Read": {
+        "additionalProperties": false,
+        "description": "Strict additive read shape for a finalized rich capture manifest.",
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureManifestFileRead"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "kind": {
+            "const": "model_files",
+            "title": "Kind",
+            "type": "string"
+          },
+          "schema_version": {
+            "const": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "selected_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Selected Ids",
+            "type": "array"
+          },
+          "source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          }
+        },
+        "required": [
+          "schema_version",
+          "kind",
+          "source",
+          "files",
+          "selected_ids"
+        ],
+        "title": "CaptureManifestV2Read",
+        "type": "object"
+      },
+      "CaptureProvider": {
+        "enum": [
+          "myminifactory",
+          "cults"
+        ],
+        "title": "CaptureProvider",
+        "type": "string"
+      },
+      "CaptureSourceDraft": {
+        "additionalProperties": false,
+        "description": "Bounded, transport-free capture provenance supplied by a browser.",
+        "properties": {
+          "adapter_version": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Adapter Version",
+            "type": "string"
+          },
+          "canonical_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Canonical Url",
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CaptureFieldDraft"
+            },
+            "maxProperties": 32,
+            "title": "Fields",
+            "type": "object"
+          },
+          "provider": {
+            "enum": [
+              "makerworld",
+              "printables",
+              "thingiverse",
+              "myminifactory",
+              "cults"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_item_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Item Id"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "canonical_url",
+          "adapter_version"
+        ],
+        "title": "CaptureSourceDraft",
+        "type": "object"
+      },
+      "CaptureUploadFileDeclaration": {
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Media Type",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Size Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256"
+        ],
+        "title": "CaptureUploadFileDeclaration",
+        "type": "object"
+      },
+      "CaptureUploadSlotRead": {
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "file",
+              "cover"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "source_file_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source File Id"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "uploaded"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "filename",
+          "media_type",
+          "size_bytes",
+          "sha256",
+          "state"
+        ],
+        "title": "CaptureUploadSlotRead",
+        "type": "object"
+      },
+      "CaptureUploadSlotsCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "capture_source": {
+            "$ref": "#/components/schemas/CaptureSourceDraft"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureUploadFileDeclaration"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "source_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Url",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "source_url",
+          "capture_source",
+          "files"
+        ],
+        "title": "CaptureUploadSlotsCreate",
+        "type": "object"
+      },
+      "CaptureUploadSlotsRead": {
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/InboxItemRead"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/CaptureUploadSlotRead"
+            },
+            "title": "Slots",
+            "type": "array"
+          }
+        },
+        "required": [
+          "item",
+          "slots"
+        ],
+        "title": "CaptureUploadSlotsRead",
         "type": "object"
       },
       "ChannelCreate": {
@@ -1027,6 +1628,14 @@
           "slug": {
             "title": "Slug",
             "type": "string"
+          },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
           }
         },
         "required": [
@@ -1290,6 +1899,29 @@
         "title": "CompatibilityRequest",
         "type": "object"
       },
+      "CultsConnectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "CultsConnectRequest",
+        "type": "object"
+      },
       "DocumentCreate": {
         "additionalProperties": false,
         "description": "Create a markdown document. Binary docs come in via the upload endpoint.",
@@ -1316,6 +1948,17 @@
               }
             ],
             "title": "Collection Id"
+          },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
           },
           "name": {
             "maxLength": 255,
@@ -1404,6 +2047,17 @@
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
           },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1485,6 +2139,17 @@
           },
           "kind": {
             "$ref": "#/components/schemas/DocumentKind"
+          },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
           },
           "name": {
             "title": "Name",
@@ -1967,6 +2632,14 @@
             "title": "Size Bytes",
             "type": "integer"
           },
+          "tags": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "uploaded_at": {
             "format": "date-time",
             "title": "Uploaded At",
@@ -2289,6 +2962,22 @@
         "title": "FleetSummary",
         "type": "object"
       },
+      "GcApprovalRequest": {
+        "properties": {
+          "digest": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest",
+            "type": "string"
+          }
+        },
+        "required": [
+          "digest"
+        ],
+        "title": "GcApprovalRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2470,9 +3159,27 @@
         "title": "InboxImportRequest",
         "type": "object"
       },
+      "InboxItemCompletion": {
+        "enum": [
+          "complete",
+          "partial"
+        ],
+        "title": "InboxItemCompletion",
+        "type": "string"
+      },
       "InboxItemCreate": {
         "additionalProperties": false,
         "properties": {
+          "capture_source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureSourceDraft"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "collection_id": {
             "anyOf": [
               {
@@ -2551,6 +3258,16 @@
             ],
             "title": "Completed At"
           },
+          "completion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InboxItemCompletion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -2583,9 +3300,15 @@
             "type": "integer"
           },
           "manifest": {
-            "additionalProperties": true,
-            "title": "Manifest",
-            "type": "object"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CaptureManifestV2Read"
+              },
+              {
+                "$ref": "#/components/schemas/LegacyInboxManifestRead"
+              }
+            ],
+            "title": "Manifest"
           },
           "owner_user_id": {
             "title": "Owner User Id",
@@ -2608,6 +3331,13 @@
               }
             ],
             "title": "Resulting Model Id"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/InboxItemResultRead"
+            },
+            "title": "Results",
+            "type": "array"
           },
           "retryable": {
             "title": "Retryable",
@@ -2669,6 +3399,100 @@
           "updated_at"
         ],
         "title": "InboxItemRead",
+        "type": "object"
+      },
+      "InboxItemResultRead": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "original_filename": {
+            "title": "Original Filename",
+            "type": "string"
+          },
+          "provenance_source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provenance Source Id"
+          },
+          "result_key": {
+            "title": "Result Key",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "source_selection_id": {
+            "title": "Source Selection Id",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source_selection_id",
+          "result_key",
+          "original_filename",
+          "state",
+          "retryable",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "InboxItemResultRead",
         "type": "object"
       },
       "InboxItemState": {
@@ -3083,12 +3907,29 @@
         "title": "JobPriority",
         "type": "string"
       },
+      "LegacyInboxManifestRead": {
+        "additionalProperties": true,
+        "description": "Compatibility wrapper for the pre-capture manifest variants.",
+        "title": "LegacyInboxManifestRead",
+        "type": "object"
+      },
       "LibraryCreate": {
         "additionalProperties": false,
         "properties": {
           "collection_mode": {
             "$ref": "#/components/schemas/ExternalLibraryCollectionMode",
             "default": "mirror"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
           },
           "enabled": {
             "default": true,
@@ -3102,8 +3943,8 @@
             "type": "string"
           },
           "root_path": {
+            "default": "",
             "maxLength": 1024,
-            "minLength": 1,
             "title": "Root Path",
             "type": "string"
           },
@@ -3111,6 +3952,16 @@
             "default": "0 * * * *",
             "maxLength": 128,
             "title": "Scan Schedule",
+            "type": "string"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind",
+            "default": "mounted"
+          },
+          "source_prefix": {
+            "default": "",
+            "maxLength": 1024,
+            "title": "Source Prefix",
             "type": "string"
           },
           "target_collection_id": {
@@ -3130,8 +3981,7 @@
           }
         },
         "required": [
-          "name",
-          "root_path"
+          "name"
         ],
         "title": "LibraryCreate",
         "type": "object"
@@ -3151,8 +4001,34 @@
       },
       "LibraryRead": {
         "properties": {
+          "binding_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding Reason"
+          },
+          "binding_state": {
+            "title": "Binding State",
+            "type": "string"
+          },
           "collection_mode": {
             "$ref": "#/components/schemas/ExternalLibraryCollectionMode"
+          },
+          "connection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection Id"
           },
           "enabled": {
             "title": "Enabled",
@@ -3211,6 +4087,10 @@
             "title": "Name",
             "type": "string"
           },
+          "root_enrollable": {
+            "title": "Root Enrollable",
+            "type": "boolean"
+          },
           "root_path": {
             "title": "Root Path",
             "type": "string"
@@ -3221,6 +4101,13 @@
           },
           "scan_schedule": {
             "title": "Scan Schedule",
+            "type": "string"
+          },
+          "source_kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "source_prefix": {
+            "title": "Source Prefix",
             "type": "string"
           },
           "target_collection_id": {
@@ -3240,18 +4127,29 @@
           },
           "watch_mode": {
             "$ref": "#/components/schemas/ExternalLibraryWatchMode"
+          },
+          "writeback_enabled": {
+            "title": "Writeback Enabled",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
           "name",
           "root_path",
+          "source_kind",
+          "connection_id",
+          "source_prefix",
+          "writeback_enabled",
           "enabled",
           "scan_interval_minutes",
           "scan_schedule",
           "watch_mode",
           "fs_kind",
           "watch_active",
+          "binding_state",
+          "binding_reason",
+          "root_enrollable",
           "collection_mode",
           "target_collection_id",
           "last_scanned_at",
@@ -3260,6 +4158,49 @@
         ],
         "title": "LibraryRead",
         "type": "object"
+      },
+      "LibraryRediscover": {
+        "additionalProperties": false,
+        "properties": {
+          "source_key": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Source Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_key"
+        ],
+        "title": "LibraryRediscover",
+        "type": "object"
+      },
+      "LibraryRootEnrollment": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_root_path": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Confirm Root Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_root_path"
+        ],
+        "title": "LibraryRootEnrollment",
+        "type": "object"
+      },
+      "LibrarySourceKind": {
+        "enum": [
+          "mounted",
+          "s3",
+          "webdav",
+          "sftp",
+          "gdrive"
+        ],
+        "title": "LibrarySourceKind",
+        "type": "string"
       },
       "LibraryUpdate": {
         "additionalProperties": false,
@@ -5004,6 +5945,39 @@
             ],
             "title": "Actual Duration S"
           },
+          "artifact_capture_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Capture Error"
+          },
+          "artifact_capture_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Capture Error Code"
+          },
+          "artifact_capture_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Capture Error Message"
+          },
           "artifact_evidence": {
             "default": "vault",
             "title": "Artifact Evidence",
@@ -5013,6 +5987,17 @@
             "format": "date-time",
             "title": "Created At",
             "type": "string"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
           },
           "error": {
             "anyOf": [
@@ -5089,6 +6074,9 @@
             "title": "Id",
             "type": "integer"
           },
+          "identity": {
+            "$ref": "#/components/schemas/PrintJobIdentityRead"
+          },
           "material_type": {
             "anyOf": [
               {
@@ -5099,6 +6087,9 @@
               }
             ],
             "title": "Material Type"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/PrintJobReportedMetadataRead"
           },
           "printer_id": {
             "anyOf": [
@@ -5117,6 +6108,19 @@
           },
           "remote_filename": {
             "title": "Remote Filename",
+            "type": "string"
+          },
+          "reproducibility": {
+            "$ref": "#/components/schemas/PrintJobReproducibilityRead"
+          },
+          "reproducibility_level": {
+            "default": "basic",
+            "enum": [
+              "exact",
+              "metadata",
+              "basic"
+            ],
+            "title": "Reproducibility Level",
             "type": "string"
           },
           "revision_label": {
@@ -5171,6 +6175,17 @@
           },
           "state": {
             "$ref": "#/components/schemas/PrintJobState"
+          },
+          "toolpath_preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolpath Preview Url"
           }
         },
         "required": [
@@ -5256,6 +6271,49 @@
           "file_count"
         ],
         "title": "ModelPrinterPresenceRead",
+        "type": "object"
+      },
+      "ModelProvenancePatch": {
+        "additionalProperties": false,
+        "description": "Explicit user overrides. Empty string is a real override, not a clear.",
+        "properties": {
+          "clear_overrides": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 12,
+            "title": "Clear Overrides",
+            "type": "array"
+          },
+          "overrides": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "maxProperties": 12,
+            "title": "Overrides",
+            "type": "object"
+          }
+        },
+        "title": "ModelProvenancePatch",
+        "type": "object"
+      },
+      "ModelProvenanceRead": {
+        "properties": {
+          "schema_version": {
+            "const": 2,
+            "default": 2,
+            "title": "Schema Version",
+            "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceSourceRead"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "title": "ModelProvenanceRead",
         "type": "object"
       },
       "ModelRead": {
@@ -5398,6 +6456,41 @@
         ],
         "title": "ModelSort",
         "type": "string"
+      },
+      "ModelSourceCoverRead": {
+        "properties": {
+          "content_type": {
+            "const": "image/webp",
+            "title": "Content Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "provenance_source_id": {
+            "title": "Provenance Source Id",
+            "type": "integer"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provenance_source_id",
+          "content_type",
+          "size_bytes",
+          "updated_at"
+        ],
+        "title": "ModelSourceCoverRead",
+        "type": "object"
       },
       "ModelStarRead": {
         "properties": {
@@ -5555,6 +6648,711 @@
         "title": "MoonrakerConfigRead",
         "type": "object"
       },
+      "MultipartChoiceWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "model_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Model Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_id"
+        ],
+        "title": "MultipartChoiceWrite",
+        "type": "object"
+      },
+      "MultipartMemberRead": {
+        "description": "A live readable member or a deliberately redacted unavailable member.",
+        "properties": {
+          "available": {
+            "default": true,
+            "title": "Available",
+            "type": "boolean"
+          },
+          "choice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "gcode_revision_count": {
+            "default": 0,
+            "title": "Gcode Revision Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "legacy_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Label"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "slug": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slug"
+          },
+          "source_file_count": {
+            "default": 0,
+            "title": "Source File Count",
+            "type": "integer"
+          },
+          "source_file_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source File Id"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "MultipartMemberRead",
+        "type": "object"
+      },
+      "MultipartModelCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MultipartModelCreate",
+        "type": "object"
+      },
+      "MultipartModelListItem": {
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover_image_uploaded": {
+            "default": false,
+            "title": "Cover Image Uploaded",
+            "type": "boolean"
+          },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
+          },
+          "cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Thumbnail Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guide_count": {
+            "default": 0,
+            "title": "Guide Count",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "member_model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Model Ids",
+            "type": "array"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "part_count": {
+            "default": 0,
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "updated_at"
+        ],
+        "title": "MultipartModelListItem",
+        "type": "object"
+      },
+      "MultipartModelRead": {
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover_image_uploaded": {
+            "default": false,
+            "title": "Cover Image Uploaded",
+            "type": "boolean"
+          },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
+          },
+          "cover_thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Thumbnail Url"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guide_count": {
+            "default": 0,
+            "title": "Guide Count",
+            "type": "integer"
+          },
+          "guides": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentListItem"
+            },
+            "title": "Guides",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "member_model_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Member Model Ids",
+            "type": "array"
+          },
+          "model_count": {
+            "default": 0,
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "part_count": {
+            "default": 0,
+            "title": "Part Count",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartRead"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "starred": {
+            "default": false,
+            "title": "Starred",
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "updated_at",
+          "created_at"
+        ],
+        "title": "MultipartModelRead",
+        "type": "object"
+      },
+      "MultipartModelSave": {
+        "additionalProperties": false,
+        "description": "Atomic metadata and composition replacement.",
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
+          "cover_model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Model Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartWrite"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "title": "MultipartModelSave",
+        "type": "object"
+      },
+      "MultipartModelStarRead": {
+        "properties": {
+          "multipart_model_id": {
+            "title": "Multipart Model Id",
+            "type": "integer"
+          },
+          "starred": {
+            "title": "Starred",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "multipart_model_id",
+          "starred"
+        ],
+        "title": "MultipartModelStarRead",
+        "type": "object"
+      },
+      "MultipartModelUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "cover_image_url": {
+            "anyOf": [
+              {
+                "format": "uri",
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cover Image Url"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 1000000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "MultipartModelUpdate",
+        "type": "object"
+      },
+      "MultipartPartRead": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartMemberRead"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sort_order"
+        ],
+        "title": "MultipartPartRead",
+        "type": "object"
+      },
+      "MultipartPartWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MultipartChoiceWrite"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "model_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ids"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MultipartPartWrite",
+        "type": "object"
+      },
+      "MultipartPartsReplace": {
+        "additionalProperties": false,
+        "properties": {
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/MultipartPartWrite"
+            },
+            "maxItems": 100,
+            "title": "Parts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "parts"
+        ],
+        "title": "MultipartPartsReplace",
+        "type": "object"
+      },
       "NotificationTarget": {
         "description": "Where a notification is delivered.",
         "enum": [
@@ -5589,6 +7387,19 @@
           "enabled"
         ],
         "title": "NotificationsSettingsUpdate",
+        "type": "object"
+      },
+      "OAuthAuthorizeRead": {
+        "properties": {
+          "authorization_url": {
+            "title": "Authorization Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "title": "OAuthAuthorizeRead",
         "type": "object"
       },
       "OperatorDecision": {
@@ -5658,6 +7469,15 @@
         ],
         "title": "OutlinerModelRead",
         "type": "object"
+      },
+      "PrintArtifactFormat": {
+        "description": "Stored print formats a provider can accept without conversion.",
+        "enum": [
+          "gcode_text",
+          "bgcode_binary"
+        ],
+        "title": "PrintArtifactFormat",
+        "type": "string"
       },
       "PrintBatchRead": {
         "properties": {
@@ -5740,6 +7560,90 @@
         "title": "PrintBatchRead",
         "type": "object"
       },
+      "PrintJobIdentityRead": {
+        "description": "Identity reported by a printer; absent values stay absent.",
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "gcode_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gcode File"
+          },
+          "plate_index": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plate Index"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "subtask_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtask Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "title": "PrintJobIdentityRead",
+        "type": "object"
+      },
       "PrintJobRead": {
         "properties": {
           "artifact_capture_error": {
@@ -5752,6 +7656,28 @@
               }
             ],
             "title": "Artifact Capture Error"
+          },
+          "artifact_capture_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Capture Error Code"
+          },
+          "artifact_capture_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Capture Error Message"
           },
           "artifact_evidence": {
             "default": "vault",
@@ -5816,6 +7742,17 @@
               }
             ],
             "title": "Dispatch Claimed At"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
           },
           "error": {
             "anyOf": [
@@ -5958,6 +7895,9 @@
             "title": "Id",
             "type": "integer"
           },
+          "identity": {
+            "$ref": "#/components/schemas/PrintJobIdentityRead"
+          },
           "material_override_at": {
             "anyOf": [
               {
@@ -5980,6 +7920,9 @@
               }
             ],
             "title": "Material Override By"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/PrintJobReportedMetadataRead"
           },
           "model_id": {
             "title": "Model Id",
@@ -6049,6 +7992,19 @@
           },
           "remote_filename": {
             "title": "Remote Filename",
+            "type": "string"
+          },
+          "reproducibility": {
+            "$ref": "#/components/schemas/PrintJobReproducibilityRead"
+          },
+          "reproducibility_level": {
+            "default": "basic",
+            "enum": [
+              "exact",
+              "metadata",
+              "basic"
+            ],
+            "title": "Reproducibility Level",
             "type": "string"
           },
           "requested_by": {
@@ -6124,6 +8080,17 @@
             ],
             "title": "Target Group"
           },
+          "toolpath_preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolpath Preview Url"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -6141,6 +8108,119 @@
           "updated_at"
         ],
         "title": "PrintJobRead",
+        "type": "object"
+      },
+      "PrintJobReportedMetadataRead": {
+        "description": "Only Bambu MQTT metadata actually supplied by the printer.",
+        "properties": {
+          "current_layer": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Layer"
+          },
+          "nozzle_diameter": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nozzle Diameter"
+          },
+          "total_layers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Layers"
+          }
+        },
+        "title": "PrintJobReportedMetadataRead",
+        "type": "object"
+      },
+      "PrintJobReproducibilityErrorRead": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PrintJobReproducibilityErrorRead",
+        "type": "object"
+      },
+      "PrintJobReproducibilityRead": {
+        "description": "Evidence level and download seam for reproducible print history.",
+        "properties": {
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrintJobReproducibilityErrorRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/PrintJobIdentityRead"
+          },
+          "level": {
+            "default": "basic",
+            "enum": [
+              "exact",
+              "metadata",
+              "basic"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/PrintJobReportedMetadataRead"
+          },
+          "toolpath_preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toolpath Preview Url"
+          }
+        },
+        "title": "PrintJobReproducibilityRead",
         "type": "object"
       },
       "PrintJobState": {
@@ -6412,6 +8492,13 @@
       },
       "PrinterCapabilities": {
         "properties": {
+          "accepted_print_formats": {
+            "items": {
+              "$ref": "#/components/schemas/PrintArtifactFormat"
+            },
+            "title": "Accepted Print Formats",
+            "type": "array"
+          },
           "can_cancel": {
             "title": "Can Cancel",
             "type": "boolean"
@@ -7947,6 +10034,257 @@
         "title": "PrinterUpdate",
         "type": "object"
       },
+      "ProvenanceCaptureSummaryRead": {
+        "properties": {
+          "adapter_version": {
+            "title": "Adapter Version",
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "title": "Captured At",
+            "type": "string"
+          },
+          "checked_at": {
+            "format": "date-time",
+            "title": "Checked At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "snapshot_sha256": {
+            "title": "Snapshot Sha256",
+            "type": "string"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          }
+        },
+        "required": [
+          "id",
+          "snapshot_sha256",
+          "adapter_version",
+          "captured_at",
+          "checked_at"
+        ],
+        "title": "ProvenanceCaptureSummaryRead",
+        "type": "object"
+      },
+      "ProvenanceFieldRead": {
+        "properties": {
+          "captured_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "captured_origin": {
+            "enum": [
+              "confirmed",
+              "inferred"
+            ],
+            "title": "Captured Origin",
+            "type": "string"
+          },
+          "captured_value": {
+            "title": "Captured Value",
+            "type": "string"
+          },
+          "effective_origin": {
+            "enum": [
+              "confirmed",
+              "inferred",
+              "user"
+            ],
+            "title": "Effective Origin",
+            "type": "string"
+          },
+          "effective_value": {
+            "title": "Effective Value",
+            "type": "string"
+          },
+          "field_name": {
+            "title": "Field Name",
+            "type": "string"
+          },
+          "user_override_set": {
+            "title": "User Override Set",
+            "type": "boolean"
+          },
+          "user_updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Updated At"
+          },
+          "user_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Value"
+          }
+        },
+        "required": [
+          "field_name",
+          "captured_value",
+          "captured_origin",
+          "user_override_set",
+          "effective_value",
+          "effective_origin"
+        ],
+        "title": "ProvenanceFieldRead",
+        "type": "object"
+      },
+      "ProvenanceSourceRead": {
+        "properties": {
+          "canonical_url": {
+            "title": "Canonical Url",
+            "type": "string"
+          },
+          "captures": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceCaptureSummaryRead"
+            },
+            "title": "Captures",
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ProvenanceFieldRead"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "first_captured_at": {
+            "format": "date-time",
+            "title": "First Captured At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_checked_at": {
+            "format": "date-time",
+            "title": "Last Checked At",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "source_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Item Id"
+          },
+          "source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Revision"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "canonical_url",
+          "first_captured_at",
+          "last_checked_at"
+        ],
+        "title": "ProvenanceSourceRead",
+        "type": "object"
+      },
+      "ProviderCategory": {
+        "enum": [
+          "this_machine",
+          "s3_compatible",
+          "nextcloud_webdav",
+          "nas_sftp",
+          "consumer_cloud"
+        ],
+        "title": "ProviderCategory",
+        "type": "string"
+      },
+      "ProviderConnectionRead": {
+        "properties": {
+          "connected": {
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "provider": {
+            "enum": [
+              "myminifactory",
+              "cults"
+            ],
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "provider",
+          "connected"
+        ],
+        "title": "ProviderConnectionRead",
+        "type": "object"
+      },
       "QueueJobCreate": {
         "additionalProperties": false,
         "properties": {
@@ -8724,6 +11062,30 @@
             ],
             "title": "Storage Backend"
           },
+          "storage_provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider"
+          },
+          "storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider Config"
+          },
           "thumb_dir": {
             "anyOf": [
               {
@@ -8769,6 +11131,11 @@
           "storage_backend": {
             "default": "local",
             "title": "Storage Backend",
+            "type": "string"
+          },
+          "storage_provider": {
+            "default": "local",
+            "title": "Storage Provider",
             "type": "string"
           },
           "thumb_dir": {
@@ -8917,6 +11284,29 @@
               }
             ],
             "title": "Current Storage Backend"
+          },
+          "current_storage_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Storage Provider"
+          },
+          "current_storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Storage Provider Config"
           },
           "current_thumb_dir": {
             "anyOf": [
@@ -9464,6 +11854,334 @@
         "title": "StartPrinterFile",
         "type": "object"
       },
+      "StorageConnectionCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/StorageConnectionPurpose",
+            "default": "library"
+          },
+          "secrets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Secrets",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "configuration"
+        ],
+        "title": "StorageConnectionCreate",
+        "type": "object"
+      },
+      "StorageConnectionPurpose": {
+        "description": "Product workflows allowed to reuse one remote-storage connection.",
+        "enum": [
+          "library",
+          "backup",
+          "both"
+        ],
+        "title": "StorageConnectionPurpose",
+        "type": "string"
+      },
+      "StorageConnectionRead": {
+        "properties": {
+          "automatic_backup_enabled": {
+            "title": "Automatic Backup Enabled",
+            "type": "boolean"
+          },
+          "configuration": {
+            "additionalProperties": true,
+            "title": "Configuration",
+            "type": "object"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/LibrarySourceKind"
+          },
+          "manual_backup_enabled": {
+            "title": "Manual Backup Enabled",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/StorageConnectionPurpose"
+          },
+          "secret_fields_set": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Secret Fields Set",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "purpose",
+          "configuration",
+          "secret_fields_set",
+          "enabled",
+          "manual_backup_enabled",
+          "automatic_backup_enabled"
+        ],
+        "title": "StorageConnectionRead",
+        "type": "object"
+      },
+      "StorageConnectionUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "automatic_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Enabled"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "manual_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Backup Enabled"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StorageConnectionPurpose"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "StorageConnectionUpdate",
+        "type": "object"
+      },
+      "StorageFieldDescriptor": {
+        "properties": {
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          },
+          "help": {
+            "title": "Help",
+            "type": "string"
+          },
+          "input_type": {
+            "default": "text",
+            "enum": [
+              "text",
+              "password",
+              "url",
+              "number",
+              "path"
+            ],
+            "title": "Input Type",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "required": {
+            "default": true,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "secret": {
+            "default": false,
+            "title": "Secret",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "help"
+        ],
+        "title": "StorageFieldDescriptor",
+        "type": "object"
+      },
+      "StorageProvider": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "category": {
+            "$ref": "#/components/schemas/ProviderCategory"
+          },
+          "consequences": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Consequences",
+            "type": "array"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled Reason"
+          },
+          "documentation_url": {
+            "title": "Documentation Url",
+            "type": "string"
+          },
+          "expected_tier": {
+            "enum": [
+              "verified",
+              "guarded",
+              "unguarded"
+            ],
+            "title": "Expected Tier",
+            "type": "string"
+          },
+          "expected_tier_note": {
+            "title": "Expected Tier Note",
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/StorageFieldDescriptor"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "selectable": {
+            "title": "Selectable",
+            "type": "boolean"
+          },
+          "support_level": {
+            "default": "stable",
+            "enum": [
+              "stable",
+              "beta"
+            ],
+            "title": "Support Level",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "category",
+          "description",
+          "expected_tier",
+          "expected_tier_note",
+          "consequences",
+          "documentation_url",
+          "available",
+          "selectable",
+          "fields"
+        ],
+        "title": "StorageProvider",
+        "type": "object"
+      },
+      "StorageRootEnrollment": {
+        "additionalProperties": false,
+        "description": "Explicit acknowledgement for enrolling an unprovable local root.",
+        "properties": {
+          "confirm": {
+            "default": false,
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "data",
+              "thumb"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "StorageRootEnrollment",
+        "type": "object"
+      },
       "StorageUsageRead": {
         "properties": {
           "backend": {
@@ -9552,6 +12270,11 @@
             "title": "Model Count",
             "type": "integer"
           },
+          "multipart_model_count": {
+            "default": 0,
+            "title": "Multipart Model Count",
+            "type": "integer"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -9567,6 +12290,21 @@
           "slug"
         ],
         "title": "TagRead",
+        "type": "object"
+      },
+      "TagSetUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "title": "TagSetUpdate",
         "type": "object"
       },
       "TimeBucketRead": {
@@ -9668,6 +12406,17 @@
             "title": "Storage Blocked",
             "type": "integer"
           },
+          "storage_cleanup_status": {
+            "default": "completed",
+            "enum": [
+              "completed",
+              "pending",
+              "blocked",
+              "partial"
+            ],
+            "title": "Storage Cleanup Status",
+            "type": "string"
+          },
           "storage_completed": {
             "default": 0,
             "title": "Storage Completed",
@@ -9764,7 +12513,7 @@
         "type": "object"
       },
       "UrlIngestRequest": {
-        "description": "Body for POST /ingest/url.\n\n``url`` may be a direct file/.zip link *or* a model *page* on a supported\nhost (Printables / MakerWorld / Thingiverse); pages are resolved to their\ndownload link server-side. The optional ``*_cookie`` fields carry a browser\nsession header for hosts that gate downloads behind login.",
+        "description": "Body for POST /ingest/url.\n\n``url`` may be a direct file/.zip link *or* a model *page* on a supported\nhost (Printables / Thingiverse); pages are resolved to their download link\nserver-side. Authenticated MakerWorld packages are captured by the browser\nextension and uploaded through the inbox. The optional cookie fields remain\naccepted for backwards compatibility; ``makerworld_cookie`` is ignored.",
         "properties": {
           "collection": {
             "anyOf": [
@@ -10260,6 +13009,33 @@
             "title": "Auto Mark Known Good",
             "type": "boolean"
           },
+          "automatic_backup_last_attempt_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Last Attempt At"
+          },
+          "automatic_backup_time_utc": {
+            "default": "02:00",
+            "title": "Automatic Backup Time Utc",
+            "type": "string"
+          },
+          "automatic_backups_enabled": {
+            "default": false,
+            "title": "Automatic Backups Enabled",
+            "type": "boolean"
+          },
+          "automatic_local_backup_enabled": {
+            "default": true,
+            "title": "Automatic Local Backup Enabled",
+            "type": "boolean"
+          },
           "backup_retention_days": {
             "default": 30,
             "title": "Backup Retention Days",
@@ -10333,6 +13109,11 @@
           "has_s3_secret_key": {
             "default": false,
             "title": "Has S3 Secret Key",
+            "type": "boolean"
+          },
+          "manual_local_backup_enabled": {
+            "default": true,
+            "title": "Manual Local Backup Enabled",
             "type": "boolean"
           },
           "model_thumbnail_width": {
@@ -10420,6 +13201,43 @@
             "title": "Storage Backend",
             "type": "string"
           },
+          "storage_capabilities": {
+            "additionalProperties": true,
+            "title": "Storage Capabilities",
+            "type": "object"
+          },
+          "storage_probe_diagnostics": {
+            "additionalProperties": true,
+            "title": "Storage Probe Diagnostics",
+            "type": "object"
+          },
+          "storage_provider": {
+            "default": "",
+            "title": "Storage Provider",
+            "type": "string"
+          },
+          "storage_provider_config": {
+            "additionalProperties": true,
+            "title": "Storage Provider Config",
+            "type": "object"
+          },
+          "storage_tier": {
+            "default": "unguarded",
+            "title": "Storage Tier",
+            "type": "string"
+          },
+          "storage_unverified_acknowledged": {
+            "default": false,
+            "title": "Storage Unverified Acknowledged",
+            "type": "boolean"
+          },
+          "storage_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Storage Warnings",
+            "type": "array"
+          },
           "thumb_dir": {
             "default": "",
             "title": "Thumb Dir",
@@ -10447,6 +13265,40 @@
               }
             ],
             "title": "Auto Mark Known Good"
+          },
+          "automatic_backup_time_utc": {
+            "anyOf": [
+              {
+                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backup Time Utc"
+          },
+          "automatic_backups_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Backups Enabled"
+          },
+          "automatic_local_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic Local Backup Enabled"
           },
           "backup_retention_days": {
             "anyOf": [
@@ -10549,6 +13401,17 @@
               }
             ],
             "title": "External Libraries Enabled"
+          },
+          "manual_local_backup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Local Backup Enabled"
           },
           "model_thumbnail_width": {
             "anyOf": [
@@ -10762,6 +13625,30 @@
             ],
             "title": "Storage Backend"
           },
+          "storage_provider": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider"
+          },
+          "storage_provider_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Provider Config"
+          },
           "thumb_dir": {
             "anyOf": [
               {
@@ -10954,16 +13841,49 @@
       }
     },
     "/api/v1/admin/gc": {
+      "get": {
+        "description": "Return the durable active plan so UI reloads cannot lose the interlock.",
+        "operationId": "read_active_gc_plan_api_v1_admin_gc_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Read Active Gc Plan Api V1 Admin Gc Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Active Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      },
       "post": {
+        "description": "Create a non-destructive GC preview; approval is a separate request.",
         "operationId": "run_gc_api_v1_admin_gc_post",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "integer"
-                  },
+                  "additionalProperties": true,
                   "title": "Response Run Gc Api V1 Admin Gc Post",
                   "type": "object"
                 }
@@ -10978,6 +13898,212 @@
           }
         ],
         "summary": "Run Gc",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}": {
+      "get": {
+        "operationId": "read_gc_plan_api_v1_admin_gc__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Read Gc Plan Api V1 Admin Gc  Run Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/abort": {
+      "post": {
+        "operationId": "abort_gc_plan_api_v1_admin_gc__run_id__abort_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Abort Gc Plan Api V1 Admin Gc  Run Id  Abort Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Abort Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/approve": {
+      "post": {
+        "operationId": "approve_gc_plan_api_v1_admin_gc__run_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GcApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Approve Gc Plan Api V1 Admin Gc  Run Id  Approve Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Approve Gc Plan",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/gc/{run_id}/finalize": {
+      "post": {
+        "operationId": "finalize_gc_plan_api_v1_admin_gc__run_id__finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Finalize Gc Plan Api V1 Admin Gc  Run Id  Finalize Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finalize Gc Plan",
         "tags": [
           "admin"
         ]
@@ -11238,6 +14364,16 @@
             "schema": {
               "default": false,
               "title": "Hard",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
               "type": "boolean"
             }
           }
@@ -11792,6 +14928,208 @@
         ]
       }
     },
+    "/api/v1/backups/adopt-local": {
+      "post": {
+        "description": "Validate and register one unowned legacy archive. Archives are not auto-adopted during listing; the filename must be in the configured backup directory.",
+        "operationId": "adopt_local_backup_api_v1_backups_adopt_local_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "filename",
+            "required": true,
+            "schema": {
+              "title": "Filename",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adopt Local Backup Api V1 Backups Adopt Local Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Adopt a legacy local backup",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/adopt-remote": {
+      "post": {
+        "operationId": "adopt_remote_backup_api_v1_backups_adopt_remote_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Source Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_archive_sha256",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "title": "Expected Archive Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adopt Remote Backup Api V1 Backups Adopt Remote Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Adopt one existing OpenDAL backup",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/adopt-s3": {
+      "post": {
+        "operationId": "adopt_s3_backup_api_v1_backups_adopt_s3_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Source Ref",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_archive_sha256",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 64,
+              "title": "Expected Archive Sha256",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Adopt S3 Backup Api V1 Backups Adopt S3 Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Adopt one legacy S3 backup",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
     "/api/v1/backups/capabilities/database": {
       "get": {
         "operationId": "get_database_backup_capabilities_api_v1_backups_capabilities_database_get",
@@ -11829,6 +15167,179 @@
         ]
       }
     },
+    "/api/v1/backups/sources": {
+      "get": {
+        "description": "Expose replicas and collision candidates without collapsing locators.",
+        "operationId": "list_backup_sources_api_v1_backups_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response List Backup Sources Api V1 Backups Sources Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List every exact backup source",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/unowned-local": {
+      "get": {
+        "operationId": "discover_unowned_local_backups_api_v1_backups_unowned_local_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Discover Unowned Local Backups Api V1 Backups Unowned Local Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover valid unowned legacy local backups",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/unowned-remote": {
+      "get": {
+        "operationId": "discover_unowned_remote_backups_api_v1_backups_unowned_remote_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Discover Unowned Remote Backups Api V1 Backups Unowned Remote Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover valid unowned OpenDAL backups",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/unowned-s3": {
+      "get": {
+        "operationId": "discover_unowned_s3_backups_api_v1_backups_unowned_s3_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Discover Unowned S3 Backups Api V1 Backups Unowned S3 Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Discover valid unowned legacy S3 backups",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
+    "/api/v1/backups/upload": {
+      "post": {
+        "operationId": "upload_backup_api_v1_backups_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_backup_api_v1_backups_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Upload Backup Api V1 Backups Upload Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Upload an existing backup archive",
+        "tags": [
+          "backups"
+        ]
+      }
+    },
     "/api/v1/backups/{backup_id}": {
       "delete": {
         "operationId": "delete_backup_api_v1_backups__backup_id__delete",
@@ -11840,6 +15351,22 @@
             "schema": {
               "title": "Backup Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Ref"
             }
           }
         ],
@@ -11887,6 +15414,22 @@
             "schema": {
               "title": "Backup Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Ref"
             }
           }
         ],
@@ -11937,6 +15480,22 @@
               "title": "Backup Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Ref"
+            }
           }
         ],
         "responses": {
@@ -11982,6 +15541,22 @@
             "schema": {
               "title": "Backup Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Ref"
             }
           }
         ],
@@ -12032,6 +15607,22 @@
               "title": "Backup Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "source_ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Ref"
+            }
           }
         ],
         "responses": {
@@ -12066,6 +15657,196 @@
         "summary": "Verify a backup archive",
         "tags": [
           "backups"
+        ]
+      }
+    },
+    "/api/v1/browser-pairings": {
+      "get": {
+        "operationId": "list_devices_api_v1_browser_pairings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BrowserDeviceRead"
+                  },
+                  "title": "Response List Devices Api V1 Browser Pairings Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Devices",
+        "tags": [
+          "browser-pairings"
+        ]
+      },
+      "post": {
+        "operationId": "create_pairing_api_v1_browser_pairings_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPairingCreateRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Pairing",
+        "tags": [
+          "browser-pairings"
+        ]
+      }
+    },
+    "/api/v1/browser-pairings/claim": {
+      "post": {
+        "operationId": "claim_pairing_api_v1_browser_pairings_claim_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserPairingClaim"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserPairingClaimRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Pairing",
+        "tags": [
+          "browser-pairings"
+        ]
+      }
+    },
+    "/api/v1/browser-pairings/{device_id}": {
+      "delete": {
+        "operationId": "revoke_device_api_v1_browser_pairings__device_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Revoke Device",
+        "tags": [
+          "browser-pairings"
+        ]
+      },
+      "patch": {
+        "operationId": "rename_device_api_v1_browser_pairings__device_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "title": "Device Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BrowserDevicePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserDeviceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Rename Device",
+        "tags": [
+          "browser-pairings"
         ]
       }
     },
@@ -12625,6 +16406,63 @@
         ]
       }
     },
+    "/api/v1/collections/{collection_id}/tags": {
+      "put": {
+        "operationId": "replace_collection_tags_api_v1_collections__collection_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace a collection's direct tags",
+        "tags": [
+          "taxonomy"
+        ]
+      }
+    },
     "/api/v1/config": {
       "get": {
         "description": "Returns the effective configuration (env + DB overlay). Secret values are masked.",
@@ -12749,7 +16587,7 @@
     },
     "/api/v1/config/makerworld/login": {
       "post": {
-        "description": "Submit MakerWorld (Bambu) email + password. Bambu usually emails a verification code, so the response is typically ``need_email_code`` with a ``login_token`` to pass to /makerworld/verify. The password is never stored — only the resulting session token is, on success.",
+        "description": "Retained for client compatibility. MakerWorld imports now require the browser extension and this endpoint returns HTTP 410.",
         "operationId": "makerworld_login_api_v1_config_makerworld_login_post",
         "requestBody": {
           "content": {
@@ -12788,7 +16626,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Start MakerWorld login",
+        "summary": "Legacy MakerWorld login endpoint",
         "tags": [
           "config"
         ]
@@ -12796,7 +16634,7 @@
     },
     "/api/v1/config/makerworld/token": {
       "post": {
-        "description": "Store a MakerWorld session token directly (the ``token`` cookie value copied from a logged-in browser). Use this for Google-SSO accounts, which have no password to log in with.",
+        "description": "Retained for client compatibility. MakerWorld imports now require the browser extension and this endpoint returns HTTP 410.",
         "operationId": "makerworld_set_token_api_v1_config_makerworld_token_post",
         "requestBody": {
           "content": {
@@ -12835,7 +16673,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Connect MakerWorld with a pasted session token",
+        "summary": "Legacy MakerWorld token endpoint",
         "tags": [
           "config"
         ]
@@ -12881,7 +16719,55 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Complete MakerWorld login with a verification code",
+        "summary": "Legacy MakerWorld verification endpoint",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/storage-roots/enroll": {
+      "post": {
+        "operationId": "enroll_storage_root_api_v1_config_storage_roots_enroll_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageRootEnrollment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Enroll Storage Root Api V1 Config Storage Roots Enroll Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Enroll a local storage root after an explicit confirmation",
         "tags": [
           "config"
         ]
@@ -13422,6 +17308,16 @@
               "title": "Document Id",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -13867,6 +17763,83 @@
           }
         ],
         "summary": "Get a pre-signed direct download URL (S3 only)",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/embedded-gcode": {
+      "get": {
+        "description": "Reads Metadata/plate_<N>.gcode on demand from an authorized 3MF. The selected member is bounded and is never extracted or persisted.",
+        "operationId": "embedded_gcode_api_v1_files__file_id__embedded_gcode_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plate_index",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Plate Index"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Embedded G-code text"
+          },
+          "404": {
+            "description": "Artifact is inaccessible or preview is unavailable"
+          },
+          "410": {
+            "description": "Artifact blob is missing from storage"
+          },
+          "413": {
+            "description": "Archive or embedded toolpath exceeds configured limits"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "description": "Preview concurrency capacity is exhausted"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Serve a Bambu 3MF's embedded G-code preview",
         "tags": [
           "files"
         ]
@@ -15248,6 +19221,146 @@
         ]
       }
     },
+    "/api/v1/inbox/browser-upload": {
+      "post": {
+        "description": "Accept browser-selected model bytes and optional bounded provenance.",
+        "operationId": "capture_browser_upload_api_v1_inbox_browser_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_capture_browser_upload_api_v1_inbox_browser_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Capture Browser Upload",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots": {
+      "post": {
+        "operationId": "create_capture_upload_slots_api_v1_inbox_capture_upload_slots_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CaptureUploadSlotsCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotsRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Capture Upload Slots",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/capture-upload-slots/{slot_id}": {
+      "put": {
+        "operationId": "put_capture_upload_slot_api_v1_inbox_capture_upload_slots__slot_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slot_id",
+            "required": true,
+            "schema": {
+              "title": "Slot Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaptureUploadSlotRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Capture Upload Slot",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
     "/api/v1/inbox/{item_id}": {
       "delete": {
         "operationId": "dismiss_item_api_v1_inbox__item_id__delete",
@@ -15383,6 +19496,53 @@
           }
         ],
         "summary": "Update Item",
+        "tags": [
+          "pending imports"
+        ]
+      }
+    },
+    "/api/v1/inbox/{item_id}/capture-upload-finalize": {
+      "post": {
+        "operationId": "finalize_capture_upload_api_v1_inbox__item_id__capture_upload_finalize_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InboxItemRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Finalize Capture Upload",
         "tags": [
           "pending imports"
         ]
@@ -15762,6 +19922,19 @@
               "minimum": 0,
               "title": "Terminal Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tracked_job_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Tracked Job Id",
+              "type": "array"
             }
           }
         ],
@@ -16222,6 +20395,124 @@
           }
         ],
         "summary": "Update an external library",
+        "tags": [
+          "external-libraries"
+        ]
+      }
+    },
+    "/api/v1/libraries/{library_id}/rediscover": {
+      "post": {
+        "operationId": "rediscover_source_api_v1_libraries__library_id__rediscover_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryRediscover"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Rediscover Source Api V1 Libraries  Library Id  Rediscover Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Allow one intentionally removed source key to be indexed again",
+        "tags": [
+          "external-libraries"
+        ]
+      }
+    },
+    "/api/v1/libraries/{library_id}/root/enroll": {
+      "post": {
+        "operationId": "enroll_root_api_v1_libraries__library_id__root_enroll_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "library_id",
+            "required": true,
+            "schema": {
+              "title": "Library Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibraryRootEnrollment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LibraryRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Explicitly enroll or re-enroll an external root",
         "tags": [
           "external-libraries"
         ]
@@ -18483,6 +22774,18 @@
     "/api/v1/models/trash/expired": {
       "delete": {
         "operationId": "purge_expired_trash_api_v1_models_trash_expired_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -18493,6 +22796,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -18834,6 +23147,72 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/files/{file_id}/tags": {
+      "put": {
+        "operationId": "replace_file_tags_api_v1_models__model_id__files__file_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace an artifact's direct tags",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/gcode-revisions": {
       "post": {
         "description": "Uploads a new sliced G-code artifact directly onto the target model. Manual revisions default to needs_test unless another status is provided.",
@@ -19109,6 +23488,340 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/provenance": {
+      "get": {
+        "operationId": "get_model_provenance_api_v1_models__model_id__provenance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelProvenanceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get model capture provenance",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/provenance/{source_id}": {
+      "patch": {
+        "operationId": "patch_model_provenance_api_v1_models__model_id__provenance__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelProvenancePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelProvenanceRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set or clear explicit provenance field overrides",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/provenance/{source_id}/cover": {
+      "delete": {
+        "operationId": "delete_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Model Source Cover",
+        "tags": [
+          "models"
+        ]
+      },
+      "get": {
+        "operationId": "get_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSourceCoverRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Source Cover",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelSourceCoverRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Put Model Source Cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/provenance/{source_id}/cover/content": {
+      "get": {
+        "operationId": "stream_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Stream Model Source Cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/purge": {
       "delete": {
         "operationId": "purge_model_api_v1_models__model_id__purge_delete",
@@ -19120,6 +23833,16 @@
             "schema": {
               "title": "Model Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_storage_risk",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Storage Risk",
+              "type": "boolean"
             }
           }
         ],
@@ -19398,6 +24121,817 @@
         "summary": "Star Model",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models": {
+      "get": {
+        "operationId": "list_multipart_models_api_v1_multipart_models_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "collection",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Collection"
+            }
+          },
+          {
+            "in": "query",
+            "name": "direct",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Direct",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tag"
+            }
+          },
+          {
+            "description": "Only sets starred by current user",
+            "in": "query",
+            "name": "favorites",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Only sets starred by current user",
+              "title": "Favorites",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MultipartModelListItem"
+                  },
+                  "title": "Response List Multipart Models Api V1 Multipart Models Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List multipart models",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "post": {
+        "operationId": "create_multipart_model_api_v1_multipart_models_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}": {
+      "delete": {
+        "operationId": "delete_multipart_model_api_v1_multipart_models__multipart_model_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete a multipart model grouping",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "get": {
+        "operationId": "get_multipart_model_api_v1_multipart_models__multipart_model_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "patch": {
+        "operationId": "update_multipart_model_api_v1_multipart_models__multipart_model_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update multipart model metadata",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "save_multipart_model_api_v1_multipart_models__multipart_model_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartModelSave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Atomically update metadata and multipart composition",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/candidates": {
+      "get": {
+        "operationId": "list_multipart_candidates_api_v1_multipart_models__multipart_model_id__candidates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MultipartMemberRead"
+                  },
+                  "title": "Response List Multipart Candidates Api V1 Multipart Models  Multipart Model Id  Candidates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List readable Models for multipart parts",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/cover": {
+      "delete": {
+        "operationId": "delete_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Remove a multipart model's uploaded cover",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Upload a multipart model cover",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/cover/content": {
+      "get": {
+        "operationId": "get_multipart_model_cover_api_v1_multipart_models__multipart_model_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Serve a multipart model's uploaded cover",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/parts": {
+      "put": {
+        "operationId": "replace_multipart_parts_api_v1_multipart_models__multipart_model_id__parts_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultipartPartsReplace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace multipart model composition",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/star": {
+      "delete": {
+        "operationId": "unstar_multipart_model_api_v1_multipart_models__multipart_model_id__star_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelStarRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Unstar a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      },
+      "put": {
+        "operationId": "star_multipart_model_api_v1_multipart_models__multipart_model_id__star_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelStarRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Star a multipart model",
+        "tags": [
+          "multipart-models"
+        ]
+      }
+    },
+    "/api/v1/multipart-models/{multipart_model_id}/tags": {
+      "put": {
+        "operationId": "replace_multipart_model_tags_api_v1_multipart_models__multipart_model_id__tags_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multipart_model_id",
+            "required": true,
+            "schema": {
+              "title": "Multipart Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagSetUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MultipartModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Replace a multipart model's direct tags",
+        "tags": [
+          "multipart-models"
         ]
       }
     },
@@ -21036,7 +26570,7 @@
     },
     "/api/v1/printers/{printer_id}/send": {
       "post": {
-        "description": "Streams the chosen vault File to the configured provider. The File must be a .gcode artifact. If start_print is true, the provider is asked to start the print immediately after upload.",
+        "description": "Streams the chosen vault File to the configured provider. The File must be a printable G-code artifact accepted by the provider. If start_print is true, the provider is asked to start the print immediately after upload.",
         "operationId": "send_to_printer_api_v1_printers__printer_id__send_post",
         "parameters": [
           {
@@ -21313,6 +26847,216 @@
         "summary": "Create Ws Ticket",
         "tags": [
           "printers"
+        ]
+      }
+    },
+    "/api/v1/provider-connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_provider_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderConnectionRead"
+                  },
+                  "title": "Response List Connections Api V1 Provider Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "provider-connections"
+        ]
+      }
+    },
+    "/api/v1/provider-connections/cults/connect": {
+      "post": {
+        "operationId": "connect_cults_api_v1_provider_connections_cults_connect_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CultsConnectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConnectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Connect Cults",
+        "tags": [
+          "provider-connections"
+        ]
+      }
+    },
+    "/api/v1/provider-connections/myminifactory/authorize": {
+      "post": {
+        "operationId": "authorize_myminifactory_api_v1_provider_connections_myminifactory_authorize_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthAuthorizeRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Authorize Myminifactory",
+        "tags": [
+          "provider-connections"
+        ]
+      }
+    },
+    "/api/v1/provider-connections/myminifactory/callback": {
+      "get": {
+        "operationId": "myminifactory_callback_api_v1_provider_connections_myminifactory_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Myminifactory Callback Api V1 Provider Connections Myminifactory Callback Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Myminifactory Callback",
+        "tags": [
+          "provider-connections"
+        ]
+      }
+    },
+    "/api/v1/provider-connections/{provider}/disconnect": {
+      "delete": {
+        "operationId": "disconnect_api_v1_provider_connections__provider__disconnect_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CaptureProvider"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Disconnect",
+        "tags": [
+          "provider-connections"
         ]
       }
     },
@@ -22069,6 +27813,281 @@
         "summary": "Test the configured Spoolman connection",
         "tags": [
           "spoolman"
+        ]
+      }
+    },
+    "/api/v1/storage-connections": {
+      "get": {
+        "operationId": "list_connections_api_v1_storage_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorageConnectionRead"
+                  },
+                  "title": "Response List Connections Api V1 Storage Connections Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Connections",
+        "tags": [
+          "storage-connections"
+        ]
+      },
+      "post": {
+        "operationId": "create_connection_api_v1_storage_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageConnectionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConnectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      }
+    },
+    "/api/v1/storage-connections/{connection_id}": {
+      "delete": {
+        "operationId": "delete_connection_api_v1_storage_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Delete Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      },
+      "patch": {
+        "operationId": "update_connection_api_v1_storage_connections__connection_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorageConnectionUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorageConnectionRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      }
+    },
+    "/api/v1/storage-connections/{connection_id}/probe": {
+      "post": {
+        "operationId": "probe_connection_api_v1_storage_connections__connection_id__probe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Probe Connection Api V1 Storage Connections  Connection Id  Probe Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Probe Connection",
+        "tags": [
+          "storage-connections"
+        ]
+      }
+    },
+    "/api/v1/storage/providers": {
+      "get": {
+        "description": "Return metadata only; credentials and configured values are never exposed.",
+        "operationId": "list_storage_providers_api_v1_storage_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StorageProvider"
+                  },
+                  "title": "Response List Storage Providers Api V1 Storage Providers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List storage providers",
+        "tags": [
+          "storage"
+        ]
+      }
+    },
+    "/api/v1/system/restart": {
+      "post": {
+        "description": "Return first, then gracefully stop for an external supervisor to relaunch.",
+        "operationId": "restart_api_v1_system_restart_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Restart Api V1 System Restart Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Restart PrintStash",
+        "tags": [
+          "system"
         ]
       }
     },

@@ -15,6 +15,23 @@ http = [
     "httpx>=0.27,<0.29",
     "websockets>=13,<18",
 ]
+network = [
+    "httpx>=0.27,<0.29",
+    "httpcore>=1,<2",
+]
+testkit = [
+    "fastapi>=0.115,<1",
+    "python-multipart>=0.0.12,<0.1",
+    "starlette>=0.41,<2",
+    "uvicorn[standard]>=0.30,<1",
+    "wsproto>=1.2,<2",
+]
+mesh = [
+    "numpy>=1.26,<3; python_version < '3.13'",
+    "numpy>=2.1,<3; python_version >= '3.13'",
+    "pillow>=10,<13; python_version < '3.13'",
+    "pillow>=11,<13; python_version >= '3.13'",
+]
 bambu = [
     "paho-mqtt>=2.1,<3",
 ]
@@ -39,6 +56,36 @@ packages = ["src/printstash_core"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    # Reads the report a finished coverage run wrote, so it cannot run inside the
+    # run it judges. `./scripts/test.sh coverage` runs it alone, afterwards.
+    "coverage_gate: asserts the coverage floors against coverage.json (lane: coverage)",
+]
+
+# Branch coverage, for the same reason the backend turns it on: this package is the
+# G-code/mesh/provider parsing layer, so it is almost entirely branching over
+# malformed input, and line coverage says nothing about whether the malformed side
+# of each branch was ever tried.
+[tool.coverage.run]
+branch = true
+source = ["src/printstash_core"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "^\\s*\\.\\.\\.$",
+    "if __name__ == .__main__.:",
+]
+
+[tool.coverage.html]
+directory = ".coverage-html"
+
+[tool.coverage.json]
+output = "coverage.json"
 
 [tool.ruff]
 target-version = "py311"

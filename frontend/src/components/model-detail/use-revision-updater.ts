@@ -11,17 +11,11 @@ import { FileRead, FileRevisionUpdate, ModelRead } from "@/types";
  * Shared revision mutation: auth gating, per-file saving indicator, toasts.
  * Used by the Overview card quick actions and the Revisions tab editor.
  */
-export function useRevisionUpdater(
-  modelId: number,
-  onModel: (model: ModelRead) => void,
-) {
+export function useRevisionUpdater(modelId: number, onModel: (model: ModelRead) => void) {
   const auth = useRequireAuth();
   const [saving, setSaving] = useState<number | null>(null);
 
-  async function update(
-    file: FileRead,
-    patch: FileRevisionUpdate,
-  ): Promise<boolean> {
+  async function update(file: FileRead, patch: FileRevisionUpdate): Promise<boolean> {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return false;

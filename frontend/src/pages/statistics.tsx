@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Area,
   AreaChart,
@@ -25,11 +25,7 @@ import { formatDuration } from "@/lib/format";
 import { formatCurrency } from "@/lib/currency";
 import { useI18n } from "@/lib/i18n";
 import { translateUiText } from "@/components/ui/localized";
-import type {
-  CollectionStatRead,
-  FilamentStatRead,
-  PrintStatisticsRead,
-} from "@/types";
+import type { CollectionStatRead, FilamentStatRead, PrintStatisticsRead } from "@/types";
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: "7d", label: "7 days" },
@@ -59,6 +55,9 @@ const AXIS_TICK = { fill: CHROME } as const;
 const CURSOR_FILL = { fill: CHROME, fillOpacity: 0.18 } as const;
 const CURSOR_LINE = { stroke: ACCENT, strokeOpacity: 0.4 } as const;
 
+/** SVG presentation attributes recharts draws the tooltip cursor with. */
+type ChartCursor = typeof CURSOR_FILL | typeof CURSOR_LINE;
+
 function ChartTooltip({
   active,
   payload,
@@ -75,15 +74,13 @@ function ChartTooltip({
   const { locale } = useI18n();
   if (!active || !payload || payload.length === 0) return null;
   const raw = payload[0]?.value;
-  const text =
-    formatValue && raw != null ? formatValue(Number(raw)) : String(raw ?? "");
+  const text = formatValue && raw != null ? formatValue(Number(raw)) : String(raw ?? "");
   return (
     <div className="rounded-md border border-border bg-popover px-3 py-2 text-xs shadow-md">
-      {label != null && (
-        <div className="mb-0.5 font-semibold text-foreground">{label}</div>
-      )}
+      {label != null && <div className="mb-0.5 font-semibold text-foreground">{label}</div>}
       <div className="text-muted-foreground">
-        {translateUiText(locale, valueLabel)}: <span className="font-medium text-foreground">{text}</span>
+        {translateUiText(locale, valueLabel)}:{" "}
+        <span className="font-medium text-foreground">{text}</span>
       </div>
     </div>
   );
@@ -146,7 +143,9 @@ function MetricCard({
   return (
     <Card className="overflow-hidden">
       <CardContent className="flex items-center gap-3 p-4">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${toneClasses}`}>
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${toneClasses}`}
+        >
           <Icon className="h-5 w-5" />
         </div>
         <div className="min-w-0">
@@ -172,6 +171,27 @@ const WIDGETS: { id: WidgetId; label: string }[] = [
   { id: "filaments", label: "Filament usage" },
   { id: "collections", label: "Top collections" },
 ];
+const ALL_WIDGET_IDS: readonly WidgetId[] = WIDGETS.map((widget) => widget.id);
+const WIDGET_PREFERENCE_KEY = "printstash:statistics-widgets";
+
+/**
+ * Parses the saved widget preference into the set of widgets to show.
+ *
+ * The stored value is whatever a previous build wrote, so it is treated as
+ * untrusted: anything that is not a JSON array of ids we still ship is
+ * discarded and every widget is shown, which is also the first-visit default.
+ */
+function loadVisibleWidgets(): Set<WidgetId> {
+  const saved = window.localStorage.getItem(WIDGET_PREFERENCE_KEY);
+  if (saved === null) return new Set(ALL_WIDGET_IDS);
+  try {
+    const parsed: unknown = JSON.parse(saved);
+    if (!Array.isArray(parsed)) return new Set(ALL_WIDGET_IDS);
+    return new Set(ALL_WIDGET_IDS.filter((id) => parsed.includes(id)));
+  } catch {
+    return new Set(ALL_WIDGET_IDS);
+  }
+}
 
 function RankingCard({
   title,
@@ -199,20 +219,36 @@ function RankingCard({
     <Card className="overflow-hidden">
       <CardHeader className="border-b border-border/70 pb-3">
         <CardTitle className="text-sm font-semibold">{localizedTitle}</CardTitle>
-        <p className="text-xs text-muted-foreground">{translateUiText(locale, `Ranked by ${localizedValueLabel.toLowerCase()}`)}</p>
+        <p className="text-xs text-muted-foreground">
+          {translateUiText(locale, `Ranked by ${localizedValueLabel.toLowerCase()}`)}
+        </p>
       </CardHeader>
       <CardContent className="pt-4">
         {data.length === 0 ? (
-          <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">{translateUiText(locale, "No data for this period")}</p>
+          <p className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+            {translateUiText(locale, "No data for this period")}
+          </p>
         ) : (
           <ol className="space-y-3">
             {data.slice(0, 8).map((item, index) => (
-              <li key={`${item.name}-${index}`} className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-                <span className="row-span-2 font-mono text-2xs tabular-nums text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
-                <span className="truncate text-xs font-medium text-foreground" title={item.name}>{item.name}</span>
-                <span className="font-mono text-2xs tabular-nums text-muted-foreground">{formatValue(item.value)}</span>
+              <li
+                key={`${item.name}-${index}`}
+                className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1"
+              >
+                <span className="row-span-2 font-mono text-2xs tabular-nums text-muted-foreground">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <span className="truncate text-xs font-medium text-foreground" title={item.name}>
+                  {item.name}
+                </span>
+                <span className="font-mono text-2xs tabular-nums text-muted-foreground">
+                  {formatValue(item.value)}
+                </span>
                 <div className="col-span-2 col-start-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div className={`h-full origin-left rounded-full ${fill}`} style={{ transform: `scaleX(${item.value / max})` }} />
+                  <div
+                    className={`h-full origin-left rounded-full ${fill}`}
+                    style={{ transform: `scaleX(${item.value / max})` }}
+                  />
                 </div>
               </li>
             ))}
@@ -223,13 +259,7 @@ function RankingCard({
   );
 }
 
-function TimeSeriesCard({
-  stats,
-  currency,
-}: {
-  stats: PrintStatisticsRead;
-  currency: string;
-}) {
+function TimeSeriesCard({ stats, currency }: { stats: PrintStatisticsRead; currency: string }) {
   const { locale } = useI18n();
   const [metric, setMetric] = useState<Metric>("cost");
   const [chartType, setChartType] = useState<ChartType>("area");
@@ -257,7 +287,19 @@ function TimeSeriesCard({
     <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={CHROME} strokeOpacity={0.32} />
   );
   const xAxis = (
-    <XAxis dataKey="bucket" fontSize={11} tickLine={false} axisLine={false} tickMargin={10} tick={AXIS_TICK} tickFormatter={(value) => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(new Date(`${value}T00:00:00`))} />
+    <XAxis
+      dataKey="bucket"
+      fontSize={11}
+      tickLine={false}
+      axisLine={false}
+      tickMargin={10}
+      tick={AXIS_TICK}
+      tickFormatter={(value) =>
+        new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
+          new Date(`${value}T00:00:00`),
+        )
+      }
+    />
   );
   const yAxis = (
     <YAxis
@@ -270,7 +312,7 @@ function TimeSeriesCard({
       tickFormatter={(v) => formatValue(Number(v))}
     />
   );
-  const tooltip = (cursor: object) => (
+  const tooltip = (cursor: ChartCursor) => (
     <Tooltip
       content={<ChartTooltip valueLabel={localizedMetricLabel} formatValue={formatValue} />}
       cursor={cursor}
@@ -280,7 +322,14 @@ function TimeSeriesCard({
   return (
     <Card className="overflow-hidden">
       <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div><CardTitle className="text-sm font-semibold">{translateUiText(locale, `${metricLabel} over time`)}</CardTitle><p className="mt-1 text-xs text-muted-foreground">{translateUiText(locale, "Completed jobs in selected period")}</p></div>
+        <div>
+          <CardTitle className="text-sm font-semibold">
+            {translateUiText(locale, `${metricLabel} over time`)}
+          </CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {translateUiText(locale, "Completed jobs in selected period")}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Segmented options={METRICS} value={metric} onChange={setMetric} />
           <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
@@ -371,12 +420,19 @@ function StatsContent({
     value: f.total_g ?? 0,
   }));
   const modelData = stats.top_models.map((m) => ({ name: m.name, value: m.print_count }));
-  const printerData = stats.top_printers.map((p) => ({ name: p.name, value: Math.round(p.print_time_s / 3600) }));
+  const printerData = stats.top_printers.map((p) => ({
+    name: p.name,
+    value: Math.round(p.print_time_s / 3600),
+  }));
   const collectionRanking = collectionData.map((c) => ({ name: c.name, value: c.prints }));
   const periodDays = stats.start_at
-    ? Math.max(1, (new Date(stats.end_at).getTime() - new Date(stats.start_at).getTime()) / 86400000)
+    ? Math.max(
+        1,
+        (new Date(stats.end_at).getTime() - new Date(stats.start_at).getTime()) / 86400000,
+      )
     : Math.max(1, stats.cost_over_time.length);
-  const weeklyFilament = stats.total_filament_g == null ? null : stats.total_filament_g / periodDays * 7;
+  const weeklyFilament =
+    stats.total_filament_g == null ? null : (stats.total_filament_g / periodDays) * 7;
 
   return (
     <div className="space-y-6 animate-panel-in">
@@ -403,18 +459,55 @@ function StatsContent({
           label="Print time"
           value={formatDuration(stats.total_print_time_s)}
         />
-        <MetricCard icon={Weight} label="7-day forecast" value={formatFilament(weeklyFilament)} tone="violet" />
+        <MetricCard
+          icon={Weight}
+          label="7-day forecast"
+          value={formatFilament(weeklyFilament)}
+          tone="violet"
+        />
       </div>
 
       <TimeSeriesCard stats={stats} currency={currency} />
 
-      <p className="-mt-3 text-xs text-muted-foreground">{translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}</p>
+      <p className="-mt-3 text-xs text-muted-foreground">
+        {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
+      </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        {visibleWidgets.has("models") && <RankingCard title="Most printed models" data={modelData} valueLabel="Prints" formatValue={(value) => `${value}×`} />}
-        {visibleWidgets.has("printers") && <RankingCard title="Printer workload" data={printerData} valueLabel="Print hours" tone="cyan" formatValue={(value) => `${value}h`} />}
-        {visibleWidgets.has("filaments") && <RankingCard title="Filament usage" data={filamentData} valueLabel="Filament weight" tone="violet" formatValue={formatFilament} />}
-        {visibleWidgets.has("collections") && <RankingCard title="Top collections" data={collectionRanking} valueLabel="Prints" formatValue={(value) => `${value}×`} />}
+        {visibleWidgets.has("models") && (
+          <RankingCard
+            title="Most printed models"
+            data={modelData}
+            valueLabel="Prints"
+            formatValue={(value) => `${value}×`}
+          />
+        )}
+        {visibleWidgets.has("printers") && (
+          <RankingCard
+            title="Printer workload"
+            data={printerData}
+            valueLabel="Print hours"
+            tone="cyan"
+            formatValue={(value) => `${value}h`}
+          />
+        )}
+        {visibleWidgets.has("filaments") && (
+          <RankingCard
+            title="Filament usage"
+            data={filamentData}
+            valueLabel="Filament weight"
+            tone="violet"
+            formatValue={formatFilament}
+          />
+        )}
+        {visibleWidgets.has("collections") && (
+          <RankingCard
+            title="Top collections"
+            data={collectionRanking}
+            valueLabel="Prints"
+            formatValue={(value) => `${value}×`}
+          />
+        )}
       </div>
     </div>
   );
@@ -424,25 +517,17 @@ export default function StatisticsPage() {
   const { locale } = useI18n();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(
-    () => new Set(WIDGETS.map((widget) => widget.id)),
-  );
+  const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
   const { data, isLoading, isError } = usePrintStatistics(period);
   const { data: config } = useVaultConfig();
   const currency = config?.currency ?? "USD";
 
-  useEffect(() => {
-    const saved = window.localStorage.getItem("printstash:statistics-widgets");
-    if (saved) {
-      try { setVisibleWidgets(new Set(JSON.parse(saved) as WidgetId[])); } catch { /* Ignore invalid old preference. */ }
-    }
-  }, []);
-
   function toggleWidget(id: WidgetId) {
     setVisibleWidgets((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      window.localStorage.setItem("printstash:statistics-widgets", JSON.stringify([...next]));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      window.localStorage.setItem(WIDGET_PREFERENCE_KEY, JSON.stringify([...next]));
       return next;
     });
   }
@@ -451,20 +536,56 @@ export default function StatisticsPage() {
     <PageContainer>
       <PageHeader
         title={translateUiText(locale, "Statistics")}
-        description={translateUiText(locale, "Cost, filament and print activity from completed jobs")}
-        actions={<div className="flex flex-wrap items-center gap-2">
-          <Segmented options={PERIODS.map((p) => ({ id: p.value, label: p.label }))} value={period} onChange={setPeriod} />
-          <DropdownMenu
-            open={customizeOpen}
-            onOpenChange={setCustomizeOpen}
-            role="dialog"
-            trigger={<Button data-menu-trigger variant="outline" size="xs" aria-haspopup="dialog" aria-expanded={customizeOpen} onClick={() => setCustomizeOpen((open) => !open)}><Settings2 className="h-3.5 w-3.5" />{translateUiText(locale, "Customize")}</Button>}
-            contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
-          >
-            <p className="px-2 pb-2 text-xs font-semibold">{translateUiText(locale, "Visible ranking charts")}</p>
-            {WIDGETS.map((widget) => <label key={widget.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"><input type="checkbox" checked={visibleWidgets.has(widget.id)} onChange={() => toggleWidget(widget.id)} className="h-4 w-4 accent-primary" />{translateUiText(locale, widget.label)}</label>)}
-          </DropdownMenu>
-        </div>}
+        description={translateUiText(
+          locale,
+          "Cost, filament and print activity from completed jobs",
+        )}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Segmented
+              options={PERIODS.map((p) => ({ id: p.value, label: p.label }))}
+              value={period}
+              onChange={setPeriod}
+            />
+            <DropdownMenu
+              open={customizeOpen}
+              onOpenChange={setCustomizeOpen}
+              role="dialog"
+              trigger={
+                <Button
+                  data-menu-trigger
+                  variant="outline"
+                  size="xs"
+                  aria-haspopup="dialog"
+                  aria-expanded={customizeOpen}
+                  onClick={() => setCustomizeOpen((open) => !open)}
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                  {translateUiText(locale, "Customize")}
+                </Button>
+              }
+              contentClassName="w-64 rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-md"
+            >
+              <p className="px-2 pb-2 text-xs font-semibold">
+                {translateUiText(locale, "Visible ranking charts")}
+              </p>
+              {WIDGETS.map((widget) => (
+                <label
+                  key={widget.id}
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-2 text-sm hover:bg-popover-hover"
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleWidgets.has(widget.id)}
+                    onChange={() => toggleWidget(widget.id)}
+                    className="h-4 w-4 accent-primary"
+                  />
+                  {translateUiText(locale, widget.label)}
+                </label>
+              ))}
+            </DropdownMenu>
+          </div>
+        }
       />
 
       {isLoading && (

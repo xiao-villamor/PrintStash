@@ -236,9 +236,8 @@ class _PendingCollection:
     target_collection: str
     owner_user_id: Optional[int]
     members: list[import_resolvers.CollectionMember]
-    # The session cookie resolved when the manifest was created, carried forward
-    # so the later /select confirm can still authenticate downloads. May be stale
-    # by confirm time (sessions expire within the 1h TTL) — then downloads 403.
+    # Retained in the in-memory contract for backwards compatibility. MakerWorld
+    # collection resolution is extension-only and this value is always ``None``.
     makerworld_cookie: Optional[str] = None
     created_at: float = field(default_factory=time.time)
 
@@ -283,14 +282,9 @@ pending_collections: _PendingRegistry[_PendingCollection] = _PendingRegistry()
 
 
 def _makerworld_cookie(override: Optional[str]) -> Optional[str]:
-    """Effective MakerWorld session cookie for an import.
-
-    Prefers a per-request ``override``, falls back to the instance-level
-    ``settings.makerworld_cookie`` (admin pastes it once so end users paste
-    nothing), and is ``None`` when neither is set — anonymous imports can list a
-    collection but MakerWorld's auth-gated download endpoints will then 403.
-    """
-    return (override or "").strip() or settings.makerworld_cookie.strip() or None
+    """Ignore the deprecated server-side MakerWorld credential field."""
+    del override
+    return None
 
 
 def _collection_target(parent: Optional[str], title: str) -> str:
@@ -1134,14 +1128,18 @@ async def select_collection_members(
 def list_jobs(
     response: Response,
     terminal_limit: int = Query(20, ge=0, le=100),
+    tracked_job_id: list[str] = Query(default=[]),
     current_user: User = Depends(require_user),
 ) -> list[IngestJobStatus]:
     response.headers["Cache-Control"] = "no-store"
+    if len(tracked_job_id) > 20:
+        raise HTTPException(status_code=422, detail="too_many_tracked_job_ids")
     assert current_user.id is not None
     return registry.list_for_user(
         current_user.id,
         is_superuser=current_user.is_superuser,
         terminal_limit=terminal_limit,
+        tracked_job_ids=tuple(dict.fromkeys(tracked_job_id)),
     )
 
 

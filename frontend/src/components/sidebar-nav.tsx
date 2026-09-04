@@ -1,35 +1,66 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
-import { BookOpen, Box, Inbox, SlidersHorizontal, LogIn, LogOut, Printer, Settings, User } from "lucide-react";
+import {
+  BookOpen,
+  Box,
+  Inbox,
+  SlidersHorizontal,
+  LogIn,
+  LogOut,
+  Printer,
+  Settings,
+  User,
+  type LucideIcon,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
 import { listPendingImports } from "@/lib/api";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 
-const mainItems = [
+type NavItem = {
+  href: string;
+  labelKey: MessageKey;
+  icon: LucideIcon;
+  adminOnly?: boolean;
+  external?: boolean;
+};
+
+const mainItems: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
   { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
-  { href: "https://xiao-villamor.github.io/PrintStash/", labelKey: "nav.wiki", icon: BookOpen, external: true },
+  {
+    href: "https://xiao-villamor.github.io/PrintStash/",
+    labelKey: "nav.wiki",
+    icon: BookOpen,
+    external: true,
+  },
 ];
 
-const bottomItems = [
-  { href: "/settings", labelKey: "nav.settings", icon: Settings },
-];
+const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];
 
 export function SidebarNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { t } = useI18n();
-  const [pendingCount, setPendingCount] = useState(0);
+  // The badge count is tagged with the account it was fetched for, so a signed-out
+  // or freshly switched user never sees the previous account's inbox total while
+  // the refetch is still in flight.
+  const [pending, setPending] = useState<{ userId: number; count: number } | null>(null);
   useEffect(() => {
-    if (!user) { setPendingCount(0); return; }
-    listPendingImports(false).then((items) => setPendingCount(items.filter((item) => item.state !== "dismissed").length)).catch(() => setPendingCount(0));
+    if (!user) return;
+    const userId = user.id;
+    listPendingImports(false)
+      .then((items) =>
+        setPending({ userId, count: items.filter((item) => item.state !== "dismissed").length }),
+      )
+      .catch(() => setPending({ userId, count: 0 }));
   }, [pathname, user]);
+  const pendingCount = user && pending?.userId === user.id ? pending.count : 0;
   const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (
@@ -42,29 +73,22 @@ export function SidebarNav() {
           <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">
             PrintStash
           </h1>
-          <p className="text-2xs text-muted-foreground font-mono">
-            Your prints, organized
-          </p>
+          <p className="text-2xs text-muted-foreground font-mono">Your prints, organized</p>
         </div>
       </div>
 
       <div className="flex flex-col gap-1 flex-1">
         {visibleMainItems.map((item) => {
-          const isActive =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
+          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           const className = `flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] ${
-            isActive
-              ? "text-accent-foreground bg-accent"
-              : "text-muted-foreground hover:bg-muted"
+            isActive ? "text-accent-foreground bg-accent" : "text-muted-foreground hover:bg-muted"
           }`;
           if (item.external) {
             return (
               <a key={item.href} href={item.href} className={className}>
                 <item.icon className="h-5 w-5" />
                 <span className="font-mono text-xs tracking-wider uppercase">
-                  {t(item.labelKey as MessageKey)}
+                  {t(item.labelKey)}
                 </span>
               </a>
             );
@@ -72,10 +96,12 @@ export function SidebarNav() {
           return (
             <Link key={item.href} href={item.href} className={className}>
               <item.icon className="h-5 w-5" />
-              <span className="font-mono text-xs tracking-wider uppercase">
-                {t(item.labelKey as MessageKey)}
-              </span>
-              {item.href === "/inbox" && pendingCount > 0 && <span className="ml-auto rounded-full bg-accent px-2 py-0.5 font-mono text-3xs text-accent-foreground">{pendingCount}</span>}
+              <span className="font-mono text-xs tracking-wider uppercase">{t(item.labelKey)}</span>
+              {item.href === "/inbox" && pendingCount > 0 && (
+                <span className="ml-auto rounded-full bg-accent px-2 py-0.5 font-mono text-3xs text-accent-foreground">
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           );
         })}
@@ -127,7 +153,7 @@ export function SidebarNav() {
               }`}
             >
               <item.icon className="h-5 w-5" />
-              <span className="font-mono text-xs tracking-wider uppercase">{t(item.labelKey as MessageKey)}</span>
+              <span className="font-mono text-xs tracking-wider uppercase">{t(item.labelKey)}</span>
             </Link>
           );
         })}

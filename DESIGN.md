@@ -110,6 +110,40 @@ title carries inline metadata (printer detail's provider/beta badges, model
 detail) render their own `<h1>` instead of composing `PageHeader`; that is the
 only sanctioned exception, and it does not license a third heading style.
 
+### Framed work surfaces
+
+Dense document workflows such as Profiles, Settings, and Pending Imports use a
+shared visual grammar: **one framed work surface**, not a collection of loose
+status cards. The frame keeps controls, context, rows, loading, and empty states
+visually attached to the same task.
+
+Compose the pattern from existing primitives:
+
+1. Start with `Card className="overflow-hidden"` below the `PageHeader`.
+2. Put local tabs, filters, and batch actions in a compact toolbar using
+   `border-b bg-muted/30 p-3`. `TabBar` uses an inset background frame and
+   `accent` for the active state; commands remain regular `Button` variants.
+3. Introduce the current section with `border-b px-4 py-4 sm:px-5`, a square
+   `h-8 w-8 rounded-md bg-muted` icon anchor, a `text-sm font-semibold` title,
+   and a `text-xs text-muted-foreground` description.
+4. Render related records as dense rows inside that frame, separated by
+   `divide-y divide-border`. A row may use a small state icon, primary text,
+   compact metadata, a status badge, and contextual actions aligned right.
+5. Keep loading skeletons and empty states inside the same frame. The surface
+   must not disappear or change width when its data state changes.
+
+The frame is the main elevation boundary. Do not wrap every queue row, setting,
+or result in another shadowed `Card`; that creates a generic card feed and loses
+the app's compact tool-panel hierarchy. Nested bordered groups are appropriate
+only when they represent a real sub-form, table, or independently editable
+unit.
+
+Use mono uppercase micro-labels for technical fields and table-like headers,
+not for primary titles or prose. Keep primary blue for actions that start work;
+status and selection use their semantic tokens. On narrow screens, rows stack
+into a readable content band and a separate action band. Text gets `min-w-0`
+and may wrap; actions must remain reachable without horizontal scrolling.
+
 ## Motion
 
 ### Curves and durations — the only ones that exist
@@ -254,3 +288,6 @@ Supporting hooks in `frontend/src/lib/`:
 6. New movement is registered in the reduced-motion block, at matching
    specificity.
 7. Nothing over 300ms. Nothing bounces.
+8. Dense workflows use one framed work surface. Related rows share its frame,
+   and loading and empty states remain inside it instead of becoming loose page
+   content.

@@ -15,11 +15,11 @@ from datetime import timedelta
 from time import monotonic
 from typing import Any, Dict, Optional
 
-from sqlalchemy import delete, func, or_
-from sqlmodel import select
+from sqlalchemy import delete, exists, func, or_
+from sqlmodel import Session, select
 
 from app.core.time import utcnow
-from app.db.models import BackgroundJob
+from app.db.models import BackgroundJob, StagingLease
 from app.db.session import get_session_factory
 from app.schemas.ingest import (
     ImportCompletion,
@@ -158,6 +158,7 @@ class JobRegistry:
         *,
         is_superuser: bool,
         terminal_limit: int,
+        tracked_job_ids: tuple[str, ...],
     ) -> list[IngestJobStatus]:
         with get_session_factory().scoped_session() as session:
             terminal_cutoff = utcnow() - _FINISHED_TTL
@@ -188,8 +189,19 @@ class JobRegistry:
                 .order_by(BackgroundJob.updated_at.desc())  # type: ignore[attr-defined]
                 .limit(terminal_limit)
             ).all()
+            tracked = (
+                session.exec(
+                    select(BackgroundJob).where(
+                        *scope,
+                        BackgroundJob.id.in_(tracked_job_ids),  # type: ignore[union-attr]
+                    )
+                ).all()
+                if tracked_job_ids
+                else []
+            )
+            rows_by_id = {row.id: row for row in [*active, *terminal, *tracked]}
             rows = sorted(
-                [*active, *terminal], key=lambda row: row.updated_at, reverse=True
+                rows_by_id.values(), key=lambda row: row.updated_at, reverse=True
             )
             return [
                 IngestJobStatus(
@@ -221,6 +233,7 @@ class JobRegistry:
                 delete(BackgroundJob).where(
                     BackgroundJob.finished_at.is_not(None),  # type: ignore[union-attr]
                     BackgroundJob.finished_at < cutoff,
+                    ~exists().where(StagingLease.background_job_id == BackgroundJob.id),
                 )
             )
             session.commit()
@@ -254,6 +267,7 @@ class JobRegistry:
         *,
         visible: bool = True,
         kind: str = "ingest",
+        session: Session | None = None,
     ) -> str:
         job_id = uuid.uuid4().hex
         with self._lock:
@@ -265,7 +279,22 @@ class JobRegistry:
                 state="pending",
                 kind=kind[:64] or "ingest",
             )
-            self._persist(self._jobs[job_id])
+            if session is None:
+                self._persist(self._jobs[job_id])
+            else:
+                session.add(
+                    BackgroundJob(
+                        id=job_id,
+                        owner_user_id=owner_user_id,
+                        visible=visible,
+                        kind=kind[:64] or "ingest",
+                        state="pending",
+                        status_json=self._status_payload(self._jobs[job_id]),
+                        created_at=utcnow(),
+                        updated_at=utcnow(),
+                    )
+                )
+                session.flush()
         return job_id
 
     def update(
@@ -437,12 +466,14 @@ class JobRegistry:
         *,
         is_superuser: bool = False,
         terminal_limit: int = _DEFAULT_TERMINAL_HISTORY,
+        tracked_job_ids: tuple[str, ...] = (),
     ) -> list[IngestJobStatus]:
         with self._lock:
             persisted = self._load_for_user(
                 user_id,
                 is_superuser=is_superuser,
                 terminal_limit=max(0, min(100, terminal_limit)),
+                tracked_job_ids=tracked_job_ids,
             )
             for job in persisted:
                 self._jobs[job.job_id] = job

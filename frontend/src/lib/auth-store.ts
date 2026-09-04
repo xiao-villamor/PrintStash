@@ -21,7 +21,7 @@ export interface StoredUser {
 }
 
 function isBrowser(): boolean {
-  return typeof window !== "undefined";
+  return "window" in globalThis;
 }
 
 function emit() {
@@ -32,11 +32,31 @@ export function getToken(): string | null {
   return null;
 }
 
+/**
+ * Decode the persisted user blob. localStorage is writable by anything running
+ * on the origin, so the stored JSON is a foreign document until decoded here;
+ * a blob missing the identity fields yields null rather than a half-built user.
+ */
+function parseStoredUser(raw: string): StoredUser | null {
+  const candidate: unknown = JSON.parse(raw);
+  if (!(candidate instanceof Object) || !("id" in candidate) || !("username" in candidate)) {
+    return null;
+  }
+  const id = Number(candidate.id);
+  if (!Number.isInteger(id)) return null;
+  return {
+    id,
+    username: String(candidate.username),
+    email: "email" in candidate && candidate.email !== null ? String(candidate.email) : null,
+    is_superuser: "is_superuser" in candidate && candidate.is_superuser === true,
+  };
+}
+
 export function getUser(): StoredUser | null {
   if (!isBrowser()) return null;
   try {
     const raw = localStorage.getItem(USER_KEY) ?? localStorage.getItem(LEGACY_USER_KEY);
-    return raw ? (JSON.parse(raw) as StoredUser) : null;
+    return raw ? parseStoredUser(raw) : null;
   } catch {
     return null;
   }
@@ -46,11 +66,7 @@ export function isLoggedIn(): boolean {
   return !!getUser();
 }
 
-export function storeLogin(
-  token: string,
-  user: StoredUser,
-  options?: { silent?: boolean },
-): void {
+export function storeLogin(token: string, user: StoredUser, options?: { silent?: boolean }): void {
   if (!isBrowser()) return;
   try {
     // The backend also sets the access JWT as an HttpOnly SameSite cookie.
@@ -66,7 +82,9 @@ export function storeLogin(
     // getMe is the *same* identity, so firing it there would needlessly nuke
     // freshly-loaded queries on every page load.
     if (!options?.silent) emit();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function clearLogin(): void {
@@ -77,7 +95,9 @@ export function clearLogin(): void {
     localStorage.removeItem(LEGACY_TOKEN_KEY);
     localStorage.removeItem(LEGACY_USER_KEY);
     emit();
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function onAuthChange(cb: () => void): () => void {
@@ -98,7 +118,9 @@ export function emitUnauthorized(): void {
   if (!isLoggedIn()) return;
   try {
     sessionStorage.setItem(SESSION_EXPIRED_KEY, "1");
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   clearLogin();
   window.dispatchEvent(new Event(UNAUTH_EVENT));
 }

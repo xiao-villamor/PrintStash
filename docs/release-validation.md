@@ -3,6 +3,15 @@
 Run these checks before tagging a release. For the full hands-on browser sweep
 of every UI workflow, see [`manual-testing.md`](./manual-testing.md).
 
+For a reproducible environment built from the current checkout, use
+[`docker-compose.manual-test.yml`](../docker-compose.manual-test.yml). It runs
+PrintStash on PostgreSQL and S3-compatible storage alongside Spoolman, with
+optional Authentik OIDC and printer-emulator profiles. Set
+`VAULT_OIDC_ENABLED=false` whenever the identity profile is omitted. Setup,
+reset, and teardown
+are documented in
+[`deploy/manual-testing/README.md`](../deploy/manual-testing/README.md).
+
 ## Clean Install
 
 ```bash
@@ -33,9 +42,16 @@ Expected:
 
 - existing models/files are still visible
 - thumbnails still load
+- external-library rows remain live when a configured external snapshot is
+  incomplete or unavailable; no previously indexed external file is soft-deleted
 - 3MF/OBJ files can open through the cached STL preview endpoint
 - a new G-code upload creates or updates the expected model
 - Settings shows vault stats and the trash page can load
+- markerless legacy local roots either auto-enroll from stored size plus SHA-256
+  evidence or enter read-only recovery with an explicit exact-path enrollment
+  action; missing/mismatched mounts are never created or written through
+- valid legacy local backups are discoverable and can be explicitly adopted without
+  making invalid/unowned archives restorable
 
 ## Backend
 
@@ -56,6 +72,7 @@ uv run pip-audit
 ```bash
 cd frontend
 pnpm lint
+pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm build
@@ -63,15 +80,80 @@ pnpm test:e2e
 pnpm test:e2e:real
 ```
 
-## Optional database and storage contracts
+## Database and storage contracts
 
-- Run `tests/postgres` with `PRINTSTASH_TEST_POSTGRES_URL` against PostgreSQL
-  16 through Psycopg 3.
+These are part of `full`, not optional: they run against a real PostgreSQL 16 and
+a real SeaweedFS that the suite starts as containers, so Docker must be running.
+
+- Run `tests/integration/postgres` — PostgreSQL 16 through Psycopg 3.
 - Run the async database contract once without extras (explicit capability
   error) and once with `--extra async-db` for SQLite async.
-- Run `tests/test_storage_s3.py` against the pinned SeaweedFS service.
+- Run `tests/contract/services/test_storage_backend.py` — the pinned SeaweedFS
+  image, started for the run.
+- Run the real Nextcloud and OpenSSH storage contracts. They must exercise the
+  production adapters (authentication rejection, nested/Unicode paths,
+  duplicate-create preservation, stat/read/list/stream, host-key rejection, and
+  supported/blocked destructive operations), not only endpoint reachability.
+- Run the public real-backend storage lifecycle: setup, API restart, upload, remote
+  byte verification, trash, rejected unconfirmed purge, then the explicit confirmed
+  outcome. Assert remote absence only when the provider proved and used safe atomic
+  quarantine; otherwise assert `blocked` with the exact bytes retained.
 - Run `./scripts/test_minio_migration.sh`; it verifies normal, Unicode, and
   multipart objects twice with downloaded-content comparison.
+- Run the read-only LibrarySource contracts in the same provider containers:
+  native S3 continuation-token pages against SeaweedFS, bounded directory
+  cursor traversal against Nextcloud WebDAV and OpenSSH SFTP, stable
+  materialization, and access/host-key failures. A remote source test must never
+  invoke the managed-storage delete API.
+- Run the 0.13 migration chain from the literal released 0.12.1 SQLite schema.
+  Assert legacy mounted libraries keep their root, schedule and linked rows;
+  new connection/checkpoint/tombstone/GC tables start empty; and a new
+  autogenerate pass produces no schema diff.
+
+## Library-source safety matrix
+
+For each protocol changed by the release, record all rows below. Containerized
+protocol evidence and physical-appliance evidence are separate results.
+
+| Behavior | Mounted | S3 | WebDAV | SFTP |
+| --- | --- | --- | --- | --- |
+| Nested and Unicode discovery | Required | Required | Required | Required |
+| Multi-page cursor resume after process restart | N/A | Required | Required | Required |
+| Interrupted/incomplete scan leaves unseen rows live | Required | Required | Required | Required |
+| Empty or wrong source blocks mass removal | Required | Required | Required | Required |
+| Same-size/same-mtime replacement found by rotating hash | Required | Required | Required | Required |
+| Trash tombstone prevents immediate re-import | Required | Required | Required | Required |
+| Restore/Rediscover clears suppression | Required | Required | Required | Required |
+| Source bytes unchanged by Trash and GC | Required | Required | Required | Required |
+| Network/rate/page/byte/time budgets observed | Mount-specific | Required | Required | Required |
+| Source write-back | Create-only | Rejected | Rejected | Rejected |
+
+For Unraid, Synology, TrueNAS, OpenMediaVault, QNAP, CasaOS or Proxmox, append a
+storage validation-log row in `docs/provider-support.md`. Do not replace a
+missing appliance row with the protocol-container result.
+
+## Garbage-collection safety gate
+
+Run the integration and end-to-end cases that prove:
+
+- the scheduled coordinator creates a preview but never approval
+- a second active preview is rejected by the database lease
+- the plan is capped by resource count, one percent of Models, key count and
+  bytes
+- approval rejects a wrong digest, changed candidate, provider/restore drift,
+  non-Verified storage, stale backup, same-provider backup, non-S3 backup and a
+  backup that fails full/application verification
+- quarantine blocks early finalization and defaults to seven days
+- finalization re-verifies every proof, uses only durable ownership intents and
+  resumes pending storage cleanup after restart
+- restore refuses an active purge token and successful restore clears source
+  tombstones
+- blocked cleanup retains uncertain bytes and never falls back to a storage walk
+
+The upgrade gate must also start from the literal released v0.12.1 schema and
+data shapes: linked library-source rows and bytes, pending deletion intents,
+legacy `vault-data/` S3 objects, and v1 backup/restore journals. Reconstructing a
+legacy-looking object on the current schema is not equivalent upgrade evidence.
 
 ## Image variants
 
@@ -101,7 +183,8 @@ Current intentional lint warnings:
 
 ## Feature Smoke Checks
 
-- Open Settings, confirm vault stats load, create a backup, and export JSON/CSV.
+- Open Settings, confirm vault stats load, create and upload a backup from the
+  Backup section, and export JSON/CSV.
 - Create and revoke an API key, then verify username plus API key can log in.
 - Upload a mesh and G-code pair, open model detail, toggle mesh/G-code viewer,
   edit revision fields, and mark a recommended G-code.

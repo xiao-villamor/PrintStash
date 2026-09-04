@@ -1,0 +1,20 @@
+{
+  "name": "@printstash/domain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./card-metrics": "./src/card-metrics.ts",
+    "./currency": "./src/currency.ts",
+    "./format": "./src/format.ts",
+    "./last-collection": "./src/last-collection.ts",
+    "./metadata-preferences": "./src/metadata-preferences.ts",
+    "./provenance": "./src/provenance.ts"
+  },
+  "scripts": {
+    "test": "vitest run --config vitest.config.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:coverage": "vitest run --config vitest.config.ts --coverage"
+  }
+}

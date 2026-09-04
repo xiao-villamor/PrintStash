@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from typing import Any, Callable
 
+from printstash_core.gcode import PrintArtifactFormatError, classify_print_artifact
 from sqlalchemy import case, update
 from sqlmodel import select
 
@@ -15,6 +15,7 @@ from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
     File,
+    FileType,
     JobPriority,
     Model,
     Printer,
@@ -23,14 +24,22 @@ from app.db.models import (
     PrintJobState,
     User,
 )
+from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.services import fleet, printer_rbac, rbac
+from app.services.artifact_content import (
+    ArtifactContentError,
+    ArtifactContentMissingError,
+    resolve,
+)
 from app.services.printer_files import upsert_printer_file
-from app.services.printer_provider import ProviderError, get_provider_client
+from app.services.printer_provider import PrinterProviderClient, ProviderError
 from app.services.storage_backend import get_backend
-from app.services.task_queue import task_queue
+from app.services.task_queue import TaskQueue
 
 logger = get_logger(__name__)
+
+ProviderBuilder = Callable[[Printer], PrinterProviderClient]
 
 
 @dataclass
@@ -43,6 +52,90 @@ class FleetSchedulerStatus:
 
 scheduler_status = FleetSchedulerStatus()
 _CANDIDATE_BATCH_SIZE = 100
+
+
+def reproducibility_payload(
+    job: Any,
+    *,
+    download_url: str | None = None,
+    file_type: FileType | str | None = None,
+) -> dict[str, Any]:
+    """Compose the typed Bambu reproducibility contract for read schemas.
+
+    The payload is deliberately evidence-based: MQTT fields are grouped as
+    identity/metadata, while ``exact`` is reported only when an archived
+    Artifact (and therefore a download seam) exists.
+    """
+
+    identity = {
+        "display_name": job.external_display_name,
+        "task_id": job.external_task_id,
+        "subtask_id": job.external_subtask_id,
+        "project_id": job.external_project_id,
+        "profile_id": job.external_profile_id,
+        "gcode_file": job.external_gcode_file,
+        "plate_index": job.external_plate_index,
+    }
+    metadata = {
+        "current_layer": job.external_current_layer,
+        "total_layers": job.external_total_layers,
+        "nozzle_diameter": job.external_nozzle_diameter,
+    }
+    has_identity = any(value is not None for value in identity.values())
+    exact = (
+        job.source != "external"
+        or job.artifact_evidence in {"gcode_archived", "project_archived"}
+    ) and download_url is not None
+    level = "exact" if exact else "metadata" if has_identity else "basic"
+    error_code = getattr(job, "artifact_capture_error_code", None)
+    error_message = getattr(job, "artifact_capture_error_message", None)
+    if error_code is None and job.artifact_capture_error:
+        error_code = job.artifact_capture_error
+    if error_message is None and error_code is not None:
+        error_message = job.artifact_capture_error or error_code
+    error = (
+        {"code": error_code, "message": error_message}
+        if error_code is not None
+        else None
+    )
+    effective_file_type = file_type or getattr(job, "file_type", None)
+    if isinstance(effective_file_type, FileType):
+        is_three_mf = effective_file_type == FileType.THREE_MF
+    else:
+        is_three_mf = str(effective_file_type).lower() in {"3mf", "filetype.three_mf"}
+    toolpath_preview_url = None
+    if (
+        job.artifact_evidence == "project_archived"
+        and is_three_mf
+        and getattr(job, "file_id", None) is not None
+    ):
+        plate_index = getattr(job, "external_plate_index", None)
+        # A malformed provider value must never become an advertised URL query;
+        # the preview endpoint treats the absent index as its unique-candidate
+        # fallback instead.
+        query = (
+            f"?plate_index={plate_index}"
+            if plate_index is not None and plate_index >= 0
+            else ""
+        )
+        toolpath_preview_url = f"/api/v1/files/{job.file_id}/embedded-gcode{query}"
+    return {
+        "reproducibility_level": level,
+        "identity": identity,
+        "metadata": metadata,
+        "reproducibility": {
+            "level": level,
+            "identity": identity,
+            "metadata": metadata,
+            "error": error,
+            "download_url": download_url if exact else None,
+            "toolpath_preview_url": toolpath_preview_url,
+        },
+        "download_url": download_url if exact else None,
+        "toolpath_preview_url": toolpath_preview_url,
+        "artifact_capture_error_code": error_code,
+        "artifact_capture_error_message": error_message,
+    }
 
 
 def scheduler_snapshot() -> dict[str, object]:
@@ -77,38 +170,36 @@ async def transfer_artifact(
     mark_outcome_unknown: bool = False,
 ) -> None:
     """Single storage-to-provider transfer seam for immediate and queued sends."""
-    if not await asyncio.to_thread(backend.exists, artifact.path):
-        raise PrinterJobError("file_blob_missing")
-    temp = tempfile.NamedTemporaryFile(
-        prefix=f"print-{artifact.id}-",
-        suffix=Path(artifact.original_filename).suffix or ".gcode",
-        delete=False,
-    )
-    target = Path(temp.name)
-    temp.close()
-    # Storage downloads are create-only; remove only the placeholder this
-    # operation just created before publishing into its random destination.
-    target.unlink()
     try:
         try:
-            local = await asyncio.to_thread(
-                backend.download_to_path, artifact.path, target
-            )
-        except Exception as exc:
+            handle = resolve(artifact, backend=backend)
+            with handle.materialize() as local:
+                artifact_format = await asyncio.to_thread(
+                    classify_print_artifact,
+                    local,
+                    filename=artifact.original_filename,
+                )
+                if not provider.capabilities.accepts_format(artifact_format):
+                    raise PrinterJobError("artifact_format_not_supported")
+                try:
+                    await provider.upload(local, remote_filename)
+                    if start_print:
+                        await provider.start(remote_filename)
+                except Exception as exc:
+                    # Upload and start are non-transactional remote operations. A
+                    # transport error can arrive after the printer accepted either
+                    # request, therefore automatic replay is unsafe.
+                    if mark_outcome_unknown:
+                        raise DispatchOutcomeUnknownError() from exc
+                    raise
+        except ArtifactContentMissingError as exc:
+            raise PrinterJobError("file_blob_missing") from exc
+        except ArtifactContentError as exc:
             raise PrinterJobError("storage_error") from exc
-        try:
-            await provider.upload(local, remote_filename)
-            if start_print:
-                await provider.start(remote_filename)
-        except Exception as exc:
-            # Upload and start are non-transactional remote operations. A
-            # transport error can arrive after the printer accepted either
-            # request, therefore automatic replay is unsafe.
-            if mark_outcome_unknown:
-                raise DispatchOutcomeUnknownError() from exc
-            raise
-    finally:
-        target.unlink(missing_ok=True)
+        except PrintArtifactFormatError as exc:
+            raise PrinterJobError(exc.code) from exc
+    except OSError as exc:
+        raise PrinterJobError("storage_error") from exc
 
 
 def reconcile_stranded_dispatches() -> int:
@@ -119,6 +210,7 @@ def reconcile_stranded_dispatches() -> int:
                 select(PrintJob).where(
                     PrintJob.state == PrintJobState.UPLOADING,
                     PrintJob.dispatch_claimed_at.is_not(None),  # type: ignore[union-attr]
+                    live(PrintJob),
                 )
             ).all()
         )
@@ -150,6 +242,7 @@ def _claim_next_sync() -> int | None:
                 .where(
                     PrintJob.state == PrintJobState.QUEUED,
                     PrintJob.dispatch_claimed_at.is_(None),  # type: ignore[union-attr]
+                    live(PrintJob),
                 )
                 .order_by(
                     PrintJob.blocked_reason.is_not(None),  # type: ignore[union-attr]
@@ -300,6 +393,7 @@ def _claim_next_sync() -> int | None:
                 PrintJob.id == candidate.id,
                 PrintJob.state == PrintJobState.QUEUED,
                 PrintJob.dispatch_claimed_at.is_(None),  # type: ignore[union-attr]
+                live(PrintJob),
             )
             .values(
                 state=PrintJobState.UPLOADING,
@@ -314,14 +408,14 @@ def _claim_next_sync() -> int | None:
         return int(candidate.id)
 
 
-async def dispatch_next() -> int | None:
+async def dispatch_next(provider_builder: ProviderBuilder) -> int | None:
     """Atomically claim and dispatch oldest eligible assigned fleet job."""
     job_id = await asyncio.to_thread(_claim_next_sync)
     if job_id is None:
         return None
 
     try:
-        await _dispatch_claimed(job_id)
+        await _dispatch_claimed(job_id, provider_builder)
         record_fleet_dispatch("started")
     except Exception as exc:  # noqa: BLE001 - terminal state must always persist
         code = (
@@ -345,7 +439,7 @@ class DispatchContext:
 def _load_dispatch_context(job_id: int) -> DispatchContext:
     with get_session_factory().scoped_session() as session:
         job = session.get(PrintJob, job_id)
-        if job is None or job.printer_id is None:
+        if job is None or job.deleted_at is not None or job.printer_id is None:
             raise RuntimeError("queue_job_not_found")
         printer = session.get(Printer, job.printer_id)
         artifact = session.get(File, job.file_id)
@@ -395,13 +489,13 @@ def _mark_dispatch_started(job_id: int, context: DispatchContext) -> None:
         )
 
 
-async def _dispatch_claimed(job_id: int) -> None:
+async def _dispatch_claimed(job_id: int, provider_builder: ProviderBuilder) -> None:
     context = await asyncio.to_thread(_load_dispatch_context, job_id)
     printer = context.printer
     artifact = context.artifact
     remote_filename = context.remote_filename
 
-    provider = get_provider_client(printer)
+    provider = provider_builder(printer)
     if not provider.capabilities.can_upload or not provider.capabilities.can_start:
         raise ProviderError(
             "operation_not_supported_for_provider",
@@ -430,7 +524,9 @@ async def _dispatch_claimed(job_id: int) -> None:
     await asyncio.to_thread(_mark_dispatch_started, job_id, context)
 
 
-async def run_fleet_scheduler() -> None:
+async def run_fleet_scheduler(
+    task_queue: TaskQueue, provider_builder: ProviderBuilder
+) -> None:
     from app.services.backup import begin_mutating_operation, end_mutating_operation
 
     scheduler_status.running = True
@@ -441,7 +537,7 @@ async def run_fleet_scheduler() -> None:
                 continue
             scheduler_status.last_tick_at = utcnow()
             try:
-                dispatched = await dispatch_next()
+                dispatched = await dispatch_next(provider_builder)
                 scheduler_status.last_error = None
                 if dispatched is not None:
                     scheduler_status.last_dispatch_at = utcnow()

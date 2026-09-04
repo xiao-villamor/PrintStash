@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the standalone Moonraker + Spoolman emulator (backend/tests/e2e/fakes/
+# Launch the standalone Moonraker + Spoolman emulator (backend/tests/fakes/
 # mock_printer.py) so fleet.spec.ts can add a real, live printer and watch it
 # come online, queue work, and print — without physical hardware. Prints
 # simulate fast (a couple of seconds) so the queue/dispatch flow settles well
@@ -17,4 +17,4 @@ else
   PY=(uv run python)
 fi
 
-exec "${PY[@]}" -m tests.e2e.fakes.mock_printer --port "$PORT" --print-seconds 3
+exec "${PY[@]}" -m tests.fakes.mock_printer --port "$PORT" --print-seconds 3

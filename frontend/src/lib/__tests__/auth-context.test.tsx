@@ -1,16 +1,33 @@
+/*
+ * Two moments where the React tree and the server have to agree about who is
+ * signed in.
+ *
+ * First-run setup creates the admin and logs them in through a different code
+ * path from the login form, in the same tab. If the provider does not observe
+ * that, the app renders as signed out immediately after a successful setup — the
+ * user is told to log in as the account they just made.
+ *
+ * Logout has to reach the server *before* it clears the browser. Clearing first
+ * and revoking after means a failed revoke leaves a live server session with no
+ * client that knows about it: the cookie still authenticates, and the user
+ * believes they logged out.
+ */
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { AuthProvider, useAuth } from "@/lib/auth-context";
+import { useAuth, type AuthApi } from "@/lib/auth-context";
+import { AuthProvider } from "@/lib/auth-provider";
 import { storeLogin } from "@/lib/auth-store";
-import { logout as apiLogout } from "@/lib/api";
-import { getMe } from "@/lib/api";
 
-vi.mock("@/lib/api", () => ({
-  getMe: vi.fn(),
-  login: vi.fn(),
-  logout: vi.fn(),
-}));
+/** Stub of the provider's auth port — no network, calls recorded. */
+function stubAuthApi() {
+  return {
+    getMe: vi.fn<AuthApi["getMe"]>(),
+    login: vi.fn<AuthApi["login"]>(),
+    logout: vi.fn<AuthApi["logout"]>(),
+  } satisfies AuthApi;
+}
 
 function AuthProbe() {
   const { loading, user, logout } = useAuth();
@@ -34,8 +51,9 @@ afterEach(() => {
 
 describe("AuthProvider", () => {
   it("observes first-run setup login in the same tab", async () => {
+    const api = stubAuthApi();
     render(
-      <AuthProvider>
+      <AuthProvider api={api}>
         <AuthProbe />
       </AuthProvider>,
     );
@@ -63,8 +81,9 @@ describe("AuthProvider", () => {
       email: null,
       is_superuser: true,
     });
-    vi.mocked(apiLogout).mockResolvedValue(undefined);
-    vi.mocked(getMe).mockResolvedValue({
+    const api = stubAuthApi();
+    api.logout.mockResolvedValue(undefined);
+    api.getMe.mockResolvedValue({
       id: 1,
       username: "admin",
       email: null,
@@ -75,7 +94,7 @@ describe("AuthProvider", () => {
     });
 
     render(
-      <AuthProvider>
+      <AuthProvider api={api}>
         <AuthProbe />
       </AuthProvider>,
     );
@@ -83,7 +102,7 @@ describe("AuthProvider", () => {
     await screen.findByText("signed in:admin");
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
 
-    await waitFor(() => expect(apiLogout).toHaveBeenCalledOnce());
+    await waitFor(() => expect(api.logout).toHaveBeenCalledOnce());
     expect(window.localStorage.getItem("printstash.token")).toBeNull();
     expect(screen.getByText("signed out")).toBeTruthy();
   });

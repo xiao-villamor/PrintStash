@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
+from enum import Enum
 from functools import partial
 
 from fastapi import FastAPI, Request, Response
@@ -14,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy.engine.url import make_url
-from sqlmodel import select
+from sqlmodel import col, select
 from starlette import status
 
 from app.api.v1 import api_router
@@ -44,18 +47,39 @@ from app.services.audit import (
 from app.services.backup import (
     begin_mutating_operation,
     end_mutating_operation,
+    inspect_restore_recovery,
 )
+from app.services.backup_schedule import run_due_backup
+from app.services.gc_planner import run_scheduled_gc
 from app.services.library_watcher import LibraryWatcher
 from app.services.notifications import run_dispatcher_loop
 from app.services.printer_hub import PrinterHub
 from app.services.printer_jobs import reconcile_stranded_dispatches, run_fleet_scheduler
 from app.services.printer_provider import build_provider_registry, get_provider_client
-from app.services.runtime_config import apply_overlay, ensure_jwt_secret, is_configured
+from app.services.realtime import InProcessBus
+from app.services.runtime_config import (
+    apply_environment_storage_provider,
+    apply_overlay,
+    ensure_jwt_secret,
+    is_configured,
+)
 from app.services.setup_token import current_setup_token
-from app.services.storage_backend import init_backend
-from app.services.trash import gc_soft_deleted
+from app.services.storage_backend import (
+    LocalStorageBackend,
+    S3StorageBackend,
+    StorageBackend,
+    StorageTier,
+    UnavailableStorageBackend,
+    bind_backend,
+)
+from app.services.task_queue import LocalTaskQueue
 
 logger = get_logger(__name__)
+
+
+def _metric_enum_value(value: object) -> str:
+    """Render SQL enum values consistently for Prometheus labels."""
+    return str(value.value) if isinstance(value, Enum) else str(value)
 
 
 async def _cancel_tasks(*tasks: asyncio.Task) -> None:
@@ -65,11 +89,126 @@ async def _cancel_tasks(*tasks: asyncio.Task) -> None:
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _close_outbound_clients() -> None:
+    """Close pooled outbound clients while preserving the first close error."""
+
+    from app.services.capture_provider_transport import close_provider_transport
+    from app.services.moonraker import close_http_client
+    from app.services.provider_redaction import redact_exception
+
+    try:
+        await close_http_client()
+    finally:
+        try:
+            await close_provider_transport()
+        except Exception as exc:
+            # A provider pool is best-effort shutdown work.  Do not prevent the
+            # process lock from being released or mask a failure from the
+            # existing shared HTTP client cleanup.
+            logger.error(
+                "failed to close capture provider transport error=%s",
+                redact_exception(exc),
+            )
+
+
 def _safe_db_url(value: str) -> str:
     try:
         return make_url(value).render_as_string(hide_password=True)
     except Exception:
         return "<invalid-db-url>"
+
+
+def _compose_storage_backend(
+    *, recover_publications: bool = True, recovery_only: bool = False
+) -> StorageBackend:
+    """Bind the configured backend before serving requests.
+
+    Restore maintenance is entered before startup repair.  In that state the
+    adapter is still useful for reads and for the explicitly journaled restore,
+    but setup probes are unsafe: they can create remote probe objects or
+    mutate a mounted root while the active database is being established.
+    """
+    try:
+        if settings.storage_provider_error:
+            raise RuntimeError(settings.storage_provider_error)
+        if settings.storage_backend in {"nextcloud", "webdav", "sftp"}:
+            from app.services.storage_opendal import OpenDALStorageBackend
+            from app.services.storage_providers import (
+                parse_provider_config,
+                resolve_transport,
+            )
+
+            provider_config = parse_provider_config(
+                json.loads(str(settings.storage_provider_config))
+            )
+            storage_backend = OpenDALStorageBackend(resolve_transport(provider_config))
+        elif settings.storage_backend == "s3":
+            storage_backend = S3StorageBackend(check_bucket=not recovery_only)
+        else:
+            storage_backend = LocalStorageBackend()
+    except Exception as exc:
+        # An explicit but invalid provider must never silently become local
+        # storage. Keep the API/health surface available in recovery mode while
+        # every storage mutation fails closed.
+        logger.exception("selected storage provider unavailable")
+        storage_backend = UnavailableStorageBackend(exc.__class__.__name__)
+    if not recovery_only:
+        try:
+            storage_backend.ensure_setup()
+        except Exception as exc:
+            # Provider reachability and root probes are runtime health, not
+            # process-start prerequisites. Keep the API/admin health surface
+            # available with a backend that rejects every storage mutation;
+            # silently falling back to local storage would split the vault.
+            logger.exception("selected storage provider unavailable during setup")
+            storage_backend = UnavailableStorageBackend(exc.__class__.__name__)
+    if (
+        not recovery_only
+        and storage_backend.backend_name != "unavailable"
+        and (
+            storage_backend.capabilities.tier is StorageTier.UNGUARDED
+            and not settings.storage_allow_unverified
+            and not getattr(storage_backend, "recovery_mode", False)
+        )
+    ):
+        raise RuntimeError(
+            "unguarded storage refused; set "
+            "VAULT_STORAGE_ALLOW_UNVERIFIED=true to acknowledge the risk"
+        )
+    logger.info(
+        "storage capabilities backend=%s tier=%s identity=%s",
+        storage_backend.backend_name,
+        storage_backend.capabilities.tier.value,
+        storage_backend.capabilities.object_identity.value,
+    )
+    for warning in storage_backend.capabilities.warnings:
+        logger.warning("storage capability warning: %s", warning)
+    bound = bind_backend(storage_backend)
+    if recover_publications and storage_backend.backend_name != "unavailable":
+        from app.services.inbox import reconcile_storage_publications
+
+        recovered = reconcile_storage_publications()
+        if recovered:
+            logger.warning("reconciled %d pending storage publication(s)", recovered)
+    return bound
+
+
+def _prepare_storage_for_startup(
+    *, recover_publications: bool = True, recovery_only: bool = False
+) -> StorageBackend:
+    """Bind storage and recover its durable publications before Inbox recovery."""
+    backend = _compose_storage_backend(
+        recover_publications=recover_publications, recovery_only=recovery_only
+    )
+    from app.services.inbox import reconcile_interrupted_items
+
+    if recover_publications and backend.backend_name != "unavailable":
+        interrupted_imports = reconcile_interrupted_items()
+        if interrupted_imports:
+            logger.warning(
+                "reconciled %d interrupted pending import(s)", interrupted_imports
+            )
+    return backend
 
 
 @asynccontextmanager
@@ -83,47 +222,72 @@ async def lifespan(app: FastAPI):
     app.state.process_lock = process_lock
     logger.info("starting %s v%s", settings.app_name, settings.app_version)
     _app_info.info({"version": settings.app_version, "name": settings.app_name})
-    # DB must exist before we can read the runtime overlay.
+    # Inspect the filesystem journal before opening or migrating the database.
+    # A crash marker is the recovery authority; startup must not run normal
+    # schema/identity/storage repairs before deciding whether it is present.
+    restore_maintenance = inspect_restore_recovery()
+    # DB must still exist before we can read the runtime overlay. The journal
+    # decision above gates every application-owned repair after initialization.
     init_db()
     with get_session_factory().scoped_session() as session:
         apply_overlay(session)
-        # Persisted runtime configuration can differ from environment
-        # defaults, so revalidate before creating the secrets key.
-        validate_runtime_storage_paths()
-        # Must run after apply_overlay: that call clears the overlay dict.
-        ensure_jwt_secret(session)
-        configured = is_configured(session)
-        # Clear any NAS scans stranded RUNNING by a previous unclean shutdown,
-        # otherwise the scheduler would skip them forever.
-        from app.services.external_library import reset_orphaned_scans
+        from app.services.runtime_config import (
+            enroll_legacy_local_roots,
+            ensure_legacy_s3_root,
+            ensure_storage_identity,
+        )
 
-        reset_count = reset_orphaned_scans(session)
-        if reset_count:
-            logger.warning(
-                "reset %d external library scan(s) stranded by restart", reset_count
-            )
+        if not restore_maintenance:
+            ensure_storage_identity(session)
+            # Migration covers normal upgrades; this bounded repair also
+            # handles stamped/create_all legacy databases.  ``apply_overlay``
+            # above already projects the historical literal during
+            # recovery-only startup without persisting while the journal is
+            # authoritative.
+            ensure_legacy_s3_root(session)
+            enroll_legacy_local_roots(session)
+            apply_environment_storage_provider(session)
+            # Persisted runtime configuration can differ from environment
+            # defaults, so revalidate before creating the secrets key.
+            validate_runtime_storage_paths()
+            # Must run after apply_overlay: that call clears the overlay dict.
+            ensure_jwt_secret(session)
+            # Clear any NAS scans stranded RUNNING by a previous unclean
+            # shutdown, otherwise the scheduler would skip them forever.
+            from app.services.external_library import reset_orphaned_scans
+
+            reset_count = reset_orphaned_scans(session)
+            if reset_count:
+                logger.warning(
+                    "reset %d external library scan(s) stranded by restart",
+                    reset_count,
+                )
+        configured = is_configured(session)
+    if restore_maintenance:
+        logger.critical(
+            "interrupted restore detected; application remains in restore maintenance"
+        )
+    # Storage must be configured and bound before either publication recovery
+    # or Inbox recovery can inspect durable capture-slot receipts.
+    _backend = _prepare_storage_for_startup(
+        recover_publications=not restore_maintenance,
+        recovery_only=restore_maintenance,
+    )
     from app.services.jobs import reconcile_interrupted_jobs
 
-    interrupted_jobs = reconcile_interrupted_jobs()
+    interrupted_jobs = reconcile_interrupted_jobs() if not restore_maintenance else 0
     if interrupted_jobs:
         logger.warning("reconciled %d interrupted background job(s)", interrupted_jobs)
     from app.services.vault_audit import reconcile_interrupted_runs
 
-    interrupted_audits = reconcile_interrupted_runs()
+    interrupted_audits = reconcile_interrupted_runs() if not restore_maintenance else 0
     if interrupted_audits:
         logger.warning("reconciled %d interrupted vault audit(s)", interrupted_audits)
-    from app.services.inbox import reconcile_interrupted_items
-
-    interrupted_imports = reconcile_interrupted_items()
-    if interrupted_imports:
-        logger.warning(
-            "reconciled %d interrupted pending import(s)", interrupted_imports
-        )
-    stranded_dispatches = reconcile_stranded_dispatches()
+    stranded_dispatches = (
+        reconcile_stranded_dispatches() if not restore_maintenance else 0
+    )
     if stranded_dispatches:
         logger.warning("reconciled %d stranded fleet dispatch(es)", stranded_dispatches)
-    # Initialise storage backend (creates dirs or validates S3 bucket).
-    _backend = init_backend()
     if not configured:
         logger.warning(
             "vault is unconfigured — open the web UI and enter this setup token: %s",
@@ -139,20 +303,26 @@ async def lifespan(app: FastAPI):
     install_audit_listeners()
     printer_provider_registry = build_provider_registry()
     app.state.printer_provider_registry = printer_provider_registry
+    provider_builder = partial(get_provider_client, registry=printer_provider_registry)
     hub = PrinterHub(
-        provider_builder=partial(
-            get_provider_client, registry=printer_provider_registry
-        )
+        InProcessBus(),
+        session_factory=get_session_factory(),
+        provider_builder=provider_builder,
     )
     app.state.printer_hub = hub
     watcher = LibraryWatcher()
     app.state.library_watcher = watcher
+    task_queue = LocalTaskQueue()
+    app.state.task_queue = task_queue
     app.state.gc_task = asyncio.create_task(
         _gc_loop(storage_maintenance_enabled=configured)
     )
     app.state.external_scan_task = asyncio.create_task(_external_scan_loop())
+    app.state.automatic_backup_task = asyncio.create_task(_automatic_backup_loop())
     app.state.notification_task = asyncio.create_task(run_dispatcher_loop())
-    app.state.fleet_scheduler_task = asyncio.create_task(run_fleet_scheduler())
+    app.state.fleet_scheduler_task = asyncio.create_task(
+        run_fleet_scheduler(task_queue, provider_builder)
+    )
     await hub.start_all()
     # Real-time folder watching is best-effort: never let it block startup.
     try:
@@ -164,17 +334,16 @@ async def lifespan(app: FastAPI):
     await _cancel_tasks(
         app.state.gc_task,
         app.state.external_scan_task,
+        app.state.automatic_backup_task,
         app.state.notification_task,
         app.state.fleet_scheduler_task,
     )
     await watcher.stop_all()
     await hub.stop_all()
-    from app.services.browser_fetch import close_browser
-    from app.services.moonraker import close_http_client
-
-    await close_http_client()
-    await close_browser()
-    release_process_lock(process_lock)
+    try:
+        await _close_outbound_clients()
+    finally:
+        release_process_lock(process_lock)
     logger.info("shutting down")
 
 
@@ -192,7 +361,7 @@ async def _gc_loop(*, storage_maintenance_enabled: bool = True) -> None:
         try:
             try:
                 # Sync DB + storage I/O — keep it off the event loop.
-                await asyncio.to_thread(gc_soft_deleted)
+                await asyncio.to_thread(run_scheduled_gc)
             except Exception:
                 logger.exception("scheduled GC failed")
             try:
@@ -202,9 +371,13 @@ async def _gc_loop(*, storage_maintenance_enabled: bool = True) -> None:
             except Exception:
                 logger.exception("notification delivery pruning failed")
             try:
-                from app.services.inbox import prune_history
+                from app.services.inbox import (
+                    prune_expired_browser_leases,
+                    prune_history,
+                )
 
                 await asyncio.to_thread(prune_history)
+                await asyncio.to_thread(prune_expired_browser_leases)
             except Exception:
                 logger.exception("pending import history pruning failed")
             try:
@@ -232,6 +405,21 @@ async def _external_scan_loop() -> None:
             await asyncio.to_thread(_run_due_external_scans)
         except Exception:
             logger.exception("external library scan tick failed")
+        finally:
+            end_mutating_operation()
+
+
+async def _automatic_backup_loop() -> None:
+    """Create at most one configured automatic backup for each UTC day."""
+    while True:
+        await asyncio.sleep(60)
+        if not begin_mutating_operation():
+            continue
+        try:
+            try:
+                await asyncio.to_thread(run_due_backup)
+            except Exception:
+                logger.exception("automatic backup failed")
         finally:
             end_mutating_operation()
 
@@ -432,7 +620,10 @@ def _refresh_printer_gauge() -> None:
         return
     printer_status.clear()
     for provider, prn_status in rows:
-        printer_status.labels(provider=provider.value, status=prn_status.value).inc()
+        printer_status.labels(
+            provider=_metric_enum_value(provider),
+            status=_metric_enum_value(prn_status),
+        ).inc()
 
 
 def _refresh_fleet_gauges() -> None:
@@ -444,10 +635,12 @@ def _refresh_fleet_gauges() -> None:
     try:
         with get_session_factory().session() as session:
             rows = session.exec(
-                select(PrintJob.state, func.count(PrintJob.id)).group_by(PrintJob.state)
+                select(col(PrintJob.state), func.count(col(PrintJob.id))).group_by(
+                    col(PrintJob.state)
+                )
             ).all()
             blocked = session.exec(
-                select(func.count(PrintJob.id)).where(
+                select(func.count(col(PrintJob.id))).where(
                     PrintJob.blocked_reason.is_not(None)  # type: ignore[union-attr]
                 )
             ).one()
@@ -456,12 +649,14 @@ def _refresh_fleet_gauges() -> None:
         return
     fleet_jobs.clear()
     for state, count in rows:
-        fleet_jobs.labels(state=state.value).set(count)
+        fleet_jobs.labels(state=_metric_enum_value(state)).set(count)
     fleet_blocked_jobs.set(blocked)
     snapshot = scheduler_snapshot()
     fleet_scheduler_running.set(1 if snapshot["running"] else 0)
     last_tick = snapshot["last_tick_at"]
-    fleet_scheduler_last_tick.set(last_tick.timestamp() if last_tick else 0)
+    fleet_scheduler_last_tick.set(
+        last_tick.timestamp() if isinstance(last_tick, datetime) else 0
+    )
 
 
 def _refresh_persistence_gauges() -> None:
@@ -472,9 +667,9 @@ def _refresh_persistence_gauges() -> None:
     try:
         with get_session_factory().session() as session:
             jobs = session.exec(
-                select(BackgroundJob.state, func.count(BackgroundJob.id)).group_by(
-                    BackgroundJob.state
-                )
+                select(
+                    col(BackgroundJob.state), func.count(col(BackgroundJob.id))
+                ).group_by(col(BackgroundJob.state))
             ).all()
             staged = session.exec(
                 select(func.coalesce(func.sum(StagingLease.size_bytes), 0))
@@ -482,7 +677,7 @@ def _refresh_persistence_gauges() -> None:
             intents = session.exec(
                 select(
                     StorageDeleteIntent.status,
-                    func.count(StorageDeleteIntent.id),
+                    func.count(col(StorageDeleteIntent.id)),
                 ).group_by(StorageDeleteIntent.status)
             ).all()
     except Exception:

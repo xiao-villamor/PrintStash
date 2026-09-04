@@ -1,0 +1,229 @@
+# Library Sources And NAS Setup
+
+PrintStash 0.13 can index files without copying them into managed Vault storage.
+A library source can be:
+
+- a folder mounted into the API container
+- an S3 or S3-compatible bucket prefix
+- a WebDAV collection, including Nextcloud
+- an SFTP directory with a pinned SSH host key
+- a Google Drive folder (beta)
+
+The source remains authoritative. PrintStash stores catalog rows, metadata and
+thumbnails, but never deletes source bytes. S3, WebDAV, SFTP and Google Drive
+sources are read-only. A mounted source can optionally accept create-only
+write-back.
+
+This is separate from the **Storage provider** setting. A Storage provider holds
+bytes PrintStash owns. A Library source indexes bytes you own elsewhere. The
+same remote connection can be enabled for Library sources, backup replicas, or
+both. Library bytes remain externally owned and read-only even when the profile
+also stores PrintStash-owned backup archives under its reserved backup folder.
+
+## Choose A Connection Method
+
+| Method | Best fit | Discovery | Writes from PrintStash | Safety boundary |
+| --- | --- | --- | --- | --- |
+| Mounted folder | PrintStash runs on the NAS or a stable SMB/NFS mount is already available to Docker | Scheduled scan; local filesystems may also use events | Optional, create-only | Root identity marker and descriptor-pinned reads |
+| S3 | Object storage and NAS services with an S3-compatible API | OpenDAL continuation-token pages | Disabled | Stable object metadata around each read |
+| WebDAV | Nextcloud or another standards-compliant WebDAV server | Bounded one-directory pages with a durable traversal cursor | Disabled | Read-only adapter and before/after object checks |
+| SFTP | NAS or server with SSH File Transfer Protocol | Bounded one-directory pages with a durable traversal cursor | Disabled | Required pinned host key and read-only adapter |
+| Google Drive | A dedicated folder in a Google account | OpenDAL paged discovery | Disabled | Read-only adapter and before/after object checks; beta |
+
+Use a mounted folder when PrintStash and the files share a host or when the NAS
+mount is already monitored by the operator. Use a direct remote profile when a
+host mount is undesirable or unavailable.
+
+## Create A Remote Connection
+
+1. Open **Settings > Remote storage** and create an S3, WebDAV, SFTP or Google
+   Drive connection whose use includes **Library sources**. Credentials are
+   encrypted in the database and never returned by the API after creation.
+2. Test the connection. A failed test does not create a source or change files.
+3. Open **Settings > Library sources**, enable the feature, add a source, select
+   the connection and enter an optional source path.
+4. Run **Scan now**, then open and download a representative linked Artifact.
+
+For Amazon S3, enter the real AWS region and leave the endpoint empty. For a
+self-hosted S3 endpoint, enter its URL; path-style addressing is selected by
+default. If the server requires virtual-host addressing, configure the profile
+through the API with `addressing_style: "virtual"`. PrintStash never creates a
+bucket or changes its versioning or lifecycle policy.
+
+For Nextcloud, use the account's WebDAV endpoint and a dedicated app password.
+For SFTP, pin either the exact OpenSSH known-host entry or a mounted known-hosts
+file. A changed host key fails closed.
+
+For Google Drive, create an OAuth client and provide its client ID, client
+secret, and an offline refresh token for the account. Use a dedicated root
+folder. PrintStash stores both secrets encrypted and never returns them through
+the API. Google Drive support is beta because its OpenDAL service does not
+provide the immutable delete identity required for automatic retention.
+
+## How Users Read And Download Source Files
+
+After a scan, linked files appear beside managed Vault files in the normal
+library. Preview, download, public-share, and Open-in-slicer requests go through
+PrintStash's Artifact content boundary:
+
+- A mounted source is opened from the path visible inside the API container.
+- S3, WebDAV and Google Drive sources are read through the OpenDAL adapter in
+  the full API image.
+- SFTP uses the same connection and Library-source abstraction, but keeps its
+  hardened AsyncSSH transport so pinned host keys and exclusive creation remain
+  enforceable.
+
+PrintStash checks that the source object remains stable while it is being read,
+then streams the response to the browser or slicer. It does not copy the source
+file into managed Vault storage. Users may also access the original through the
+NAS share or remote service when the operator has granted them access there.
+
+Apache OpenDAL is an implementation detail for supported remote transports. It
+runs inside the full API image, not as another container, and it does not expose
+a separate user-facing endpoint. The lite API image cannot activate remote
+profiles.
+
+## Network And Scan Budgets
+
+Remote discovery is intentionally conservative:
+
+- one remote scan runs per API process
+- a page contains at most 1,000 source entries
+- one scan slice reads at most 2 GiB and checks its 15-minute wall-clock budget
+  between objects
+- remote content is paced to 8 MiB/s
+- WebDAV and SFTP metadata work is paced to 4 operations/s
+- a provider error applies a 24-hour backoff; reaching the normal time budget
+  pauses without that penalty
+- cursors and observed keys are durable, so a restart resumes the epoch
+- absence is applied only after a complete epoch
+- an empty source or a removal set larger than the safety threshold is reported
+  as `remote_mass_removal_blocked` and changes no catalog rows
+- every linked file is re-hashed at least once every seven days, even if its
+  size and modification time appear unchanged
+
+These limits cap PrintStash traffic. They do not cap traffic generated by a NAS
+mount implementation, filesystem cache, antivirus scanner or another client.
+
+## Trash, Restore, And Rediscovery
+
+Trashing a linked Artifact creates a discovery tombstone. If its source object
+still exists, later scans skip it instead of immediately importing it again.
+Restoring that Artifact clears its tombstone. The explicit Rediscover action is
+the other way to clear suppression when the operator wants a fresh catalog row.
+
+Permanent catalog deletion still never deletes the source object. Back up the
+source independently because PrintStash full backups contain managed Vault
+objects, not linked source bytes.
+
+## Mounted Source Template
+
+Mount the NAS share on the Docker host, then bind the stable host path into only
+the `api` service:
+
+```yaml
+services:
+  api:
+    volumes:
+      - /mnt/printstash-library:/mnt/library:ro
+```
+
+Enter `/mnt/library` in PrintStash. Use `:ro` unless mounted write-back is
+required. Before adding it, verify the mapping from inside the running API:
+
+```bash
+docker compose exec api sh -c 'test -r /mnt/library && find /mnt/library -maxdepth 1 -type f | head'
+```
+
+Do not map a library source over `/data/files`, `/data/thumbs`, `/data/backups`,
+the database, staging, or another source. PrintStash rejects known overlaps.
+
+## Platform Recipes
+
+These recipes describe the platform interface, not appliance certification.
+The [evidence note](./research/nas-library-source-evidence.md) links the
+first-party documentation used for each one.
+
+### Unraid
+
+Create or choose a dedicated user share, then add a container volume mapping:
+
+```text
+Host path:      /mnt/user/3d-library
+Container path: /mnt/library
+Access:         Read-only
+```
+
+Use `/mnt/library` in PrintStash. Confirm the mapping again after stopping and
+starting the array. User shares are FUSE-backed, so rely on scheduled scans and
+the runtime-probed storage tier rather than assuming local filesystem behavior.
+
+### Synology DSM
+
+In Container Manager, add the DSM shared folder as a volume and map it to
+`/mnt/library`. Prefer read-only permission. If PrintStash runs on another host,
+enable SMB or NFS in DSM, mount the share on that host, then use the mounted
+source template above. Verify the selected DSM account can read all subfolders.
+
+### TrueNAS SCALE
+
+Create a dedicated dataset. In the PrintStash custom app, add a **Host Path**
+storage item, select that dataset, set the container mount path to
+`/mnt/library`, enable the ACL entries required by the container user and select
+**Read Only** unless write-back is needed. Snapshot and back up the dataset
+outside PrintStash.
+
+### OpenMediaVault
+
+Create a Shared Folder in the OMV UI and resolve its absolute filesystem path.
+It normally resembles `/srv/dev-disk-by-uuid-.../3d-library`. Add that path as a
+bind mount in the Compose definition and use `/mnt/library` inside PrintStash.
+Do not move the Shared Folder to another device without reviewing the bind and
+re-enrolling the source root.
+
+### QNAP QTS And QuTS Hero
+
+In Container Station, add a host volume for a dedicated shared folder, normally
+under `/share/<SHARE_NAME>`, map it to `/mnt/library`, and select read-only
+access. The actual host path and Container Station availability vary by model;
+verify both in the QNAP UI instead of copying a path from another NAS.
+
+### CasaOS And ZimaOS
+
+Edit/import the PrintStash Docker Compose definition with an explicit bind,
+for example `/DATA/3D:/mnt/library:ro`. For a remote SMB/NFS share, mount it on
+the host first and bind the resulting path. After CasaOS recreates or updates
+the app, inspect the effective Compose and re-run the in-container visibility
+check. Do not assume that a named Docker volume carrying CIFS options will be
+preserved by every CasaOS release.
+
+### Proxmox VE
+
+The preferred layout is a small VM running Docker. Attach or mount NFS/CIFS in
+that VM, then bind the resulting path into PrintStash. Proxmox-managed NFS/CIFS
+storage normally appears under `/mnt/pve/<STORAGE_ID>` on the PVE host, but do
+not expose that host path to an unprivileged LXC until UID/GID mapping, mount
+propagation and backup scope are understood. In either layout, make the mount a
+startup dependency so PrintStash cannot start against an empty placeholder.
+
+## Validation Checklist
+
+Run this on disposable fixtures before pointing a new source at irreplaceable
+files:
+
+1. Add files in nested directories, including Unicode names, and complete a scan.
+2. Download each supported type and compare SHA-256 with the source.
+3. Replace one file with different content but the same name and size; force its
+   verification age in a test environment or wait for the seven-day sweep.
+4. Interrupt the network during a multi-page scan. Confirm no unseen catalog
+   rows are moved to trash and that the cursor resumes later.
+5. Present an empty or wrong mount. Confirm the scan fails without catalog
+   removals.
+6. Trash a linked Artifact while leaving source bytes in place. Confirm the
+   next scan does not re-import it; restore and confirm discovery resumes.
+7. Confirm the source bytes and their external backup are unchanged after Trash
+   and GC operations.
+
+Record the appliance model, OS/firmware, filesystem, protocol, auth mode and
+result in the validation log before describing that combination as appliance-
+validated.

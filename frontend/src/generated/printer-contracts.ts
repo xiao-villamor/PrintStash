@@ -18,6 +18,10 @@ export const SHARED_PRINTER_CONTRACT = {
     "printer_config",
     "material_state"
   ],
+  "printArtifactFormats": [
+    "gcode_text",
+    "bgcode_binary"
+  ],
   "providers": {
     "moonraker": {
       "capabilities": [
@@ -40,6 +44,9 @@ export const SHARED_PRINTER_CONTRACT = {
       "supportLevel": "stable",
       "supportNotes": [],
       "requiresReadyBeforeSend": false,
+      "acceptedPrintFormats": [
+        "gcode_text"
+      ],
       "configFields": [
         {
           "name": "base_url",
@@ -76,6 +83,9 @@ export const SHARED_PRINTER_CONTRACT = {
         "Printer file inventory, deletion, raw G-code controls, and measured filament consumption are unavailable."
       ],
       "requiresReadyBeforeSend": true,
+      "acceptedPrintFormats": [
+        "gcode_text"
+      ],
       "configFields": [
         {
           "name": "host",
@@ -115,6 +125,10 @@ export const SHARED_PRINTER_CONTRACT = {
         "Raw G-code controls and measured filament consumption are unavailable."
       ],
       "requiresReadyBeforeSend": false,
+      "acceptedPrintFormats": [
+        "gcode_text",
+        "bgcode_binary"
+      ],
       "configFields": [
         {
           "name": "base_url",
@@ -168,6 +182,9 @@ export const SHARED_PRINTER_CONTRACT = {
         "File inventory, deletion, and print-history import remain unavailable."
       ],
       "requiresReadyBeforeSend": false,
+      "acceptedPrintFormats": [
+        "gcode_text"
+      ],
       "configFields": [
         {
           "name": "host",
@@ -216,6 +233,9 @@ export const SHARED_PRINTER_CONTRACT = {
         "Raw G-code controls and measured filament consumption are unavailable."
       ],
       "requiresReadyBeforeSend": false,
+      "acceptedPrintFormats": [
+        "gcode_text"
+      ],
       "configFields": [
         {
           "name": "base_url",
@@ -287,4 +307,5 @@ export const SHARED_PRINTER_CONTRACT = {
 
 export type SharedPrinterProviderId = keyof typeof SHARED_PRINTER_CONTRACT.providers;
 export type SharedPrinterCapability = (typeof SHARED_PRINTER_CONTRACT.capabilities)[number];
+export type SharedPrintArtifactFormat = (typeof SHARED_PRINTER_CONTRACT.printArtifactFormats)[number];
 export type SharedPrinterSetupOption = (typeof SHARED_PRINTER_CONTRACT.setupOptions)[number];

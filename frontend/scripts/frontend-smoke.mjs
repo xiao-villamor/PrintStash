@@ -40,8 +40,8 @@ if (printers.length > 0) {
   const printerDetailRes = await fetchOk(`/printers/${printer.id}`, "text/html");
   const printerDetailHtml = await printerDetailRes.text();
   if (
-    printerDetailHtml.includes("printerId\":\"$NaN") ||
-    printerDetailHtml.includes("printerId\":null")
+    printerDetailHtml.includes('printerId":"$NaN') ||
+    printerDetailHtml.includes('printerId":null')
   ) {
     throw new Error(`/printers/${printer.id} rendered an invalid printer id`);
   }

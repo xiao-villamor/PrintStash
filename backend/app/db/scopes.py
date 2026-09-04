@@ -13,7 +13,13 @@ from typing import Any
 
 def live(model: Any):
     """SQL predicate: rows that are not soft-deleted."""
-    return model.deleted_at.is_(None)
+    predicate = model.deleted_at.is_(None)
+    # Bambu duplicate repair is append-only: absorbed rows stay queryable for
+    # audit/rollback but are not part of any live list or reconciliation.
+    absorbed_at = getattr(model, "dedupe_absorbed_at", None)
+    if absorbed_at is not None:
+        predicate = predicate & absorbed_at.is_(None)
+    return predicate
 
 
 def trashed(model: Any):

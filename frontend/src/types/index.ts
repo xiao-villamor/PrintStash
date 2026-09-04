@@ -1,4 +1,14 @@
 export type { DocumentKind, DocumentListItem, DocumentRead } from "./documents";
+export type {
+  MultipartModelReference,
+  MultipartModelListItem,
+  MultipartPartRead,
+  MultipartModelRead,
+  MultipartModelCreate,
+  MultipartModelUpdate,
+  MultipartPartsWrite,
+  MultipartModelCandidate,
+} from "./multipart-models";
 
 export type {
   MetadataRead,
@@ -18,6 +28,7 @@ export type {
   ListModelPageParams,
   TrashedModelRead,
   TrashPurgeRead,
+  StorageCleanupStatus,
   ModelBatchFailure,
   ModelBatchResult,
   RevisionBatchResult,
@@ -34,6 +45,7 @@ export type {
   ImportedPrintJobRead,
   IngestResponse,
   IngestJobStatus,
+  IngestJobResult,
   ArchiveEntry,
   ArchiveManifest,
   ModelFile,
@@ -64,9 +76,21 @@ export type {
   PrinterProfileRead,
   PrinterProfileCreate,
   PrinterProfileUpdate,
+  PrintSummaryRead,
 } from "./models";
 
+export { normalizeTrashPurgeRead } from "./models";
+
 export type {
+  HealthResponse,
+  StorageHealthRead,
+  StorageRootRole,
+  StorageRootEnrollmentRead,
+} from "./config";
+
+export type {
+  ProviderJsonValue,
+  ProviderJsonObject,
   PrinterStatus,
   PrinterProvider,
   PrinterCapabilities,
@@ -74,6 +98,11 @@ export type {
   PrinterDiagnostics,
   MoonrakerConfigRead,
   PrintJobState,
+  ReproducibilityLevel,
+  PrintJobIdentityRead,
+  PrintJobReportedMetadataRead,
+  PrintJobReproducibilityErrorRead,
+  PrintJobReproducibilityRead,
   RoutingStrategy,
   JobPriority,
   CompatibilityPolicy,
@@ -125,18 +154,26 @@ export type {
   SetupResponse,
   VaultConfigRead,
   VaultConfigUpdate,
-  MakerWorldStatus,
-  MakerWorldLoginRequest,
-  MakerWorldVerifyRequest,
-  MakerWorldTokenRequest,
-  MakerWorldLoginResponse,
+  StorageTier,
+  StorageProviderConfigValue,
+  StorageProviderConfigValues,
+  ProviderCategory,
+  StorageProviderField,
+  StorageProvider,
   ExternalLibrary,
   ExternalLibraryCreate,
   ExternalLibraryUpdate,
   ExternalLibraryCollectionMode,
   ExternalLibraryWatchMode,
   ExternalLibraryFsKind,
+  ExternalLibraryBindingState,
   ExternalLibraryScanSummary,
+  ExternalLibraryRootEnrollment,
+  LibrarySourceKind,
+  StorageConnectionPurpose,
+  StorageConnectionConfiguration,
+  StorageConnectionConfigurationValue,
+  StorageConnection,
 } from "./config";
 
 export type {
@@ -150,12 +187,44 @@ export type {
   NotificationDelivery,
 } from "./notifications";
 
-export type {
-  SpoolmanStatus,
-  SpoolmanUpdate,
-  SpoolmanTestResult,
-  SpoolRead,
-} from "./spoolman";
+export type { SpoolmanStatus, SpoolmanUpdate, SpoolmanTestResult, SpoolRead } from "./spoolman";
 
-export type { VaultAuditFinding, VaultAuditMode, VaultAuditRun, BackupVerification } from "./maintenance";
-export type { InboxItem, InboxItemState } from "./inbox";
+export type {
+  VaultAuditFinding,
+  VaultAuditFindingDetails,
+  VaultAuditMode,
+  VaultAuditRun,
+  BackupVerification,
+} from "./maintenance";
+export type {
+  InboxItem,
+  InboxItemCompletion,
+  InboxItemResult,
+  InboxItemResultState,
+  InboxItemState,
+  InboxManifestFile,
+  InboxCapturedField,
+  InboxCapturedFieldName,
+  InboxManifest,
+  InboxManifestV1,
+  InboxManifestV2,
+} from "./inbox";
+export type {
+  ModelProvenancePatch,
+  ModelProvenanceRead,
+  ModelSourceCoverRead,
+  ProvenanceCaptureSummaryRead,
+  ProvenanceFieldName,
+  ProvenanceFieldRead,
+  ProvenanceOrigin,
+  ProvenanceSourceRead,
+} from "./provenance";
+export type {
+  BrowserDevicePatch,
+  BrowserDeviceRead,
+  BrowserPairingCreateRead,
+  CaptureProvider,
+  CultsConnectRequest,
+  OAuthAuthorizeRead,
+  ProviderConnectionRead,
+} from "./provider-connections";

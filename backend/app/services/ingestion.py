@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import threading
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional, ParamSpec, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Optional, ParamSpec, TypeVar
 
 from sqlalchemy import case, func, update
 from sqlalchemy.exc import IntegrityError
@@ -27,18 +27,30 @@ from app.db.models import (
     Metadata,
     Model,
     ModelTagLink,
+    OwnedStorageObject,
     StagingLease,
+    StorageObjectState,
     User,
 )
 from app.db.scopes import live
-from app.db.session import SessionFactory
+from app.db.session import SessionFactory, get_session_factory
 from app.services import gcode_parser, rbac, storage, taxonomy, thumbnail
 from app.services.hashing import sha256_file
 from app.services.jobs import registry
 from app.services.mesh_processing import FallbackThumbnail
 from app.services.profile_detection import upsert_detected_profiles
-from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_backend import (
+    LocalStorageBackend,
+    StorageCollisionError,
+    get_backend,
+)
+from app.services.storage_ownership import (
+    provider_ref_for_backend,
+    publish_file,
+)
+
+if TYPE_CHECKING:
+    from app.services.provenance import ProvenanceContext
 
 logger = get_logger(__name__)
 
@@ -81,8 +93,74 @@ class ThumbnailDurabilityError(RuntimeError):
     """A thumbnail reported as generated is not visible in storage."""
 
 
+class ArtifactCommitUncertain(RuntimeError):
+    """The domain commit outcome is unknown; storage evidence was preserved."""
+
+
 def _fault_injection_checkpoint(_stage: str, _job_id: str) -> None:
     """Stable monkeypatch seam for commit-boundary regression tests."""
+
+
+def _resolve_committed_artifact(
+    *,
+    backend,
+    key: str,
+    model_id: int,
+    blob_hash: str,
+    ingestion_key: str | None,
+) -> File | None:
+    """Resolve a commit acknowledgement failure without touching the blob."""
+    with get_session_factory().session() as verification:
+        namespace = backend.namespace_for(key)
+        provider_ref = provider_ref_for_backend(backend, namespace=namespace)
+        provider_scope = OwnedStorageObject.provider_ref == provider_ref
+        # Local receipts written before provider_ref was introduced are safe
+        # to resolve only within the current backend namespace. Remote legacy
+        # NULL receipts intentionally have no compatibility path: their
+        # destination cannot be proven and destructive recovery must fail
+        # closed.
+        if backend.backend_name == "local":
+            provider_scope = provider_scope | OwnedStorageObject.provider_ref.is_(None)  # type: ignore[union-attr]
+        ownership = verification.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.backend == backend.backend_name,
+                OwnedStorageObject.namespace == namespace,
+                provider_scope,
+                OwnedStorageObject.key == key,
+                OwnedStorageObject.state == StorageObjectState.COMMITTED,
+            )
+        ).first()
+        if ownership is None:
+            return None
+        statement = select(File).where(
+            File.model_id == model_id,
+            File.path == key,
+            File.sha256 == blob_hash,
+        )
+        if ingestion_key is not None:
+            statement = statement.where(File.ingestion_key == ingestion_key)
+        candidate = verification.exec(statement).first()
+        if candidate is None:
+            return None
+        # Return a detached copy; the caller's failed transaction must not be
+        # reused after the acknowledgement boundary.
+        verification.expunge(candidate)
+        return candidate
+
+
+def _attach_ingested_artifact(
+    session: Session, file_row: File, context: ProvenanceContext
+) -> None:
+    """Attach provenance without taking over artifact transaction ownership.
+
+    The import is deliberately deferred so all existing ingestion callers stay
+    independent of the optional capture/provenance feature until they pass a
+    context.  The provenance service must not commit here: this caller owns the
+    File, metadata, storage receipts, and their rollback as one transaction.
+    """
+    from app.services.provenance import attach_ingested_artifact
+
+    attach_ingested_artifact(session, file_row, context)
 
 
 def verify_durable_artifact(
@@ -107,12 +185,17 @@ def verify_durable_artifact(
         ):
             raise ArtifactDurabilityError("artifact_rows_not_durable")
         primary_key = artifact.path
+        thumbnail_key = artifact.thumbnail_path
 
     backend = get_backend()
     if not backend.exists(primary_key):
         raise ArtifactDurabilityError("artifact_blob_not_durable")
     if thumbnail_status in {"generated", "fallback_generated"}:
-        if not backend.exists(backend.thumbnail_key(file_id)):
+        # New generations are immutable, recipe-versioned objects. Keep the
+        # legacy address only as a read-compatible fallback for artifacts that
+        # predate durable thumbnail generations.
+        candidate = thumbnail_key or backend.thumbnail_key(file_id)
+        if not backend.exists(candidate):
             raise ThumbnailDurabilityError("thumbnail_blob_not_durable")
 
 
@@ -150,6 +233,21 @@ def _reserve_next_version(session: Session, model_id: int) -> int:
     if next_value is None:
         raise RuntimeError("artifact_model_not_found")
     return int(next_value) - 1
+
+
+def _reserve_version_before_publication(session: Session, model: Model) -> int:
+    """Durably allocate the logical version before storage publication.
+
+    The short independent transaction avoids holding SQLite's caller write lock
+    while the ownership ledger reserves its storage key. A failed publication
+    may leave a harmless version gap; no File row can observe a duplicate.
+    """
+    assert model.id is not None
+    with Session(bind=session.get_bind(), expire_on_commit=False) as reservation:
+        version = _reserve_next_version(reservation, model.id)
+        reservation.commit()
+    session.expire(model, ["next_file_version"])
+    return version
 
 
 def _serialize_artifact_persistence(func: Callable[_P, _R]) -> Callable[_P, _R]:
@@ -289,6 +387,7 @@ def persist_artifact(
     external_library_id: int | None = None,
     source_mtime: float | None = None,
     ingestion_key: str | None = None,
+    provenance_context: ProvenanceContext | None = None,
 ) -> File:
     """Persist a parsed, staged artifact onto *model* — the deep core shared
     by background ingestion and synchronous revision attachment.
@@ -310,6 +409,30 @@ def persist_artifact(
     assert model.id is not None
     backend = get_backend()
 
+    if is_external:
+        # External roots are independently owned from the active vault
+        # backend. Revalidate the durable marker before reserving a version or
+        # publishing bytes so a remount/replacement cannot receive a write.
+        from app.services.external_library import (
+            ExternalRootBindingError,
+            assert_root_binding,
+        )
+
+        library = (
+            session.get(ExternalLibrary, external_library_id)
+            if external_library_id is not None
+            else None
+        )
+        if library is None:
+            raise ExternalRootBindingError("unbound", "external_library_missing")
+        if library.source_kind.value == "mounted":
+            assert_root_binding(library)
+        elif move_blob or library.writeback_enabled:
+            # Remote sources are intentionally read-only. A future writeback
+            # capability must prove atomic create/replace per protocol before
+            # it can cross this boundary.
+            raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
+
     if ingestion_key is not None:
         existing_ingestion = session.exec(
             select(File).where(File.ingestion_key == ingestion_key)
@@ -323,7 +446,7 @@ def persist_artifact(
     # counter UPDATE so SQLite never has to upgrade a stale read transaction
     # while another process owns the write lock.
     session.commit()
-    version = _reserve_next_version(session, model_id)
+    version = _reserve_version_before_publication(session, model)
     dest_key = (
         dest_key_override
         if dest_key_override is not None
@@ -335,28 +458,65 @@ def persist_artifact(
         )
     )
     blob_receipt = None
-    thumbnail_receipt = None
+    commit_started = False
+    commit_resolved = False
     try:
         if move_blob:
             # ``move_in`` performs the only authoritative collision check using
             # the backend's atomic create-only primitive. An earlier exists()
             # check would be a TOCTOU race.
-            blob_receipt = backend.move_in(staged_path, dest_key)
-        size_bytes = (
-            blob_receipt.size
-            if blob_receipt is not None
-            else backend.stat_size(dest_key)
-        )
+            if is_external:
+                # A NAS path is independent of the active vault backend. Bind
+                # a local adapter to this library root so its ownership proof
+                # cannot be interpreted as an S3/WebDAV key.
+                library = (
+                    session.get(ExternalLibrary, external_library_id)
+                    if external_library_id is not None
+                    else None
+                )
+                library_root = (
+                    Path(library.root_path).expanduser().resolve(strict=False)
+                    if library is not None
+                    else Path(dest_key).parent
+                )
+                from app.services.external_library import expected_root_marker
+
+                external_backend = LocalStorageBackend(
+                    external_roots=(library_root,),
+                    external_root_bindings={library_root: expected_root_marker(library)}
+                    if library is not None
+                    else None,
+                )
+                # Linked NAS bytes remain user-owned: publish add-only and do
+                # not create a vault ownership-ledger row or delete intent.
+                blob_receipt = external_backend.move_in(staged_path, dest_key)
+            else:
+                blob_receipt = publish_file(
+                    session,
+                    backend,
+                    dest_key,
+                    staged_path,
+                    object_kind="artifact",
+                    sha256=blob_hash,
+                    move=True,
+                )
+        if blob_receipt is not None:
+            size_bytes = blob_receipt.size
+        elif is_external and not move_blob:
+            # An external Artifact is indexed in place.  Its opaque ``path``
+            # is a NAS path, not a key in the active vault backend (which may
+            # be S3/WebDAV), so never ask that backend to stat it.
+            size_bytes = staged_path.stat().st_size
+        else:
+            size_bytes = backend.stat_size(dest_key)
 
         # For write-back into a NAS library, capture the on-disk mtime of the file we
         # just wrote so the next scan recognises it as unchanged (no re-import).
         if is_external and source_mtime is None:
-            direct = backend.direct_path(dest_key)
-            if direct is not None:
-                try:
-                    source_mtime = direct.stat().st_mtime
-                except OSError:
-                    source_mtime = None
+            try:
+                source_mtime = Path(dest_key).stat().st_mtime
+            except OSError:
+                source_mtime = None
 
         if file_type == FileType.GCODE:
             recommended_rows = session.exec(
@@ -403,30 +563,11 @@ def persist_artifact(
         session.add(file_row)
         session.flush()
         assert file_row.id is not None
-        if blob_receipt is not None and not is_external:
-            record_creation(session, blob_receipt, object_kind="artifact")
-
-        if thumb_bytes:
-            candidate_thumbnail_key = backend.thumbnail_key(file_row.id)
-            try:
-                encoded_thumbnail = thumbnail.to_webp(thumb_bytes)
-                thumbnail_receipt = backend.create_bytes(
-                    encoded_thumbnail, candidate_thumbnail_key
-                )
-            except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
-                logger.exception(
-                    "thumbnail derivation failed; continuing Artifact persistence",
-                    extra={"file_id": file_row.id},
-                )
-            else:
-                record_creation(session, thumbnail_receipt, object_kind="thumbnail")
-                file_row.thumbnail_path = candidate_thumbnail_key
-                session.add(file_row)
-                if overwrite_thumbnail or not model.thumbnail_path:
-                    model.thumbnail_path = candidate_thumbnail_key
-                    model.thumbnail_file_id = file_row.id
-                    session.add(model)
-
+        if provenance_context is not None:
+            # The File id exists, but the Artifact has not yet become visible.
+            # A provenance failure therefore follows the established rollback
+            # path for both its link and the bytes/row it describes.
+            _attach_ingested_artifact(session, file_row, provenance_context)
         # The parser may carry detection-only keys (e.g. printer_preset_name)
         # that have no Metadata column.
         md_fields = {k: v for k, v in meta.items() if k in Metadata.model_fields}
@@ -447,19 +588,85 @@ def persist_artifact(
                         color_hex=requirement.get("color_hex"),
                     )
                 )
+        # A driver may acknowledge a committed transaction as an exception
+        # (for example, a connection loss after COMMIT). From here onward the
+        # blob must be preserved until a fresh session resolves the outcome.
+        commit_started = True
         session.commit()
-    except Exception:
+    except Exception as exc:
         session.rollback()
-        # Delete only exact destinations selected by this failed write.  Never
-        # rely on a later directory walk to infer ownership.
-        if thumbnail_receipt is not None:
-            backend.rollback_create(thumbnail_receipt)
-        # External-library bytes become user-owned at publication and are never
-        # removed by rollback cleanup. A failed DB transaction may leave an
-        # unindexed file, which is safer and the next scan can discover it.
-        if blob_receipt is not None and not is_external:
-            backend.rollback_create(blob_receipt)
-        raise
+        if commit_started and blob_receipt is not None and not is_external:
+            try:
+                resolved = _resolve_committed_artifact(
+                    backend=backend,
+                    key=blob_receipt.key,
+                    model_id=model_id,
+                    blob_hash=blob_hash,
+                    ingestion_key=ingestion_key,
+                )
+            except Exception as resolution_exc:
+                # The acknowledgement and the verification query are separate
+                # failure domains. If the latter is unavailable, the outcome is
+                # still unknown and the committed bytes must remain retryable.
+                raise ArtifactCommitUncertain(
+                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                ) from resolution_exc
+            if resolved is not None:
+                file_row = resolved
+                commit_resolved = True
+            else:
+                # Unknown commit state is retryable and reconciled by the
+                # ownership worker. Deleting here could destroy a committed
+                # artifact when only the acknowledgement was lost.
+                raise ArtifactCommitUncertain(
+                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                ) from exc
+        else:
+            # Before the domain commit boundary, exact receipt rollback is safe.
+            # External-library bytes remain user-owned for the next scan.
+            if blob_receipt is not None and not is_external:
+                backend.rollback_create(blob_receipt)
+            raise
+
+    # A successfully resolved commit is terminal for this call. The detached
+    # row is returned and thumbnail work is left to the derivative reconciler;
+    # continuing with the rolled-back caller session could create a second,
+    # unrelated transaction against stale Model state.
+    if commit_resolved:
+        return file_row
+
+    # A thumbnail is a retryable derivative, not part of the File+Metadata
+    # integrity boundary. Publish it only after that transaction commits so its
+    # own durable reservation never competes with an already-open SQLite writer.
+    if thumb_bytes:
+        assert file_row.id is not None
+        try:
+            from app.services.thumbnail_engine import ThumbnailStrategy
+            from app.services.thumbnail_generations import (
+                publish_precomputed_thumbnail,
+            )
+
+            is_fallback = isinstance(thumb_bytes, FallbackThumbnail)
+            publish_precomputed_thumbnail(
+                session,
+                file_row,
+                thumb_bytes,
+                strategy=(
+                    ThumbnailStrategy.FALLBACK
+                    if is_fallback
+                    else ThumbnailStrategy.FULL
+                ),
+                complete=not is_fallback or thumb_bytes.complete,
+                promote=overwrite_thumbnail or not model.thumbnail_path,
+                normalize=file_type != FileType.GCODE,
+                backend=backend,
+            )
+        except Exception:  # noqa: BLE001 - thumbnail is a retryable derivative
+            session.rollback()
+            logger.exception(
+                "thumbnail derivation failed; continuing Artifact persistence",
+                extra={"file_id": file_row.id},
+            )
 
     session.refresh(file_row)
     return file_row
@@ -509,9 +716,16 @@ def resolve_write_target(
     brand-new model uses the upload's chosen ``target_library_id``; otherwise the
     blob goes to vault storage. When the feature is disabled everything is vault.
     """
+    from app.services.external_library import (
+        ExternalRootBindingError,
+        assert_root_binding,
+    )
     from app.services.runtime_config import external_libraries_enabled
 
     vault = WriteTarget(None, False, None, None)
+    # The external-library toggle is a deployment-wide policy switch.  Keep
+    # the historical vault behavior while it is off, including when callers
+    # still send a stale/explicit target_library_id from an older client.
     if not external_libraries_enabled(session):
         return vault
 
@@ -533,12 +747,19 @@ def resolve_write_target(
 
     library = session.get(ExternalLibrary, library_id)
     if library is None:
-        return vault
-    backend = get_backend()
-    if backend.direct_path(backend.blob_key("probe", 0, "probe")) is None:
-        raise RuntimeError("external_library_requires_local_storage_backend")
+        raise ExternalRootBindingError("missing", "external_library_missing")
 
-    root = Path(library.root_path)
+    if library.source_kind.value != "mounted":
+        raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
+
+    # An explicitly selected library, or a model already linked to one, must
+    # fail closed. Falling back to vault storage would make the UI appear to
+    # succeed while silently breaking the external mirror contract.
+    assert_root_binding(library)
+    # Store and derive destinations from one canonical root.  This keeps scan
+    # paths, collection mapping, and write-back keys identical even when an
+    # operator configured the library through a symlink or relative path.
+    root = Path(library.root_path).expanduser().resolve(strict=False)
     subpath = ""
     if (
         library.collection_mode == ExternalLibraryCollectionMode.MIRROR
@@ -559,7 +780,11 @@ def resolve_write_target(
         # boundary. The final create remains atomic/no-replace for collision
         # safety after this topology check.
         raise StorageCollisionError("external_library_symlink_escape") from exc
-    return WriteTarget(str(dest_path), True, library_id, None)
+    # Directory creation is deliberately deferred to LocalStorageBackend's
+    # descriptor-pinned publication primitive.  Calling Path.mkdir here would
+    # recreate a missing mount (or create descendants through a replacement
+    # pathname) after the binding check above.
+    return WriteTarget(str(canonical_target), True, library_id, None)
 
 
 def run_ingestion_pipeline(
@@ -576,6 +801,7 @@ def run_ingestion_pipeline(
     session_factory: SessionFactory | None = None,
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
+    provenance_context: ProvenanceContext | None = None,
 ) -> None:
     """Full ingestion pipeline.
 
@@ -645,7 +871,8 @@ def run_ingestion_pipeline(
                 with session_factory.scoped_session() as cleanup_session:
                     lease = cleanup_session.exec(
                         select(StagingLease).where(
-                            StagingLease.background_job_id == job_id
+                            StagingLease.background_job_id == job_id,
+                            StagingLease.capture_upload_slot_origin_id.is_(None),
                         )
                     ).first()
                     if lease is not None:
@@ -655,6 +882,47 @@ def run_ingestion_pipeline(
         report("hashing")
         blob_hash = sha256_file(staged_path)
         logger.info("ingestion_job job_id=%s stage=hashed result=running", job_id)
+
+        if provenance_context is not None:
+            provenance_context = replace(provenance_context, blob_sha256=blob_hash)
+            from app.services.provenance import preflight_existing_artifact
+
+            with session_factory.scoped_session() as session:
+                preflight = preflight_existing_artifact(session, provenance_context)
+            if preflight.status == "reusable":
+                assert preflight.model_id is not None and preflight.file_id is not None
+                # A byte-level duplicate can still carry a newer source
+                # snapshot.  Upsert it before returning the existing Artifact;
+                # this preserves the dedupe invariant without making capture
+                # freshness depend on a new blob write.
+                from app.services.provenance import attach_existing_artifact
+
+                with session_factory.scoped_session() as session:
+                    existing_file = session.get(File, preflight.file_id)
+                    if existing_file is None:
+                        raise RuntimeError("captured_artifact_missing")
+                    attach_existing_artifact(session, existing_file, provenance_context)
+                    session.commit()
+                registry.finish(
+                    job_id,
+                    state="completed",
+                    completion="complete",
+                    model_id=preflight.model_id,
+                    file_id=preflight.file_id,
+                    processed=1,
+                    total=1,
+                    succeeded=1,
+                    deduplicated=1,
+                    result={
+                        "created": False,
+                        "deduplicated": True,
+                        "name": original_filename,
+                    },
+                )
+                staged_path.unlink(missing_ok=True)
+                return
+            if preflight.status == "trashed":
+                raise RuntimeError("captured_artifact_trashed")
 
         meta, thumb_bytes = strategy.process(staged_path, report)
         if thumb_bytes is None and strategy.file_type not in (FileType.GCODE,):
@@ -731,6 +999,7 @@ def run_ingestion_pipeline(
                 external_library_id=dest.external_library_id,
                 source_mtime=dest.source_mtime,
                 ingestion_key=job_id,
+                provenance_context=provenance_context,
             )
             assert file_row.id is not None
             durable_ids = (model.id, file_row.id)
@@ -785,7 +1054,10 @@ def run_ingestion_pipeline(
         staged_path.unlink(missing_ok=True)
         with session_factory.scoped_session() as cleanup_session:
             lease = cleanup_session.exec(
-                select(StagingLease).where(StagingLease.background_job_id == job_id)
+                select(StagingLease).where(
+                    StagingLease.background_job_id == job_id,
+                    StagingLease.capture_upload_slot_origin_id.is_(None),
+                )
             ).first()
             if lease is not None:
                 cleanup_session.delete(lease)
@@ -855,7 +1127,7 @@ def _mesh_strategy(file_type: FileType) -> IngestionStrategy:
         path: Path, report: ProgressFn = _noop_progress
     ) -> tuple[dict[str, Any], bytes | None]:
         # Single mesh load for both geometry and thumbnail.
-        return mesh_processing.analyze_mesh(path, report=report)
+        return mesh_processing.analyze_mesh(path, report=report, output_format="WEBP")
 
     return IngestionStrategy(
         file_type=file_type,
@@ -878,6 +1150,7 @@ def ingest_orca_gcode(
     session_factory: SessionFactory | None = None,
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
+    provenance_context: ProvenanceContext | None = None,
 ) -> None:
     """Public entry point for G-code ingestion (called from the OrcaSlicer router)."""
     run_ingestion_pipeline(
@@ -893,6 +1166,7 @@ def ingest_orca_gcode(
         session_factory=session_factory,
         source_url=source_url,
         target_library_id=target_library_id,
+        provenance_context=provenance_context,
     )
 
 
@@ -910,6 +1184,7 @@ def ingest_mesh(
     session_factory: SessionFactory | None = None,
     source_url: Optional[str] = None,
     target_library_id: int | None = None,
+    provenance_context: ProvenanceContext | None = None,
 ) -> None:
     """Public entry point for mesh ingestion (called from the model upload router)."""
     run_ingestion_pipeline(
@@ -925,6 +1200,7 @@ def ingest_mesh(
         session_factory=session_factory,
         source_url=source_url,
         target_library_id=target_library_id,
+        provenance_context=provenance_context,
     )
 
 

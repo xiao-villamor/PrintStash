@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { usePathname, useRouter } from "@/lib/navigation";
 import {
   BarChart3,
@@ -22,12 +22,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Drawer } from "@/components/ui/drawer";
 import { TaskList } from "@/components/task-list";
-import {
-  clearCompletedTasks,
-  listTasks,
-  subscribeTasks,
-  type TaskItem,
-} from "@/lib/task-center";
+import { clearCompletedTasks, listTasks, subscribeTasks, type TaskItem } from "@/lib/task-center";
 import { listPendingImports } from "@/lib/api";
 
 type NavItem = {
@@ -71,32 +66,31 @@ export function BottomNavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  // The sheet remembers which route it was opened on, so navigating away closes
+  // it by derivation instead of by an after-the-fact effect.
+  const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
+  const moreOpen = openedOnPath === pathname;
+  const [tasks, setTasks] = useState<TaskItem[]>(listTasks);
   const [pendingImports, setPendingImports] = useState(0);
 
-  const visibleItems = NAV_ITEMS.filter(
-    (item) => !item.adminOnly || user?.is_superuser,
-  );
+  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user?.is_superuser);
 
-  // Close the sheet on navigation.
-  useEffect(() => {
-    setMoreOpen(false);
-  }, [pathname]);
-
-  useEffect(() => {
-    setTasks(listTasks());
-    return subscribeTasks(() => setTasks(listTasks()));
-  }, []);
+  useEffect(() => subscribeTasks(() => setTasks(listTasks())), []);
 
   useEffect(() => {
     let active = true;
-    const refresh = () => listPendingImports(false)
-      .then((rows) => { if (active) setPendingImports(rows.filter((row) => row.state !== "dismissed").length); })
-      .catch(() => {});
+    const refresh = () =>
+      listPendingImports(false)
+        .then((rows) => {
+          if (active) setPendingImports(rows.filter((row) => row.state !== "dismissed").length);
+        })
+        .catch(() => {});
     void refresh();
     const timer = window.setInterval(refresh, 30000);
-    return () => { active = false; window.clearInterval(timer); };
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [pathname]);
 
   const tabs = visibleItems.slice(0, MAX_TABS);
@@ -105,7 +99,7 @@ export function BottomNavBar() {
 
   async function handleLogout() {
     await logout();
-    setMoreOpen(false);
+    setOpenedOnPath(null);
     router.push("/login");
   }
 
@@ -122,7 +116,7 @@ export function BottomNavBar() {
         ))}
         <button
           type="button"
-          onClick={() => setMoreOpen(true)}
+          onClick={() => setOpenedOnPath(pathname)}
           aria-label={t("nav.more")}
           aria-expanded={moreOpen}
           aria-current={moreActive ? "page" : undefined}
@@ -144,7 +138,7 @@ export function BottomNavBar() {
           setTasks(listTasks());
         }}
         onLogout={user ? handleLogout : undefined}
-        onClose={() => setMoreOpen(false)}
+        onClose={() => setOpenedOnPath(null)}
       />
     </>
   );
@@ -158,7 +152,11 @@ function NavTab({ item, active, badge = 0 }: { item: NavItem; active: boolean; b
     <>
       <span className="relative">
         <TabIcon icon={item.icon} active={active} />
-        {badge > 0 && <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-destructive px-1 text-center text-3xs font-bold text-destructive-foreground">{badge > 99 ? "99+" : badge}</span>}
+        {badge > 0 && (
+          <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-destructive px-1 text-center text-3xs font-bold text-destructive-foreground">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
       </span>
       <TabLabel active={active}>{t(item.labelKey)}</TabLabel>
     </>
@@ -193,13 +191,7 @@ function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
   );
 }
 
-function TabLabel({
-  active,
-  children,
-}: {
-  active: boolean;
-  children: React.ReactNode;
-}) {
+function TabLabel({ active, children }: { active: boolean; children: React.ReactNode }) {
   return (
     <span
       className={`text-3xs font-medium leading-none tracking-tight ${
@@ -232,7 +224,9 @@ function MoreSheet({
 }) {
   const { t } = useI18n();
   const [tasksOpen, setTasksOpen] = useState(false);
-  const activeTasks = tasks.filter((task) => task.status === "pending" || task.status === "running").length;
+  const activeTasks = tasks.filter(
+    (task) => task.status === "pending" || task.status === "running",
+  ).length;
 
   return (
     <Drawer
@@ -243,83 +237,95 @@ function MoreSheet({
       containerClassName="md:hidden"
       className="max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl"
     >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/25" />
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-semibold text-foreground">{t("nav.more")}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t("nav.close")}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        {items.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {items.map((item) => {
-              const active = isItemActive(item, pathname);
-              const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
-                active
-                  ? "border-primary-soft bg-accent text-primary"
-                  : "border-border bg-background text-foreground hover:bg-muted"
-              }`;
-              const inner = (
-                <>
-                  <item.icon className="h-5 w-5" />
-                  <span className="text-xs font-medium">{t(item.labelKey)}</span>
-                </>
-              );
-              if (item.external) {
-                return (
-                  <a key={item.href} href={item.href} aria-current={active ? "page" : undefined} onClick={onClose} className={className}>
-                    {inner}
-                  </a>
-                );
-              }
+      <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/25" />
+      <div className="mb-3 flex items-center justify-between">
+        <span className="text-sm font-semibold text-foreground">{t("nav.more")}</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={t("nav.close")}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      {items.length > 0 && (
+        <div className="grid grid-cols-3 gap-2">
+          {items.map((item) => {
+            const active = isItemActive(item, pathname);
+            const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
+              active
+                ? "border-primary-soft bg-accent text-primary"
+                : "border-border bg-background text-foreground hover:bg-muted"
+            }`;
+            const inner = (
+              <>
+                <item.icon className="h-5 w-5" />
+                <span className="text-xs font-medium">{t(item.labelKey)}</span>
+              </>
+            );
+            if (item.external) {
               return (
-                <Link key={item.href} href={item.href} aria-current={active ? "page" : undefined} onClick={onClose} className={className}>
+                <a
+                  key={item.href}
+                  href={item.href}
+                  aria-current={active ? "page" : undefined}
+                  onClick={onClose}
+                  className={className}
+                >
                   {inner}
-                </Link>
+                </a>
               );
-            })}
-          </div>
-        )}
+            }
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+                onClick={onClose}
+                className={className}
+              >
+                {inner}
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
-        <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
+      <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
+        <button
+          type="button"
+          onClick={() => setTasksOpen((open) => !open)}
+          aria-expanded={tasksOpen}
+          className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        >
+          <Bell className="h-4 w-4 text-muted-foreground" />
+          <span className="flex-1">{t("nav.tasks")}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs text-muted-foreground">
+            {activeTasks ? `${activeTasks} active` : tasks.length}
+          </span>
+        </button>
+        {tasksOpen && <TaskList tasks={tasks} onClear={onClearTasks} compact />}
+      </div>
+
+      {onLogout && (
+        <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 pb-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <User className="h-4 w-4" />
+          </div>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+            {username ?? t("nav.account")}
+          </span>
           <button
             type="button"
-            onClick={() => setTasksOpen((open) => !open)}
-            aria-expanded={tasksOpen}
-            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={onLogout}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
           >
-            <Bell className="h-4 w-4 text-muted-foreground" />
-            <span className="flex-1">{t("nav.tasks")}</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs text-muted-foreground">
-              {activeTasks ? `${activeTasks} active` : tasks.length}
-            </span>
+            <LogOut className="h-4 w-4" />
+            {t("nav.logOut")}
           </button>
-          {tasksOpen && <TaskList tasks={tasks} onClear={onClearTasks} compact />}
         </div>
-
-        {onLogout && (
-          <div className="mt-3 flex items-center gap-3 border-t border-border pt-3 pb-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <User className="h-4 w-4" />
-            </div>
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-              {username ?? t("nav.account")}
-            </span>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
-            >
-              <LogOut className="h-4 w-4" />
-              {t("nav.logOut")}
-            </button>
-          </div>
-        )}
+      )}
     </Drawer>
   );
 }

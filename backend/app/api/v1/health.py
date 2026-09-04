@@ -33,6 +33,7 @@ def _runtime_capabilities() -> dict[str, bool | str]:
     """Report optional image capabilities without importing heavy modules."""
     return {
         "image_variant": os.environ.get("PRINTSTASH_IMAGE_VARIANT", "source"),
+        "restart": bool(settings.restart_enabled),
         "browser": find_spec("patchright") is not None,
         "step": find_spec("cascadio") is not None,
         "thumbnails": all(
@@ -96,7 +97,13 @@ def _backup_probe() -> dict:
 
 def _storage_probe() -> dict:
     try:
-        return get_backend().health_probe()
+        backend = get_backend()
+        result = backend.health_probe()
+        result["provider"] = settings.storage_provider or backend.backend_name
+        result["tier"] = backend.capabilities.tier.value
+        result["warnings"] = list(backend.capabilities.warnings)
+        result["unverified_acknowledged"] = bool(settings.storage_allow_unverified)
+        return result
     except Exception as exc:
         return {
             "ok": False,
@@ -288,7 +295,18 @@ def health_details() -> dict:
 
 @router.get("/health", summary="Minimal liveness probe")
 def health() -> dict:
-    return {"status": "ok", "name": settings.app_name}
+    storage = _storage_probe()
+    return {
+        "status": "ok",
+        "name": settings.app_name,
+        "storage": {
+            "provider": storage.get("provider"),
+            "capabilities": storage.get("capabilities", {}),
+            "tier": storage.get("tier"),
+            "diagnostics": storage.get("diagnostics", {}),
+            "warnings": storage.get("warnings", []),
+        },
+    }
 
 
 @router.get(

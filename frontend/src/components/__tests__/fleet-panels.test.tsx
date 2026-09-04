@@ -1,58 +1,78 @@
+/*
+ * The two panels an operator actually drives a print farm from.
+ *
+ * Everything here is about the *call* the UI makes, because the state lives on the
+ * server. Reordering is the sharp case: the queue is ordered by an integer
+ * position, so moving a job up has to send the new position rather than a
+ * direction — a UI that sent "up" and let the server guess would reorder
+ * differently than the list it just animated. Both directions are asserted,
+ * since an off-by-one is symmetric and looks right from one end.
+ *
+ * Deleting confirms first; nothing else does. That asymmetry is deliberate and it
+ * is the only irreversible action in the panel.
+ *
+ * Drain is asserted in both directions too. Toggling it on is what an operator
+ * does before servicing a machine; failing to send `false` on resume leaves a
+ * printer permanently out of rotation with the UI showing it as available.
+ */
+
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FleetMaintenancePanel, FleetQueuePanel } from "@/components/fleet-panels";
-import type { MaintenanceLog, MaintenanceWindow, PrinterRead, PrintJobRead } from "@/types";
+import {
+  FleetMaintenancePanel,
+  FleetQueuePanel,
+  type FleetMaintenanceDeps,
+  type FleetQueueDeps,
+} from "@/components/fleet-panels";
+import { defaultQueryApi, QueryApiProvider, type QueryApi } from "@/lib/queries";
+import { queryKeys } from "@/lib/query-client";
+import type {
+  FleetSummary,
+  MaintenanceLog,
+  MaintenanceWindow,
+  PrinterRead,
+  PrintJobRead,
+} from "@/types";
 
-const {
-  cancelFleetJob,
-  updateFleetJob,
-  retryFleetJob,
-  updatePrinterRouting,
-  createMaintenanceWindow,
-  createMaintenanceLog,
-  listMaintenanceWindows,
-  listMaintenanceLog,
-  deleteMaintenanceWindow,
-  deleteMaintenanceLog,
-} = vi.hoisted(() => ({
-  cancelFleetJob: vi.fn(),
-  updateFleetJob: vi.fn(),
-  retryFleetJob: vi.fn(),
-  updatePrinterRouting: vi.fn(),
-  createMaintenanceWindow: vi.fn(),
-  createMaintenanceLog: vi.fn(),
-  listMaintenanceWindows: vi.fn(),
-  listMaintenanceLog: vi.fn(),
-  deleteMaintenanceWindow: vi.fn(),
-  deleteMaintenanceLog: vi.fn(),
-}));
+// Both panels take their fleet mutations through an optional `deps` prop, so
+// those are stubbed by passing them in. The queue panel's reads are the real
+// `useFleetQueue`/`useFleetSummary` hooks, driven by the pre-seeded
+// `QueryClient` cache `renderQueuePanel` renders them under.
+// Toasts are left as the real thing — sonner is happy without a mounted
+// `<Toaster />` and nothing here asserts on them.
+const deleteJob = vi.fn<FleetQueueDeps["deleteJob"]>();
+const updateJob = vi.fn<FleetQueueDeps["updateJob"]>();
+const retryJob = vi.fn<FleetQueueDeps["retryJob"]>();
+const decideOperatorGate = vi.fn<FleetQueueDeps["decideOperatorGate"]>();
 
-vi.mock("@/lib/api", () => ({
-  cancelFleetJob,
-  updateFleetJob,
-  retryFleetJob,
-  updatePrinterRouting,
-  createMaintenanceWindow,
-  createMaintenanceLog,
-  listMaintenanceWindows,
-  listMaintenanceLog,
-  deleteMaintenanceWindow,
-  deleteMaintenanceLog,
-}));
+const queueDeps: FleetQueueDeps = {
+  deleteJob,
+  updateJob,
+  retryJob,
+  decideOperatorGate,
+};
 
-const mockUseFleetQueue = vi.fn<() => { data: PrintJobRead[]; isLoading: boolean; refetch: () => void }>();
-const mockUseFleetSummary = vi.fn<() => { data: unknown; refetch: () => void }>();
-vi.mock("@/lib/queries", () => ({
-  useFleetQueue: () => mockUseFleetQueue(),
-  useFleetSummary: () => mockUseFleetSummary(),
-}));
+const listWindows = vi.fn<FleetMaintenanceDeps["listWindows"]>();
+const listLog = vi.fn<FleetMaintenanceDeps["listLog"]>();
+const createWindow = vi.fn<FleetMaintenanceDeps["createWindow"]>();
+const createLog = vi.fn<FleetMaintenanceDeps["createLog"]>();
+const deleteWindow = vi.fn<FleetMaintenanceDeps["deleteWindow"]>();
+const deleteLog = vi.fn<FleetMaintenanceDeps["deleteLog"]>();
+const updateRouting = vi.fn<FleetMaintenanceDeps["updateRouting"]>();
 
-vi.mock("@/lib/toast", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}));
+const maintenanceDeps: FleetMaintenanceDeps = {
+  listWindows,
+  listLog,
+  createWindow,
+  createLog,
+  deleteWindow,
+  deleteLog,
+  updateRouting,
+};
 
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   return {
@@ -72,6 +92,7 @@ function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
       can_list_files: true,
       can_send_gcode: true,
       can_measure_consumption: true,
+      accepted_print_formats: ["gcode_text"],
       support_level: "stable",
       support_notes: [],
       unsupported_actions: [],
@@ -132,30 +153,98 @@ function makeJob(overrides: Partial<PrintJobRead> = {}): PrintJobRead {
   };
 }
 
+function makeSummary(overrides: Partial<FleetSummary> = {}): FleetSummary {
+  return {
+    total_printers: 0,
+    queued_jobs: 0,
+    active_jobs: 0,
+    draining_printers: 0,
+    maintenance_printers: 0,
+    attention_jobs: 0,
+    ...overrides,
+  };
+}
+
+function makeWindow(overrides: Partial<MaintenanceWindow> = {}): MaintenanceWindow {
+  return {
+    id: 1,
+    printer_id: 1,
+    starts_at: "2026-08-01T09:00:00Z",
+    ends_at: "2026-08-01T11:00:00Z",
+    reason: "Nozzle swap",
+    created_at: "2026-07-15T00:00:00Z",
+    updated_at: "2026-07-15T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeLog(overrides: Partial<MaintenanceLog> = {}): MaintenanceLog {
+  return {
+    id: 1,
+    printer_id: 1,
+    performed_at: "2026-07-15T00:00:00Z",
+    category: "belt",
+    note: "Tensioned X belt",
+    counter_value: null,
+    counter_unit: null,
+    created_at: "2026-07-15T00:00:00Z",
+    updated_at: "2026-07-15T00:00:00Z",
+    ...overrides,
+  };
+}
+
+/** FleetQueuePanel's history window is part of the fleet-queue query key. */
+const FLEET_QUEUE_HISTORY_LIMIT = 20;
+
+/**
+ * Renders the queue panel over its real query hooks: the cache is seeded with
+ * the given jobs and summary and held stale-free, so the first render already
+ * has data and nothing falls back to the network. `QueryApiProvider` keeps the
+ * `refetch()` the panel fires after a mutation resolving to the same data.
+ */
+function renderQueuePanel(
+  seed: { printers?: PrinterRead[]; jobs?: PrintJobRead[]; summary?: FleetSummary } = {},
+) {
+  const jobs = seed.jobs ?? [];
+  const summary = seed.summary ?? makeSummary();
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false },
+    },
+  });
+  client.setQueryData([...queryKeys.fleetQueue, FLEET_QUEUE_HISTORY_LIMIT], jobs);
+  client.setQueryData(queryKeys.fleetSummary, summary);
+  const api: QueryApi = {
+    ...defaultQueryApi,
+    listFleetQueue: () => Promise.resolve(jobs),
+    getFleetSummary: () => Promise.resolve(summary),
+  };
+
+  return render(
+    <QueryApiProvider value={api}>
+      <QueryClientProvider client={client}>
+        <FleetQueuePanel printers={seed.printers ?? [makePrinter()]} deps={queueDeps} />
+      </QueryClientProvider>
+    </QueryApiProvider>,
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  mockUseFleetQueue.mockReturnValue({ data: [], isLoading: false, refetch: vi.fn() });
-  mockUseFleetSummary.mockReturnValue({
-    data: { queued_jobs: 0, active_jobs: 0, attention_jobs: 0, draining_printers: 0 },
-    refetch: vi.fn(),
-  });
-  listMaintenanceWindows.mockResolvedValue([]);
-  listMaintenanceLog.mockResolvedValue([]);
+  listWindows.mockResolvedValue([]);
+  listLog.mockResolvedValue([]);
 });
 
 describe("FleetQueuePanel", () => {
   it("renders queued, active, and recent jobs grouped into sections", () => {
-    mockUseFleetQueue.mockReturnValue({
-      data: [
+    renderQueuePanel({
+      jobs: [
         makeJob({ id: 1, state: "queued", queue_position: 1, remote_filename: "first.gcode" }),
         makeJob({ id: 2, state: "queued", queue_position: 2, remote_filename: "second.gcode" }),
         makeJob({ id: 3, state: "printing", remote_filename: "active.gcode" }),
         makeJob({ id: 4, state: "completed", remote_filename: "done.gcode" }),
       ],
-      isLoading: false,
-      refetch: vi.fn(),
     });
-    render(<FleetQueuePanel printers={[makePrinter()]} />);
 
     expect(screen.getByRole("heading", { name: "Queued" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Active" })).toBeInTheDocument();
@@ -166,91 +255,128 @@ describe("FleetQueuePanel", () => {
   });
 
   it("shows the empty state when there are no jobs", () => {
-    render(<FleetQueuePanel printers={[]} />);
+    renderQueuePanel({ printers: [] });
     expect(screen.getByText("No queued print jobs")).toBeInTheDocument();
   });
 
   it("moving a queued job down calls updateFleetJob with the new queue position", async () => {
-    updateFleetJob.mockResolvedValue({});
-    mockUseFleetQueue.mockReturnValue({
-      data: [
+    updateJob.mockResolvedValue(makeJob());
+    renderQueuePanel({
+      jobs: [
         makeJob({ id: 1, state: "queued", queue_position: 1, remote_filename: "first.gcode" }),
         makeJob({ id: 2, state: "queued", queue_position: 2, remote_filename: "second.gcode" }),
       ],
-      isLoading: false,
-      refetch: vi.fn(),
     });
-    render(<FleetQueuePanel printers={[makePrinter()]} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Move first.gcode down" }));
 
-    await waitFor(() => expect(updateFleetJob).toHaveBeenCalledWith(1, { queue_position: 2 }));
+    await waitFor(() => expect(updateJob).toHaveBeenCalledWith(1, { queue_position: 2 }));
   });
 
   it("moving a queued job up calls updateFleetJob with the new queue position", async () => {
-    updateFleetJob.mockResolvedValue({});
-    mockUseFleetQueue.mockReturnValue({
-      data: [
+    updateJob.mockResolvedValue(makeJob());
+    renderQueuePanel({
+      jobs: [
         makeJob({ id: 1, state: "queued", queue_position: 1, remote_filename: "first.gcode" }),
         makeJob({ id: 2, state: "queued", queue_position: 2, remote_filename: "second.gcode" }),
       ],
-      isLoading: false,
-      refetch: vi.fn(),
     });
-    render(<FleetQueuePanel printers={[makePrinter()]} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Move second.gcode up" }));
 
-    await waitFor(() => expect(updateFleetJob).toHaveBeenCalledWith(2, { queue_position: 1 }));
+    await waitFor(() => expect(updateJob).toHaveBeenCalledWith(2, { queue_position: 1 }));
   });
 
-  it("cancelling a queued job confirms then calls cancelFleetJob", async () => {
-    cancelFleetJob.mockResolvedValue(undefined);
-    mockUseFleetQueue.mockReturnValue({
-      data: [makeJob({ id: 5, state: "queued", queue_position: 1, remote_filename: "cancel-me.gcode" })],
-      isLoading: false,
-      refetch: vi.fn(),
+  it("deleting a queued job confirms then calls deleteFleetJob", async () => {
+    deleteJob.mockResolvedValue(undefined);
+    renderQueuePanel({
+      jobs: [
+        makeJob({ id: 5, state: "queued", queue_position: 1, remote_filename: "cancel-me.gcode" }),
+      ],
     });
-    render(<FleetQueuePanel printers={[makePrinter()]} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Cancel cancel-me.gcode" }));
-    await userEvent.click(screen.getByRole("button", { name: "Cancel job" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete cancel-me.gcode" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete job" }));
 
-    await waitFor(() => expect(cancelFleetJob).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith(5));
+  });
+
+  it("edits routing, priority, and position for a queued job", async () => {
+    updateJob.mockResolvedValue(makeJob());
+    renderQueuePanel({
+      jobs: [
+        makeJob({
+          id: 7,
+          remote_filename: "edit-me.gcode",
+          updated_at: "2026-07-15T00:00:00Z",
+        }),
+      ],
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit edit-me.gcode" }));
+    const dialog = screen.getByRole("dialog", { name: "Edit queue job" });
+    await userEvent.selectOptions(within(dialog).getByLabelText("Routing"), "manual");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Printer"), "1");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Priority"), "rush");
+    await userEvent.clear(within(dialog).getByLabelText("Queue position"));
+    await userEvent.type(within(dialog).getByLabelText("Queue position"), "3");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(updateJob).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          strategy: "manual",
+          printer_id: 1,
+          priority: "rush",
+          queue_position: 3,
+          expected_updated_at: "2026-07-15T00:00:00Z",
+        }),
+      ),
+    );
   });
 
   it("retrying a failed retryable job calls retryFleetJob", async () => {
-    retryFleetJob.mockResolvedValue({});
-    mockUseFleetQueue.mockReturnValue({
-      data: [makeJob({ id: 9, state: "failed", retryable: true, remote_filename: "retry-me.gcode" })],
-      isLoading: false,
-      refetch: vi.fn(),
+    retryJob.mockResolvedValue(makeJob({ id: 9, state: "queued" }));
+    renderQueuePanel({
+      jobs: [
+        makeJob({ id: 9, state: "failed", retryable: true, remote_filename: "retry-me.gcode" }),
+      ],
     });
-    render(<FleetQueuePanel printers={[makePrinter()]} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
 
-    await waitFor(() => expect(retryFleetJob).toHaveBeenCalledWith(9));
+    await waitFor(() => expect(retryJob).toHaveBeenCalledWith(9));
   });
 });
 
 describe("FleetMaintenancePanel", () => {
   it("shows the empty state with no printers", () => {
-    render(<FleetMaintenancePanel printers={[]} onPrintersChanged={vi.fn()} />);
+    render(
+      <FleetMaintenancePanel
+        printers={[]}
+        onPrintersChanged={vi.fn<() => void>()}
+        deps={maintenanceDeps}
+      />,
+    );
     expect(screen.getByText("No printers to maintain")).toBeInTheDocument();
   });
 
   it("toggling soft drain calls updatePrinterRouting with drain_mode true", async () => {
-    updatePrinterRouting.mockResolvedValue({});
-    const onPrintersChanged = vi.fn();
+    updateRouting.mockResolvedValue({});
+    const onPrintersChanged = vi.fn<() => void>();
     render(
-      <FleetMaintenancePanel printers={[makePrinter({ drain_mode: false })]} onPrintersChanged={onPrintersChanged} />,
+      <FleetMaintenancePanel
+        printers={[makePrinter({ drain_mode: false })]}
+        onPrintersChanged={onPrintersChanged}
+        deps={maintenanceDeps}
+      />,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Soft drain" }));
 
     await waitFor(() =>
-      expect(updatePrinterRouting).toHaveBeenCalledWith(1, {
+      expect(updateRouting).toHaveBeenCalledWith(1, {
         drain_mode: true,
         drain_reason: "Manual soft drain",
       }),
@@ -259,24 +385,34 @@ describe("FleetMaintenancePanel", () => {
   });
 
   it("resuming a drained printer calls updatePrinterRouting with drain_mode false", async () => {
-    updatePrinterRouting.mockResolvedValue({});
+    updateRouting.mockResolvedValue({});
     render(
       <FleetMaintenancePanel
         printers={[makePrinter({ drain_mode: true, drain_reason: "Nozzle swap" })]}
-        onPrintersChanged={vi.fn()}
+        onPrintersChanged={vi.fn<() => void>()}
+        deps={maintenanceDeps}
       />,
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Resume routing" }));
 
     await waitFor(() =>
-      expect(updatePrinterRouting).toHaveBeenCalledWith(1, { drain_mode: false, drain_reason: null }),
+      expect(updateRouting).toHaveBeenCalledWith(1, {
+        drain_mode: false,
+        drain_reason: null,
+      }),
     );
   });
 
   it("scheduling a maintenance window calls createMaintenanceWindow with the entered fields", async () => {
-    createMaintenanceWindow.mockResolvedValue({} as MaintenanceWindow);
-    render(<FleetMaintenancePanel printers={[makePrinter()]} onPrintersChanged={vi.fn()} />);
+    createWindow.mockResolvedValue(makeWindow());
+    render(
+      <FleetMaintenancePanel
+        printers={[makePrinter()]}
+        onPrintersChanged={vi.fn<() => void>()}
+        deps={maintenanceDeps}
+      />,
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "Schedule" }));
     const dialog = screen.getByRole("dialog", { name: "Schedule maintenance" });
@@ -286,7 +422,7 @@ describe("FleetMaintenancePanel", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(createMaintenanceWindow).toHaveBeenCalledWith(
+      expect(createWindow).toHaveBeenCalledWith(
         1,
         expect.objectContaining({ reason: "Nozzle swap" }),
       ),
@@ -294,8 +430,14 @@ describe("FleetMaintenancePanel", () => {
   });
 
   it("logging maintenance calls createMaintenanceLog with the category and note", async () => {
-    createMaintenanceLog.mockResolvedValue({} as MaintenanceLog);
-    render(<FleetMaintenancePanel printers={[makePrinter()]} onPrintersChanged={vi.fn()} />);
+    createLog.mockResolvedValue(makeLog());
+    render(
+      <FleetMaintenancePanel
+        printers={[makePrinter()]}
+        onPrintersChanged={vi.fn<() => void>()}
+        deps={maintenanceDeps}
+      />,
+    );
 
     await userEvent.click(screen.getByRole("button", { name: "Log" }));
     const dialog = screen.getByRole("dialog", { name: "Log maintenance" });
@@ -305,7 +447,10 @@ describe("FleetMaintenancePanel", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(createMaintenanceLog).toHaveBeenCalledWith(1, { category: "belt", note: "Tensioned X belt" }),
+      expect(createLog).toHaveBeenCalledWith(1, {
+        category: "belt",
+        note: "Tensioned X belt",
+      }),
     );
   });
 });

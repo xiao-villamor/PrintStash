@@ -1,0 +1,8 @@
+{
+  "data": {
+    "print": {
+      "name": "No identity",
+      "stls": [{"id": "file-7", "name": "cube.stl", "fileSize": 123}]
+    }
+  }
+}

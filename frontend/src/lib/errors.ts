@@ -34,26 +34,29 @@ export class ApiError extends Error {
 }
 
 /**
+ * Read the message out of a caught value: an Error carries one, and code (or a
+ * rejected promise) may hand over a bare string instead.
+ */
+function thrownMessage(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
+  // oxlint-disable-next-line anti-slop/no-runtime-typeof -- this helper is the boundary: `throw`/`reject` accept any JS value, so there is no earlier point at which a bare string message could have been decoded.
+  if (typeof cause === "string") return cause;
+  return "Unknown error";
+}
+
+/**
  * Parse a caught error value into an ApiError.
  * Handles the message format produced by ``handleResponse`` and ``expectOk``:
  * ``"HTTP <status>: <body>"`` where ``<body>`` is a JSON string from FastAPI.
  */
-export function parseApiError(raw: unknown): ApiError {
-  if (raw instanceof ApiError) return raw;
+export function parseApiError(cause: unknown): ApiError {
+  if (cause instanceof ApiError) return cause;
 
-  if (
-    raw instanceof TypeError ||
-    (raw instanceof Error && raw.name === "AbortError")
-  ) {
-    return new ApiError(0, "network_unreachable", raw.message);
+  if (cause instanceof TypeError || (cause instanceof Error && cause.name === "AbortError")) {
+    return new ApiError(0, "network_unreachable", cause.message);
   }
 
-  const message =
-    raw instanceof Error
-      ? raw.message
-      : typeof raw === "string"
-        ? raw
-        : "Unknown error";
+  const message = thrownMessage(cause);
 
   const match = message.match(/^HTTP\s+(\d{3}):\s*([\s\S]+)$/);
   if (!match) {
@@ -70,6 +73,7 @@ export function parseApiError(raw: unknown): ApiError {
 
   try {
     const parsed = JSON.parse(body);
+    // oxlint-disable-next-line anti-slop/no-runtime-typeof -- FastAPI puts a string code in `detail` for coded errors but a list of field objects for 422 validation errors; only the string form is a detail code, and this line is where that body gets decoded.
     const code = typeof parsed?.detail === "string" ? parsed.detail : String(status);
     return new ApiError(status, code, body);
   } catch {
@@ -78,7 +82,7 @@ export function parseApiError(raw: unknown): ApiError {
 }
 
 /** Human-readable error messages keyed by server detail codes. */
-const ERROR_MESSAGES: Record<string, string> = {
+const ERROR_MESSAGES = {
   // Auth
   invalid_api_key_or_token: "Authentication failed. Sign in again.",
   invalid_credentials: "Invalid username or password.",
@@ -94,6 +98,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   unsupported_file_type: "Unsupported file type.",
   file_too_large: "File exceeds the upload size limit.",
   upload_too_large: "File exceeds the upload size limit.",
+  // The backstop, not the upload limit: `BodyLimitMiddleware` bounds the whole
+  // request — which sits above the per-file cap — so a merely-large file gets the
+  // specific `upload_too_large` above and only a runaway body lands here.
+  request_too_large: "Request exceeds the size limit.",
   no_importable_files: "No importable 3D files were found.",
   no_entries_selected: "Select at least one file to import.",
   // URL import
@@ -117,9 +125,13 @@ const ERROR_MESSAGES: Record<string, string> = {
   printables_blocked:
     "Printables blocked the request. Try again later or use a direct download link.",
   makerworld_blocked:
-    "MakerWorld blocked the request. Connect MakerWorld under Settings → Imports, or use a direct download link.",
+    "MakerWorld blocked the browser request. Sign in on the model page and try the extension again.",
   makerworld_login_required:
-    "MakerWorld requires you to be logged in to download this model. Connect MakerWorld under Settings → Imports and try again.",
+    "MakerWorld requires you to be signed in on the model page before using the extension.",
+  makerworld_extension_required:
+    "MakerWorld imports must be sent from the PrintStash browser extension.",
+  makerworld_model_page_required:
+    "Open an individual MakerWorld model page before using the browser extension.",
   // MakerWorld login (Settings → Imports)
   missing_credentials: "Enter your MakerWorld email and password.",
   invalid_code: "That verification code wasn't accepted. Try again.",
@@ -154,25 +166,39 @@ const ERROR_MESSAGES: Record<string, string> = {
   users_already_exist: "A user account already exists in this vault.",
   data_dir_not_writable: "Cannot write to the data directory. Check filesystem permissions.",
   thumb_dir_not_writable: "Cannot write to the thumbnail directory. Check filesystem permissions.",
+  gdrive_transport_unavailable:
+    "Google Drive isn't available in this server image. Upgrade or rebuild the full image, then try again.",
+  storage_connection_probe_failed:
+    "Couldn't reach the remote storage. Check its credentials and connection settings, then try again.",
+  backup_destination_required: "Select at least one available destination for this backup.",
+  backup_all_destinations_failed:
+    "The backup couldn't be saved to any selected destination. Check each destination and try again.",
+  backup_remote_delete_unverified:
+    "This remote backup changed or couldn't be verified, so it was not deleted.",
   // General
   duplicate_slug: "An item with that name already exists.",
-  network_unreachable:
-    "Couldn't reach the server. Check that PrintStash is running and try again.",
+  network_unreachable: "Couldn't reach the server. Check that PrintStash is running and try again.",
   unknown:
     "Something went wrong reaching the server. Check that PrintStash is running and try again.",
-};
+} satisfies Record<string, string>;
+
+/** A server detail code the vault ships copy for. */
+type KnownErrorCode = keyof typeof ERROR_MESSAGES;
+
+function isKnownErrorCode(code: string): code is KnownErrorCode {
+  return Object.hasOwn(ERROR_MESSAGES, code);
+}
 
 /** Return a user-presentable message for a given server detail code. */
 export function getErrorMessage(code: string): string {
-  const message = ERROR_MESSAGES[code];
-  if (message) return message;
+  if (isKnownErrorCode(code)) return ERROR_MESSAGES[code];
   const humanized = code.replace(/_/g, " ").trim();
   if (!humanized) return ERROR_MESSAGES.unknown;
   return `${humanized.charAt(0).toUpperCase()}${humanized.slice(1)}.`;
 }
 
 /** Return a user-presentable message for any caught error. */
-export function userMessage(raw: unknown): string {
-  const api = parseApiError(raw);
+export function userMessage(cause: unknown): string {
+  const api = parseApiError(cause);
   return getErrorMessage(api.code);
 }

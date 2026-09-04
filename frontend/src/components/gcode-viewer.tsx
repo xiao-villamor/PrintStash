@@ -1,196 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import { AlertTriangle, Layers, Loader2 } from "lucide-react";
-import { authHeaders, getUrl } from "@/lib/api/request";
-import {
-  previewPixelRatio,
-  usePreviewPreferences,
-} from "@/lib/preview-preferences";
-
-// ---- Types ----
-
-interface LayerRange {
-  z: number;
-  vertexStart: number; // index into extrudePositions (in floats / 3)
-  vertexCount: number;
-}
-
-export interface ToolpathData {
-  extrudePositions: Float32Array;
-  extrudeColors: Float32Array;
-  travelPositions: Float32Array;
-  layerRanges: LayerRange[];
-  cumulativeVertices: Uint32Array; // cumulative vertex count per layer (length = layerRanges.length + 1)
-  totalLayers: number;
-  bounds: {
-    sizeX: number; sizeY: number; sizeZ: number;
-    maxDim: number;
-  };
-}
-
-// ---- G-code Parser ----
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  };
-  return [f(0), f(8), f(4)];
-}
-
-export function parseGcode(text: string): ToolpathData {
-  let cx = 0, cy = 0, cz = 0, ce = 0;
-  let relXYZ = false, relE = false;
-
-  const extrudeSegs: number[] = [];
-  const travelSegs: number[] = [];
-
-  const layerRanges: LayerRange[] = [];
-  let currentZ = -1;
-  let layerVertStart = 0; // in vertex units (floats/3)
-
-  let minX = Infinity, maxX = -Infinity;
-  let minY = Infinity, maxY = -Infinity;
-  let minZ = Infinity, maxZ = -Infinity;
-
-  const lines = text.split("\n");
-
-  for (const rawLine of lines) {
-    let line = rawLine;
-    const semi = line.indexOf(";");
-    if (semi >= 0) line = line.slice(0, semi);
-    line = line.trim();
-    if (!line) continue;
-
-    const tokens = line.split(/\s+/);
-    const op = tokens[0].toUpperCase();
-
-    if (op === "G90") { relXYZ = false; continue; }
-    if (op === "G91") { relXYZ = true; continue; }
-    if (op === "M82") { relE = false; continue; }
-    if (op === "M83") { relE = true; continue; }
-    if (op !== "G0" && op !== "G1" && op !== "G00" && op !== "G01") continue;
-
-    let nx = cx, ny = cy, nz = cz, ne = ce;
-    let hasE = false;
-
-    for (let i = 1; i < tokens.length; i++) {
-      const t = tokens[i].toUpperCase();
-      if (t.length < 2) continue;
-      const k = t[0];
-      const v = parseFloat(t.slice(1));
-      if (isNaN(v)) continue;
-      if (k === "X") nx = relXYZ ? cx + v : v;
-      else if (k === "Y") ny = relXYZ ? cy + v : v;
-      else if (k === "Z") nz = relXYZ ? cz + v : v;
-      else if (k === "E") { ne = relE ? ce + v : v; hasE = true; }
-    }
-
-    // Layer change: Z increases
-    if (nz > cz && nz > 0.01) {
-      if (currentZ >= 0) {
-        const vCount = extrudeSegs.length / 3 - layerVertStart;
-        layerRanges.push({ z: currentZ, vertexStart: layerVertStart, vertexCount: vCount });
-      }
-      currentZ = nz;
-      layerVertStart = extrudeSegs.length / 3;
-    } else if (currentZ < 0 && nz >= 0) {
-      currentZ = nz;
-    }
-
-    const isExtrusion = hasE && (relE ? ne > 0 : ne > ce + 0.0001);
-    if (hasE) ce = ne;
-
-    // Track bounds only from extrusion moves so start-gcode travel to X0 Y0 doesn't skew center
-    if (isExtrusion) {
-      if (nx < minX) minX = nx; if (nx > maxX) maxX = nx;
-      if (ny < minY) minY = ny; if (ny > maxY) maxY = ny;
-      if (nz < minZ) minZ = nz; if (nz > maxZ) maxZ = nz;
-    }
-
-    const dx = nx - cx, dy = ny - cy, dz = nz - cz;
-    if (dx !== 0 || dy !== 0 || dz !== 0) {
-      // Map: three.x = gcodeX, three.y = gcodeZ (height), three.z = -gcodeY
-      if (isExtrusion) {
-        extrudeSegs.push(cx, cz, -cy, nx, nz, -ny);
-      } else {
-        travelSegs.push(cx, cz, -cy, nx, nz, -ny);
-      }
-    }
-
-    cx = nx; cy = ny; cz = nz;
-  }
-
-  // Push final layer
-  if (currentZ >= 0) {
-    const vCount = extrudeSegs.length / 3 - layerVertStart;
-    layerRanges.push({ z: currentZ, vertexStart: layerVertStart, vertexCount: vCount });
-  }
-
-  if (minX === Infinity) { minX = 0; maxX = 200; minY = 0; maxY = 200; minZ = 0; maxZ = 20; }
-
-  // Center coordinates
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2; // gcode Y
-  const centerZ = (minZ + maxZ) / 2; // gcode Z (height)
-
-  const extArr = new Float32Array(extrudeSegs);
-  const travArr = new Float32Array(travelSegs);
-
-  for (let i = 0; i < extArr.length; i += 3) {
-    extArr[i] -= centerX;
-    extArr[i + 1] -= centerZ;
-    extArr[i + 2] += centerY; // three.z was -gcodeY, center is -(centerY), shift = +centerY
-  }
-  for (let i = 0; i < travArr.length; i += 3) {
-    travArr[i] -= centerX;
-    travArr[i + 1] -= centerZ;
-    travArr[i + 2] += centerY;
-  }
-
-  // Per-vertex colors based on Y (height) in three.js space
-  const totalVerts = extArr.length / 3;
-  const colArr = new Float32Array(totalVerts * 3);
-  const heightRange = maxZ - minZ || 1;
-
-  for (let vi = 0; vi < totalVerts; vi++) {
-    const threeY = extArr[vi * 3 + 1]; // centered, three.y = gcodeZ - centerZ
-    const gcodeZ = threeY + centerZ;
-    const t = Math.max(0, Math.min(1, (gcodeZ - minZ) / heightRange));
-    // Blue (240°) at bottom → red (0°) at top
-    const hue = (1 - t) * 240;
-    const [r, g, b] = hslToRgb(hue, 0.9, 0.55);
-    colArr[vi * 3] = r;
-    colArr[vi * 3 + 1] = g;
-    colArr[vi * 3 + 2] = b;
-  }
-
-  // Cumulative vertex counts for layer slider
-  const cumulative = new Uint32Array(layerRanges.length + 1);
-  cumulative[0] = 0;
-  for (let i = 0; i < layerRanges.length; i++) {
-    cumulative[i + 1] = cumulative[i] + layerRanges[i].vertexCount;
-  }
-
-  const sizeX = maxX - minX;
-  const sizeY = maxY - minY;
-  const sizeZ = maxZ - minZ;
-
-  return {
-    extrudePositions: extArr,
-    extrudeColors: colArr,
-    travelPositions: travArr,
-    layerRanges,
-    cumulativeVertices: cumulative,
-    totalLayers: layerRanges.length,
-    bounds: { sizeX, sizeY, sizeZ, maxDim: Math.max(sizeX, sizeY, sizeZ) || 1 },
-  };
-}
+import { getAuthenticatedText } from "@/lib/api/request";
+import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
+import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
+import { parseGcode, type ToolpathData } from "@/lib/gcode";
 
 // ---- Three.js Scene ----
 
@@ -230,15 +48,21 @@ function GcodeScene({
   );
 
   // Stable LineSegments objects — must be memoized so <primitive> identity is stable across renders
-  const extrudeLines = useMemo(() => new THREE.LineSegments(extrudeGeo, extrudeMat), [extrudeGeo, extrudeMat]);
-  const travelLines  = useMemo(() => new THREE.LineSegments(travelGeo,  travelMat),  [travelGeo,  travelMat]);
+  const extrudeLines = useMemo(
+    () => new THREE.LineSegments(extrudeGeo, extrudeMat),
+    [extrudeGeo, extrudeMat],
+  );
+  const travelLines = useMemo(
+    () => new THREE.LineSegments(travelGeo, travelMat),
+    [travelGeo, travelMat],
+  );
 
   // Bed geometry (actual mm dimensions — gcode coords are real mm)
   const bedGeo = useMemo(() => {
     if (!printerBedMm) return null;
     return new THREE.PlaneGeometry(printerBedMm.x, printerBedMm.y);
   }, [printerBedMm]);
-  const bedEdgesGeo = useMemo(() => bedGeo ? new THREE.EdgesGeometry(bedGeo) : null, [bedGeo]);
+  const bedEdgesGeo = useMemo(() => (bedGeo ? new THREE.EdgesGeometry(bedGeo) : null), [bedGeo]);
 
   // Update drawRange directly on the stable geometry — no ref gymnastics needed
   useEffect(() => {
@@ -254,12 +78,13 @@ function GcodeScene({
       orbitRef.current.target.set(0, 0, 0);
       orbitRef.current.update();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  const gridHalfSize = showBed && printerBedMm
-    ? Math.max(printerBedMm.x, printerBedMm.y) * 0.6
-    : (Math.max(data.bounds.sizeX, data.bounds.sizeY) / 2) * 1.1 || 10;
+  const gridHalfSize =
+    showBed && printerBedMm
+      ? Math.max(printerBedMm.x, printerBedMm.y) * 0.6
+      : (Math.max(data.bounds.sizeX, data.bounds.sizeY) / 2) * 1.1 || 10;
   const floorY = -(data.bounds.sizeZ / 2);
 
   return (
@@ -273,15 +98,18 @@ function GcodeScene({
       />
       <ambientLight intensity={0.8} />
       <primitive object={extrudeLines} />
-      {showTravel && data.travelPositions.length > 0 && (
-        <primitive object={travelLines} />
-      )}
+      {showTravel && data.travelPositions.length > 0 && <primitive object={travelLines} />}
 
       {/* Bed platform (only in bed-fit mode) */}
       {showBed && bedGeo && bedEdgesGeo && printerBedMm && (
         <group position={[0, floorY - 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <mesh geometry={bedGeo}>
-            <meshStandardMaterial color="#1e3a5f" transparent opacity={0.15} side={THREE.DoubleSide} />
+            <meshStandardMaterial
+              color="#1e3a5f"
+              transparent
+              opacity={0.15}
+              side={THREE.DoubleSide}
+            />
           </mesh>
           <lineSegments geometry={bedEdgesGeo}>
             <lineBasicMaterial color="#3b82f6" transparent opacity={0.8} />
@@ -308,22 +136,26 @@ function GcodeScene({
 
 // ---- Error Boundary ----
 
-interface EBState { hasError: boolean }
+interface EBState {
+  hasError: boolean;
+}
 class GcodeErrorBoundary extends React.Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; renderFailed: string },
   EBState
 > {
-  constructor(props: { children: React.ReactNode }) {
+  constructor(props: { children: React.ReactNode; renderFailed: string }) {
     super(props);
     this.state = { hasError: false };
   }
-  static getDerivedStateFromError(): EBState { return { hasError: true }; }
+  static getDerivedStateFromError(): EBState {
+    return { hasError: true };
+  }
   render() {
     if (this.state.hasError) {
       return (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
           <AlertTriangle className="h-8 w-8" />
-          <span className="font-mono text-xs">G-code render failed</span>
+          <span className="font-mono text-xs">{this.props.renderFailed}</span>
         </div>
       );
     }
@@ -331,66 +163,128 @@ class GcodeErrorBoundary extends React.Component<
   }
 }
 
+class UnsupportedBinaryGcodeError extends Error {}
+
+function viewerCopy(
+  i18n: ReturnType<typeof useOptionalI18n>,
+  key: MessageKey,
+  fallback: string,
+  values?: Record<string, string>,
+): string {
+  const template = i18n?.t(key) ?? fallback;
+  return Object.entries(values ?? {}).reduce(
+    (text, [name, value]) => text.replaceAll(`{${name}}`, value),
+    template,
+  );
+}
+
 // ---- Public Component ----
+
+interface CanvasRendererProps {
+  children: React.ReactNode;
+  className: string;
+  dpr: number;
+  gl: { preserveDrawingBuffer: boolean };
+}
+
+function DefaultCanvasRenderer({ children, className, dpr, gl }: CanvasRendererProps) {
+  return (
+    <Canvas className={className} dpr={dpr} gl={gl}>
+      {children}
+    </Canvas>
+  );
+}
+
+/** The outcome of one completed toolpath fetch, tagged with the url it was for. */
+interface LoadedToolpath {
+  url: string;
+  data: ToolpathData | null;
+  errorKind: "binary" | "load" | null;
+}
 
 export interface GcodeViewerProps {
   url: string;
   printerBedMm?: { x: number; y: number } | null;
   screenshotName?: string;
+  canvasRenderer?: ComponentType<CanvasRendererProps>;
 }
 
-export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
+export function GcodeViewer({ url, printerBedMm = null, canvasRenderer }: GcodeViewerProps) {
+  const i18n = useOptionalI18n();
   const previewPreferences = usePreviewPreferences();
-  const [data, setData] = useState<ToolpathData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const CanvasRenderer = canvasRenderer ?? DefaultCanvasRenderer;
+  // One state for the fetch that has actually completed, tagged with its url,
+  // so switching files derives "loading" during render instead of clearing the
+  // previous file's toolpath from an effect.
+  const [loaded, setLoaded] = useState<LoadedToolpath | null>(null);
   const [currentLayer, setCurrentLayer] = useState(0);
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    setError(null);
-    setData(null);
-    setCurrentLayer(0);
+  const current = loaded?.url === url ? loaded : null;
+  const loading = current === null;
+  const data = current?.data ?? null;
+  const errorKind = current?.errorKind ?? null;
 
-    fetch(getUrl(url), { headers: authHeaders() })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
+  useEffect(() => {
+    // A response for a file the viewer has already left must not be shown as
+    // this url's toolpath.
+    let live = true;
+
+    getAuthenticatedText(url)
       .then((text) => {
         // PrusaSlicer binary G-code (.bgcode) starts with the "GCDE" magic and
         // carries no plain-text toolpath — its moves are heatshrink-compressed.
         // Its metadata + thumbnail are indexed on the server, but there's
         // nothing here to rasterise, so show a notice instead of an empty plot.
         if (text.startsWith("GCDE")) {
-          throw new Error(
-            "Binary G-code (.bgcode) can't be previewed in the browser — download the file to open it in a slicer.",
-          );
+          throw new UnsupportedBinaryGcodeError();
         }
         const parsed = parseGcode(text);
-        setData(parsed);
+        if (!live) return;
+        setLoaded({ url, data: parsed, errorKind: null });
         setCurrentLayer(parsed.totalLayers - 1);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Failed to load G-code"))
-      .finally(() => setLoading(false));
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setLoaded({
+          url,
+          data: null,
+          errorKind: cause instanceof UnsupportedBinaryGcodeError ? "binary" : "load",
+        });
+      });
+
+    return () => {
+      live = false;
+    };
   }, [url]);
+
+  const loadingCopy = viewerCopy(i18n, "viewer.loadingToolpath", "Loading toolpath…");
+  const renderFailedCopy = viewerCopy(i18n, "viewer.renderFailed", "G-code render failed");
+  const errorCopy = viewerCopy(
+    i18n,
+    errorKind === "binary" ? "viewer.binaryUnsupported" : "viewer.loadFailed",
+    errorKind === "binary"
+      ? "Binary G-code (.bgcode) can't be previewed in the browser — download the file to open it in a slicer."
+      : "Unable to load the toolpath preview.",
+  );
+  const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData", "No toolpath data");
+  const noToolpathCopy = viewerCopy(i18n, "viewer.noToolpathFound", "No toolpath found in file");
 
   if (loading) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
         <Loader2 className="h-8 w-8 animate-spin" />
-        <span className="font-mono text-xs">Parsing G-code…</span>
+        <span className="font-mono text-xs">{loadingCopy}</span>
       </div>
     );
   }
 
-  if (error || !data) {
+  if (errorKind || !data) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
         <AlertTriangle className="h-8 w-8" />
-        <span className="font-mono text-xs">{error ?? "No toolpath data"}</span>
+        <span className="font-mono text-xs">{errorKind ? errorCopy : noDataCopy}</span>
       </div>
     );
   }
@@ -399,15 +293,15 @@ export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted-foreground">
         <Layers className="h-8 w-8 opacity-40" />
-        <span className="font-mono text-xs">No toolpath found in file</span>
+        <span className="font-mono text-xs">{noToolpathCopy}</span>
       </div>
     );
   }
 
   return (
     <div className="relative h-full w-full">
-      <GcodeErrorBoundary>
-        <Canvas
+      <GcodeErrorBoundary renderFailed={renderFailedCopy}>
+        <CanvasRenderer
           className="h-full w-full"
           dpr={previewPixelRatio(previewPreferences.previewQuality)}
           gl={{ preserveDrawingBuffer: true }}
@@ -419,7 +313,7 @@ export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
             showBed={showBed}
             printerBedMm={printerBedMm ?? null}
           />
-        </Canvas>
+        </CanvasRenderer>
       </GcodeErrorBoundary>
 
       {/* Layer controls overlay */}
@@ -427,37 +321,63 @@ export function GcodeViewer({ url, printerBedMm = null }: GcodeViewerProps) {
         <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-3 py-2 flex flex-col gap-1.5">
           <div className="flex items-center justify-between gap-2">
             <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              Layer {currentLayer + 1} / {data.totalLayers}
+              {viewerCopy(i18n, "viewer.layer", "Layer {current} / {total}", {
+                current: String(currentLayer + 1),
+                total: String(data.totalLayers),
+              })}
               {data.layerRanges[currentLayer] && (
-                <> · Z {data.layerRanges[currentLayer].z.toFixed(2)} mm</>
+                <>
+                  {" · "}
+                  {viewerCopy(i18n, "viewer.z", "Z {value} mm", {
+                    value: data.layerRanges[currentLayer].z.toFixed(2),
+                  })}
+                </>
               )}
             </span>
             <div className="flex items-center gap-1">
               <button
+                type="button"
                 onClick={() => setShowTravel((v) => !v)}
+                aria-pressed={showTravel}
+                aria-label={viewerCopy(
+                  i18n,
+                  showTravel ? "viewer.hideTravel" : "viewer.showTravel",
+                  showTravel ? "Hide travel moves" : "Show travel moves",
+                )}
                 className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                   showTravel
                     ? "border-primary text-primary bg-secondary-container"
                     : "border-outline-variant text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Travel
+                {viewerCopy(i18n, "viewer.travel", "Travel")}
               </button>
               {printerBedMm && (
                 <button
+                  type="button"
                   onClick={() => setShowBed((v) => !v)}
+                  aria-pressed={showBed}
+                  aria-label={viewerCopy(
+                    i18n,
+                    showBed ? "viewer.hideBed" : "viewer.showBed",
+                    showBed ? "Hide build plate" : "Show build plate",
+                  )}
                   className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
                     showBed
                       ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30"
                       : "border-outline-variant text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Bed {printerBedMm.x}×{printerBedMm.y}
+                  {viewerCopy(i18n, "viewer.bed", "Bed {x}×{y}", {
+                    x: String(printerBedMm.x),
+                    y: String(printerBedMm.y),
+                  })}
                 </button>
               )}
             </div>
           </div>
           <input
+            aria-label={viewerCopy(i18n, "viewer.currentLayer", "Current layer")}
             type="range"
             min={0}
             max={data.totalLayers - 1}

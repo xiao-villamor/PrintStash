@@ -31,7 +31,7 @@ services:
     ports:
       - "127.0.0.1:${PRINTSTASH_HTTP_PORT:-3000}:3000"
     environment:
-      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_UPLOAD_MB:-512}m
+      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_REQUEST_MB:-528}m
     networks:
       - printstash_net
     depends_on:
@@ -69,9 +69,6 @@ services:
       VAULT_S3_SECRET_KEY: ${VAULT_S3_SECRET_KEY:-}
       VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS: ${VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS:-900}
       VAULT_S3_MULTIPART_THRESHOLD_MB: ${VAULT_S3_MULTIPART_THRESHOLD_MB:-50}
-      VAULT_S3_LIFECYCLE_EXPIRATION_DAYS: ${VAULT_S3_LIFECYCLE_EXPIRATION_DAYS:-0}
-      VAULT_S3_LIFECYCLE_TRANSITION_DAYS: ${VAULT_S3_LIFECYCLE_TRANSITION_DAYS:-0}
-      VAULT_S3_TRANSITION_STORAGE_CLASS: ${VAULT_S3_TRANSITION_STORAGE_CLASS:-STANDARD_IA}
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:?set a strong VAULT_JWT_SECRET in .env}
       VAULT_SETUP_TOKEN: ${VAULT_SETUP_TOKEN:-}
       VAULT_SECRETS_KEY: ${VAULT_SECRETS_KEY:-}
@@ -99,6 +96,12 @@ services:
       VAULT_MEDIA_WORKER_TIMEOUT_SECONDS: ${VAULT_MEDIA_WORKER_TIMEOUT_SECONDS:-180}
       VAULT_SQLITE_SYNCHRONOUS: ${VAULT_SQLITE_SYNCHRONOUS:-NORMAL}
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      # Safe because this API service is supervised by restart: unless-stopped.
+      VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}
+      # Set these to the host uid/gid when using bind mounts. The image keeps
+      # the secure 10001:10001 defaults when they are omitted.
+      PUID: "${PUID:-10001}"
+      PGID: "${PGID:-10001}"
       TZ: UTC
       # Trust X-Forwarded-For only from your reverse proxy's address (uvicorn
       # --proxy-headers is already on). Set this to the proxy's IP/CIDR —

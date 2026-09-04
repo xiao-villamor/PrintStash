@@ -1,10 +1,5 @@
 import { getJson, sendAction, sendJson } from "@/lib/api/request";
-import {
-  PublicModelRead,
-  ShareLinkCreate,
-  ShareLinkCreated,
-  ShareLinkRead,
-} from "@/types";
+import { PublicModelRead, ShareLinkCreate, ShareLinkCreated, ShareLinkRead } from "@/types";
 
 // Public (unauthenticated) — used by the /share/:token page.
 export function getSharedModel(token: string): Promise<PublicModelRead> {
@@ -32,11 +27,7 @@ export function createModelShare(
   modelId: number,
   payload: ShareLinkCreate,
 ): Promise<ShareLinkCreated> {
-  return sendJson<ShareLinkCreated>(
-    `/api/v1/models/${modelId}/shares`,
-    "POST",
-    payload,
-  );
+  return sendJson<ShareLinkCreated>(`/api/v1/models/${modelId}/shares`, "POST", payload);
 }
 
 export function listModelShares(modelId: number): Promise<ShareLinkRead[]> {

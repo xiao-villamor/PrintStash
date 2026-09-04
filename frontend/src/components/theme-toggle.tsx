@@ -12,8 +12,10 @@ function applyTheme(theme: Theme) {
   root.classList.add("theme-transitioning");
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
-  const favicon = document.getElementById("app-favicon") as HTMLLinkElement | null;
-  if (favicon) {
+  // The pre-paint script in index.html appends the <link id="app-favicon">; the
+  // instanceof check is what proves it is a link before we retarget its href.
+  const favicon = document.getElementById("app-favicon");
+  if (favicon instanceof HTMLLinkElement) {
     favicon.href = theme === "dark" ? "/icon-dark.svg?v=2" : "/icon-light.svg?v=2";
   }
   const id = window.setTimeout(() => root.classList.remove("theme-transitioning"), 350);

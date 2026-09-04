@@ -1,20 +1,18 @@
 "use client";
 
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { FileText, Star } from "lucide-react";
+import { FileText, Star, Tags } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { getAssetUrl, starModel, unstarModel } from "@/lib/api";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { Localized } from "@/components/ui/localized";
-
-// MIME type carrying a dragged model's id, so collection drop targets can tell
-// an internal "move model" drag apart from an OS file-upload drag.
-export const MODEL_DND_MIME = "application/x-printstash-model";
+import { MODEL_DND_MIME } from "@/lib/model-dnd";
 
 // STL blobs already warmed this session (the /stl endpoint serves
 // Cache-Control'd responses, so a hover fetch lands in the HTTP cache and the
@@ -29,12 +27,19 @@ function warmStl(meshFileId: number | null) {
   });
 }
 import {
+  CARD_METRIC_STORAGE_KEY,
   CardMetricId,
   CardMetrics,
-  DEFAULT_CARD_METRICS,
   readCardMetrics,
 } from "@/lib/card-metrics";
 
+/** An optimistic star toggle, remembered against the server value it overrode. */
+interface StarOverride {
+  /** The `model.starred` this override was made against. */
+  base: boolean;
+  /** What the card shows for as long as the override stands. */
+  value: boolean;
+}
 
 function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -43,25 +48,45 @@ function formatTime(seconds: number): string {
   return `${minutes}m`;
 }
 
-const REVISION_CONFIG: Record<FileRevisionStatus, { label: string; classes: string }> = {
-  known_good: { label: "Known Good", classes: "bg-green-50 dark:bg-green-950/50 text-green-700 border-green-200 dark:border-green-800" },
-  needs_test: { label: "Needs Test", classes: "bg-amber-50 dark:bg-amber-950/50 text-amber-700 border-amber-200 dark:border-amber-800" },
-  failed:     { label: "Failed",     classes: "bg-red-50 dark:bg-red-950/50 text-red-700 border-red-200 dark:border-red-800" },
-  archived:   { label: "Archived",   classes: "bg-muted text-muted-foreground border-border" },
-};
+const REVISION_CONFIG = {
+  known_good: {
+    label: "Known Good",
+    classes:
+      "bg-green-50 dark:bg-green-950/50 text-green-700 border-green-200 dark:border-green-800",
+  },
+  needs_test: {
+    label: "Needs Test",
+    classes:
+      "bg-amber-50 dark:bg-amber-950/50 text-amber-700 border-amber-200 dark:border-amber-800",
+  },
+  failed: {
+    label: "Failed",
+    classes: "bg-red-50 dark:bg-red-950/50 text-red-700 border-red-200 dark:border-red-800",
+  },
+  archived: { label: "Archived", classes: "bg-muted text-muted-foreground border-border" },
+} satisfies Record<FileRevisionStatus, { label: string; classes: string }>;
 
-const METRIC_CONFIG: Record<CardMetricId, { abbr: string; getValue: (model: ModelListItem) => string }> = {
+const METRIC_CONFIG = {
   layer_height: {
     abbr: "LYR",
-    getValue: (m) => m.print_summary?.layer_height_mm != null ? `${m.print_summary.layer_height_mm.toFixed(2)} mm` : "—",
+    getValue: (m) =>
+      m.print_summary?.layer_height_mm != null
+        ? `${m.print_summary.layer_height_mm.toFixed(2)} mm`
+        : "—",
   },
   print_time: {
     abbr: "TIME",
-    getValue: (m) => m.print_summary?.estimated_time_s != null ? formatTime(m.print_summary.estimated_time_s) : "—",
+    getValue: (m) =>
+      m.print_summary?.estimated_time_s != null
+        ? formatTime(m.print_summary.estimated_time_s)
+        : "—",
   },
   filament_weight: {
     abbr: "WGT",
-    getValue: (m) => m.print_summary?.filament_weight_g != null ? `${Math.round(m.print_summary.filament_weight_g)} g` : "—",
+    getValue: (m) =>
+      m.print_summary?.filament_weight_g != null
+        ? `${Math.round(m.print_summary.filament_weight_g)} g`
+        : "—",
   },
   material: {
     abbr: "MAT",
@@ -75,9 +100,15 @@ const METRIC_CONFIG: Record<CardMetricId, { abbr: string; getValue: (model: Mode
     abbr: "FILES",
     getValue: (m) => `${m.file_count}`,
   },
-};
+} satisfies Record<CardMetricId, { abbr: string; getValue: (model: ModelListItem) => string }>;
 
-function RevisionBadge({ status, label }: { status: FileRevisionStatus | null | undefined; label?: string | null }) {
+function RevisionBadge({
+  status,
+  label,
+}: {
+  status: FileRevisionStatus | null | undefined;
+  label?: string | null;
+}) {
   if (!status) return null;
   const cfg = REVISION_CONFIG[status];
   const accessibleLabel = label
@@ -100,11 +131,21 @@ function RevisionBadge({ status, label }: { status: FileRevisionStatus | null | 
   );
 }
 
-function MetricCell({ id, model, isLast }: { id: CardMetricId; model: ModelListItem; isLast: boolean }) {
+function MetricCell({
+  id,
+  model,
+  isLast,
+}: {
+  id: CardMetricId;
+  model: ModelListItem;
+  isLast: boolean;
+}) {
   const cfg = METRIC_CONFIG[id];
   return (
     <div className={`py-2 px-1 text-center bg-muted/50 ${isLast ? "" : "border-r border-border"}`}>
-      <p className="text-3xs font-bold text-muted-foreground uppercase tracking-wider mb-0.5">{cfg.abbr}</p>
+      <p className="text-3xs font-bold text-muted-foreground uppercase tracking-wider mb-0.5">
+        {cfg.abbr}
+      </p>
       <p className="text-2xs font-bold text-foreground font-mono truncate">{cfg.getValue(model)}</p>
     </div>
   );
@@ -117,6 +158,7 @@ function ModelCardInner({
   selected = false,
   onToggleSelect,
   draggable = false,
+  onEditTags,
 }: {
   model: ModelListItem;
   metrics: CardMetrics;
@@ -124,10 +166,19 @@ function ModelCardInner({
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onEditTags?: (model: ModelListItem) => void;
 }) {
   const router = useRouter();
   const [dragging, setDragging] = useState(false);
-  const [starred, setStarred] = useState(model.starred);
+  // The card owns an optimistic star only until the server says otherwise: a
+  // fresh `model.starred` (list refetch, or the star toggled on the detail
+  // page) no longer matches `base` and supersedes the override, so nothing has
+  // to copy the prop into state.
+  const [starOverride, setStarOverride] = useState<StarOverride | null>(null);
+  const starred =
+    starOverride !== null && starOverride.base === model.starred
+      ? starOverride.value
+      : model.starred;
   const [starBusy, setStarBusy] = useState(false);
   const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
   // Lazy thumbnails used to snap in at full opacity the instant their bytes
@@ -137,18 +188,18 @@ function ModelCardInner({
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;
-
-  useEffect(() => setStarred(model.starred), [model.starred]);
+  const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
 
   async function toggleStar() {
     if (starBusy) return;
     const next = !starred;
-    setStarred(next);
+    setStarOverride({ base: model.starred, value: next });
     setStarBusy(true);
     try {
       await (next ? starModel(model.id) : unstarModel(model.id));
     } catch (error) {
-      setStarred(!next);
+      // `!next` is exactly what the card showed before this toggle.
+      setStarOverride({ base: model.starred, value: !next });
       toast.error(error);
     } finally {
       setStarBusy(false);
@@ -163,159 +214,190 @@ function ModelCardInner({
   }
 
   return (
-    <Localized><article
-      draggable={draggable}
-      onDragStart={
-        draggable
-          ? (e) => {
-              e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
-              e.dataTransfer.effectAllowed = "move";
-              setDragging(true);
-            }
-          : undefined
-      }
-      onDragEnd={() => setDragging(false)}
-      className={`animate-card-in group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
-        draggable ? "cursor-grab active:cursor-grabbing" : ""
-      } ${dragging ? "opacity-40" : ""} ${
-        selected
-          ? "border-primary ring-2 ring-primary-soft"
-          : "border-border hover:border-primary"
-      }`}
-      onMouseEnter={handleHover}
-      onTouchStart={handleHover}
-    >
-      {selectable && (
-        <div className="absolute left-2 top-2 z-10">
-          <Checkbox
-            checked={selected}
-            onChange={() => onToggleSelect?.(model.id)}
-            ariaLabel={`Select ${model.name}`}
-          />
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={(event) => { event.preventDefault(); event.stopPropagation(); void toggleStar(); }}
-        disabled={starBusy}
-        aria-label={starred ? `Remove ${model.name} from favorites` : `Add ${model.name} to favorites`}
-        className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
+    <Localized>
+      <article
+        draggable={draggable}
+        onDragStart={
+          draggable
+            ? (e) => {
+                e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
+                e.dataTransfer.effectAllowed = "move";
+                setDragging(true);
+              }
+            : undefined
+        }
+        onDragEnd={() => setDragging(false)}
+        className={`animate-card-in group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
+          draggable ? "cursor-grab active:cursor-grabbing" : ""
+        } ${dragging ? "opacity-40" : ""} ${
+          selected
+            ? "border-primary ring-2 ring-primary-soft"
+            : "border-border hover:border-primary"
+        }`}
+        onMouseEnter={handleHover}
+        onTouchStart={handleHover}
       >
-        <Star className={`h-4 w-4 ${starred ? "fill-current text-primary" : ""}`} />
-      </button>
-      <Link
-        href={`/models/${model.id}`}
-        draggable={false}
-        className="flex flex-col h-full overflow-hidden"
-        onClick={(e) => {
-          if (selectable) {
-            e.preventDefault();
-            onToggleSelect?.(model.id, e.shiftKey);
-          }
-        }}
-      >
-
-        {/* Thumbnail */}
-        <div className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0">
-          {thumb ? (
-            <img
-              alt={model.name}
-              draggable={false}
-              className={`w-full h-full object-cover transition-opacity duration-slow ease-out ${
-                thumbLoaded ? "opacity-90 group-hover:opacity-100" : "opacity-0"
-              }`}
-              src={thumb}
-              loading="lazy"
-              decoding="async"
-              onLoad={() => setThumbLoaded(true)}
-              // Cached images can finish before React attaches onLoad; catch that
-              // case so they don't stay stuck at opacity-0.
-              ref={(node) => {
-                if (node?.complete && node.naturalWidth > 0) setThumbLoaded(true);
-              }}
+        {selectable && (
+          <div className="absolute left-2 top-2 z-10">
+            <Checkbox
+              checked={selected}
+              onChange={() => onToggleSelect?.(model.id)}
+              ariaLabel={`Select ${model.name}`}
             />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <FileText className="h-10 w-10 text-muted-foreground/40" />
-            </div>
-          )}
-          {hasPrinter && (
-            <div className="absolute bottom-2 right-2">
-              <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
-                On printer
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Title + revision */}
-        <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
-          <h2 title={model.name} className="text-sm font-bold text-foreground uppercase tracking-tight line-clamp-2 leading-tight">
-            {model.name}
-          </h2>
-          <RevisionBadge
-            status={model.recommended_revision_status}
-            label={model.recommended_revision_label}
-          />
-        </div>
-
-        {/* Subtitle */}
-        {(ps?.slicer_name || hasPrinter || ps?.material_type) && (
-          <p className="px-3 pb-1 text-xs text-muted-foreground truncate">
-            {[printerPresence[0]?.printer_name, ps?.material_type, ps?.slicer_name]
-              .filter(Boolean)
-              .join(" · ")}
-          </p>
+          </div>
         )}
-
-        {/* Configurable metrics grid */}
-        <div className="px-3 pb-2">
-          <div className="grid grid-cols-3 border border-border rounded-sm overflow-hidden">
-            {metrics.map((id, i) => (
-              <MetricCell key={id} id={id} model={model} isLast={i === 2} />
-            ))}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void toggleStar();
+          }}
+          disabled={starBusy}
+          aria-label={
+            starred ? `Remove ${model.name} from favorites` : `Add ${model.name} to favorites`
+          }
+          className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
+        >
+          <Star className={`h-4 w-4 ${starred ? "fill-current text-primary" : ""}`} />
+        </button>
+        {!selectable && canEditTags && onEditTags && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onEditTags(model);
+            }}
+            aria-label={
+              model.tags.length > 0 ? `Edit tags for ${model.name}` : `Add tags to ${model.name}`
+            }
+            title={model.tags.length > 0 ? "Edit tags" : "Add tags"}
+            className="absolute right-2 top-12 z-10 bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
+          >
+            <Tags className="h-4 w-4" />
+          </Button>
+        )}
+        <Link
+          href={`/models/${model.id}`}
+          draggable={false}
+          className="flex flex-col h-full overflow-hidden"
+          onClick={(e) => {
+            if (selectable) {
+              e.preventDefault();
+              onToggleSelect?.(model.id, e.shiftKey);
+            }
+          }}
+        >
+          {/* Thumbnail */}
+          <div className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0">
+            {thumb ? (
+              <img
+                alt={model.name}
+                draggable={false}
+                className={`w-full h-full object-cover transition-opacity duration-slow ease-out ${
+                  thumbLoaded ? "opacity-90 group-hover:opacity-100" : "opacity-0"
+                }`}
+                src={thumb}
+                loading="lazy"
+                decoding="async"
+                onLoad={() => setThumbLoaded(true)}
+                // Cached images can finish before React attaches onLoad; catch that
+                // case so they don't stay stuck at opacity-0.
+                ref={(node) => {
+                  if (node?.complete && node.naturalWidth > 0) setThumbLoaded(true);
+                }}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <FileText className="h-10 w-10 text-muted-foreground/40" />
+              </div>
+            )}
+            {hasPrinter && (
+              <div className="absolute bottom-2 right-2">
+                <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
+                  On printer
+                </span>
+              </div>
+            )}
           </div>
-        </div>
 
-        {/* Footer chips */}
-        <div className="px-3 pb-3 mt-auto flex items-end justify-between gap-2 border-t border-border pt-2">
-          <div className="flex flex-wrap gap-1.5 min-w-0">
-            {model.collection && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                {model.collection}
-              </span>
-            )}
-            {ps?.slicer_name && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                GCODE
-              </span>
-            )}
-            <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-              {model.file_count} {model.file_count === 1 ? "File" : "Files"}
-            </span>
-            {ps?.material_type && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                {ps.material_type}
-              </span>
-            )}
-            {model.tags.slice(0, 2).map((tag) => (
-              <span key={tag} className="px-2 py-0.5 bg-accent border border-primary-soft rounded text-xs font-mono font-semibold text-accent-foreground uppercase tracking-tight">
-                {tag}
-              </span>
-            ))}
-            {model.tags.length > 2 && (
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground">
-                +{model.tags.length - 2}
-              </span>
-            )}
+          {/* Title + revision */}
+          <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
+            <h2
+              title={model.name}
+              className="text-sm font-bold text-foreground uppercase tracking-tight line-clamp-2 leading-tight"
+            >
+              {model.name}
+            </h2>
+            <RevisionBadge
+              status={model.recommended_revision_status}
+              label={model.recommended_revision_label}
+            />
           </div>
-          <p className="text-2xs text-muted-foreground font-mono uppercase shrink-0">
-            {timeAgoShort(model.updated_at)}
-          </p>
-        </div>
 
-      </Link>
-    </article></Localized>
+          {/* Subtitle */}
+          {(ps?.slicer_name || hasPrinter || ps?.material_type) && (
+            <p className="px-3 pb-1 text-xs text-muted-foreground truncate">
+              {[printerPresence[0]?.printer_name, ps?.material_type, ps?.slicer_name]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+
+          {/* Configurable metrics grid */}
+          <div className="px-3 pb-2">
+            <div className="grid grid-cols-3 border border-border rounded-sm overflow-hidden">
+              {metrics.map((id, i) => (
+                <MetricCell key={id} id={id} model={model} isLast={i === 2} />
+              ))}
+            </div>
+          </div>
+
+          {/* Footer chips */}
+          <div className="px-3 pb-3 mt-auto flex items-end justify-between gap-2 border-t border-border pt-2">
+            <div className="flex flex-wrap gap-1.5 min-w-0">
+              {model.collection && (
+                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+                  {model.collection}
+                </span>
+              )}
+              {ps?.slicer_name && (
+                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+                  GCODE
+                </span>
+              )}
+              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+                {model.file_count} {model.file_count === 1 ? "File" : "Files"}
+              </span>
+              {ps?.material_type && (
+                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+                  {ps.material_type}
+                </span>
+              )}
+              {model.tags.slice(0, 2).map((tag) => (
+                <span
+                  key={tag}
+                  className="px-2 py-0.5 bg-accent border border-primary-soft rounded text-xs font-mono font-semibold text-accent-foreground uppercase tracking-tight"
+                >
+                  {tag}
+                </span>
+              ))}
+              {model.tags.length > 2 && (
+                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground">
+                  +{model.tags.length - 2}
+                </span>
+              )}
+            </div>
+            <p className="text-2xs text-muted-foreground font-mono uppercase shrink-0">
+              {timeAgoShort(model.updated_at)}
+            </p>
+          </div>
+        </Link>
+      </article>
+    </Localized>
   );
 }
 
@@ -327,32 +409,39 @@ export function ModelCard({
   selected,
   onToggleSelect,
   draggable,
+  onEditTags,
 }: {
   model: ModelListItem;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
+  onEditTags?: (model: ModelListItem) => void;
 }) {
-  const [metrics, setMetrics] = useState<CardMetrics>(DEFAULT_CARD_METRICS);
+  // `readCardMetrics` already falls back to the defaults when there is no stored
+  // preference, so it is the correct initial value rather than something to
+  // re-read after mount.
+  const [metrics, setMetrics] = useState(readCardMetrics);
 
   useEffect(() => {
-    setMetrics(readCardMetrics());
     function onStorage(e: StorageEvent) {
-      if (e.key === "printstash.card.metrics") setMetrics(readCardMetrics());
+      if (e.key === CARD_METRIC_STORAGE_KEY) setMetrics(readCardMetrics());
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   return (
-    <Localized><ModelCardMemo
-      model={model}
-      metrics={metrics}
-      selectable={selectable}
-      selected={selected}
-      onToggleSelect={onToggleSelect}
-      draggable={draggable}
-    /></Localized>
+    <Localized>
+      <ModelCardMemo
+        model={model}
+        metrics={metrics}
+        selectable={selectable}
+        selected={selected}
+        onToggleSelect={onToggleSelect}
+        draggable={draggable}
+        onEditTags={onEditTags}
+      />
+    </Localized>
   );
 }

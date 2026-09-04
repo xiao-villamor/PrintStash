@@ -8,22 +8,38 @@ value without code changes. See ADR-0002.
 
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
 from typing import Any, Optional
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.config import DEFAULT_JWT_SECRET, _overlay, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import SystemConfig, User
+from app.db.models import File, SystemConfig, User
+from app.services.storage_providers import (
+    SFTPProviderConfig,
+    StorageProviderConfig,
+    merge_provider_secrets,
+    parse_provider_config,
+    resolve_transport,
+    sanitized_provider_config,
+    split_provider_config,
+)
 
 logger = get_logger(__name__)
 
 # Sentinel for "argument not provided" so callers can leave a field untouched
 # while still being allowed to pass an explicit ``None`` to clear it.
 _UNSET: Any = object()
+
+# v0.12's compatibility S3 adapter used this literal namespace. Keep it
+# independent from the process environment so legacy rows are never
+# reinterpreted after an operator changes VAULT_S3_ROOT.
+LEGACY_S3_ROOT = "vault-data"
 
 
 def get_or_create(session: Session, *, commit: bool = True) -> SystemConfig:
@@ -42,12 +58,145 @@ def get_config(session: Session) -> SystemConfig:
     return get_or_create(session)
 
 
+def ensure_storage_identity(session: Session) -> str:
+    """Create the random installation identity before storage is composed."""
+    config = get_or_create(session)
+    if not config.storage_identity:
+        # 256 bits gives the installation binding enough entropy that a copied
+        # sentinel cannot plausibly collide with another vault.
+        config.storage_identity = secrets.token_hex(32)
+        config.updated_at = utcnow()
+        session.add(config)
+        session.commit()
+    _overlay["storage_identity"] = config.storage_identity
+    return config.storage_identity
+
+
+def ensure_legacy_s3_root(session: Session) -> bool:
+    """Pin the historical S3 root for an untyped legacy configuration.
+
+    The migration normally performs this backfill. The startup repair is kept
+    as a compatibility net for databases that were stamped or created outside
+    the normal migration path. Recovery-only startup does not call this mutating
+    repair; ``_merge_config_overlay`` still projects the literal in memory.
+    """
+    config = session.get(SystemConfig, 1)
+    if (
+        config is None
+        or config.storage_provider
+        or config.storage_backend != "s3"
+        or config.s3_root
+    ):
+        return False
+    config.s3_root = LEGACY_S3_ROOT
+    config.updated_at = utcnow()
+    session.add(config)
+    session.commit()
+    session.refresh(config)
+    return True
+
+
+def enroll_legacy_local_roots(session: Session) -> dict[str, bool]:
+    """Safely bind markerless v0.12 local roots during startup.
+
+    A markerless non-empty root is enrolled only when DB-referenced managed
+    files still match their recorded size and hash. A genuinely new,
+    unconfigured installation leaves even empty roots untouched: first-run
+    setup is the only flow allowed to claim them. All other roots remain
+    read-only until an explicit enrollment flow proves them.
+    """
+    from app.services.storage_backend import enroll_legacy_local_root
+
+    if settings.storage_backend != "local":
+        return {"data": True, "thumb": True}
+    identity = str(_overlay.get("storage_identity") or "")
+    # A startup probe must remain bounded.  Hashing every historical row here
+    # turns a missing sentinel into an unbounded migration and can keep a large
+    # installation in recovery for hours.  The oldest deterministic sample is
+    # enough to prove that this is the configured legacy tree; all remaining
+    # rows are still reconciled by the normal scanner after enrollment.
+    managed_rows_exist = (
+        session.exec(
+            select(File.id)
+            .where(File.is_external == False)  # noqa: E712
+            .limit(1)
+        ).first()
+        is not None
+    )
+    candidate_files = session.exec(
+        select(File)
+        .where(File.is_external == False)  # noqa: E712
+        .where(File.sha256.is_not(None))
+        .where(func.length(File.sha256) == 64)
+        .order_by(File.id)  # pyright: ignore[reportArgumentType]
+        .limit(32)
+    ).all()
+    files = [
+        file
+        for file in candidate_files
+        if isinstance(file.sha256, str)
+        and len(file.sha256) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in file.sha256)
+    ][:3]
+    fresh_install = not is_configured(session) and not managed_rows_exist
+    if fresh_install:
+        # Startup is unauthenticated and must not mutate a candidate mount.
+        # Besides preserving that ownership boundary, leaving the roots truly
+        # empty lets /setup validate them before it writes their binding.
+        return {"data": False, "thumb": False}
+
+    data_proofs: list[tuple[Path, int, str | None]] = [
+        (Path(file.path), file.size_bytes, file.sha256) for file in files if file.path
+    ]
+    data_root = Path(settings.data_dir)
+    thumb_root = Path(settings.thumb_dir)
+    data_enrolled = enroll_legacy_local_root(
+        data_root,
+        role="data",
+        installation=identity,
+        proofs=data_proofs,
+    )
+
+    # Thumbnail rows historically carried no content hash. A same-size file at
+    # a markerless, separately-mounted thumb path is therefore not evidence of
+    # the right installation and must await explicit administrator enrollment.
+    # The only safe automatic exception is a thumb root physically co-located
+    # under the already-proven data root.
+    try:
+        thumb_is_co_located = thumb_root.resolve(strict=False).is_relative_to(
+            data_root.resolve(strict=False)
+        )
+    except OSError:
+        thumb_is_co_located = False
+    thumb_proofs: list[tuple[Path, int, str | None]] = []
+    if data_enrolled and thumb_is_co_located:
+        for file in files:
+            if not file.thumbnail_path:
+                continue
+            path = Path(file.thumbnail_path)
+            try:
+                thumb_proofs.append((path, path.stat().st_size, None))
+            except OSError:
+                return {"data": data_enrolled, "thumb": False}
+    thumb_enrolled = enroll_legacy_local_root(
+        thumb_root,
+        role="thumb",
+        installation=identity,
+        proofs=thumb_proofs,
+        allow_size_only=thumb_is_co_located and data_enrolled,
+    )
+    return {"data": data_enrolled, "thumb": thumb_enrolled}
+
+
 def is_configured(session: Session) -> bool:
     """True once the setup wizard has run *and* at least one user exists.
 
     Both checks matter: if the DB is wiped but a stale ``system_config`` row
     survives somehow, we still surface the wizard.
     """
+    # This is a read-only predicate. In particular, first-run setup calls it
+    # before validating/provisioning a remote root; creating the singleton here
+    # would leave durable config behind when provisioning fails.
     config = session.get(SystemConfig, 1)
     if config is None or config.configured_at is None:
         return False
@@ -60,16 +209,33 @@ def _merge_config_overlay(config: SystemConfig) -> None:
         if value is not None and value != "":
             _overlay[key] = value
 
-    if config.data_dir:
+    if config.storage_provider and config.storage_provider_config_json:
+        provider = _stored_provider_config(config)
+        if provider is not None:
+            _project_provider_overlay(provider)
+        else:
+            _overlay["storage_provider_error"] = "stored_provider_configuration_invalid"
+    if config.storage_identity:
+        _overlay["storage_identity"] = config.storage_identity
+    if config.data_dir and not config.storage_provider:
         _overlay["data_dir"] = Path(config.data_dir)
-    if config.thumb_dir:
+    if config.thumb_dir and not config.storage_provider:
         _overlay["thumb_dir"] = Path(config.thumb_dir)
-    _set("storage_backend", config.storage_backend)
-    _set("s3_bucket", config.s3_bucket)
-    _set("s3_endpoint_url", config.s3_endpoint_url)
-    _set("s3_region", config.s3_region)
-    _set("s3_access_key", config.s3_access_key)
-    _set("s3_secret_key", config.s3_secret_key)
+    if not config.storage_provider:
+        if config.storage_backend:
+            # An explicit legacy DB backend outranks the new provider env input.
+            # The empty overlay value intentionally shadows the frozen env value.
+            _overlay["storage_provider"] = ""
+        _set("storage_backend", config.storage_backend)
+        _set("s3_bucket", config.s3_bucket)
+        _set("s3_endpoint_url", config.s3_endpoint_url)
+        _set("s3_region", config.s3_region)
+        _set("s3_access_key", config.s3_access_key)
+        _set("s3_secret_key", config.s3_secret_key)
+        if config.storage_backend == "s3":
+            # Recovery-only startup deliberately does not persist repairs, but
+            # must still use the historical root rather than ambient env.
+            _overlay["s3_root"] = config.s3_root or LEGACY_S3_ROOT
     if config.backup_retention_days is not None:
         _overlay["backup_retention_days"] = config.backup_retention_days
     if config.trash_retention_days is not None:
@@ -94,10 +260,6 @@ def _merge_config_overlay(config: SystemConfig) -> None:
     _set("oidc_redirect_uri", config.oidc_redirect_uri)
     if config.oidc_allow_insecure_http is not None:
         _overlay["oidc_allow_insecure_http"] = config.oidc_allow_insecure_http
-    # A logged-in MakerWorld token overlays the env cookie as ``token=<jwt>`` so
-    # the importer's existing cookie path picks it up (see makerworld_auth).
-    if config.makerworld_token:
-        _overlay["makerworld_cookie"] = f"token={config.makerworld_token}"
 
 
 def apply_overlay(session: Session) -> None:
@@ -105,14 +267,393 @@ def apply_overlay(session: Session) -> None:
     config = session.get(SystemConfig, 1)
     if config is None:
         return
+    # Secret-key material is intentionally environment/process supplied, never
+    # persisted in SystemConfig. Keep an explicit runtime value across the
+    # replacement so credentials encrypted before applying the DB overlay stay
+    # decryptable (and test workers can use an isolated deterministic key).
+    secret_overrides = {
+        key: _overlay[key]
+        for key in ("secrets_key", "secrets_key_file")
+        if key in _overlay
+    }
     _overlay.clear()
     _merge_config_overlay(config)
+    apply_environment_storage_provider(session)
+    _overlay.update(secret_overrides)
+
+
+def apply_environment_storage_provider(session: Session) -> None:
+    """Project new provider env input only when no DB storage source exists."""
+    import os
+
+    config = session.get(SystemConfig, 1)
+    has_db_storage = config is not None and bool(
+        config.storage_provider or config.storage_backend
+    )
+    if not has_db_storage and settings.storage_provider:
+        try:
+            nonsecret = _json_object(str(settings.storage_provider_config))
+            secrets_map = {
+                str(k): str(v)
+                for k, v in _json_object(str(settings.storage_provider_secrets)).items()
+                if v
+            }
+            typed = _typed_environment_provider_config()
+            typed_env_supplied = any(
+                key.startswith("VAULT_")
+                and key
+                in {
+                    "VAULT_STORAGE_ROOT",
+                    "VAULT_DATA_DIR",
+                    "VAULT_THUMB_DIR",
+                    "VAULT_S3_BUCKET",
+                    "VAULT_S3_REGION",
+                    "VAULT_S3_ENDPOINT_URL",
+                    "VAULT_S3_ACCESS_KEY",
+                    "VAULT_S3_SECRET_KEY",
+                    "VAULT_WEBDAV_ENDPOINT_URL",
+                    "VAULT_WEBDAV_USERNAME",
+                    "VAULT_WEBDAV_PASSWORD",
+                    "VAULT_SFTP_HOST",
+                    "VAULT_SFTP_PORT",
+                    "VAULT_SFTP_USERNAME",
+                    "VAULT_SFTP_HOST_KEY",
+                    "VAULT_SFTP_PASSWORD",
+                    "VAULT_SFTP_PRIVATE_KEY_PATH",
+                    "VAULT_SFTP_PASSPHRASE",
+                }
+                for key in os.environ
+            )
+            if typed_env_supplied and (nonsecret or secrets_map):
+                raise ValueError("storage_provider_configuration_conflict")
+            if typed_env_supplied and typed:
+                nonsecret = typed
+            elif nonsecret or secrets_map:
+                logger.warning(
+                    "VAULT_STORAGE_PROVIDER_CONFIG and *_SECRETS are deprecated; "
+                    "use typed provider environment fields"
+                )
+            parsed = merge_provider_secrets(nonsecret, secrets_map)
+            if parsed.provider != settings.storage_provider:
+                raise ValueError("storage_provider_config_mismatch")
+            _project_provider_overlay(parsed)
+        except ValueError as exc:
+            _overlay["storage_provider_error"] = str(exc)
+            logger.exception("environment provider configuration is invalid")
+
+
+def _typed_environment_provider_config() -> dict[str, object]:
+    """Build canonical provider config from scalar VAULT_* fields."""
+    import os
+
+    def supplied(name: str, value: object) -> bool:
+        # Checking the process environment first keeps this boundary correct
+        # for Settings instances assembled by tests or embedding applications,
+        # where ``model_fields_set`` does not retain source provenance.
+        if f"VAULT_{name.upper()}" in os.environ:
+            return True
+        try:
+            return name in settings._frozen.model_fields_set  # type: ignore[attr-defined]
+        except AttributeError:
+            return value not in (None, "")
+
+    provider = settings.storage_provider
+    root = settings.storage_root.strip()
+    payload: dict[str, object] = {"provider": provider}
+    if root and supplied("storage_root", root):
+        payload["root"] = root
+    if provider == "local":
+        if supplied("data_dir", settings.data_dir):
+            payload["data_dir"] = str(settings.data_dir)
+        if supplied("thumb_dir", settings.thumb_dir):
+            payload["thumb_dir"] = str(settings.thumb_dir)
+    elif provider in {
+        "s3",
+        "cloudflare_r2",
+        "backblaze_b2",
+        "wasabi",
+        "s3_self_hosted",
+    }:
+        for key, env_name, value in (
+            ("bucket", "s3_bucket", settings.s3_bucket),
+            ("region", "s3_region", settings.s3_region),
+            ("endpoint_url", "s3_endpoint_url", settings.s3_endpoint_url),
+            (
+                "addressing_style",
+                "s3_addressing_style",
+                settings.s3_addressing_style,
+            ),
+            ("access_key", "s3_access_key", settings.s3_access_key),
+            ("secret_key", "s3_secret_key", settings.s3_secret_key),
+        ):
+            if value not in (None, "") and supplied(env_name, value):
+                payload[key] = value
+    elif provider in {"nextcloud", "webdav"}:
+        for key, value in (
+            ("endpoint_url", settings.webdav_endpoint_url),
+            ("username", settings.webdav_username),
+            ("password", settings.webdav_password),
+        ):
+            if value not in (None, "") and supplied(
+                {
+                    "endpoint_url": "webdav_endpoint_url",
+                    "username": "webdav_username",
+                    "password": "webdav_password",
+                }[key],
+                value,
+            ):
+                payload[key] = value
+    elif provider == "sftp":
+        for key, value in (
+            ("host", settings.sftp_host),
+            ("port", settings.sftp_port),
+            ("username", settings.sftp_username),
+            ("host_key", settings.sftp_host_key),
+            ("password", settings.sftp_password),
+            ("private_key_path", settings.sftp_private_key_path),
+            ("passphrase", settings.sftp_passphrase),
+        ):
+            if value not in (None, "") and supplied(f"sftp_{key}", value):
+                payload[key] = value
+    # Provider alone is not a typed configuration; use the deprecated JSON only
+    # when no scalar was supplied, otherwise validation must fail closed.
+    return payload if len(payload) > 1 else {}
 
 
 def activate_config(config: SystemConfig) -> None:
     """Merge a newly committed config into live runtime state."""
     _merge_config_overlay(config)
     ensure_dirs()
+
+
+def _json_object(value: str | None) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _stored_provider_config(config: SystemConfig) -> StorageProviderConfig | None:
+    if not config.storage_provider or not config.storage_provider_config_json:
+        return None
+    nonsecret = _json_object(config.storage_provider_config_json)
+    secrets_json = _json_object(config.storage_provider_secret_json)
+    secrets_map = {str(k): str(v) for k, v in secrets_json.items() if v}
+    try:
+        return merge_provider_secrets(nonsecret, secrets_map)
+    except ValueError:
+        logger.exception("stored provider configuration is invalid")
+        return None
+
+
+def _project_provider_overlay(config: StorageProviderConfig) -> None:
+    spec = resolve_transport(config)
+    _overlay["storage_provider"] = config.provider
+    _overlay["storage_provider_config"] = config.model_dump_json()
+    if spec.kind.value == "local":
+        _overlay["storage_backend"] = "local"
+        _overlay["data_dir"] = Path(str(spec.options["data_dir"]))
+        _overlay["thumb_dir"] = Path(str(spec.options["thumb_dir"]))
+    elif spec.kind.value == "s3":
+        _overlay["storage_backend"] = "s3"
+        _overlay["s3_bucket"] = str(spec.options["bucket"])
+        _overlay["s3_endpoint_url"] = str(spec.options["endpoint_url"])
+        _overlay["s3_region"] = str(spec.options["region"])
+        _overlay["s3_addressing_style"] = str(spec.options["addressing_style"])
+        _overlay["s3_access_key"] = str(spec.options["access_key"])
+        _overlay["s3_secret_key"] = str(spec.options["secret_key"])
+        # Keep the managed namespace alongside the compatibility S3 fields.
+        # The S3 adapter must not silently collapse a typed provider root back
+        # to the historical default.
+        _overlay["s3_root"] = str(spec.options["root"])
+    else:
+        _overlay["storage_backend"] = config.provider
+
+
+def update_storage_provider(
+    session: Session,
+    *,
+    provider: str,
+    raw_config: dict[str, Any],
+    commit: bool = True,
+    apply_runtime: bool = True,
+) -> SystemConfig:
+    """Validate, persist, and sanitize one discriminated provider config."""
+    config = get_or_create(session, commit=commit)
+    if raw_config.get("provider") != provider:
+        raise ValueError("storage_provider_config_mismatch")
+    parsed = resolve_requested_storage_provider(
+        config, provider=provider, raw_config=raw_config
+    )
+    nonsecret, secrets_map = split_provider_config(parsed)
+    config.storage_provider = provider
+    config.storage_provider_config_json = json.dumps(nonsecret, separators=(",", ":"))
+    config.storage_provider_secret_json = json.dumps(secrets_map, separators=(",", ":"))
+    # Compatibility projections remain available to older releases/readers.
+    spec = resolve_transport(parsed)
+    config.storage_backend = (
+        "s3"
+        if spec.kind.value == "s3"
+        else "local"
+        if spec.kind.value == "local"
+        else provider
+    )
+    if spec.kind.value == "local":
+        config.data_dir = str(spec.options["data_dir"])
+        config.thumb_dir = str(spec.options["thumb_dir"])
+    elif spec.kind.value == "s3":
+        config.s3_bucket = str(spec.options["bucket"])
+        config.s3_endpoint_url = str(spec.options["endpoint_url"])
+        config.s3_region = str(spec.options["region"])
+        config.s3_access_key = str(spec.options["access_key"])
+        config.s3_secret_key = str(spec.options["secret_key"])
+    config.updated_at = utcnow()
+    session.add(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    if apply_runtime:
+        _project_provider_overlay(parsed)
+    return config
+
+
+def resolve_requested_storage_provider(
+    config: SystemConfig,
+    *,
+    provider: str,
+    raw_config: dict[str, Any],
+) -> StorageProviderConfig:
+    prior_config = _json_object(config.storage_provider_config_json)
+    prior_secrets = _json_object(config.storage_provider_secret_json)
+    if config.storage_provider == provider:
+        merged = {**prior_config, **prior_secrets, **raw_config}
+        if provider == "sftp":
+            if raw_config.get("password"):
+                merged.pop("private_key_path", None)
+                merged.pop("passphrase", None)
+            elif raw_config.get("private_key_path"):
+                merged.pop("password", None)
+    else:
+        merged = raw_config
+    return parse_provider_config(merged)
+
+
+def storage_provider_signature(config: StorageProviderConfig) -> tuple[object, ...]:
+    # Host-key and authentication rotation must not look like a namespace
+    # migration. Legacy SFTP rows may lack a host key, so build this identity
+    # without crossing the stricter activation boundary in ``resolve_transport``.
+    if isinstance(config, SFTPProviderConfig):
+        return (
+            "sftp",
+            config.provider,
+            f"sftp/{config.root}",
+            config.host,
+            config.port,
+            config.username,
+        )
+    spec = resolve_transport(config)
+    namespace_options = {
+        "bucket",
+        "data_dir",
+        "endpoint_url",
+        "host",
+        "path_style",
+        "port",
+        "region",
+        "root",
+        "thumb_dir",
+        "username",
+    }
+    return (
+        spec.kind.value,
+        spec.provider,
+        spec.namespace,
+        tuple(
+            sorted(
+                (key, str(value))
+                for key, value in spec.options.items()
+                if key in namespace_options
+            )
+        ),
+    )
+
+
+def storage_namespace_change_requires_migration(
+    session: Session,
+    *,
+    storage_backend: str | None = None,
+    data_dir: str | None = None,
+    thumb_dir: str | None = None,
+    s3_bucket: str | None = None,
+    s3_endpoint_url: str | None = None,
+    s3_region: str | None = None,
+    storage_provider: str | None = None,
+    storage_provider_config: dict[str, Any] | None = None,
+) -> tuple[bool, StorageProviderConfig | None]:
+    """Own provider projection and migration gating for config routes."""
+    config = get_config(session)
+
+    def changed(value: str | None, current: object, *, path: bool = False) -> bool:
+        if value is None:
+            return False
+        if value == "":
+            return str(current) != ""
+        if path:
+            return Path(value).expanduser().resolve(strict=False) != Path(
+                str(current)
+            ).expanduser().resolve(strict=False)
+        return value != str(current)
+
+    changed_legacy = any(
+        (
+            changed(storage_backend, settings.storage_backend),
+            changed(data_dir, settings.data_dir, path=True),
+            changed(thumb_dir, settings.thumb_dir, path=True),
+            changed(s3_bucket, settings.s3_bucket),
+            changed(s3_endpoint_url, settings.s3_endpoint_url),
+            changed(s3_region, settings.s3_region),
+        )
+    )
+    requested = None
+    if storage_provider is not None and storage_provider_config is not None:
+        requested = resolve_requested_storage_provider(
+            config, provider=storage_provider, raw_config=storage_provider_config
+        )
+        current = _stored_provider_config(config)
+        changed_legacy = current is None or (
+            storage_provider_signature(current) != storage_provider_signature(requested)
+        )
+        # This is also the validation boundary for API updates. In particular,
+        # old SFTP rows remain readable, while saving/activating one without a
+        # pinned host key returns the actionable validation error.
+        resolve_transport(requested)
+    return changed_legacy, requested
+
+
+def has_storage_state(session: Session) -> bool:
+    """Whether changing the namespace would orphan existing domain rows."""
+    from app.db.models import Collection, Document, File, Model
+
+    return any(
+        session.exec(select(table.id).limit(1)).first() is not None
+        for table in (File, Document, Model, Collection)
+    )
+
+
+def get_sanitized_storage_provider(
+    session: Session,
+) -> tuple[str, dict[str, object]] | None:
+    config = session.get(SystemConfig, 1)
+    if config is None or not config.storage_provider:
+        return None
+    nonsecret = _json_object(config.storage_provider_config_json)
+    secrets_map = {
+        str(k): str(v)
+        for k, v in _json_object(config.storage_provider_secret_json).items()
+        if v
+    }
+    return config.storage_provider, sanitized_provider_config(nonsecret, secrets_map)
 
 
 def ensure_jwt_secret(session: Session) -> None:
@@ -125,7 +666,8 @@ def ensure_jwt_secret(session: Session) -> None:
     Refusing to boot instead would brick every existing install, since the
     compose files default ``VAULT_JWT_SECRET`` to the shipped value.
     """
-    if settings.jwt_secret != DEFAULT_JWT_SECRET:
+    configured_secret = settings.jwt_secret.strip()
+    if configured_secret and configured_secret != DEFAULT_JWT_SECRET:
         return
 
     config = get_or_create(session)
@@ -270,6 +812,13 @@ def update_config(
     _apply_str("s3_region", s3_region)
     _apply_str("s3_access_key", s3_access_key)
     _apply_str("s3_secret_key", s3_secret_key)
+    # Legacy setup stores the effective root alongside its compatibility S3
+    # fields. Existing rows are already pinned by migration/startup repair;
+    # only fill a missing value from the explicit current environment during a
+    # first-time legacy setup write.
+    if storage_backend == "s3" and not config.storage_provider and not config.s3_root:
+        config.s3_root = str(settings.s3_root)
+        pending_overlay["s3_root"] = config.s3_root
     _apply_int("backup_retention_days", backup_retention_days)
     _apply_int("trash_retention_days", trash_retention_days)
     _apply_int("model_thumbnail_width", model_thumbnail_width)
@@ -318,6 +867,25 @@ def external_libraries_enabled(session: Session) -> bool:
     """Master opt-in switch for NAS folder mirroring. Off by default."""
     config = session.get(SystemConfig, 1)
     return False if config is None else bool(config.external_libraries_enabled)
+
+
+def update_backup_schedule(
+    session: Session,
+    *,
+    enabled: bool | None = None,
+    time_utc: str | None = None,
+    manual_local_enabled: bool | None = None,
+    automatic_local_enabled: bool | None = None,
+) -> SystemConfig:
+    from app.services.backup_schedule import update_schedule
+
+    return update_schedule(
+        session,
+        enabled=enabled,
+        time_utc=time_utc,
+        manual_local_enabled=manual_local_enabled,
+        automatic_local_enabled=automatic_local_enabled,
+    )
 
 
 def notifications_enabled(session: Session) -> bool:
@@ -457,19 +1025,17 @@ def set_auto_mark_known_good(session: Session, enabled: bool) -> SystemConfig:
 
 
 def set_makerworld_token(session: Session, token: str) -> SystemConfig:
-    """Persist a MakerWorld session token and apply it as the import cookie now."""
+    """Compatibility helper used only to clear a token from older installs."""
+    del token
     config = get_or_create(session)
-    config.makerworld_token = token or None
-    config.makerworld_token_updated_at = utcnow() if token else None
+    config.makerworld_token = None
+    config.makerworld_token_updated_at = None
     config.updated_at = utcnow()
     session.add(config)
     session.commit()
     session.refresh(config)
-    if token:
-        _overlay["makerworld_cookie"] = f"token={token}"
-    else:
-        _overlay.pop("makerworld_cookie", None)
-    logger.info("MakerWorld token %s", "set" if token else "cleared")
+    _overlay.pop("makerworld_cookie", None)
+    logger.info("legacy MakerWorld token cleared")
     return config
 
 
@@ -479,14 +1045,9 @@ def clear_makerworld_token(session: Session) -> SystemConfig:
 
 
 def makerworld_status(session: Session) -> dict:
-    """Connection status for the MakerWorld login UI (never returns the token)."""
-    config = session.get(SystemConfig, 1)
-    connected = bool(config and config.makerworld_token)
-    updated_at = config.makerworld_token_updated_at if config else None
-    return {
-        "connected": connected,
-        "updated_at": updated_at.isoformat() if updated_at else None,
-    }
+    """Compatibility status: MakerWorld connections are no longer server-side."""
+    del session
+    return {"connected": False, "updated_at": None}
 
 
 def mark_configured(session: Session, *, commit: bool = True) -> SystemConfig:
@@ -507,6 +1068,7 @@ def get_effective_config(session: Session) -> dict:
     ``settings`` is now a ConfigResolver — attribute reads already resolve
     overlay-preferred values. No manual merge needed.
     """
+    config = session.get(SystemConfig, 1)
     return {
         "storage_backend": str(settings.storage_backend),
         "data_dir": str(settings.data_dir),
@@ -514,11 +1076,25 @@ def get_effective_config(session: Session) -> dict:
         "s3_bucket": str(settings.s3_bucket),
         "s3_endpoint_url": str(settings.s3_endpoint_url),
         "s3_region": str(settings.s3_region),
+        "s3_addressing_style": str(settings.s3_addressing_style),
         "s3_access_key": _mask_secret(str(settings.s3_access_key)),
         "s3_secret_key": _mask_secret(str(settings.s3_secret_key)),
         "has_s3_access_key": bool(settings.s3_access_key),
         "has_s3_secret_key": bool(settings.s3_secret_key),
         "backup_retention_days": int(settings.backup_retention_days),
+        "automatic_backups_enabled": bool(config and config.automatic_backups_enabled),
+        "automatic_backup_time_utc": (
+            config.automatic_backup_time_utc if config else "02:00"
+        ),
+        "automatic_backup_last_attempt_at": (
+            config.automatic_backup_last_attempt_at if config else None
+        ),
+        "manual_local_backup_enabled": (
+            config.manual_local_backup_enabled if config else True
+        ),
+        "automatic_local_backup_enabled": (
+            config.automatic_local_backup_enabled if config else True
+        ),
         "trash_retention_days": int(settings.trash_retention_days),
         "model_thumbnail_width": int(settings.model_thumbnail_width),
         "backup_s3_bucket": str(settings.backup_s3_bucket),

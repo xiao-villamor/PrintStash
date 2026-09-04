@@ -21,6 +21,8 @@ from app.db.models import (
     InboxItemState,
     Metadata,
     Model,
+    OwnedStorageObject,
+    StorageObjectState,
     VaultAuditFinding,
     VaultAuditFindingState,
     VaultAuditMode,
@@ -32,6 +34,7 @@ from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.schemas.maintenance import VaultAuditFindingRead, VaultAuditRunRead
 from app.services import audit, thumbnail_repair
+from app.services.artifact_content import ArtifactContentError, resolve
 from app.services.storage_backend import get_backend
 from app.services.storage_utils import OwnedBlob, ownership_snapshot
 
@@ -128,9 +131,7 @@ def _sync_counts(session: Session, run: VaultAuditRun) -> None:
     session.flush()
     severities = list(
         session.exec(
-            select(VaultAuditFinding.severity).where(
-                VaultAuditFinding.run_id == run.id
-            )
+            select(VaultAuditFinding.severity).where(VaultAuditFinding.run_id == run.id)
         ).all()
     )
     run.critical_count = severities.count(VaultAuditSeverity.CRITICAL)
@@ -407,10 +408,23 @@ def _check_database(session: Session, run: VaultAuditRun) -> None:
                     repair_action="reparse_metadata",
                 )
         if model.thumbnail_file_id:
-            current = backend.thumbnail_key(model.thumbnail_file_id)
+            thumbnail_file = session.get(File, model.thumbnail_file_id)
+            current = (
+                model.thumbnail_path
+                or (
+                    thumbnail_file.thumbnail_path
+                    if thumbnail_file is not None
+                    else None
+                )
+                or backend.thumbnail_key(model.thumbnail_file_id)
+            )
             legacy = backend.legacy_thumbnail_key(model.thumbnail_file_id)
             try:
-                key = current if backend.exists(current) else legacy
+                if backend.exists(current):
+                    key = current
+                else:
+                    compatibility = backend.thumbnail_key(model.thumbnail_file_id)
+                    key = compatibility if backend.exists(compatibility) else legacy
                 present = backend.exists(key)
             except Exception:
                 present = False
@@ -498,6 +512,8 @@ def _check_background_jobs(session: Session, run: VaultAuditRun) -> None:
             BackgroundJob.updated_at < cutoff,
         )
     ).all()
+    if _cancelled(session, run):
+        return
     for job in stuck:
         _add(
             session,
@@ -541,16 +557,78 @@ def _check_backups(session: Session, run: VaultAuditRun) -> None:
     from app.services import backup
 
     run.current_phase = "backups"
-    for meta in backup.list_backups():
+    # Audit the ownership ledger directly. Discovery/listing is a presentation
+    # seam and can omit inaccessible objects or collapse same-ID replicas.
+    # Cache projections are deliberately excluded: they are rebuildable
+    # derivatives, not authoritative backup sources.
+    rows = session.exec(
+        select(OwnedStorageObject).where(
+            OwnedStorageObject.backend.in_(("local", "backup-s3")),
+            OwnedStorageObject.object_kind.in_(("backup", "backup-legacy")),
+            OwnedStorageObject.state.in_(
+                (StorageObjectState.COMMITTED, StorageObjectState.BLOCKED)
+            ),
+        )
+    ).all()
+    if _cancelled(session, run):
+        return
+    for row in rows:
         if _cancelled(session, run):
             return
-        result = backup.verify_backup(meta.id)
-        for issue in result.findings:
+        location = "local" if row.backend == "local" else "s3"
+        source_ref = backup._source_ref(  # noqa: SLF001
+            location=location,
+            namespace=row.namespace,
+            path=row.key,
+            provider_ref=row.provider_ref,
+        )
+        result = backup.verify_backup_ownership(int(row.id))
+        if result.status == "valid":
+            continue
+        if result.status in {"missing", "inaccessible"}:
+            default_code = "backup_storage_inaccessible"
+        elif result.status == "identity":
+            default_code = "backup_identity_unavailable"
+        elif result.status == "digest":
+            default_code = "backup_digest_mismatch"
+        else:
+            default_code = "backup_corrupt"
+        findings = result.verification.findings if result.verification else []
+        if not findings:
+            _add(
+                session,
+                run,
+                code=default_code,
+                severity=VaultAuditSeverity.CRITICAL,
+                resource_type="backup",
+                identifier=source_ref,
+                details={
+                    "ownership_id": int(row.id),
+                    "location": location,
+                    "provider_ref": row.provider_ref,
+                    "error": result.error,
+                },
+            )
+            continue
+        for issue in findings:
             code = str(issue.get("code", "backup_manifest_invalid"))
+            code = {
+                "backup_remote_identity_unavailable": "backup_identity_unavailable",
+                "backup_remote_etag_changed": "backup_identity_mismatch",
+                "backup_remote_version_changed": "backup_identity_mismatch",
+                "backup_download_digest_mismatch": "backup_digest_mismatch",
+                "backup_publication_digest_mismatch": "backup_digest_mismatch",
+                "backup_member_hash_mismatch": "backup_corrupt",
+                "backup_blob_hash_changed": "backup_corrupt",
+            }.get(code, code)
             if code not in {
                 "backup_manifest_invalid",
                 "backup_member_missing",
                 "backup_member_size_mismatch",
+                "backup_identity_unavailable",
+                "backup_identity_mismatch",
+                "backup_digest_mismatch",
+                "backup_corrupt",
             }:
                 code = "backup_manifest_invalid"
             member = Path(str(issue.get("member", "archive")).replace("\\", "/")).name
@@ -560,8 +638,13 @@ def _check_backups(session: Session, run: VaultAuditRun) -> None:
                 code=code,
                 severity=VaultAuditSeverity.CRITICAL,
                 resource_type="backup",
-                identifier=meta.id,
-                details={"member": member},
+                identifier=source_ref,
+                details={
+                    "member": member,
+                    "ownership_id": int(row.id),
+                    "location": location,
+                    "provider_ref": row.provider_ref,
+                },
             )
 
 
@@ -702,16 +785,16 @@ def _reparse_metadata(session: Session, file_id: int) -> bool:
         is not None
     ):
         return row is not None
-    backend = get_backend()
-    if not backend.exists(row.path):
+    try:
+        with resolve(row).materialize() as path:
+            strategy = (
+                _gcode_strategy()
+                if row.file_type == FileType.GCODE
+                else _mesh_strategy(row.file_type)
+            )
+            values, _thumbnail = strategy.process(path)
+    except ArtifactContentError:
         return False
-    with backend.local_path(row.path) as path:
-        strategy = (
-            _gcode_strategy()
-            if row.file_type == FileType.GCODE
-            else _mesh_strategy(row.file_type)
-        )
-        values, _thumbnail = strategy.process(path)
     fields = {
         key: value for key, value in values.items() if key in Metadata.model_fields
     }

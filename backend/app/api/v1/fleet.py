@@ -33,9 +33,29 @@ from app.schemas.fleet import (
 from app.schemas.materials import CompatibilityRead, CompatibilityRequest
 from app.schemas.printers import PrintJobRead
 from app.services import fleet, materials, printer_rbac, rbac
-from app.services.task_queue import TaskEnvelope, task_queue
+from app.services.printer_jobs import reproducibility_payload
+from app.services.task_queue import TaskEnvelope, TaskQueue, get_task_queue
 
 router = APIRouter(prefix="/fleet", tags=["fleet"])
+
+
+def _print_job_read(session: Session, job: PrintJob) -> PrintJobRead:
+    artifact = session.get(File, job.file_id)
+    return PrintJobRead(
+        **job.model_dump(
+            exclude={"artifact_capture_error_code", "artifact_capture_error_message"}
+        ),
+        **reproducibility_payload(
+            job,
+            file_type=artifact.file_type if artifact is not None else None,
+            download_url=(
+                f"/api/v1/files/{job.file_id}/download"
+                if job.source != "external"
+                or job.artifact_evidence.endswith("_archived")
+                else None
+            ),
+        ),
+    )
 
 
 @router.get("/summary", response_model=FleetSummary)
@@ -61,7 +81,7 @@ def get_queue(
         history_offset=history_offset,
         visible_printer_ids=visible_ids,
     )
-    return [PrintJobRead(**job.model_dump()) for job in rows]
+    return [_print_job_read(session, job) for job in rows]
 
 
 @router.post(
@@ -73,6 +93,7 @@ async def create_queue_job(
     payload: QueueJobCreate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> PrintJobRead:
     if not current_user.is_superuser:
         if payload.strategy != RoutingStrategy.MANUAL or payload.printer_id is None:
@@ -103,7 +124,7 @@ async def create_queue_job(
     await task_queue.enqueue(
         TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
     )
-    return PrintJobRead(**job.model_dump())
+    return _print_job_read(session, job)
 
 
 @router.post("/compatibility", response_model=CompatibilityRead)
@@ -140,6 +161,7 @@ async def create_batch(
     payload: BatchCreate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> PrintBatchRead:
     if not current_user.is_superuser:
         if payload.strategy != RoutingStrategy.MANUAL or payload.printer_id is None:
@@ -172,7 +194,7 @@ async def create_batch(
     )
     return PrintBatchRead(
         **batch.model_dump(),
-        jobs=[PrintJobRead(**job.model_dump()) for job in jobs],
+        jobs=[_print_job_read(session, job) for job in jobs],
     )
 
 
@@ -193,7 +215,7 @@ def _require_queue_job_role(
     session: Session, current_user: User, job_id: int, minimum: PrinterRole
 ) -> PrintJob:
     job = session.get(PrintJob, job_id)
-    if job is None or job.deleted_at is not None:
+    if job is None or job.deleted_at is not None or job.dedupe_absorbed_at is not None:
         raise HTTPException(status_code=404, detail="queue_job_not_found")
     if job.printer_id is None:
         if current_user.is_superuser:
@@ -224,7 +246,7 @@ def patch_queue_job(
         job = fleet.update_queue_job(session, job_id, payload, current_user)
     except fleet.FleetError as exc:
         raise _queue_error(exc) from exc
-    return PrintJobRead(**job.model_dump())
+    return _print_job_read(session, job)
 
 
 @router.delete("/queue/{job_id}", response_model=PrintJobRead)
@@ -235,10 +257,10 @@ def delete_queue_job(
 ) -> PrintJobRead:
     _require_queue_job_role(session, current_user, job_id, PrinterRole.PRINT)
     try:
-        job = fleet.cancel_queue_job(session, job_id, current_user)
+        job = fleet.delete_queue_job(session, job_id, current_user)
     except fleet.FleetError as exc:
         raise _queue_error(exc) from exc
-    return PrintJobRead(**job.model_dump())
+    return _print_job_read(session, job)
 
 
 @router.post("/queue/{job_id}/retry", response_model=PrintJobRead)
@@ -246,6 +268,7 @@ async def retry_queue_job(
     job_id: int,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> PrintJobRead:
     _require_queue_job_role(session, current_user, job_id, PrinterRole.PRINT)
     try:
@@ -255,7 +278,7 @@ async def retry_queue_job(
     await task_queue.enqueue(
         TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
     )
-    return PrintJobRead(**job.model_dump())
+    return _print_job_read(session, job)
 
 
 @router.post("/queue/{job_id}/operator-decision", response_model=PrintJobRead)
@@ -264,6 +287,7 @@ async def decide_operator_release(
     payload: OperatorDecision,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    task_queue: TaskQueue = Depends(get_task_queue),
 ) -> PrintJobRead:
     _require_queue_job_role(session, current_user, job_id, PrinterRole.PRINT)
     try:
@@ -274,7 +298,7 @@ async def decide_operator_release(
         await task_queue.enqueue(
             TaskEnvelope(job_id=str(job.id), kind="fleet_dispatch", payload={})
         )
-    return PrintJobRead(**job.model_dump())
+    return _print_job_read(session, job)
 
 
 @router.patch(

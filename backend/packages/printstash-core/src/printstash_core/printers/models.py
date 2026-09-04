@@ -39,13 +39,41 @@ class Capability(StrEnum):
     MATERIAL_STATE = "material_state"
 
 
-class ProviderError(RuntimeError):
-    """Exception boundary shared by provider implementations."""
+class PrintArtifactFormat(StrEnum):
+    """Stored print formats a provider can accept without conversion."""
 
-    def __init__(self, detail: str, *, code: str = "provider_error") -> None:
+    GCODE_TEXT = "gcode_text"
+    BGCODE_BINARY = "bgcode_binary"
+
+
+class ProviderError(RuntimeError):
+    """Exception boundary shared by provider implementations.
+
+    ``code`` remains the coarse compatibility category used by the provider
+    facade.  ``action_code`` is the stable, actionable reason callers should
+    persist or show to an operator (for example ``bambu_ftps_not_found``).
+    Keeping both lets older integrations continue to branch on
+    ``provider_error`` while newer API contracts can expose the precise cause.
+    Retries are opt-in: transports must explicitly mark an error retryable;
+    arbitrary provider failures remain one-shot by default.
+    """
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        code: str = "provider_error",
+        action_code: str | None = None,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(detail)
         self.detail = detail
         self.code = code
+        # Never promote an arbitrary remote/detail string into an actionable
+        # machine code. Provider implementations opt into a more precise code
+        # explicitly (the Bambu FTPS classifier does so).
+        self.action_code = action_code or code
+        self.retryable = retryable
 
 
 _UNSUPPORTED_ACTION_ORDER: tuple[Capability, ...] = (
@@ -63,16 +91,27 @@ class ProviderCapabilities:
     """Capabilities and support metadata declared by a provider factory."""
 
     supported: frozenset[Capability]
+    accepted_print_formats: frozenset[PrintArtifactFormat] = frozenset()
     support_level: str = "stable"
     support_notes: tuple[str, ...] = ()
     requires_ready_before_send: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "supported", frozenset(self.supported))
+        object.__setattr__(
+            self,
+            "accepted_print_formats",
+            frozenset(self.accepted_print_formats),
+        )
         object.__setattr__(self, "support_notes", tuple(self.support_notes))
+        if self.can_upload and not self.accepted_print_formats:
+            raise ValueError("upload providers must declare an accepted print format")
 
     def supports(self, capability: Capability) -> bool:
         return capability in self.supported
+
+    def accepts_format(self, artifact_format: PrintArtifactFormat) -> bool:
+        return artifact_format in self.accepted_print_formats
 
     @property
     def can_start(self) -> bool:
@@ -142,6 +181,11 @@ class ProviderCapabilities:
             "support_level": self.support_level,
             "support_notes": list(self.support_notes),
             "unsupported_actions": list(self.unsupported_actions),
+            "accepted_print_formats": [
+                artifact_format.value
+                for artifact_format in PrintArtifactFormat
+                if self.accepts_format(artifact_format)
+            ],
         }
 
 

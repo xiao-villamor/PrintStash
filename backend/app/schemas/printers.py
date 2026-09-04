@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Optional
 
+from printstash_core.printers import PrintArtifactFormat
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db.models import (
@@ -45,6 +46,45 @@ class PrinterCapabilities(BaseModel):
     support_level: str = "stable"
     support_notes: list[str] = Field(default_factory=list)
     unsupported_actions: list[str] = Field(default_factory=list)
+    accepted_print_formats: list[PrintArtifactFormat] = Field(default_factory=list)
+
+
+class PrintJobIdentityRead(BaseModel):
+    """Identity reported by a printer; absent values stay absent."""
+
+    display_name: Optional[str] = None
+    task_id: Optional[str] = None
+    subtask_id: Optional[str] = None
+    project_id: Optional[str] = None
+    profile_id: Optional[str] = None
+    gcode_file: Optional[str] = None
+    plate_index: Optional[int] = None
+
+
+class PrintJobReportedMetadataRead(BaseModel):
+    """Only Bambu MQTT metadata actually supplied by the printer."""
+
+    current_layer: Optional[int] = None
+    total_layers: Optional[int] = None
+    nozzle_diameter: Optional[float] = None
+
+
+class PrintJobReproducibilityErrorRead(BaseModel):
+    code: str
+    message: str
+
+
+class PrintJobReproducibilityRead(BaseModel):
+    """Evidence level and download seam for reproducible print history."""
+
+    level: Literal["exact", "metadata", "basic"] = "basic"
+    identity: PrintJobIdentityRead = Field(default_factory=PrintJobIdentityRead)
+    metadata: PrintJobReportedMetadataRead = Field(
+        default_factory=PrintJobReportedMetadataRead
+    )
+    error: Optional[PrintJobReproducibilityErrorRead] = None
+    download_url: Optional[str] = None
+    toolpath_preview_url: Optional[str] = None
 
 
 class PrinterAccess(BaseModel):
@@ -314,6 +354,18 @@ class PrintJobRead(BaseModel):
     external_nozzle_diameter: Optional[float] = None
     artifact_evidence: str = "vault"
     artifact_capture_error: Optional[str] = None
+    artifact_capture_error_code: Optional[str] = None
+    artifact_capture_error_message: Optional[str] = None
+    reproducibility_level: Literal["exact", "metadata", "basic"] = "basic"
+    identity: PrintJobIdentityRead = Field(default_factory=PrintJobIdentityRead)
+    metadata: PrintJobReportedMetadataRead = Field(
+        default_factory=PrintJobReportedMetadataRead
+    )
+    reproducibility: PrintJobReproducibilityRead = Field(
+        default_factory=PrintJobReproducibilityRead
+    )
+    download_url: Optional[str] = None
+    toolpath_preview_url: Optional[str] = None
     error: Optional[str] = None
     routing_strategy: RoutingStrategy = RoutingStrategy.MANUAL
     queue_position: int = 0

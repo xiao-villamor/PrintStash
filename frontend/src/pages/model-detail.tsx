@@ -8,5 +8,5 @@ export default function ModelDetailPage() {
   const modelId = Number(id);
   if (!id || Number.isNaN(modelId)) return <NotFound />;
   // No SSR prefetch: the client view fetches with the stored token.
-  return <ModelDetailClientView id={modelId} initialModel={null} />;
+  return <ModelDetailClientView key={modelId} id={modelId} initialModel={null} />;
 }

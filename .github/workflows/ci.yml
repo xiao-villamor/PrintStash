@@ -9,7 +9,7 @@ on:
   # checks passing first (see ghcr.yml).
   workflow_call:
   # Nightly "full-matrix" gate + on-demand run. Every job below already runs
-  # per-PR (backend + coverage, storage-s3/SeaweedFS, e2e-real Playwright, frontend
+  # per-PR (backend + coverage, e2e-real Playwright, frontend
   # mock-API Playwright); these two triggers re-run the whole gauntlet off-peak
   # daily and on manual dispatch, so a comprehensive gate exists without adding
   # new job definitions or slowing individual PRs.
@@ -25,6 +25,51 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  critical-capabilities:
+    name: Critical capabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run machine-declared critical capabilities
+        run: ./scripts/test-critical.sh
+
   printer-core:
     name: Printer core (${{ matrix.python }}, ${{ matrix.resolution }})
     runs-on: ubuntu-latest
@@ -55,10 +100,25 @@ jobs:
           uv venv --python ${{ matrix.python }}
           uv pip install --python .venv/bin/python \
             --resolution ${{ matrix.resolution }} \
-            --editable ".[dev,printers-all]"
+            --editable ".[dev,mesh,printers-all,testkit]"
 
       - name: Test autonomous package
-        run: .venv/bin/pytest tests -q
+        run: .venv/bin/pytest tests -q -m "not coverage_gate"
+
+      # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
+      # The gate reads the report the measured pass writes, so it cannot run inside
+      # that pass — hence two invocations rather than `--cov-fail-under`, which can
+      # only check the aggregate.
+      - name: Coverage gate for the autonomous package
+        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        # `uv pip install --python .venv/...` rather than `.venv/bin/pip`: the
+        # venv is created by `uv venv`, which does not install pip into it, so
+        # calling it directly exits 127 and this gate never ran.
+        run: |
+          uv pip install --python .venv/bin/python pytest-cov
+          .venv/bin/pytest tests -q -m "not coverage_gate" \
+            --cov --cov-report=term-missing --cov-report=json
+          .venv/bin/pytest tests/repo/test_coverage_floors.py -q --no-cov
 
       - name: Lint autonomous package
         run: .venv/bin/ruff check src tests
@@ -109,14 +169,31 @@ jobs:
       - name: Lint backend
         run: uv run ruff check app/ tests/
 
+      - name: Check backend formatting (ratcheted modules)
+        run: uv run ruff format --check app/core app/db app/schemas packages/printstash-core/src
+
       - name: Check dependency declarations
         run: uv run deptry app/
 
       - name: Typecheck critical backend modules
         run: uv run pyright
 
+      - name: Typecheck backend with ty (advisory)
+        run: uv run ty check app/ --exit-zero --quiet
+
+      # `full` includes the `postgres`- and `s3`-marked subsets, which start their
+      # own PostgreSQL and SeaweedFS through backend/tests/containers.py. They used
+      # to need dedicated jobs with a `services:` block and a `docker run`; those
+      # are gone, because running the same tests twice per PR is the duplication
+      # the container module exists to remove.
       - name: Test backend
-        run: uv run pytest tests -v --cov=app --cov-report=term-missing --cov-fail-under=95
+        # The `coverage` lane is `full` under branch coverage plus the coverage gate
+        # (tests/repo/test_coverage_floors.py): the aggregate ratcheted in both
+        # directions, and a floor every module has to clear on its own. Branches are
+        # counted, so a guard clause whose false path never runs is half-covered
+        # rather than covered — the same suite reads 95.07% by lines and 93.35% with
+        # branches, and the second number is the one that says something.
+        run: ./scripts/test.sh coverage -v
 
   backend-python313:
     name: Backend compatibility (Python 3.13, advisory)
@@ -144,7 +221,71 @@ jobs:
         run: uv sync --extra dev --extra full --frozen
 
       - name: Run backend compatibility suite
-        run: uv run pytest tests -q
+        run: ./scripts/test.sh full -q
+
+  flaky-detection:
+    name: Flaky detection (nightly)
+    # An order-dependent test fails perhaps one run in eight, which on a PR reads
+    # as "CI is flaky" and gets a re-run rather than a fix. Five shuffled,
+    # parallel runs on a schedule turn that into a specific named failure with a
+    # seed that reproduces it.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Run the suite five times with different orderings
+        run: |
+          set -uo pipefail
+          status=0
+          for seed in 1 7 42 99 1234; do
+            echo "::group::seed ${seed}"
+            uv run pytest tests -q -p randomly --randomly-seed="${seed}" -n 4 \
+              --deselect tests/integration/postgres \
+              > "run-${seed}.log" 2>&1 || status=1
+            tail -1 "run-${seed}.log"
+            echo "::endgroup::"
+          done
+          # Every run must fail the *same* set. A test that appears in one run's
+          # failures and not another's is order-dependent, which is the thing
+          # this job exists to name.
+          for seed in 1 7 42 99 1234; do
+            grep -E '^FAILED ' "run-${seed}.log" | sed 's/ - .*//' | sort > "fails-${seed}.txt"
+          done
+          if ! diff -q fails-1.txt fails-7.txt > /dev/null \
+            || ! diff -q fails-1.txt fails-42.txt > /dev/null \
+            || ! diff -q fails-1.txt fails-99.txt > /dev/null \
+            || ! diff -q fails-1.txt fails-1234.txt > /dev/null; then
+            echo "::error::the failing set differs between orderings — an order-dependent test"
+            sort -u fails-*.txt | comm -13 <(sort fails-1.txt) - || true
+            exit 1
+          fi
+          exit "${status}"
+
+      - name: Upload the run logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-detection-logs
+          path: backend/run-*.log
+          retention-days: 7
 
   sqlite-async:
     name: SQLite async extra
@@ -170,180 +311,7 @@ jobs:
         run: uv sync --extra dev --extra async-db --frozen
 
       - name: Test optional SQLite async contracts
-        run: uv run pytest tests/test_db_session.py -v -k "async or capability"
-
-  postgres:
-    name: PostgreSQL contracts
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: printstash
-          POSTGRES_PASSWORD: printstash
-          POSTGRES_DB: printstash
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U printstash -d printstash"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --frozen
-
-      - name: Test PostgreSQL migrations and critical contracts
-        env:
-          PRINTSTASH_TEST_POSTGRES_URL: postgresql://printstash:printstash@localhost:5432/printstash
-        run: uv run pytest tests/postgres -v
-
-  storage-s3:
-    name: Storage backend (S3/SeaweedFS)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --frozen
-
-      # Keep this as an explicit container so the command and development-sized
-      # volume allocation match the local integration-test environment.
-      - name: Start SeaweedFS
-        run: |
-          docker run -d --name seaweedfs -p 9100:8333 \
-            -e AWS_ACCESS_KEY_ID=printstash \
-            -e AWS_SECRET_ACCESS_KEY=printstash-secret \
-            chrislusf/seaweedfs:4.41@sha256:43b768cd62b00d132439cda881b93fd1adebf1b315e996e794087743821d771d \
-            mini -dir=/data -master.volumeSizeLimitMB=64 -master.telemetry=false
-          for i in $(seq 1 20); do
-            curl -sS http://localhost:9100/ >/dev/null && break
-            sleep 1
-          done
-          curl -sS http://localhost:9100/ >/dev/null
-
-      - name: Test S3 storage backend + backup destination against real SeaweedFS
-        env:
-          PRINTSTASH_TEST_S3_ENDPOINT: http://localhost:9100
-        run: uv run pytest tests/test_storage_s3.py tests/test_backup_restore.py -v
-
-  security:
-    name: Security scan
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install backend dependencies
-        run: uv sync --extra dev --frozen
-
-      - name: Static analysis (bandit)
-        run: uv run bandit -ll -r app/
-
-      - name: Dependency audit (pip-audit)
-        run: |
-          uv export --frozen --no-dev --no-emit-local --no-hashes \
-            --output-file "${RUNNER_TEMP}/printstash-audit-requirements.txt"
-          uv run --no-sync pip-audit --strict \
-            --requirement "${RUNNER_TEMP}/printstash-audit-requirements.txt"
-
-  migration-upgrade:
-    name: Migration upgrade (oldest supported release -> head)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Run upgrade check
-        run: ./scripts/test_migration_upgrade.sh
-
-  docker-smoke:
-    name: Docker full/lite smoke and size gate
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Build full API, lite API, and frontend
-        run: |
-          docker build --build-arg PRINTSTASH_VARIANT=full -t ghcr.io/xiao-villamor/printstash-api:latest backend
-          docker build --build-arg PRINTSTASH_VARIANT=lite -t printstash-api-lite-ci backend
-          docker build -t ghcr.io/xiao-villamor/printstash-frontend:latest frontend
-
-      - name: Verify image capabilities, size, and startup
-        run: ./scripts/check_api_image_variants.sh ghcr.io/xiao-villamor/printstash-api:latest printstash-api-lite-ci
-
-      - name: Start composed full stack
-        run: docker compose -f docker-compose.yml up -d --no-build --wait --wait-timeout 180 api frontend
-
-      - name: Hit /health
-        run: >-
-          curl --fail --show-error --silent
-          --retry 5 --retry-delay 1 --retry-all-errors
-          http://localhost:3000/api/v1/health
-
-      - name: Compose logs on failure
-        if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.build.yml logs
-
-      - name: Tear down
-        if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.build.yml down -v
+        run: uv run pytest tests/integration/db/test_session.py -v -k "async or capability"
 
   minio-migration:
     name: MinIO to SeaweedFS migration
@@ -352,8 +320,31 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check whether legacy migration files changed
+        id: legacy_migration
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- \
+            .github/workflows/ci.yml \
+            docker-compose.yml \
+            docker-compose.migrate-minio.yml \
+            scripts/migrate_minio_to_seaweedfs.sh \
+            scripts/rclone_minio_to_seaweedfs.sh \
+            scripts/test_minio_migration.sh; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify idempotent migration and downloaded content
+        if: steps.legacy_migration.outputs.run == 'true'
         run: ./scripts/test_minio_migration.sh
 
   frontend:
@@ -381,23 +372,178 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
-
       - name: Typecheck frontend
-        run: pnpm exec tsc --noEmit
+        run: pnpm typecheck
 
       - name: Lint frontend
         run: pnpm lint
 
+      - name: Check frontend formatting
+        run: pnpm format:check
+
       - name: Unit test frontend
         run: pnpm test
+
+      # There was no coverage step in this job at all, so the thresholds in
+      # vite.config.ts were never enforced anywhere. `pnpm coverage` measures the
+      # app and both workspace packages and then runs scripts/coverage-gate.mjs,
+      # which carries a two-sided floor per area of the tree.
+      - name: Coverage gate for frontend
+        run: pnpm coverage
 
       - name: Build frontend
         run: pnpm build
 
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Test frontend in browser
         run: pnpm test:e2e
+
+  browser-extension:
+    name: Browser extension
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: browser-extension
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: browser-extension/pnpm-lock.yaml
+
+      - name: Install extension dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check extension formatting
+        run: pnpm format:check
+
+      - name: Lint extension
+        run: pnpm lint
+
+      - name: Typecheck extension
+        run: pnpm typecheck
+
+      - name: Test extension and build Chrome, Firefox, and Edge
+        run: pnpm test
+
+      - name: Install backend runtime for capture boundary
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python for capture boundary
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies for capture boundary
+        working-directory: backend
+        run: uv sync --extra dev --frozen
+
+      - name: Provision ephemeral backend for extension capture
+        working-directory: backend
+        shell: bash
+        run: |
+          capture_root="$(mktemp -d "${RUNNER_TEMP}/printstash-capture.XXXXXX")"
+          setup_token="$(openssl rand -hex 32)"
+          echo "PRINTSTASH_EXTENSION_CAPTURE_BASE_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
+          echo "PRINTSTASH_EXTENSION_CAPTURE_SETUP_TOKEN=$setup_token" >> "$GITHUB_ENV"
+          echo "PRINTSTASH_EXTENSION_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
+          VAULT_SETUP_TOKEN="$setup_token" \
+          VAULT_DB_URL="sqlite:///${capture_root}/printstash.sqlite" \
+          VAULT_DATA_DIR="$capture_root/files" \
+          VAULT_THUMB_DIR="$capture_root/thumbs" \
+          VAULT_STAGING_DIR="$capture_root/staging" \
+          VAULT_BACKUP_DIR="$capture_root/backups" \
+          VAULT_SECRETS_KEY_FILE="$capture_root/secrets-key" \
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 8765 \
+            >"${RUNNER_TEMP}/printstash-capture-backend.log" 2>&1 &
+          echo $! >"${RUNNER_TEMP}/printstash-capture-backend.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8765/api/v1/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/printstash-capture-backend.log"
+          exit 1
+
+      - name: Run real backend extension capture boundary
+        run: pnpm test:real-backend-capture
+
+      - name: Tear down ephemeral capture backend
+        if: always()
+        shell: bash
+        run: |
+          if test -f "${RUNNER_TEMP}/printstash-capture-backend.pid"; then
+            kill "$(cat "${RUNNER_TEMP}/printstash-capture-backend.pid")" 2>/dev/null || true
+          fi
+          if test -n "${PRINTSTASH_EXTENSION_CAPTURE_ROOT:-}" \
+            && test -d "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" \
+            && [[ "$PRINTSTASH_EXTENSION_CAPTURE_ROOT" == "${RUNNER_TEMP}/printstash-capture."* ]]; then
+            rm -rf "$PRINTSTASH_EXTENSION_CAPTURE_ROOT"
+          fi
+
+      - name: Locate runner Chrome and ChromeDriver
+        id: browser
+        shell: bash
+        run: |
+          chrome="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || true)"
+          chromedriver="$(command -v chromedriver || true)"
+          test -n "$chrome" || { echo "No runner-installed Chrome/Chromium found" >&2; exit 1; }
+          test -n "$chromedriver" || { echo "No runner-installed ChromeDriver found" >&2; exit 1; }
+          echo "chrome=$chrome" >> "$GITHUB_OUTPUT"
+          echo "chromedriver=$chromedriver" >> "$GITHUB_OUTPUT"
+
+      - name: Run ChromeDriver
+        shell: bash
+        run: |
+          "${{ steps.browser.outputs.chromedriver }}" --port=4444 --url-base=/ >"${RUNNER_TEMP}/printstash-chromedriver.log" 2>&1 &
+          echo $! >"${RUNNER_TEMP}/printstash-chromedriver.pid"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:4444/status >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "${RUNNER_TEMP}/printstash-chromedriver.log"
+          exit 1
+
+      - name: Run loaded Chrome extension smoke
+        env:
+          PRINTSTASH_EXTENSION_BROWSER_BINARY: ${{ steps.browser.outputs.chrome }}
+          PRINTSTASH_EXTENSION_WEBDRIVER_HOST: 127.0.0.1
+          PRINTSTASH_EXTENSION_WEBDRIVER_PORT: "4444"
+          PRINTSTASH_EXTENSION_WEBDRIVER_PATH: /
+          PRINTSTASH_EXTENSION_DIST: ${{ github.workspace }}/browser-extension/.output/chrome-mv3
+        run: pnpm test:e2e
+
+      - name: Stop ChromeDriver
+        if: always()
+        shell: bash
+        run: |
+          if test -f "${RUNNER_TEMP}/printstash-chromedriver.pid"; then
+            kill "$(cat "${RUNNER_TEMP}/printstash-chromedriver.pid")" 2>/dev/null || true
+          fi
+
+      - name: Upload ChromeDriver log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension-chromedriver-log
+          path: ${{ runner.temp }}/printstash-chromedriver.log
 
   e2e-real:
     name: Real-backend E2E
@@ -419,7 +565,10 @@ jobs:
 
       - name: Install backend dependencies
         working-directory: backend
-        run: uv sync --extra dev --frozen
+        # Storage-provider E2E exercises WebDAV through the OpenDAL-backed
+        # providers, which is the full image capability rather than the lite
+        # runtime installed by the general real-backend lane.
+        run: uv sync --extra dev --extra full --frozen
 
       # Frontend: serves a Vite dev server + drives Playwright.
       - name: Set up pnpm
@@ -446,6 +595,10 @@ jobs:
         working-directory: frontend
         run: pnpm test:e2e:real
 
+      - name: Storage-provider E2E
+        working-directory: frontend
+        run: pnpm test:e2e:storage
+
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -455,11 +608,12 @@ jobs:
           retention-days: 7
 
   docker-build:
-    name: Docker build (${{ matrix.image }})
-    runs-on: ubuntu-latest
+    name: Docker build (${{ matrix.image }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
-    # Catch arm64 build breakage before it reaches a release tag. Builds both
-    # published platforms but never pushes — the release workflows publish.
+    # Build each platform on its native architecture. Besides avoiding slow
+    # QEMU emulation, this lets the full ARM image be loaded and STEP-smoked in
+    # the same job instead of building that image twice.
     strategy:
       fail-fast: false
       matrix:
@@ -468,26 +622,59 @@ jobs:
             context: ./backend
             dockerfile: ./backend/Dockerfile
             build-args: PRINTSTASH_VARIANT=full
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+            load: false
+            step-smoke: false
+          - image: printstash-api
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            build-args: PRINTSTASH_VARIANT=full
+            arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            load: true
+            step-smoke: true
           - image: printstash-api-lite
             context: ./backend
             dockerfile: ./backend/Dockerfile
             build-args: PRINTSTASH_VARIANT=lite
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+            load: false
+            step-smoke: false
+          - image: printstash-api-lite
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+            build-args: PRINTSTASH_VARIANT=lite
+            arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            load: false
+            step-smoke: false
           - image: printstash-frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
             build-args: ""
+            arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+            load: false
+            step-smoke: false
+          - image: printstash-frontend
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+            build-args: ""
+            arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            load: false
+            step-smoke: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          # Newer binfmt images crash with "illegal instruction" on arm64
-          # emulation of Node's JIT output (hung the 0.8.5 release job for
-          # 6h before GitHub's job cap force-cancelled it). Pin to the last
-          # known-good QEMU build.
-          image: tonistiigi/binfmt:qemu-v7.0.0-28
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -497,45 +684,21 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: false
+          load: ${{ matrix.load }}
+          tags: ${{ matrix.image }}:${{ matrix.arch }}-ci
           build-args: ${{ matrix.build-args }}
-          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }}
           # ignore-error: a transient GitHub Actions Cache outage (e.g. a 503
           # while exporting) should not fail an otherwise-successful build.
-          cache-to: type=gha,scope=${{ matrix.image }},mode=max,ignore-error=true
-
-  arm-step-runtime:
-    name: ARM64 STEP runtime smoke
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          image: tonistiigi/binfmt:qemu-v7.0.0-28
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build loadable ARM64 full image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          platforms: linux/arm64
-          load: true
-          tags: printstash-arm-step-smoke:ci
-          build-args: PRINTSTASH_VARIANT=full
-          cache-from: type=gha,scope=printstash-api
+          cache-to: type=gha,scope=${{ matrix.image }}-${{ matrix.arch }},mode=max,ignore-error=true
 
       - name: Tessellate a valid STEP fixture in ARM64 userspace
+        if: matrix.step-smoke
         run: >-
-          docker run --rm --platform linux/arm64
+          docker run --rm
           -v "$PWD/backend/tests/fixtures:/fixtures:ro"
-          printstash-arm-step-smoke:ci
+          printstash-api:arm64-ci
           /app/.venv/bin/python -c
           "from pathlib import Path; from app.services.mesh_processing import _load_mesh; mesh = _load_mesh(Path('/fixtures/cascadio_material.stp')); assert mesh is not None and len(mesh.faces) > 0"

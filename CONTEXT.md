@@ -9,18 +9,67 @@ retention. This file pins the project's domain language.
 ### Library
 
 **Model**:
-A logical asset deduplicated by source-mesh sha256; owns versioned Files.
+A printable logical asset deduplicated by source-mesh sha256; owns versioned
+Files and remains independently addressable and reusable even when referenced
+by Multipart Models. The Organized library view may group a referenced Model
+under its Multipart Model instead of duplicating both cards at the same level.
 _Avoid_: asset, item, part
 
 **Artifact** (File):
 One physical stored blob (STL/3MF/OBJ/G-code) at a version under a Model.
 _Avoid_: upload, attachment
 
+**Multipart Model**:
+An independent library grouping that describes one object made from several
+printable Models. It references Models without moving or owning them and has
+its own description, collection, cover, guides and tags. A cover may be a
+private image uploaded to managed storage or a custom external image URL;
+otherwise the UI falls back to a member Model thumbnail. Its tags do not
+propagate to member Models, and member tags do not propagate to the grouping.
+_Avoid_: assembly Model, merged Model, collection
+
+**Multipart Part**:
+A named physical role within a Multipart Model, such as “base”, “handle” or
+“lid”. It has one Model when fixed and several Model Choices when alternatives
+are valid.
+_Avoid_: Part Group, folder, variant group
+
+**Model Choice**:
+One existing Model that can satisfy a Multipart Part. A Model can be referenced
+by any number of Multipart Models and keeps its own Artifacts, preview, G-code
+Revisions and print history.
+_Avoid_: Part Option, source file option, revision
+
+**Multipart Guide**:
+A Document linked to one Multipart Model for assembly or printing guidance.
+Guides may be Markdown, PDF or raster images, remain visible in Documents, and
+survive deletion of the grouping as ordinary Documents.
+_Avoid_: Model file, Artifact, attachment
+
+Multipart Models and ordinary Models share one library. Everything is the
+default presentation: it shows Multipart Models and ordinary Models together.
+Organized shows each Multipart Model once and suppresses duplicate top-level
+cards for the Models it references. Multipart sets only shows groupings, and
+Parts only shows referenced Models.
+Search always reveals a matching Model, including in Organized. This is a
+presentation rule, not ownership: adding a piece or alternative never transfers
+or duplicates that Model's Files, and removing a piece or deleting the grouping
+only removes the reference. The Model and all of its Artifacts and Revisions
+remain addressable from search, Everything, Parts only and any other Multipart
+Model that reuses it. Multipart Parts have an explicit order; every part is
+required, while its Model Choices are alternatives where exactly one is
+selected for a build.
+
 **Artifact persistence**:
-The invariant-heavy sequence `version → canonical move → File row →
-thumbnail → Metadata`, owned solely by `services/ingestion.persist_artifact`.
-Both background ingestion and revision attachment call it; nothing else
-re-implements it.
+The invariant-heavy sequence `version → canonical publication → File row +
+Metadata + committed ownership`, owned solely by
+`services/ingestion.persist_artifact`. That primary boundary is atomic: once
+the database commit begins, uncertain outcomes preserve the published bytes and
+their ownership evidence for reconciliation rather than deleting them.
+Thumbnails are retryable derivatives published after the primary transaction;
+their failure never invalidates an otherwise complete Artifact. Both background
+ingestion and revision attachment call this service; nothing else re-implements
+it.
 
 **Revision**:
 A G-code Artifact with test-outcome bookkeeping (label, status, notes,
@@ -51,12 +100,42 @@ A soft-deleted row awaiting retention expiry; query via
 _Avoid_: deleted (ambiguous with hard delete)
 
 **Trash lifecycle**:
-soft-delete → restore → expiry → hard delete (rows + explicitly owned blobs);
-owned solely by `services/trash` (including the hourly GC loop). PrintStash
-never walks configured storage and deletes files merely because no database row
-claims them; failed writes clean up their exact destinations at the write site.
+soft-delete → restore or expiry → GC preview → explicit approval → quarantine →
+revalidated hard delete. `services/trash` owns individual transitions and
+`services/gc_planner` owns automatic expiry. Automatic GC never approves its
+own plan. It requires a recent, verified backup on an independent S3 provider,
+an unchanged candidate digest, Verified active storage, and a completed
+quarantine interval. PrintStash never walks configured storage and deletes
+files merely because no database row claims them; failed writes clean up only
+their exact destinations at the write site.
+
+**GC plan**:
+A durable, bounded and immutable preview of expired catalog rows and their
+explicitly owned storage keys. At most one plan is active. Approval binds its
+exact digest to a backup witness; finalization rechecks the candidate rows,
+restore generation, provider identity, backup and quarantine deadline.
+
+**Backup witness**:
+The exact archive id, source reference, provider identity and digest of a fully
+verified, application-compatible S3 backup created in the previous 24 hours on
+a provider different from active Vault storage.
 
 ### Storage
+
+**Storage capability tier**:
+The runtime-probed safety guarantee of the active storage backend: Verified,
+Guarded, or Unguarded. Tiers are derived from capability axes, never from a
+provider label. Destructive storage behavior consults the probed tier.
+
+**Storage provider**:
+A stable catalogue entry selected by ID (for example `local`, `s3`, or
+`nextcloud`). It supplies typed setup fields and resolves to a native or remote
+transport; provider identity and transport kind are not interchangeable.
+
+**Ownership intent**:
+An `owned_storage_objects` reservation created before bytes are published.
+PENDING intents are reclaimable after the grace period, COMMITTED intents are
+authoritative ownership records, and BLOCKED intents require operator review.
 
 **Storage key**:
 Opaque identifier for a stored blob — an absolute path (local backend) or
@@ -72,40 +151,59 @@ streaming.
 temp download remotely. The only sanctioned way to feed a stored blob to
 code that needs a filesystem path (mesh loading, tar, restore).
 
+**Artifact content**:
+`services/artifact_content` is the only read seam for an Artifact's bytes. It
+resolves managed storage, descriptor-pinned mounted files, and read-only remote
+sources without asking callers to understand `File.path`. Mounted reads reject
+symlinks and changes between open, hash and close. Remote reads verify stable
+object metadata around materialization.
+
 **Thumbnail**:
 A WebP preview stored under `thumbnail_key()` (`{file_id}.webp`);
 `thumbnail.to_webp()` is the single conversion seam every write goes
 through. Pre-WebP installs left PNGs under `legacy_thumbnail_key()` —
 read/delete only, never written.
 
-### External libraries (NAS folder mirroring)
+### Library sources
 
 **External library**:
-A user-managed folder (typically on a NAS) that PrintStash mirrors *in place* —
-the folder is the source of truth. Files are indexed where they live; only the
-generated thumbnail + metadata are stored by the vault. Opt-in and OFF by
-default (`SystemConfig.external_libraries_enabled`). Owned by
-`services/external_library`.
+A user-managed mounted folder or read-only S3, WebDAV, or SFTP namespace that
+PrintStash indexes in place. The source remains authoritative; only generated
+thumbnails and metadata are stored by the Vault. Opt-in and OFF by default
+(`SystemConfig.external_libraries_enabled`). Owned by
+`services/external_library`. The UI calls these **Library sources**.
+
+**Storage connection**:
+A reusable remote-location profile. Non-secret configuration is stored separately
+from encrypted credentials, and API reads never return secret values. A
+connection may be enabled for Library sources, off-site backup replicas, or both;
+one connection can serve more than one Library source.
 
 **Linked file**:
-An Artifact with `File.is_external = true`: its blob lives on an external root
-(`File.path` is that absolute path), not in vault storage. PrintStash never
-overwrites or deletes a linked file's bytes — trash/GC skip external blobs.
+An Artifact with `File.is_external = true`: its bytes live on a library source,
+not in managed Vault storage. `File.source_key` is the stable source-relative
+identity. `File.path` is an absolute display path for mounted sources and an
+opaque `source://` display URI for remote sources. PrintStash never deletes a
+linked file's bytes; trash and GC skip them.
 _Avoid_: "imported file" (that means a vault-owned copy).
 
-**Mirror scan**:
-`scan_library()` reconciling the index with the folder — new files indexed,
-removed files trashed, changed files (size/mtime → re-hash) refreshed in place.
-Safety rule: a scan **aborts without deleting** when the root is missing/
-unreadable, or empty while live indexed files exist (an unmounted NAS must never
-trigger mass deletion). Manual (`POST /libraries/{id}/scan`) or the periodic
-`_external_scan_loop` in `main.py`.
+**Discovery epoch**:
+A complete, restart-safe reconciliation of one library source. Mounted sources
+use a descriptor-pinned filesystem snapshot. Remote sources page through a
+durable cursor in bounded slices; absence is interpreted only after the full
+epoch completes. Empty or unexpectedly large removal sets fail closed. A
+weekly rotating hash check catches changes that preserve size and mtime.
+
+**Discovery tombstone**:
+A durable `(library, source_key)` suppression created when a linked Artifact is
+trashed. It prevents the still-present source object from being re-imported on
+the next scan. Restore or explicit Rediscover clears it.
 
 **Write-back**:
-Web uploads/revisions routed into a library folder instead of vault storage
-(`ingestion.resolve_write_target`). Revisions follow their model's library
-automatically; new uploads pick a target in the upload modal. Collision-safe —
-write-back only *adds* files, never overwrites.
+Create-only web uploads or revisions routed into a mounted library folder
+instead of Vault storage (`ingestion.resolve_write_target`). It is disabled for
+S3, WebDAV, and SFTP library sources. Mounted write-back only adds files and
+never overwrites existing bytes.
 
 ## Flagged ambiguities
 

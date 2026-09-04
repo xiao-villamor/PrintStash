@@ -52,6 +52,23 @@ _REDACTED_FIELDS = {
     "backup_s3_secret_key",
     "backup_s3_access_key",
     "config_json",
+    "access_token",
+    "refresh_token",
+    "credential_secret",
+    "state_hash",
+    "code_hash",
+    "credential_hash",
+}
+_PROVENANCE_REDACTED_FIELDS = {
+    "canonical_url",
+    "source_item_id",
+    "source_revision",
+    "snapshot_json",
+    "captured_value_json",
+    "user_value_json",
+    "source_file_id",
+    "source_filename",
+    "container_entry_path",
 }
 _REDACTED = "[redacted]"
 
@@ -102,7 +119,16 @@ def _diff_for_obj(obj: Any) -> dict[str, Any]:
         hist = attr.history
         if not hist.has_changes():
             continue
-        if attr.key in _REDACTED_FIELDS:
+        if attr.key in _REDACTED_FIELDS or (
+            getattr(obj, "__tablename__", "")
+            in {
+                "model_provenance_sources",
+                "model_provenance_fields",
+                "provenance_captures",
+                "artifact_provenance_links",
+            }
+            and attr.key in _PROVENANCE_REDACTED_FIELDS
+        ):
             out[attr.key] = {"before": _REDACTED, "after": _REDACTED}
             continue
         out[attr.key] = {

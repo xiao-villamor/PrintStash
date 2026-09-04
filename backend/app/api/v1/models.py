@@ -44,9 +44,11 @@ from app.db.models import (
     FilamentProfile,
     File,
     FileRevisionStatus,
+    FileTagLink,
     FileType,
     Metadata,
     Model,
+    ModelProvenanceSource,
     ModelStar,
     ModelTagLink,
     Printer,
@@ -83,9 +85,15 @@ from app.schemas.models import (
     PrintStatisticsRead,
     RevisionBatchLabels,
     RevisionBatchResult,
+    TagSetUpdate,
     TrashedModelRead,
     TrashPurgeRead,
     VaultStatsRead,
+)
+from app.schemas.provenance import (
+    ModelProvenancePatch,
+    ModelProvenanceRead,
+    ModelSourceCoverRead,
 )
 from app.schemas.saved_views import ModelStarRead
 from app.services import (
@@ -93,18 +101,28 @@ from app.services import (
     library_transfer,
     model_views,
     print_results,
+    provenance,
     rbac,
+    source_covers,
     storage,
     taxonomy,
 )
 from app.services.ingestion import add_gcode_revision_to_model
 from app.services.jobs import registry
 from app.services.moonraker import MoonrakerError
-from app.services.storage_deletion import process_storage_delete_intents
+from app.services.printer_jobs import reproducibility_payload
+from app.services.storage_backend import get_backend
+from app.services.storage_deletion import (
+    cleanup_status,
+    enqueue_owned_key,
+    process_storage_delete_intents,
+)
 from app.services.storage_ownership import UnsafeStorageDeleteError
 from app.services.trash import (
+    StorageRiskConfirmationRequired,
     hard_delete_expired_models,
     hard_delete_model,
+    record_source_tombstone,
     soft_delete_model,
     soft_delete_models,
 )
@@ -693,12 +711,21 @@ def list_trash(
     dependencies=[Depends(require_superuser)],
     summary="Permanently delete expired trash items",
 )
-def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRead:
+def purge_expired_trash(
+    confirm_storage_risk: bool = Query(False),
+    session: Session = Depends(get_session),
+) -> TrashPurgeRead:
     try:
         purged_model_ids = hard_delete_expired_models(
             session,
             retention_days=int(settings.trash_retention_days),
+            confirm_storage_risk=confirm_storage_risk,
         )
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -713,6 +740,7 @@ def purge_expired_trash(session: Session = Depends(get_session)) -> TrashPurgeRe
         storage_completed=storage_result.completed,
         storage_pending=storage_result.pending,
         storage_blocked=storage_result.blocked,
+        storage_cleanup_status=cleanup_status(storage_result),
     )
 
 
@@ -727,6 +755,181 @@ def get_model(
     session: Session = Depends(get_session),
 ) -> ModelRead:
     return _detail_or_404(session, model_id, current_user)
+
+
+@router.get(
+    "/{model_id}/provenance",
+    response_model=ModelProvenanceRead,
+    summary="Get model capture provenance",
+)
+def get_model_provenance(
+    model_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelProvenanceRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return model_views.provenance_detail(session, model_id)
+
+
+@router.patch(
+    "/{model_id}/provenance/{source_id}",
+    response_model=ModelProvenanceRead,
+    dependencies=[Depends(require_auth)],
+    summary="Set or clear explicit provenance field overrides",
+)
+def patch_model_provenance(
+    model_id: int,
+    source_id: int,
+    payload: ModelProvenancePatch,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelProvenanceRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    source = session.exec(
+        select(ModelProvenanceSource).where(
+            ModelProvenanceSource.id == source_id,
+            ModelProvenanceSource.model_id == model_id,
+        )
+    ).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="provenance_source_not_found")
+    if set(payload.overrides) & set(payload.clear_overrides):
+        raise HTTPException(status_code=422, detail="provenance_override_conflict")
+    for field_name, value in payload.overrides.items():
+        provenance.set_user_override(
+            session,
+            provenance_source_id=source_id,
+            field_name=field_name,
+            value=value,
+            actor_id=current_user.id,
+        )
+    for field_name in payload.clear_overrides:
+        provenance.clear_user_override(
+            session,
+            provenance_source_id=source_id,
+            field_name=field_name,
+            actor_id=current_user.id,
+        )
+    session.commit()
+    return model_views.provenance_detail(session, model_id)
+
+
+def _provenance_source_or_404(
+    session: Session, model_id: int, source_id: int
+) -> ModelProvenanceSource:
+    source = session.exec(
+        select(ModelProvenanceSource).where(
+            ModelProvenanceSource.id == source_id,
+            ModelProvenanceSource.model_id == model_id,
+        )
+    ).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="provenance_source_not_found")
+    return source
+
+
+@router.get(
+    "/{model_id}/provenance/{source_id}/cover", response_model=ModelSourceCoverRead
+)
+def get_model_source_cover(
+    model_id: int,
+    source_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelSourceCoverRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    _provenance_source_or_404(session, model_id, source_id)
+    cover = source_covers.get(session, source_id)
+    if cover is None:
+        raise HTTPException(status_code=404, detail="source_cover_not_found")
+    return ModelSourceCoverRead.model_validate(cover)
+
+
+@router.get("/{model_id}/provenance/{source_id}/cover/content")
+def stream_model_source_cover(
+    model_id: int,
+    source_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    _provenance_source_or_404(session, model_id, source_id)
+    cover = source_covers.get(session, source_id)
+    if cover is None:
+        raise HTTPException(status_code=404, detail="source_cover_not_found")
+    return Response(
+        content=get_backend().read_bytes(cover.storage_key),
+        media_type="image/webp",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "ETag": f'"source-cover-{cover.id}-{int(cover.updated_at.timestamp())}"',
+        },
+    )
+
+
+@router.put(
+    "/{model_id}/provenance/{source_id}/cover",
+    response_model=ModelSourceCoverRead,
+    dependencies=[Depends(require_auth)],
+)
+async def put_model_source_cover(
+    model_id: int,
+    source_id: int,
+    file: UploadFile = UploadFileParam(...),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelSourceCoverRead:
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    _provenance_source_or_404(session, model_id, source_id)
+    data = await file.read(15 * 1024 * 1024 + 1)
+    try:
+        result = source_covers.put(
+            session,
+            get_backend(),
+            provenance_source_id=source_id,
+            actor_id=current_user.id,
+            data=data,
+            content_type=file.content_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        source_covers.rollback_after_commit_failure(session, get_backend(), result)
+        raise
+    session.refresh(result.cover)
+    return ModelSourceCoverRead.model_validate(result.cover)
+
+
+@router.delete(
+    "/{model_id}/provenance/{source_id}/cover",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_auth)],
+)
+def delete_model_source_cover(
+    model_id: int,
+    source_id: int,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    _provenance_source_or_404(session, model_id, source_id)
+    cover = source_covers.get(session, source_id)
+    if cover is None:
+        raise HTTPException(status_code=404, detail="source_cover_not_found")
+    enqueue_owned_key(
+        session,
+        get_backend(),
+        cover.storage_key,
+        required_proof=True,
+        resource_kind="model_source_cover",
+        resource_id=cover.id,
+    )
+    session.delete(cover)
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(
@@ -882,6 +1085,16 @@ def get_model_print_jobs(
             started_at=job.started_at,
             finished_at=job.finished_at,
             created_at=job.created_at,
+            **reproducibility_payload(
+                job,
+                file_type=file.file_type,
+                download_url=(
+                    f"/api/v1/files/{job.file_id}/download"
+                    if job.source != "external"
+                    or job.artifact_evidence.endswith("_archived")
+                    else None
+                ),
+            ),
         )
         for job, printer, file, md in rows
     ]
@@ -988,6 +1201,16 @@ def create_manual_print_job(
         started_at=job.started_at,
         finished_at=job.finished_at,
         created_at=job.created_at,
+        **reproducibility_payload(
+            job,
+            file_type=file_row.file_type,
+            download_url=(
+                f"/api/v1/files/{job.file_id}/download"
+                if job.source != "external"
+                or job.artifact_evidence.endswith("_archived")
+                else None
+            ),
+        ),
     )
 
 
@@ -1183,9 +1406,14 @@ def batch_tag_models(
     # Removal only targets tags that already exist; never create on remove.
     remove_tag_ids: List[int] = []
     for raw in payload.remove:
-        slug = taxonomy.slugify(raw.strip())
-        if not slug:
+        # Guard the *input*, not the slug. `slugify` falls back to "model" for
+        # anything it cannot make a slug out of, so slugging first turned
+        # `remove: ["   "]` into "remove the tag named model" — and the guard
+        # underneath it could never fire.
+        name = raw.strip()
+        if not name:
             continue
+        slug = taxonomy.slugify(name)
         tag = session.exec(select(Tag).where(Tag.slug == slug, live(Tag))).first()
         if tag is not None and tag.id is not None:
             remove_tag_ids.append(tag.id)
@@ -1247,14 +1475,13 @@ def batch_set_revision_labels(
             raise HTTPException(status_code=400, detail="revision_not_supported")
         ordered.append(row)
 
-    models_by_id = {
-        model.id: model
-        for model in _require_all_editable_models(
-            session, current_user, [row.model_id for row in ordered]
-        )
-    }
-    if any(row.model_id not in models_by_id for row in ordered):
-        raise HTTPException(status_code=404, detail="model_not_found")
+    # Called for the authorization it enforces: it raises 404 for a model that is
+    # not there and 403 for one this user may not edit, on the first failure. The
+    # returned rows are not needed here, and a second "did every id come back?"
+    # check after it could never fire.
+    _require_all_editable_models(
+        session, current_user, [row.model_id for row in ordered]
+    )
 
     try:
         model_views.set_revision_labels(session, ordered, payload.revision_label)
@@ -1417,6 +1644,38 @@ def update_file_revision(
     return _detail_or_404(session, model_id, current_user)
 
 
+@router.put(
+    "/{model_id}/files/{file_id}/tags",
+    response_model=ModelRead,
+    dependencies=[Depends(require_auth)],
+    summary="Replace an artifact's direct tags",
+)
+def replace_file_tags(
+    model_id: int,
+    file_id: int,
+    payload: TagSetUpdate,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> ModelRead:
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    file_row = session.get(File, file_id)
+    if (
+        file_row is None
+        or file_row.model_id != model_id
+        or file_row.deleted_at is not None
+    ):
+        raise HTTPException(status_code=404, detail="file_not_found")
+
+    session.exec(delete(FileTagLink).where(FileTagLink.file_id == file_id))
+    tags = taxonomy.resolve_or_create_tags_in_transaction(session, payload.tags)
+    for tag in tags:
+        session.add(FileTagLink(file_id=file_id, tag_id=tag.id))
+    model.updated_at = utcnow()
+    session.add(model)
+    session.commit()
+    return _detail_or_404(session, model_id, current_user)
+
+
 @router.delete(
     "/{model_id}/files/{file_id}/revision",
     response_model=ModelRead,
@@ -1448,6 +1707,7 @@ def delete_file_revision(
     file_row.deleted_at = utcnow()
     file_row.deleted_by = current_user.id
     file_row.is_recommended = False
+    record_source_tombstone(session, file_row, "revision_trashed")
     session.add(file_row)
     # Clear the old partial-index entry before promoting its replacement.
     session.flush()
@@ -1514,6 +1774,7 @@ def restore_model(
 )
 def purge_model(
     model_id: int,
+    confirm_storage_risk: bool = Query(False),
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> TrashPurgeRead:
@@ -1529,7 +1790,12 @@ def purge_model(
         CollectionRole.EDIT,
     )
     try:
-        hard_delete_model(session, m)
+        hard_delete_model(session, m, confirm_storage_risk=confirm_storage_risk)
+    except StorageRiskConfirmationRequired as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=exc.detail
+        ) from exc
     except UnsafeStorageDeleteError as exc:
         session.rollback()
         raise HTTPException(
@@ -1544,6 +1810,7 @@ def purge_model(
         storage_completed=storage_result.completed,
         storage_pending=storage_result.pending,
         storage_blocked=storage_result.blocked,
+        storage_cleanup_status=cleanup_status(storage_result),
     )
 
 

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  AlertTriangle,
+  CheckCircle2,
   FolderSync,
+  HardDrive,
   Plus,
   RefreshCw,
+  ShieldAlert,
   Trash2,
-  HardDrive,
-  AlertTriangle,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import {
@@ -13,7 +15,9 @@ import {
   deleteExternalLibrary,
   getJobStatus,
   getVaultConfig,
+  enrollExternalLibraryRoot,
   listExternalLibraries,
+  listStorageConnections,
   scanExternalLibrary,
   updateExternalLibrary,
   updateVaultConfig,
@@ -24,7 +28,10 @@ import { trackImportJob } from "@/lib/task-center";
 import type {
   ExternalLibrary,
   ExternalLibraryCollectionMode,
+  ExternalLibraryCreate,
   ExternalLibraryWatchMode,
+  LibrarySourceKind,
+  StorageConnection,
 } from "@/types";
 
 const BTN_PRIMARY =
@@ -51,6 +58,21 @@ const WATCH_OPTIONS: { value: ExternalLibraryWatchMode; label: string }[] = [
   { value: "events", label: "On (force watching)" },
   { value: "off", label: "Off (schedule only)" },
 ];
+const COLLECTION_MODES = [
+  "mirror",
+  "single",
+] as const satisfies readonly ExternalLibraryCollectionMode[];
+
+// A <select> hands back a bare string. These decode it into the domain type at
+// that boundary; the elements only render the values below, so an unmatched
+// value can only come from a tampered DOM and falls back to the default mode.
+function parseWatchMode(value: string): ExternalLibraryWatchMode {
+  return WATCH_OPTIONS.find((option) => option.value === value)?.value ?? "auto";
+}
+
+function parseCollectionMode(value: string): ExternalLibraryCollectionMode {
+  return COLLECTION_MODES.find((collectionMode) => collectionMode === value) ?? "mirror";
+}
 
 function describeSchedule(cron: string): string {
   if (!cron) return "Manual only";
@@ -60,17 +82,59 @@ function describeSchedule(cron: string): string {
 
 function watchStatus(lib: ExternalLibrary): string {
   if (!lib.enabled) return "Paused";
+  if ((lib.source_kind ?? "mounted") !== "mounted") {
+    return "Remote source — bounded scheduled scans only";
+  }
   if (lib.watch_active) {
     return lib.fs_kind === "network"
       ? "Watching (forced — polling network folder)"
       : "Watching (real-time)";
   }
   if (lib.watch_mode === "off") return "Watching off — scheduled scans only";
-  if (lib.fs_kind === "network")
-    return "Network folder — scheduled scans only";
-  if (lib.fs_kind === "unknown")
-    return "Unknown filesystem — scheduled scans only";
+  if (lib.fs_kind === "network") return "Network folder — scheduled scans only";
+  if (lib.fs_kind === "unknown") return "Unknown filesystem — scheduled scans only";
   return "Scheduled scans only";
+}
+
+interface ExternalLibraryBindingStatus {
+  label: string;
+  description: string;
+  tone: "bound" | "recovery";
+}
+
+function bindingStatus(lib: ExternalLibrary): ExternalLibraryBindingStatus {
+  const isMounted = (lib.source_kind ?? "mounted") === "mounted";
+  if (lib.binding_state === "bound") {
+    return {
+      label: "Source verified",
+      description: isMounted
+        ? "This mounted root is verified for this PrintStash installation."
+        : "This remote location is verified through its encrypted connection.",
+      tone: "bound",
+    };
+  }
+  if (lib.binding_state === "unbound") {
+    return {
+      label: "Needs enrollment",
+      description:
+        "This existing library has no root proof. Scans, watching, and writeback stay paused until you verify and enroll this exact path.",
+      tone: "recovery",
+    };
+  }
+  if (lib.binding_state === "missing") {
+    return {
+      label: "Root proof unavailable",
+      description:
+        "The root or its proof is unavailable. Scans, watching, and writeback stay paused until you verify the intended mount and enroll it again.",
+      tone: "recovery",
+    };
+  }
+  return {
+    label: "Root binding blocked",
+    description:
+      "This root cannot be used safely. Scans, watching, and writeback stay paused; verify the intended mount and resolve the binding problem before continuing.",
+    tone: "recovery",
+  };
 }
 
 function ScheduleControl({
@@ -128,11 +192,58 @@ function formatDate(value: string | null | undefined): string {
   }).format(new Date(value));
 }
 
-async function pollScanJob(jobId: string): Promise<void> {
+function isLibrarySourceKind(value: string): value is LibrarySourceKind {
+  return (
+    value === "mounted" ||
+    value === "s3" ||
+    value === "webdav" ||
+    value === "sftp" ||
+    value === "gdrive"
+  );
+}
+
+/**
+ * The API this panel drives. Declared as a port so a test can render the panel
+ * against a stub; production callers get {@link VAULT_API}, which wires the real
+ * `@/lib/api` calls. The two config calls are narrowed to the one flag the panel
+ * cares about.
+ */
+export interface ExternalLibrariesApi {
+  isFeatureEnabled: () => Promise<boolean>;
+  setFeatureEnabled: (enabled: boolean) => Promise<void>;
+  list: typeof listExternalLibraries;
+  enroll: typeof enrollExternalLibraryRoot;
+  create: typeof createExternalLibrary;
+  update: typeof updateExternalLibrary;
+  remove: typeof deleteExternalLibrary;
+  scan: typeof scanExternalLibrary;
+  jobStatus: typeof getJobStatus;
+  listConnections?: typeof listStorageConnections;
+}
+
+const VAULT_API: ExternalLibrariesApi = {
+  isFeatureEnabled: async () => (await getVaultConfig()).external_libraries_enabled,
+  setFeatureEnabled: async (enabled) => {
+    await updateVaultConfig({ external_libraries_enabled: enabled });
+  },
+  list: listExternalLibraries,
+  enroll: enrollExternalLibraryRoot,
+  create: createExternalLibrary,
+  update: updateExternalLibrary,
+  remove: deleteExternalLibrary,
+  scan: scanExternalLibrary,
+  jobStatus: getJobStatus,
+  listConnections: listStorageConnections,
+};
+
+async function pollScanJob(
+  jobId: string,
+  jobStatus: ExternalLibrariesApi["jobStatus"],
+): Promise<void> {
   // Mirrors the upload modal's polling: wait until the scan job terminates.
   const deadline = Date.now() + 15 * 60 * 1000;
   while (Date.now() < deadline) {
-    const job = await getJobStatus(jobId);
+    const job = await jobStatus(jobId);
     if (job.state === "completed") return;
     if (job.state === "failed") {
       throw new Error(job.error || "scan_failed");
@@ -142,53 +253,64 @@ async function pollScanJob(jobId: string): Promise<void> {
   throw new Error("scan_timeout");
 }
 
-export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
+export function ExternalLibrariesPanel({
+  canEdit,
+  api = VAULT_API,
+}: {
+  canEdit: boolean;
+  api?: ExternalLibrariesApi;
+}) {
   const [enabled, setEnabled] = useState(false);
   const [enableBusy, setEnableBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
+  const [connections, setConnections] = useState<StorageConnection[]>([]);
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExternalLibrary | null>(null);
+  const [enrollTarget, setEnrollTarget] = useState<ExternalLibrary | null>(null);
 
   // Add-library draft.
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState("");
+  const [sourceKind, setSourceKind] = useState<LibrarySourceKind>("mounted");
+  const [connectionId, setConnectionId] = useState<number | "">("");
+  const [sourcePrefix, setSourcePrefix] = useState("");
   const [scanSchedule, setScanSchedule] = useState("0 * * * *");
   const [watchMode, setWatchMode] = useState<ExternalLibraryWatchMode>("auto");
   const [mode, setMode] = useState<ExternalLibraryCollectionMode>("mirror");
 
   const refresh = useCallback(async () => {
     try {
-      setLibraries(await listExternalLibraries());
+      setLibraries(await api.list());
+      if (api.listConnections) setConnections(await api.listConnections());
     } catch (e) {
       toast.error(e);
     }
-  }, []);
+  }, [api]);
 
   useEffect(() => {
     let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
+    api
+      .isFeatureEnabled()
+      .then((featureEnabled) => {
         if (cancelled) return;
-        setEnabled(cfg.external_libraries_enabled);
+        setEnabled(featureEnabled);
         setLoaded(true);
-        if (cfg.external_libraries_enabled) refresh();
+        if (featureEnabled) refresh();
       })
       .catch(() => setLoaded(true));
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [api, refresh]);
 
   async function toggleFeature(next: boolean) {
     setEnableBusy(true);
     setEnabled(next);
     try {
-      await updateVaultConfig({ external_libraries_enabled: next });
-      toast.success(
-        next ? "Shared volumes enabled." : "Shared volumes disabled.",
-      );
+      await api.setFeatureEnabled(next);
+      toast.success(next ? "Library sources enabled." : "Library sources disabled.");
       if (next) await refresh();
     } catch (e) {
       setEnabled(!next);
@@ -199,25 +321,38 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   }
 
   async function handleCreate() {
-    if (!name.trim() || !rootPath.trim()) {
-      toast.error("Name and folder path are required.");
+    if (!name.trim() || (sourceKind === "mounted" ? !rootPath.trim() : connectionId === "")) {
+      toast.error(
+        sourceKind === "mounted"
+          ? "Name and folder path are required."
+          : "Name and a compatible remote connection are required.",
+      );
       return;
     }
     setBusyId("create");
     try {
-      await createExternalLibrary({
+      const body: ExternalLibraryCreate = {
         name: name.trim(),
-        root_path: rootPath.trim(),
+        root_path: sourceKind === "mounted" ? rootPath.trim() : undefined,
         scan_schedule: scanSchedule,
-        watch_mode: watchMode,
+        watch_mode: sourceKind === "mounted" ? watchMode : "off",
         collection_mode: mode,
-      });
+      };
+      if (sourceKind !== "mounted") {
+        body.source_kind = sourceKind;
+        body.connection_id = connectionId === "" ? null : connectionId;
+        body.source_prefix = sourcePrefix.trim();
+      }
+      await api.create(body);
       setName("");
       setRootPath("");
+      setSourceKind("mounted");
+      setConnectionId("");
+      setSourcePrefix("");
       setScanSchedule("0 * * * *");
       setWatchMode("auto");
       setMode("mirror");
-      toast.success("Library added.");
+      toast.success("Library source added.");
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -229,9 +364,9 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   async function handleScan(lib: ExternalLibrary) {
     setBusyId(lib.id);
     try {
-      const resp = await scanExternalLibrary(lib.id);
+      const resp = await api.scan(lib.id);
       trackImportJob(resp.job_id, `Scan ${lib.name}`);
-      await pollScanJob(resp.job_id);
+      await pollScanJob(resp.job_id, api.jobStatus);
       toast.success(`Scan complete for "${lib.name}".`);
       await refresh();
     } catch (e) {
@@ -245,7 +380,21 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   async function handleToggleEnabled(lib: ExternalLibrary) {
     setBusyId(lib.id);
     try {
-      await updateExternalLibrary(lib.id, { enabled: !lib.enabled });
+      await api.update(lib.id, { enabled: !lib.enabled });
+      await refresh();
+    } catch (e) {
+      toast.error(e);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleEnroll(lib: ExternalLibrary) {
+    setBusyId(lib.id);
+    try {
+      await api.enroll(lib.id, { confirm_root_path: lib.root_path });
+      toast.success("Root verified. Rescan to resume indexing.");
+      setEnrollTarget(null);
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -260,7 +409,7 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   ) {
     setBusyId(lib.id);
     try {
-      await updateExternalLibrary(lib.id, patch);
+      await api.update(lib.id, patch);
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -272,8 +421,8 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
   async function handleDelete(lib: ExternalLibrary) {
     setBusyId(lib.id);
     try {
-      await deleteExternalLibrary(lib.id);
-      toast.success(`Removed "${lib.name}". Files on the volume were not touched.`);
+      await api.remove(lib.id);
+      toast.success(`Removed "${lib.name}". Source files were not touched.`);
       await refresh();
     } catch (e) {
       toast.error(e);
@@ -287,279 +436,418 @@ export function ExternalLibrariesPanel({ canEdit }: { canEdit: boolean }) {
 
   return (
     <Localized>
-    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-      <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3 min-w-0">
-          <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
-            <FolderSync className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">
-              Shared volumes
-            </h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Mirror a folder — on the server or a NAS — in place: files are indexed
-              where they live, never copied. Local folders can be watched in real
-              time; all folders support scheduled and manual scans. Off by default.
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          disabled={!canEdit || enableBusy}
-          onClick={() => toggleFeature(!enabled)}
-          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-            enabled ? "bg-primary" : "bg-outline-variant"
-          }`}
-        >
-          <span
-            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-              enabled ? "translate-x-6" : "translate-x-1"
-            }`}
-          />
-        </button>
-      </div>
-
-      {enabled && (
-        <div className="p-4 sm:p-5 space-y-5">
-          {/* Existing libraries */}
-          {libraries.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-              <FolderSync className="h-7 w-7 text-muted-foreground/50" />
-              <p className="text-sm font-medium text-foreground">No shared volumes yet</p>
-              <p className="text-xs text-muted-foreground">Add a folder below to start mirroring it into your vault.</p>
+      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+        <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-8 h-8 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
+              <FolderSync className="h-4 w-4" />
             </div>
-          ) : (
-            <ul className="space-y-3">
-              {libraries.map((lib) => {
-                const busy = busyId === lib.id;
-                const s = lib.last_scan_summary;
-                return (
-                  <li
-                    key={lib.id}
-                    className="rounded border border-border bg-background p-3 sm:p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
-                          <span className="text-sm font-medium text-foreground truncate">
-                            {lib.name}
-                          </span>
-                          {!lib.enabled && (
-                            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/70 border border-border rounded px-1.5 py-0.5">
-                              paused
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-foreground">Library sources</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Index existing models from mounted folders, S3, WebDAV, or SFTP without copying them
+                into Vault storage. Source files stay externally owned and are never deleted by
+                PrintStash. Off by default.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Library sources enabled"
+            aria-checked={enabled}
+            disabled={!canEdit || enableBusy}
+            onClick={() => toggleFeature(!enabled)}
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+              enabled ? "bg-primary" : "bg-outline-variant"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                enabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+
+        {enabled && (
+          <div className="p-4 sm:p-5 space-y-5">
+            {/* Existing libraries */}
+            {libraries.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
+                <FolderSync className="h-7 w-7 text-muted-foreground/50" />
+                <p className="text-sm font-medium text-foreground">No library sources yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Add a mounted folder or connect remote storage to index existing models without
+                  copying them into the Vault.
+                </p>
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {libraries.map((lib) => {
+                  const busy = busyId === lib.id;
+                  const s = lib.last_scan_summary;
+                  const binding = bindingStatus(lib);
+                  const rootBound = lib.binding_state === "bound";
+                  return (
+                    <li
+                      key={lib.id}
+                      className="rounded border border-border bg-background p-3 sm:p-4"
+                    >
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 w-full">
+                          <div className="flex items-center gap-2">
+                            <HardDrive className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-sm font-medium text-foreground truncate">
+                              {lib.name}
                             </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground font-mono mt-1 truncate">
-                          {lib.root_path}
-                        </p>
-                        <p className="text-2xs text-muted-foreground mt-1">
-                          {lib.collection_mode === "mirror"
-                            ? "Mirrors subfolders → collections"
-                            : "Single collection"}{" "}
-                          · {describeSchedule(lib.scan_schedule)} · last scan{" "}
-                          {formatDate(lib.last_scanned_at)}
-                        </p>
-                        <p className="text-2xs text-muted-foreground mt-0.5">
-                          {watchStatus(lib)}
-                        </p>
-                        {canEdit && (
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2 max-w-md">
-                            <ScheduleControl
-                              value={lib.scan_schedule}
-                              disabled={busy}
-                              inputClass={`${INPUT} !py-1.5 text-xs`}
-                              onChange={(cron) =>
-                                handleUpdate(lib, { scan_schedule: cron })
-                              }
-                            />
-                            <select
-                              className={`${INPUT} !py-1.5 text-xs self-start`}
-                              value={lib.watch_mode}
-                              disabled={busy}
-                              onChange={(e) =>
-                                handleUpdate(lib, {
-                                  watch_mode: e.target
-                                    .value as ExternalLibraryWatchMode,
-                                })
-                              }
-                            >
-                              {WATCH_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>
-                                  {o.label}
-                                </option>
-                              ))}
-                            </select>
+                            {!lib.enabled && (
+                              <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/70 border border-border rounded px-1.5 py-0.5">
+                                paused
+                              </span>
+                            )}
                           </div>
-                        )}
-                        {lib.last_scan_status === "error" && (
-                          <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
-                            <AlertTriangle className="h-3 w-3" />
-                            {s?.error || "Last scan failed"}
+                          <p className="text-xs text-muted-foreground font-mono mt-1 truncate">
+                            {lib.root_path}
                           </p>
-                        )}
-                        {(lib.last_scan_status === "ok" ||
-                          lib.last_scan_status === "partial") &&
-                          s && (
-                            <p className="text-2xs text-muted-foreground mt-1">
-                              +{s.added} added · {s.updated} updated · {s.removed}{" "}
-                              removed
-                              {s.errors.length > 0
-                                ? ` · ${s.errors.length} errors`
-                                : ""}
+                          {(lib.source_kind ?? "mounted") !== "mounted" && (
+                            <p className="mt-1 text-2xs text-muted-foreground">
+                              {(lib.source_kind ?? "mounted").toUpperCase()} · remote source ·
+                              read-only
                             </p>
                           )}
-                        {lib.last_scan_status === "partial" && (
-                          <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
-                            <AlertTriangle className="h-3 w-3" />
-                            Some files could not be indexed
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-shrink-0 items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={!canEdit || busy}
-                          onClick={() => handleScan(lib)}
-                          className={BTN_SECONDARY}
-                        >
-                          <RefreshCw
-                            className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`}
-                          />
-                          {busy ? "Scanning" : "Scan now"}
-                        </button>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={lib.enabled}
-                          aria-label="Auto-scan enabled"
-                          disabled={!canEdit || busy}
-                          onClick={() => handleToggleEnabled(lib)}
-                          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-                            lib.enabled
-                              ? "bg-primary"
-                              : "bg-outline-variant"
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                              lib.enabled ? "translate-x-6" : "translate-x-1"
+                          <div
+                            className={`mt-2 flex items-start gap-2 rounded border p-2 ${
+                              binding.tone === "bound"
+                                ? "border-success/30 bg-success/10"
+                                : "border-warning/30 bg-warning/10"
                             }`}
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canEdit || busy}
-                          onClick={() => setDeleteTarget(lib)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
-                          aria-label="Remove library"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                            role={rootBound ? undefined : "alert"}
+                          >
+                            {rootBound ? (
+                              <CheckCircle2
+                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
+                                aria-hidden
+                              />
+                            ) : (
+                              <ShieldAlert
+                                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
+                                aria-hidden
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-2xs font-semibold text-foreground">
+                                {binding.label}
+                              </p>
+                              <p className="mt-0.5 text-2xs leading-relaxed text-muted-foreground">
+                                {binding.description}
+                              </p>
+                              {lib.binding_reason && !rootBound && (
+                                <p className="mt-0.5 font-mono text-3xs text-muted-foreground">
+                                  {lib.binding_reason}
+                                </p>
+                              )}
+                              {lib.root_enrollable && canEdit && (
+                                <button
+                                  type="button"
+                                  className={`${BTN_SECONDARY} mt-2`}
+                                  disabled={busy}
+                                  onClick={() => setEnrollTarget(lib)}
+                                >
+                                  Review and enroll
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-2xs text-muted-foreground mt-1">
+                            {lib.collection_mode === "mirror"
+                              ? "Mirrors subfolders → collections"
+                              : "Single collection"}{" "}
+                            · {describeSchedule(lib.scan_schedule)} · last scan{" "}
+                            {formatDate(lib.last_scanned_at)}
+                          </p>
+                          <p className="text-2xs text-muted-foreground mt-0.5">
+                            {watchStatus(lib)}
+                          </p>
+                          {canEdit && (
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2 max-w-md">
+                              <ScheduleControl
+                                value={lib.scan_schedule}
+                                disabled={busy}
+                                inputClass={`${INPUT} !py-1.5 text-xs`}
+                                onChange={(cron) => handleUpdate(lib, { scan_schedule: cron })}
+                              />
+                              {(lib.source_kind ?? "mounted") === "mounted" && (
+                                <select
+                                  className={`${INPUT} !py-1.5 text-xs self-start`}
+                                  value={lib.watch_mode}
+                                  disabled={busy}
+                                  onChange={(e) =>
+                                    handleUpdate(lib, {
+                                      watch_mode: parseWatchMode(e.target.value),
+                                    })
+                                  }
+                                >
+                                  {WATCH_OPTIONS.map((o) => (
+                                    <option key={o.value} value={o.value}>
+                                      {o.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+                          )}
+                          {lib.last_scan_status === "error" && (
+                            <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
+                              <AlertTriangle className="h-3 w-3" />
+                              {s?.error || "Last scan failed"}
+                            </p>
+                          )}
+                          {(lib.last_scan_status === "ok" || lib.last_scan_status === "partial") &&
+                            s && (
+                              <p className="text-2xs text-muted-foreground mt-1">
+                                +{s.added} added · {s.updated} updated · {s.removed} removed
+                                {s.errors.length > 0 ? ` · ${s.errors.length} errors` : ""}
+                              </p>
+                            )}
+                          {lib.last_scan_status === "partial" && (
+                            <p className="mt-1 inline-flex items-center gap-1 text-2xs text-destructive">
+                              <AlertTriangle className="h-3 w-3" />
+                              Some files could not be indexed
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex flex-shrink-0 items-center gap-1.5 self-end sm:self-auto">
+                          <button
+                            type="button"
+                            disabled={!canEdit || busy || !rootBound}
+                            onClick={() => handleScan(lib)}
+                            title={rootBound ? undefined : "Verify the source before scanning."}
+                            className={BTN_SECONDARY}
+                          >
+                            <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
+                            {busy ? "Scanning" : "Scan now"}
+                          </button>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={lib.enabled}
+                            aria-label="Auto-scan enabled"
+                            disabled={!canEdit || busy || !rootBound}
+                            onClick={() => handleToggleEnabled(lib)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                              lib.enabled ? "bg-primary" : "bg-outline-variant"
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                lib.enabled ? "translate-x-6" : "translate-x-1"
+                              }`}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canEdit || busy}
+                            onClick={() => setDeleteTarget(lib)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
+                            aria-label="Remove library source"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
-          {/* Add a library */}
-          <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
-            <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-              Add a folder
+            <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
+              Remote connection profiles are managed in Settings → Remote storage. Create one there,
+              allow Library sources, then select it below.
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input
-                className={INPUT}
-                placeholder="Name (e.g. NAS models)"
-                value={name}
-                disabled={!canEdit}
-                onChange={(e) => setName(e.target.value)}
-              />
-              <input
-                className={INPUT}
-                placeholder="Absolute folder path (e.g. /mnt/nas/3d)"
-                value={rootPath}
-                disabled={!canEdit}
-                onChange={(e) => setRootPath(e.target.value)}
-              />
-              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                Scan schedule
-                <ScheduleControl
-                  value={scanSchedule}
-                  disabled={!canEdit}
-                  inputClass={INPUT}
-                  onChange={setScanSchedule}
-                />
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-                Real-time watching
-                <select
-                  className={INPUT}
-                  value={watchMode}
-                  disabled={!canEdit}
-                  onChange={(e) =>
-                    setWatchMode(e.target.value as ExternalLibraryWatchMode)
-                  }
+
+            {/* Add a library source */}
+            <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
+              <p className="text-2xs font-mono uppercase tracking-wider text-primary">
+                Add a library source
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Source name
+                  <input
+                    className={INPUT}
+                    aria-label="Source name"
+                    placeholder="e.g. Workshop NAS"
+                    value={name}
+                    disabled={!canEdit}
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Source type
+                  <select
+                    className={INPUT}
+                    aria-label="Library source type"
+                    value={sourceKind}
+                    disabled={!canEdit}
+                    onChange={(event) => {
+                      if (!isLibrarySourceKind(event.target.value)) return;
+                      setSourceKind(event.target.value);
+                      setConnectionId("");
+                    }}
+                  >
+                    <option value="mounted">Mounted folder (SMB/NFS/local)</option>
+                    <option value="s3">S3 / compatible</option>
+                    <option value="webdav">WebDAV / Nextcloud</option>
+                    <option value="sftp">SFTP</option>
+                    <option value="gdrive">Google Drive</option>
+                  </select>
+                </label>
+                {sourceKind === "mounted" ? (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground sm:col-span-2">
+                    Mounted folder path
+                    <input
+                      className={INPUT}
+                      aria-label="Mounted folder path"
+                      placeholder="e.g. /mnt/nas/3d"
+                      value={rootPath}
+                      disabled={!canEdit}
+                      onChange={(e) => setRootPath(e.target.value)}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      Remote connection
+                      <select
+                        className={INPUT}
+                        aria-label="Remote source connection"
+                        value={connectionId}
+                        disabled={!canEdit}
+                        onChange={(event) =>
+                          setConnectionId(event.target.value ? Number(event.target.value) : "")
+                        }
+                      >
+                        <option value="">Choose an enabled connection</option>
+                        {connections
+                          .filter(
+                            (connection) =>
+                              connection.kind === sourceKind &&
+                              connection.enabled &&
+                              ["library", "both"].includes(connection.purpose ?? "library"),
+                          )
+                          .map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                      Path within connection (optional)
+                      <input
+                        className={INPUT}
+                        aria-label="Source path within connection"
+                        placeholder="e.g. production/models"
+                        value={sourcePrefix}
+                        disabled={!canEdit}
+                        onChange={(event) => setSourcePrefix(event.target.value)}
+                      />
+                    </label>
+                  </>
+                )}
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Scan schedule
+                  <ScheduleControl
+                    value={scanSchedule}
+                    disabled={!canEdit}
+                    inputClass={INPUT}
+                    onChange={setScanSchedule}
+                  />
+                </label>
+                {sourceKind === "mounted" && (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Real-time watching
+                    <select
+                      className={INPUT}
+                      value={watchMode}
+                      disabled={!canEdit}
+                      onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
+                    >
+                      {WATCH_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Collection layout
+                  <select
+                    className={INPUT}
+                    aria-label="Collection layout"
+                    value={mode}
+                    disabled={!canEdit}
+                    onChange={(e) => setMode(parseCollectionMode(e.target.value))}
+                  >
+                    <option value="mirror">Map subfolders to collections</option>
+                    <option value="single">Single collection (flat)</option>
+                  </select>
+                </label>
+              </div>
+              <p className="text-2xs text-muted-foreground">
+                PrintStash stores catalog metadata and thumbnails only; source files stay in their
+                original location.{" "}
+                {sourceKind === "mounted"
+                  ? "Mounted sources support manual and scheduled scans. Local folders can also be watched and may accept create-only write-back."
+                  : "Remote sources use bounded manual or scheduled scans and are always read-only."}
+              </p>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={!canEdit || busyId === "create"}
+                  onClick={handleCreate}
+                  className={BTN_PRIMARY}
                 >
-                  {WATCH_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <select
-                className={INPUT}
-                value={mode}
-                disabled={!canEdit}
-                onChange={(e) =>
-                  setMode(e.target.value as ExternalLibraryCollectionMode)
-                }
-              >
-                <option value="mirror">Mirror subfolders as collections</option>
-                <option value="single">Single collection (flat)</option>
-              </select>
-            </div>
-            <p className="text-2xs text-muted-foreground">
-              Watching gives near-real-time updates on local folders. Network
-              folders (NAS over NFS/SMB) don't deliver file events, so they fall
-              back to the schedule above.
-            </p>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                disabled={!canEdit || busyId === "create"}
-                onClick={handleCreate}
-                className={BTN_PRIMARY}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                {busyId === "create" ? "Adding" : "Add library"}
-              </button>
+                  <Plus className="h-3.5 w-3.5" />
+                  {busyId === "create" ? "Adding" : "Add source"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <ConfirmModal
-        open={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
-        title="Remove external library?"
-        description={
-          deleteTarget
-            ? `"${deleteTarget.name}" will be removed and its indexed models moved to trash. The files on the shared volume are never touched.`
-            : ""
-        }
-        confirmLabel="Remove"
-        busy={deleteTarget !== null && busyId === deleteTarget.id}
-        onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-      />
-    </div>
+        <ConfirmModal
+          open={deleteTarget !== null}
+          onClose={() => setDeleteTarget(null)}
+          title="Remove library source?"
+          description={
+            deleteTarget
+              ? `"${deleteTarget.name}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.`
+              : ""
+          }
+          confirmLabel="Remove"
+          busy={deleteTarget !== null && busyId === deleteTarget.id}
+          onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+        />
+        <ConfirmModal
+          open={enrollTarget !== null}
+          onClose={() => {
+            if (busyId === null) setEnrollTarget(null);
+          }}
+          title="Enroll mounted source root?"
+          description={
+            enrollTarget
+              ? `Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: ${enrollTarget.root_path}. This re-enables safe scans, watching, and writeback.`
+              : ""
+          }
+          confirmLabel="Enroll root"
+          busy={enrollTarget !== null && busyId === enrollTarget.id}
+          onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
+        />
+      </div>
     </Localized>
   );
 }

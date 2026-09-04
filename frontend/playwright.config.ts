@@ -3,8 +3,9 @@ import { defineConfig, devices } from "@playwright/test";
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3210);
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
 const apiBase = `http://127.0.0.1:${apiPort}`;
+const bundledDevFlag = process.env.PLAYWRIGHT_BUNDLED_DEV ? " --experimental-bundle" : "";
 // Vite dev server carries the /api/v1 proxy (target from VITE_API_URL).
-const webServerCommand = `VITE_API_URL=${apiBase} ./node_modules/.bin/vite --port ${port} --strictPort --host 127.0.0.1`;
+const webServerCommand = `VITE_API_URL=${apiBase} ./node_modules/.bin/vite${bundledDevFlag} --port ${port} --strictPort --host 127.0.0.1`;
 
 export default defineConfig({
   testDir: "./tests/e2e",

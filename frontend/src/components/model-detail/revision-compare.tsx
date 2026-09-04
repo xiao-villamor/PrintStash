@@ -14,17 +14,21 @@ import { ArtifactOutcomeRead, FileRead } from "@/types";
 import { revisionStatusLabel } from "./presentation";
 import { Localized } from "@/components/ui/localized";
 
-export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead; right: FileRead; outcomes?: ArtifactOutcomeRead[] }) {
+export function RevisionCompare({
+  left,
+  right,
+  outcomes = [],
+}: {
+  left: FileRead;
+  right: FileRead;
+  outcomes?: ArtifactOutcomeRead[];
+}) {
   const leftOutcome = outcomes.find((row) => row.file_id === left.id);
   const rightOutcome = outcomes.find((row) => row.file_id === right.id);
   const leftSlicer =
-    [left.metadata?.slicer_name, left.metadata?.slicer_version]
-      .filter(Boolean)
-      .join(" ") || "—";
+    [left.metadata?.slicer_name, left.metadata?.slicer_version].filter(Boolean).join(" ") || "—";
   const rightSlicer =
-    [right.metadata?.slicer_name, right.metadata?.slicer_version]
-      .filter(Boolean)
-      .join(" ") || "—";
+    [right.metadata?.slicer_name, right.metadata?.slicer_version].filter(Boolean).join(" ") || "—";
   const rows = [
     ["Type", left.file_type.toUpperCase(), right.file_type.toUpperCase()],
     ["Version", String(left.version), String(right.version)],
@@ -91,7 +95,11 @@ export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead
       formatTemperature(right.metadata?.bed_temperature_c),
     ],
     ["Material", left.metadata?.material_type ?? "—", right.metadata?.material_type ?? "—"],
-    ["Filament profile", left.metadata?.material_brand ?? "—", right.metadata?.material_brand ?? "—"],
+    [
+      "Filament profile",
+      left.metadata?.material_brand ?? "—",
+      right.metadata?.material_brand ?? "—",
+    ],
     [
       "Filament",
       formatGrams(left.metadata?.filament_weight_g),
@@ -112,33 +120,67 @@ export function RevisionCompare({ left, right, outcomes = [] }: { left: FileRead
     ["Size", formatBytes(left.size_bytes), formatBytes(right.size_bytes)],
     ["SHA-256", left.sha256.slice(0, 12), right.sha256.slice(0, 12)],
     ["Prints", String(leftOutcome?.print_count ?? 0), String(rightOutcome?.print_count ?? 0)],
-    ["Completed", String(leftOutcome?.completed_count ?? 0), String(rightOutcome?.completed_count ?? 0)],
+    [
+      "Completed",
+      String(leftOutcome?.completed_count ?? 0),
+      String(rightOutcome?.completed_count ?? 0),
+    ],
     ["Failed", String(leftOutcome?.failed_count ?? 0), String(rightOutcome?.failed_count ?? 0)],
-    ["Success rate", formatPercent(leftOutcome?.success_rate != null ? leftOutcome.success_rate * 100 : null), formatPercent(rightOutcome?.success_rate != null ? rightOutcome.success_rate * 100 : null)],
-    ["Avg actual time", formatDuration(leftOutcome?.average_duration_s ?? null), formatDuration(rightOutcome?.average_duration_s ?? null)],
-    ["Actual filament", formatGrams(leftOutcome?.total_filament_g ?? null), formatGrams(rightOutcome?.total_filament_g ?? null)],
-    ["Actual cost", formatCost(leftOutcome?.total_cost ?? null), formatCost(rightOutcome?.total_cost ?? null)],
+    [
+      "Success rate",
+      formatPercent(leftOutcome?.success_rate != null ? leftOutcome.success_rate * 100 : null),
+      formatPercent(rightOutcome?.success_rate != null ? rightOutcome.success_rate * 100 : null),
+    ],
+    [
+      "Avg actual time",
+      formatDuration(leftOutcome?.average_duration_s ?? null),
+      formatDuration(rightOutcome?.average_duration_s ?? null),
+    ],
+    [
+      "Actual filament",
+      formatGrams(leftOutcome?.total_filament_g ?? null),
+      formatGrams(rightOutcome?.total_filament_g ?? null),
+    ],
+    [
+      "Actual cost",
+      formatCost(leftOutcome?.total_cost ?? null),
+      formatCost(rightOutcome?.total_cost ?? null),
+    ],
   ];
 
   return (
-    <Localized><div className="bg-surface border border-outline-variant rounded overflow-hidden">
-      <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
-        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">Field</span>
-        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">Rev {left.gcode_revision_number ?? left.version}</span>
-        <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">Rev {right.gcode_revision_number ?? right.version}</span>
-      </div>
-      {rows.map(([label, leftValue, rightValue], index) => (
-        <div
-          key={label}
-          className={`grid grid-cols-[1fr_1fr_1fr] ${index === rows.length - 1 ? "" : "border-b border-surface-container-high"}`}
-        >
-          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">{label}</span>
-          <span className="px-2 py-2 font-mono text-2xs text-on-surface break-words">{leftValue}</span>
-          <span className={`px-2 py-2 font-mono text-2xs break-words ${leftValue === rightValue ? "text-on-surface" : "text-primary font-semibold"}`}>
-            {rightValue}
+    <Localized>
+      <div className="bg-surface border border-outline-variant rounded overflow-hidden">
+        <div className="grid grid-cols-[1fr_1fr_1fr] border-b border-outline-variant bg-surface-container-low">
+          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+            Field
+          </span>
+          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
+            Rev {left.gcode_revision_number ?? left.version}
+          </span>
+          <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface">
+            Rev {right.gcode_revision_number ?? right.version}
           </span>
         </div>
-      ))}
-    </div></Localized>
+        {rows.map(([label, leftValue, rightValue], index) => (
+          <div
+            key={label}
+            className={`grid grid-cols-[1fr_1fr_1fr] ${index === rows.length - 1 ? "" : "border-b border-surface-container-high"}`}
+          >
+            <span className="px-2 py-2 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+              {label}
+            </span>
+            <span className="px-2 py-2 font-mono text-2xs text-on-surface break-words">
+              {leftValue}
+            </span>
+            <span
+              className={`px-2 py-2 font-mono text-2xs break-words ${leftValue === rightValue ? "text-on-surface" : "text-primary font-semibold"}`}
+            >
+              {rightValue}
+            </span>
+          </div>
+        ))}
+      </div>
+    </Localized>
   );
 }

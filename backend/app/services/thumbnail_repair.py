@@ -4,19 +4,27 @@ from sqlmodel import Session, select
 
 from app.db.models import File, FileType, Model
 from app.db.scopes import live
-from app.services import mesh_processing, thumbnail
 from app.services.storage_backend import get_backend
-from app.services.storage_ownership import record_creation, replace_owned_bytes
+from app.services.thumbnail_engine import ThumbnailEngine
+from app.services.thumbnail_generations import (
+    ThumbnailEnsureOutcome,
+    ThumbnailEnsureResult,
+    ensure_thumbnail,
+)
 
 _MESH_TYPES = (FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP)
 
 
-def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
-    """Idempotently rebuild one Model thumbnail from newest readable mesh."""
+def regenerate_model_thumbnail_result(
+    session: Session, model_id: int, *, force: bool = False
+) -> ThumbnailEnsureResult:
+    """Ensure one Model thumbnail, trying live revisions newest to oldest."""
     model = session.exec(select(Model).where(Model.id == model_id, live(Model))).first()
     if model is None:
-        return False
-    mesh = session.exec(
+        return ThumbnailEnsureResult(
+            ThumbnailEnsureOutcome.FAILED, None, failure_reason="model_not_found"
+        )
+    meshes = session.exec(
         select(File)
         .where(
             File.model_id == model_id,
@@ -24,30 +32,29 @@ def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
             live(File),
         )
         .order_by(File.version.desc(), File.id.desc())  # type: ignore[attr-defined]
-    ).first()
-    if mesh is None or mesh.id is None:
-        return False
-    backend = get_backend()
-    if not backend.exists(mesh.path):
-        return False
-    with backend.local_path(mesh.path) as path:
-        data = mesh_processing.render_thumbnail(path)
-    if not data:
-        return False
-    key = backend.thumbnail_key(mesh.id)
-    # Do not replace an ID-shaped file without persisted object-level proof.
-    # A collision leaves the existing bytes untouched; the repair can be
-    # retried after an operator resolves the audit finding.
-    encoded = thumbnail.to_webp(data)
-    if backend.exists(key):
-        replace_owned_bytes(
-            session, backend, key, encoded, object_kind="thumbnail"
+    ).all()
+    last_result: ThumbnailEnsureResult | None = None
+    for mesh in meshes:
+        if mesh.id is None:
+            continue
+        result = ensure_thumbnail(
+            session,
+            mesh,
+            force=force,
+            promote=True,
+            backend=get_backend(),
+            engine=ThumbnailEngine(),
         )
-    else:
-        receipt = backend.create_bytes(encoded, key)
-        record_creation(session, receipt, object_kind="thumbnail")
-    model.thumbnail_file_id = mesh.id
-    model.thumbnail_path = key
-    session.add(model)
-    session.commit()
-    return True
+        last_result = result
+        if result.available:
+            return result
+        if result.outcome is ThumbnailEnsureOutcome.COALESCED:
+            return result
+    return last_result or ThumbnailEnsureResult(
+        ThumbnailEnsureOutcome.FAILED, None, failure_reason="no_readable_mesh"
+    )
+
+
+def regenerate_model_thumbnail(session: Session, model_id: int) -> bool:
+    """Backwards-compatible boolean repair API."""
+    return regenerate_model_thumbnail_result(session, model_id).available

@@ -13,7 +13,8 @@ PrintStash is a local-first web app for STL, 3MF, OBJ, STEP, and G-code
 libraries. It connects Models and G-code revisions to printer fleets, material
 state, print history, Documents, share links, notifications, access control,
 Pending Imports, and Vault audits. Upload from the browser, capture a model URL,
-mirror a NAS folder, or let OrcaSlicer push new G-code after every slice.
+index a mounted or remote library source, or let OrcaSlicer push new G-code
+after every slice.
 
 ![PrintStash demo](screenshots/00-demo-v010.gif)
 
@@ -39,6 +40,13 @@ usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
 as the primary install path. SQLite plus local disk is the default; Postgres and
 S3/R2-compatible storage are optional.
 
+The `0.13.0` branch is the upcoming release. It adds runtime-probed storage
+safety tiers, typed S3/WebDAV/SFTP provider setup, paired-browser marketplace
+capture with Model Source provenance, richer Bambu LAN history evidence,
+GitHub-flavoured Markdown tables, and safer 3MF/STL preview handling. It is not
+yet a tagged release; see the [unreleased changelog](./CHANGELOG.md#unreleased)
+and [0.13.0 upgrade notes](./UPGRADE.md#0130-notes) before testing an upgrade.
+
 Hardware reports, parser fixtures, install notes, docs fixes, and UX feedback
 are welcome in
 [Discussions](https://github.com/xiao-villamor/PrintStash/discussions) or issues.
@@ -52,20 +60,33 @@ are welcome in
   logs in with username + API key, then uploads under a JWT Bearer token.
 - Content-hash dedup groups files into logical models and keeps version history
   in one place rather than scattered across folders.
-- Nested collections, flat tags, search, filters, thumbnails, grid/list views,
+- Multipart Models group existing Models into named parts and alternatives
+  (for example, a short or long handle) without moving, hiding, or deleting
+  their files. Each Model remains independently visible, downloadable, and
+  sliceable, and can be reused in more than one Multipart Model. Open the
+  separate **Multipart models** tab in the Vault to create a grouping, add a
+  part, then choose existing Models as its alternatives.
+- Nested collections; direct Model, Collection, and Artifact tags; unified search
+  across names, files, collection paths, effective tags, and provenance; filters,
+  thumbnails, grid/list views,
   sorting, breadcrumbs, and drag-and-drop between collections.
 
-**Shared volumes (mirror a folder or NAS)**
-- Point PrintStash at a folder on the server or a NAS and it indexes files **in
-  place** — no copying, no second source of truth; only thumbnails and metadata
-  are stored in the vault.
-- Two-way sync: scans pick up added, removed, and edited files, and web uploads
-  and revisions write back into the folder (never overwriting existing bytes).
+**Library sources (mounted folders, NAS, and remote protocols)**
+- Point PrintStash at a mounted folder, S3 prefix, WebDAV collection, or SFTP
+  directory and it indexes files **in place**. Only thumbnails and metadata are
+  stored in the Vault.
+- Discovery picks up added, removed, and edited files without a recursive
+  full-download loop. Remote sources are read-only. Mounted folders may accept
+  create-only web uploads and revisions without overwriting existing bytes.
 - Keep it current with a per-volume schedule (presets or custom cron), manual
   "Scan now", and optional real-time watching of local folders.
 - Network folders (NFS/SMB) can't deliver filesystem events, so watching
   auto-detects the filesystem and falls back to the schedule — with a per-volume
   override. An unmounted share can never trigger a mass delete.
+- Remote scans use durable cursors, one global scan slot, 1,000-key pages, a
+  2 GiB and 15-minute slice budget, 8 MiB/s content pacing, 4 metadata calls/s
+  for WebDAV/SFTP, and a 24-hour provider-error backoff. A weekly rotating hash
+  check catches same-size, same-mtime replacements.
 
 **Preview and inspect**
 - A browser 3D viewer for source meshes — solid, X-ray, and wireframe modes,
@@ -120,6 +141,12 @@ are welcome in
 **Capture, Documents, sharing, and notifications**
 - Pending Imports keep URL and browser captures reviewable across restarts, with
   retry, archive/file selection, tags, and Collection assignment before ingest.
+- Pair named, revocable browsers for authenticated Printables file selection
+  and MakerWorld package transfer without sending marketplace cookies to
+  PrintStash. MyMiniFactory OAuth and Cults metadata connections are per-user.
+- Captured Models retain bounded source snapshots, confirmed/inferred fields,
+  and explicit user overrides; portable archives can carry the provenance as
+  an optional backward-compatible sidecar.
 - Attach Markdown notes, PDFs, images, and other files to any Collection.
   Markdown includes a built-in editor, preview, and pasted or dropped images.
 - Create expiring, read-only public links for a Model. Original-file downloads
@@ -147,8 +174,11 @@ are welcome in
 - Per-printer roles grant view, print, control, or admin independently and apply
   to UI sessions, API keys, REST endpoints, and live WebSocket state.
 - Audit logs record who changed what, including authenticated browser actions.
-- A recycle bin keeps soft-deleted models restorable until retention expires,
-  with manual restore, purge-expired, and permanent-delete.
+- A recycle bin keeps soft-deleted models restorable until retention expires.
+  Scheduled cleanup only creates a bounded preview. Physical deletion requires
+  an exact administrator approval, Verified active storage, a fresh verified
+  backup on independent S3, and a configurable quarantine (seven days by
+  default), with every proof checked again before finalization.
 
 **Vault integrity, backups, and portability**
 - Quick and Full Vault audits persist findings, support cancellation, group
@@ -164,9 +194,20 @@ are welcome in
 - Metadata export to JSON or CSV for analysis, migration planning, or audits.
 - Model-card metrics and the metadata fields shown on detail pages are
   configurable.
-- Local disk by default, with optional S3/R2 object storage and Postgres, plus
-  upload limits, trash retention, and backup retention.
-- Health checks report database, storage, backup, and printer-provider readiness.
+- Local disk by default, with optional S3/R2, B2, Wasabi, self-hosted S3,
+  Nextcloud/WebDAV, or SFTP storage and optional Postgres. Storage support
+  maturity is distinct from the Verified/Guarded/Unguarded tier measured at
+  runtime; remote presets remain beta except the generic/native S3 path.
+- Health checks report database, measured storage capabilities, backup, and
+  printer-provider readiness.
+
+Storage and migration guides:
+
+- [0.13.0 release and migration guide](./docs/0.13.0-release-guide.md)
+- [Library sources and NAS recipes](./docs/library-sources.md)
+- [Storage provider and protocol matrix](./docs/provider-support.md#storage-and-library-source-compatibility)
+- [Garbage collection safety and recovery](./docs/storage-data-safety.md)
+- [Upgrade and migration to 0.13.0](./UPGRADE.md#0130-notes)
 
 ## Quick Start
 
@@ -227,6 +268,21 @@ tessellation but keeps STL/OBJ/3MF thumbnail generation:
 ```bash
 docker compose -f docker-compose.light.yml up -d
 ```
+
+### Bind-mounted data directories
+
+The API image starts with the unprivileged `10001:10001` identity. If you
+replace the named volumes with host bind mounts, set `PUID` and `PGID` to the
+numeric owner that should access those directories; the entrypoint repairs
+ownership before running migrations and the server:
+
+```bash
+PUID=1000 PGID=1000 docker compose up -d
+```
+
+Both values must be positive numeric Linux IDs. The default `10001:10001` is
+used when they are omitted. Changing either value on a later restart safely
+re-keys ownership of the mounted data directories.
 
 For a hardened production setup (API kept internal, frontend bound to localhost
 behind your own TLS reverse proxy), use the production compose instead. That file
@@ -313,8 +369,8 @@ deliberately not a full manufacturing platform. Set expectations accordingly:
 - **Bambu LAN is beta** with local status, plain-text G-code upload, explicit
   start, and pause/resume/cancel. Remote inventory/deletion is not implemented.
 - **PrusaLink is beta** for local FDM printers, with Digest or legacy API-key
-  authentication, status, upload/start, files, and print controls. Prusa
-  Connect cloud is not used.
+  authentication, status, streamed plain-text G-code and validated `.bgcode`
+  upload/start, files, and print controls. Prusa Connect cloud is not used.
 - **Elegoo support covers Neptune 4, Pro, Plus, and Max** through Moonraker;
   Centauri Carbon and Carbon 2 additionally have beta local status/control
   support through native SDCP/MQTT, plus beta G-code upload since 0.11.3.
@@ -336,7 +392,9 @@ deliberately not a full manufacturing platform. Set expectations accordingly:
   preview.
 
 Full detail — including non-goals — lives in
-[docs/known-limitations.md](./docs/known-limitations.md).
+[docs/known-limitations.md](./docs/known-limitations.md). Storage provider setup,
+runtime safety tiers, and required credentials are documented in
+[docs/storage-providers.md](./docs/storage-providers.md).
 
 ## Contributing
 

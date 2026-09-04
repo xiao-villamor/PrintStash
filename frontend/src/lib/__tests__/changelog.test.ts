@@ -1,3 +1,18 @@
+/*
+ * Four version numbers that must agree, checked by reading all four.
+ *
+ * `frontend/package.json`, `backend/pyproject.toml`, the backend runtime constant
+ * and the newest changelog entry describe the same release. Nothing at runtime
+ * compares them, so a release cut with three of the four bumped ships a UI that
+ * reports the wrong version — and the version is what a self-hoster quotes in
+ * every bug report.
+ *
+ * The integrity rows keep the changelog machine-readable: entries sorted
+ * newest-first with unique versions, each with at least one change. The "newest
+ * entry" check above reads the file positionally, so an unsorted changelog makes
+ * it assert against the wrong release.
+ */
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -12,10 +27,15 @@ import { APP_VERSION, CHANGELOG } from "@/lib/changelog";
  * test rather than a stale About tab in production.
  */
 
-// vitest runs from the frontend package root, so package.json sits at cwd.
-const pkg = JSON.parse(
-  readFileSync(join(process.cwd(), "package.json"), "utf8"),
-) as { version: string };
+// vitest runs from the frontend package root, so package.json sits at cwd. The
+// version is read out of the text the same way the backend files are, so a
+// missing field fails loudly here instead of surfacing as `undefined` later.
+const frontendPackageJson = readFileSync(join(process.cwd(), "package.json"), "utf8");
+const frontendVersionMatch = frontendPackageJson.match(/^ {2}"version": "([^"]+)"/m);
+if (!frontendVersionMatch) {
+  throw new Error("could not find version in frontend/package.json");
+}
+const frontendVersion = frontendVersionMatch[1];
 
 // Version bumps are a triple (backend/pyproject.toml, config.py's
 // app_version, frontend/package.json) — this only guards the frontend/backend
@@ -33,15 +53,13 @@ const backendConfig = readFileSync(
   join(process.cwd(), "..", "backend", "app", "core", "config.py"),
   "utf8",
 );
-const backendConfigVersionMatch = backendConfig.match(
-  /^\s*app_version: str = "([^"]+)"/m,
-);
+const backendConfigVersionMatch = backendConfig.match(/^\s*app_version: str = "([^"]+)"/m);
 if (!backendConfigVersionMatch) {
   throw new Error("could not find app_version in backend/app/core/config.py");
 }
 const backendConfigVersion = backendConfigVersionMatch[1];
 
-describe("changelog ↔ package.json", () => {
+describe("APP_VERSION", () => {
   it("APP_VERSION is the newest changelog entry", () => {
     expect(APP_VERSION).toBe(CHANGELOG[0].version);
   });
@@ -49,19 +67,19 @@ describe("changelog ↔ package.json", () => {
   it("the newest changelog entry matches the shipped app version", () => {
     // Bumping package.json without adding the matching changelog entry (or vice
     // versa) breaks here — keep them in lockstep on every release.
-    expect(CHANGELOG[0].version).toBe(pkg.version);
+    expect(CHANGELOG[0].version).toBe(frontendVersion);
   });
 
   it("frontend package.json matches backend/pyproject.toml", () => {
-    expect(pkg.version).toBe(backendVersion);
+    expect(frontendVersion).toBe(backendVersion);
   });
 
   it("the backend runtime version matches the package versions", () => {
-    expect(backendConfigVersion).toBe(pkg.version);
+    expect(backendConfigVersion).toBe(frontendVersion);
   });
 });
 
-describe("changelog integrity", () => {
+describe("CHANGELOG", () => {
   it("every entry is well-formed and has at least one change", () => {
     for (const entry of CHANGELOG) {
       expect(entry.version).toMatch(/^\d+\.\d+\.\d+$/);

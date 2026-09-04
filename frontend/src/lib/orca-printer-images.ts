@@ -1,7 +1,7 @@
 const ORCA_REPOSITORY = "https://github.com/SoftFever/OrcaSlicer";
 const ORCA_RAW_ROOT = "https://raw.githubusercontent.com/SoftFever/OrcaSlicer/main/";
 
-const ORCA_COVER_PATHS: Record<string, string> = {
+const ORCA_COVER_PATHS = {
   "Bambu Lab A1 mini": "resources/profiles/BBL/Bambu Lab A1 mini_cover.png",
   "Bambu Lab A1": "resources/profiles/BBL/Bambu Lab A1_cover.png",
   "Bambu Lab P1P": "resources/profiles/BBL/Bambu Lab P1P_cover.png",
@@ -83,7 +83,14 @@ const ORCA_COVER_PATHS: Record<string, string> = {
   "Qidi Q1 Pro": "resources/profiles/Qidi/Qidi Q1 Pro_cover.png",
   "Qidi X-Plus 3": "resources/profiles/Qidi/Qidi X-Plus 3_cover.png",
   "Qidi X-Max 3": "resources/profiles/Qidi/Qidi X-Max 3_cover.png",
-};
+} satisfies Record<string, string>;
+
+/** A printer model name OrcaSlicer ships a cover image for. */
+type OrcaCoveredModel = keyof typeof ORCA_COVER_PATHS;
+
+function isOrcaCoveredModel(modelName: string): modelName is OrcaCoveredModel {
+  return Object.hasOwn(ORCA_COVER_PATHS, modelName);
+}
 
 export interface PrinterArtwork {
   imageUrl: string;
@@ -92,7 +99,7 @@ export interface PrinterArtwork {
 }
 
 export function printerArtwork(modelName: string | null | undefined): PrinterArtwork {
-  const path = modelName ? ORCA_COVER_PATHS[modelName] : undefined;
+  const path = modelName && isOrcaCoveredModel(modelName) ? ORCA_COVER_PATHS[modelName] : undefined;
   if (!path) {
     return {
       imageUrl: "/images/printers/generic-fdm.png",

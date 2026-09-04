@@ -7,7 +7,7 @@ import { useRouter } from "@/lib/navigation";
 import { BottomNavBar } from "@/components/bottom-nav-bar";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
-import { MobileFilterProvider } from "@/lib/mobile-filter-context";
+import { MobileFilterProvider } from "@/lib/mobile-filter-provider";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { Localized } from "@/components/ui/localized";
@@ -23,27 +23,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isVault = pathname === "/";
 
   useEffect(() => {
-    const titleKey: MessageKey | null = pathname === "/"
-      ? "nav.vault"
-      : pathname.startsWith("/models/")
-        ? "nav.model"
-        : pathname.startsWith("/documents/")
-          ? "nav.document"
-          : pathname.startsWith("/printers/")
-            ? "nav.printer"
-            : pathname.startsWith("/printers")
-              ? "nav.printers"
-              : pathname.startsWith("/statistics")
-                ? "nav.statistics"
-                : pathname.startsWith("/settings")
-                  ? "nav.settings"
-                  : pathname.startsWith("/profiles")
-                    ? "nav.profiles"
-                    : pathname.startsWith("/login")
-                      ? "nav.signIn"
-                      : pathname.startsWith("/setup")
-                        ? "nav.setup"
-                        : null;
+    const titleKey: MessageKey | null =
+      pathname === "/"
+        ? "nav.vault"
+        : pathname.startsWith("/models/")
+          ? "nav.model"
+          : pathname.startsWith("/multipart-models/")
+            ? "nav.multipart"
+            : pathname.startsWith("/documents/")
+              ? "nav.document"
+              : pathname.startsWith("/printers/")
+                ? "nav.printer"
+                : pathname.startsWith("/printers")
+                  ? "nav.printers"
+                  : pathname.startsWith("/statistics")
+                    ? "nav.statistics"
+                    : pathname.startsWith("/settings")
+                      ? "nav.settings"
+                      : pathname.startsWith("/profiles")
+                        ? "nav.profiles"
+                        : pathname.startsWith("/login")
+                          ? "nav.signIn"
+                          : pathname.startsWith("/setup")
+                            ? "nav.setup"
+                            : null;
     document.title = `${titleKey ? t(titleKey) : "PrintStash"} · PrintStash`;
   }, [pathname, t]);
 
@@ -64,7 +67,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [chromeless, loading, pathname, router, user]);
 
   if (!chromeless && !loading && !user) {
-    return <Localized><Toaster /></Localized>;
+    return (
+      <Localized>
+        <Toaster />
+      </Localized>
+    );
   }
 
   return (
@@ -81,9 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {isVault ? (
                   children
                 ) : (
-                  <main className="flex-1 min-w-0 overflow-hidden bg-background">
-                    {children}
-                  </main>
+                  <main className="flex-1 min-w-0 overflow-hidden bg-background">{children}</main>
                 )}
               </div>
               <BottomNavBar />

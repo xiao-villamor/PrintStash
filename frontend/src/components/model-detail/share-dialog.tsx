@@ -3,18 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Link2, Loader2, X } from "lucide-react";
 
-import {
-  createModelShare,
-  listModelShares,
-  revokeShare,
-} from "@/lib/api/share";
+import { createModelShare, listModelShares, revokeShare } from "@/lib/api/share";
 import { toast } from "@/lib/toast";
 import { FileRead, ShareLinkRead } from "@/types";
 import { ModalShell } from "@/components/ui/modal";
 import { Localized } from "@/components/ui/localized";
 
 function shareUrl(path: string): string {
-  if (typeof window === "undefined") return path;
+  // Server-side rendering has no origin to prefix; the relative path is still usable.
+  if (!("window" in globalThis)) return path;
   return `${window.location.origin}${path}`;
 }
 
@@ -38,22 +35,30 @@ export function ShareDialog({
   const [selectedRevisionIds, setSelectedRevisionIds] = useState<number[]>([]);
   const [lastToken, setLastToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const gcodeFiles = useMemo(
-    () => files.filter((f) => f.file_type === "gcode"),
-    [files],
-  );
+  const gcodeFiles = useMemo(() => files.filter((f) => f.file_type === "gcode"), [files]);
+
+  // Each open starts from a clean form. Adjusting state during the render that
+  // flips `open` (React's documented alternative to a reset effect) keeps the
+  // dialog from painting the previous session's selection for one frame.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      const recommended =
+        gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
+      setRevisionScope("all");
+      setSelectedRevisionIds(recommended ? [recommended.id] : []);
+      setLoading(true);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
-    const recommended = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
-    setRevisionScope("all");
-    setSelectedRevisionIds(recommended ? [recommended.id] : []);
-    setLoading(true);
     listModelShares(modelId)
       .then(setLinks)
       .catch((e) => toast.error(e))
       .finally(() => setLoading(false));
-  }, [open, modelId, gcodeFiles]);
+  }, [open, modelId]);
 
   async function doCreate() {
     setCreating(true);
@@ -93,9 +98,7 @@ export function ShareDialog({
 
   function toggleRevision(id: number) {
     setSelectedRevisionIds((current) =>
-      current.includes(id)
-        ? current.filter((candidate) => candidate !== id)
-        : [...current, id],
+      current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id],
     );
   }
 
@@ -103,11 +106,12 @@ export function ShareDialog({
     creating || (revisionScope === "selected" && selectedRevisionIds.length === 0);
 
   return (
-    <Localized><ModalShell
-      open={open}
-      onClose={onClose}
-      className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
-    >
+    <Localized>
+      <ModalShell
+        open={open}
+        onClose={onClose}
+        className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
+      >
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
           <div>
             <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
@@ -117,7 +121,11 @@ export function ShareDialog({
               Public, expiring, read-only links. Anyone with the link can view this model only.
             </p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant">
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -181,7 +189,10 @@ export function ShareDialog({
                 {revisionScope === "selected" && (
                   <div className="max-h-44 overflow-y-auto rounded border border-outline-variant divide-y divide-outline-variant">
                     {gcodeFiles.map((f) => (
-                      <label key={f.id} className="flex items-start gap-2 px-3 py-2 hover:bg-surface-container-low">
+                      <label
+                        key={f.id}
+                        className="flex items-start gap-2 px-3 py-2 hover:bg-surface-container-low"
+                      >
                         <input
                           type="checkbox"
                           checked={selectedRevisionIds.includes(f.id)}
@@ -210,7 +221,11 @@ export function ShareDialog({
               disabled={createDisabled}
               className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
             >
-              {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
+              {creating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Link2 className="h-4 w-4" />
+              )}
               Create link
             </button>
           </div>
@@ -226,8 +241,15 @@ export function ShareDialog({
                   value={lastToken}
                   className="flex-1 h-8 bg-surface-container-lowest text-on-surface font-mono text-2xs border border-outline-variant rounded px-2"
                 />
-                <button onClick={copyLast} className="h-8 w-8 rounded border border-outline-variant flex items-center justify-center hover:bg-surface-container-low">
-                  {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                <button
+                  onClick={copyLast}
+                  className="h-8 w-8 rounded border border-outline-variant flex items-center justify-center hover:bg-surface-container-low"
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="h-4 w-4" />
+                  )}
                 </button>
               </div>
             </div>
@@ -245,15 +267,21 @@ export function ShareDialog({
             ) : (
               <div className="space-y-2">
                 {links.map((l) => (
-                  <div key={l.id} className="flex items-center justify-between gap-2 rounded border border-outline-variant px-3 py-2">
+                  <div
+                    key={l.id}
+                    className="flex items-center justify-between gap-2 rounded border border-outline-variant px-3 py-2"
+                  >
                     <div className="min-w-0">
                       <p className="font-mono text-2xs text-on-surface">
                         {l.is_active ? "Active" : l.revoked_at ? "Revoked" : "Expired"}
                         {l.allow_download ? " · downloadable" : " · view-only"}
-                        {l.revision_file_ids?.length ? ` · ${l.revision_file_ids.length} revs` : " · all revs"}
+                        {l.revision_file_ids?.length
+                          ? ` · ${l.revision_file_ids.length} revs`
+                          : " · all revs"}
                       </p>
                       <p className="font-mono text-3xs text-on-surface-variant">
-                        expires {new Date(l.expires_at).toLocaleDateString()} · {l.access_count} views
+                        expires {new Date(l.expires_at).toLocaleDateString()} · {l.access_count}{" "}
+                        views
                       </p>
                     </div>
                     {l.is_active && (
@@ -270,6 +298,7 @@ export function ShareDialog({
             )}
           </div>
         </div>
-    </ModalShell></Localized>
+      </ModalShell>
+    </Localized>
   );
 }

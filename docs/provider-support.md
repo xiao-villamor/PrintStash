@@ -1,4 +1,8 @@
-# Printer Provider Support
+# Provider Support
+
+Printer compatibility and storage compatibility use the same evidence rule:
+automated protocol tests do not silently become a hardware or appliance
+certification claim.
 
 PrintStash is Moonraker/Klipper-first. Other printer providers can exist, but
 they must make unsupported actions explicit in the API and UI.
@@ -101,11 +105,16 @@ send printer credentials or jobs through Prusa Connect cloud. Supported:
 - HTTP Digest username/password authentication on modern PrusaLink
 - legacy `X-Api-Key` authentication
 - polled printer/job status and temperatures
-- Vault G-code upload and explicit start
+- streamed Vault upload and explicit start for plain-text G-code and validated
+  PrusaSlicer binary G-code (`.bgcode`)
 - remote G-code inventory and deletion
 - pause, resume, and cancel controls
 
 Raw G-code commands and measured filament consumption are not supported.
+BGCODE is validated locally before transfer, keeps its `.bgcode` suffix, and is
+uploaded as `application/octet-stream`; upload never implies start. Other
+providers remain plain-text-only until their capability contract declares
+otherwise. PrintStash does not currently render a BGCODE toolpath preview.
 Physical-printer coverage is still expanding, so supervise first prints after
 adding or updating a PrusaLink device.
 
@@ -208,3 +217,48 @@ secrets.
 Moonraker print-history import is model-scoped. PrintStash matches recent
 Moonraker history entries to the model's known G-code filenames, records new
 matches as `printer_history` jobs, and skips already-imported remote filenames.
+
+## Storage And Library-source Compatibility
+
+There are two storage roles:
+
+- **Managed Vault storage** contains bytes PrintStash owns and may eventually
+  delete through capability and ownership checks.
+- **Library sources** contain user-owned bytes PrintStash indexes but never
+  deletes. S3, WebDAV, SFTP and Google Drive sources are read-only.
+- **Backup destinations** receive replicas after the local archive commits.
+  They never inherit managed-Vault deletion authority.
+
+`Contract` means the production client runs against a real service over a real
+loopback/network socket in the automated suite. `Operator validation` means the
+same release has been exercised on the named public service or appliance.
+
+| Interface or service | Role | Automated evidence | Operator validation | Claim |
+| --- | --- | --- | --- | --- |
+| POSIX local filesystem | Managed and mounted source | Integration tests cover create-only publication, identity, pinned reads, root replacement and missing/empty roots | Default development and Compose path | Stable on a local filesystem; runtime tier still decides destructive capability |
+| Mounted SMB/NFS/FUSE | Mounted source; managed storage is possible but may lose Verified semantics | Fail-closed filesystem classification and root-marker tests; no real SMB/NFS server in the contract lane | No appliance matrix yet | Supported as a mounted source; rely on scheduled scans and measured tier |
+| S3-compatible, SeaweedFS | Managed, read-only source and backup destination | Real service contract covers native managed storage; Library sources and new backup profiles use OpenDAL | CI service only | Protocol-contract validated |
+| Amazon S3 | Managed, read-only source and backup destination | Native managed adapter plus OpenDAL unit cases for region/address style/version identity | No release validation log yet | Compatible by protocol, not live-service certified |
+| Other S3-compatible services (MinIO, R2, B2, Wasabi, NAS object stores) | Managed, read-only source and backup destination | Native managed-storage contract plus OpenDAL source/replica tests; separate MinIO migration test | No complete public-service matrix | Beta compatibility; configure exact region, endpoint and address style |
+| Nextcloud WebDAV | Managed and read-only source | Real Nextcloud contract through the production OpenDAL adapter, including paged source discovery | Containerized contract service | Protocol-contract validated; appliance deployment remains beta |
+| Generic WebDAV | Managed and read-only source | Nextcloud contract plus adapter edge cases | No server matrix | Beta protocol compatibility |
+| OpenSSH SFTP | Managed and read-only source | Real OpenSSH contract through the production adapter, including host-key rejection and paged source discovery | Containerized contract service | Protocol-contract validated |
+| NAS SFTP | Managed and read-only source | OpenSSH protocol contract | No model/firmware matrix | Beta protocol compatibility; pinned host key required |
+| Google Drive | Read-only source and backup destination | OpenDAL configuration, discovery, hash-verified restore and fail-closed retention tests | No live Google account validation | Beta; automatic remote retention and Vault-GC witness are disabled |
+| Unraid, Synology DSM, TrueNAS SCALE, OpenMediaVault, QNAP QTS/QuTS, CasaOS/ZimaOS, Proxmox VE | Mounted source or host for a remote profile | The interface contracts above | No complete appliance validation rows | Installation recipes, not certification |
+
+The [Library Sources guide](./library-sources.md) gives platform recipes and a
+disposable-data validation checklist. First-party platform citations are
+recorded in [the NAS evidence note](./research/nas-library-source-evidence.md).
+
+### Storage validation log
+
+Add a row only after recording the exact provider/appliance, version,
+filesystem, protocol, auth mode and the release-validation checklist result.
+
+| Provider or appliance | Version/model | Protocol/filesystem | Date | Tester | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| SeaweedFS contract container | Pinned CI image | S3 | 2026-08-31 | Automated contract | Pass | Production native S3 managed-storage path; OpenDAL source/backup validation remains pending |
+| Nextcloud contract container | Pinned CI image | WebDAV | 2026-08-31 | Automated contract | Pass | Production OpenDAL adapter, including discovery cursor |
+| OpenSSH contract container | Pinned CI image | SFTP | 2026-08-31 | Automated contract | Pass | Production adapter and pinned-host-key rejection |
+| _(no physical NAS validation yet)_ | | | | | | |

@@ -6,7 +6,9 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 const WS_BASE = import.meta.env.VITE_WS_URL || "";
 
 function isBrowser(): boolean {
-  return typeof window !== "undefined";
+  // `"window" in globalThis` rather than a `typeof` probe: the question is
+  // "am I running in a document?", which the global's presence answers.
+  return "window" in globalThis;
 }
 
 function browserBase(): string {
@@ -45,25 +47,84 @@ export async function getAuthenticatedBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+/** Read a protected text resource while preserving the shared 401 handling. */
+export async function getAuthenticatedText(path: string): Promise<string> {
+  const res = await fetch(getUrl(path), {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  if (!res.ok) throw await parseError(res);
+  return res.text();
+}
+
+const SAFE_DOWNLOAD_FALLBACK = "download";
+
+/** Remove path/control characters before assigning a server-provided filename. */
+export function sanitizeDownloadFilename(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const withoutControls = Array.from(value)
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join("");
+  const leaf = withoutControls.replaceAll("\\", "/").split("/").pop()?.trim();
+  if (!leaf || leaf === "." || leaf === "..") return null;
+  return leaf.replace(/[<>:"|?*]/g, "_");
+}
+
+function decodeExtendedFilename(value: string): string | null {
+  const match = value.match(/^([^']*)'[^']*'(.*)$/);
+  if (!match || match[1].toLowerCase() !== "utf-8") return null;
+  const encoded = match[2];
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse RFC 6266/RFC 5987 Content-Disposition filename parameters safely. */
+export function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+
+  const extended = header.match(/(?:^|;)\s*filename\*\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]*))/i);
+  const extendedValue = extended?.[1] ?? extended?.[2]?.trim();
+  if (extendedValue) {
+    const unescaped = extendedValue.replace(/\\([\\"])/g, "$1");
+    const decoded = decodeExtendedFilename(unescaped);
+    if (decoded) {
+      const filename = sanitizeDownloadFilename(decoded);
+      if (filename) return filename;
+    }
+  }
+
+  const plain = header.match(/(?:^|;)\s*filename\s*=\s*(?:"((?:\\.|[^"])*)"|([^;]*))/i);
+  const plainValue = plain?.[1] ?? plain?.[2]?.trim();
+  if (!plainValue) return null;
+  return sanitizeDownloadFilename(plainValue.replace(/\\([\\"])/g, "$1"));
+}
+
 /**
  * Download a protected file. Plain <a href> links can't carry the bearer
  * token, so reads gated behind auth (post-RBAC) 401. Fetch the blob with the
  * token, then trigger a save via a temporary object URL.
  */
-export async function downloadAuthenticatedFile(
-  path: string,
-  filename?: string,
-): Promise<void> {
+export async function downloadAuthenticatedFile(path: string, filename?: string): Promise<void> {
   const res = await fetch(getUrl(path), {
     headers: authHeaders(),
     cache: "no-store",
   });
   if (!res.ok) throw await parseError(res);
   const blob = await res.blob();
+  const resolvedFilename =
+    sanitizeDownloadFilename(filename) ??
+    parseContentDispositionFilename(res.headers.get("content-disposition")) ??
+    SAFE_DOWNLOAD_FALLBACK;
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
-  if (filename) a.download = filename;
+  a.download = resolvedFilename;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -72,10 +133,7 @@ export async function downloadAuthenticatedFile(
 
 export function getWsUrl(path: string): string {
   if (!isBrowser()) {
-    const base = (WS_BASE || API_BASE || "http://localhost:8000").replace(
-      /\/$/,
-      "",
-    );
+    const base = (WS_BASE || API_BASE || "http://localhost:8000").replace(/\/$/, "");
     return base.replace(/^http/, "ws") + path;
   }
   if (WS_BASE) {
@@ -89,13 +147,29 @@ export function getWsUrl(path: string): string {
   return `${proto}//${window.location.host}${path}`;
 }
 
-function errorCode(status: number, body: string): string {
+/**
+ * Decode FastAPI's error envelope. Coded errors arrive as
+ * `{"detail": "model_not_found"}`; 422s put a list of field objects in
+ * `detail`, and a proxy can return HTML instead of JSON. Only the string form
+ * is a detail code — everything else has none.
+ */
+function parseDetailCode(body: string): string | null {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(body);
-    return typeof parsed?.detail === "string" ? parsed.detail : String(status);
+    parsed = JSON.parse(body);
   } catch {
-    return String(status);
+    return null;
   }
+  if (!(parsed instanceof Object) || !("detail" in parsed)) return null;
+  // Stringifying leaves a value identical to itself only when it already was a
+  // string, so this accepts the string form of `detail` and nothing else — the
+  // same test a `typeof` probe would make on this still-unvalidated member.
+  const detail = String(parsed.detail);
+  return Object.is(detail, parsed.detail) ? detail : null;
+}
+
+function errorCode(status: number, body: string): string {
+  return parseDetailCode(body) ?? String(status);
 }
 
 async function parseError(res: Response): Promise<ApiError> {
@@ -106,8 +180,17 @@ async function parseError(res: Response): Promise<ApiError> {
 
 export async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) throw await parseError(res);
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+  if (res.status === 204) {
+    // SAFETY: a 204 carries no body at all, so `undefined` is the only value
+    // this branch can produce (`res.json()` would throw on the empty payload).
+    // The endpoints that answer 204 are the void ones, whose callers declare
+    // `T` as `void`/`undefined`.
+    return undefined as T;
+  }
+  // `Response.json()` is typed `Promise<any>` by lib.dom, so `T` — the response
+  // contract the calling wrapper in `src/lib/api` declares for this endpoint —
+  // flows through without an assertion.
+  return res.json();
 }
 
 export async function expectOk(res: Response): Promise<void> {
@@ -115,16 +198,14 @@ export async function expectOk(res: Response): Promise<void> {
 }
 
 export function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {};
   const token = getStoredToken();
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export function jsonHeaders(): Record<string, string> {
-  return { "Content-Type": "application/json", ...authHeaders() };
+  const headers = authHeaders();
+  headers["Content-Type"] = "application/json";
+  return headers;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,10 +232,10 @@ const inflight = new Map<string, Promise<unknown>>();
 export function invalidateApiCache(path?: string): void {
   responseCache.clear();
   inflight.clear();
-  if (typeof path === "string") {
-    invalidateQueriesForPath(path);
-  } else {
+  if (path === undefined) {
     queryClient.invalidateQueries();
+  } else {
+    invalidateQueriesForPath(path);
   }
 }
 
@@ -173,10 +254,7 @@ export interface GetJsonOptions {
   fresh?: boolean;
 }
 
-export async function getJson<T>(
-  path: string,
-  options?: GetJsonOptions,
-): Promise<T> {
+export async function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {
   if (!isBrowser() || options?.fresh) {
     const res = await fetch(getUrl(path), {
       headers: authHeaders(),
@@ -188,10 +266,16 @@ export async function getJson<T>(
   const now = Date.now();
   const cached = responseCache.get(path);
   if (cached && cached.expires > now) {
+    // SAFETY: the cache is keyed by request path and is only written below, with
+    // the body `handleResponse<T>` just produced for that same path — so a live
+    // entry for `path` holds exactly what a cache miss would have returned.
     return cached.value as T;
   }
   const pending = inflight.get(path);
   if (pending) {
+    // SAFETY: the in-flight entry for `path` is the promise created below for
+    // that same path, i.e. `handleResponse<T>` on this endpoint's response;
+    // sharing it is what makes concurrent readers issue one request.
     return pending as Promise<T>;
   }
   const request = (async () => {
@@ -214,6 +298,12 @@ export async function getJson<T>(
 export async function sendJson<T>(
   path: string,
   method: "POST" | "PUT" | "PATCH",
+  // The outbound side of the boundary has nothing to parse: the typed wrapper in
+  // `src/lib/api` owns the endpoint's request DTO and this transport only serialises
+  // it. A `JsonValue` union cannot express that either, because TypeScript never
+  // accepts an `interface` — which every DTO in `@/types` is — as assignable to an
+  // index signature (microsoft/TypeScript#15300).
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- outbound payload, owned and typed by the calling wrapper
   body: unknown,
 ): Promise<T> {
   const res = await fetch(getUrl(path), {
@@ -221,31 +311,27 @@ export async function sendJson<T>(
     headers: jsonHeaders(),
     body: JSON.stringify(body),
   });
+  const value = await handleResponse<T>(res);
   invalidateApiCache(path);
-  return handleResponse<T>(res);
+  return value;
 }
 
-export async function sendForm<T>(
-  path: string,
-  formData: FormData,
-): Promise<T> {
+export async function sendForm<T>(path: string, formData: FormData): Promise<T> {
   const res = await fetch(getUrl(path), {
     method: "POST",
     headers: authHeaders(),
     body: formData,
   });
+  const value = await handleResponse<T>(res);
   invalidateApiCache(path);
-  return handleResponse<T>(res);
+  return value;
 }
 
-export async function sendAction(
-  path: string,
-  method: "POST" | "DELETE",
-): Promise<void> {
+export async function sendAction(path: string, method: "POST" | "DELETE"): Promise<void> {
   const res = await fetch(getUrl(path), {
     method,
     headers: authHeaders(),
   });
+  await expectOk(res);
   invalidateApiCache(path);
-  return expectOk(res);
 }

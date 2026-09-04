@@ -35,10 +35,18 @@ export function CollectionReadme({
     setExpanded(false);
   }, [readme]);
 
-  useEffect(() => {
-    let alive = true;
+  // Switching collections restarts the fetch, so the loader (and a dropped edit)
+  // belong to the render that first sees the new id — React's "adjust state when
+  // a prop changes", not an effect that repaints the previous readme first.
+  const [shownCollectionId, setShownCollectionId] = useState(collectionId);
+  if (shownCollectionId !== collectionId) {
+    setShownCollectionId(collectionId);
     setLoading(true);
     setEditing(false);
+  }
+
+  useEffect(() => {
+    let alive = true;
     getCollectionReadme(collectionId)
       .then((r) => alive && setReadme(r.readme))
       .catch(() => alive && setReadme(null))

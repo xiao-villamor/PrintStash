@@ -1,3 +1,15 @@
+/*
+ * Preview quality and screenshot scale, read back from the user's browser.
+ *
+ * The defaults are deliberate — balanced previews and 2x screenshots — because
+ * both extremes have a cost a user would notice: the highest quality makes the
+ * vault sluggish on a laptop, and the lowest makes the thumbnails useless.
+ *
+ * An unsupported value is replaced rather than passed through. These feed a
+ * renderer, and an out-of-range quality is not a slightly-wrong preview; it is a
+ * blank one.
+ */
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +20,7 @@ import {
   writePreviewPreferences,
 } from "@/lib/preview-preferences";
 
-describe("preview preferences", () => {
+describe("readPreviewPreferences", () => {
   it("uses balanced previews and 2x screenshots by default", () => {
     expect(readPreviewPreferences()).toEqual(DEFAULT_PREVIEW_PREFERENCES);
     expect(previewPixelRatio("balanced")).toBe(1.5);

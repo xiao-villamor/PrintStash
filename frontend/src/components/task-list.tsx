@@ -3,7 +3,7 @@
 import { CheckCircle2, ChevronDown, Loader2, XCircle } from "lucide-react";
 
 import type { TaskItem } from "@/lib/task-center";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 
 export function TaskList({
   tasks,
@@ -15,9 +15,17 @@ export function TaskList({
   compact?: boolean;
 }) {
   return (
-    <div className={compact ? "w-full" : "w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg"}>
+    <div
+      className={
+        compact
+          ? "w-full"
+          : "w-[360px] max-w-[calc(100vw-2rem)] rounded border border-border bg-popover shadow-lg"
+      }
+    >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">Tasks</span>
+        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
+          Tasks
+        </span>
         {tasks.some((task) => task.status === "completed" || task.status === "failed") && (
           <button
             type="button"
@@ -29,9 +37,15 @@ export function TaskList({
         )}
       </div>
       {tasks.length === 0 ? (
-        <div className="px-4 py-8 text-center font-mono text-xs text-muted-foreground">No active tasks</div>
+        <div className="px-4 py-8 text-center font-mono text-xs text-muted-foreground">
+          No active tasks
+        </div>
       ) : (
-        <div className={compact ? "max-h-64 overflow-y-auto py-2" : "max-h-[420px] overflow-y-auto py-2"}>
+        <div
+          className={
+            compact ? "max-h-64 overflow-y-auto py-2" : "max-h-[420px] overflow-y-auto py-2"
+          }
+        >
           {tasks.map((task) => (
             <TaskRow key={task.id} task={task} />
           ))}
@@ -58,11 +72,17 @@ function TaskRow({ task }: { task: TaskItem }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <p className="truncate text-sm font-medium text-foreground">{task.title}</p>
-            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">{task.status}</span>
+            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+              {task.status}
+            </span>
           </div>
-          {task.detail && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{task.detail}</p>}
+          {task.detail && (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{task.detail}</p>
+          )}
           {active && task.total == null && (
-            <p className="mt-1 text-xs text-muted-foreground">Discovering total… Safe to close this view.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Discovering total… Safe to close this view.
+            </p>
           )}
           <div className="mt-2 h-1.5 overflow-hidden rounded bg-muted">
             <div

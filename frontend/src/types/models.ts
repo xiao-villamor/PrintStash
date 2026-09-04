@@ -1,4 +1,10 @@
-import type { PrintJobState } from "./printers";
+import type {
+  PrintJobIdentityRead,
+  PrintJobReportedMetadataRead,
+  PrintJobReproducibilityRead,
+  PrintJobState,
+  ReproducibilityLevel,
+} from "./printers";
 
 export interface MetadataRead {
   slicer_name: string | null;
@@ -27,11 +33,7 @@ export interface MetadataRead {
   triangle_count: number | null;
 }
 
-export type FileRevisionStatus =
-  | "known_good"
-  | "needs_test"
-  | "failed"
-  | "archived";
+export type FileRevisionStatus = "known_good" | "needs_test" | "failed" | "archived";
 
 export type CollectionRole = "view" | "edit" | "admin";
 
@@ -51,6 +53,7 @@ export interface FileRead {
   is_external?: boolean;
   uploaded_at: string;
   metadata: MetadataRead | null;
+  tags: string[];
 }
 
 export interface FileRevisionUpdate {
@@ -103,6 +106,15 @@ export interface ModelPrintJobRead {
   source: string;
   external_display_name: string | null;
   artifact_evidence: string;
+  artifact_capture_error?: string | null;
+  artifact_capture_error_code?: string | null;
+  artifact_capture_error_message?: string | null;
+  reproducibility_level?: ReproducibilityLevel;
+  toolpath_preview_url?: string | null;
+  identity?: PrintJobIdentityRead;
+  metadata?: PrintJobReportedMetadataRead;
+  reproducibility?: PrintJobReproducibilityRead;
+  download_url?: string | null;
   gcode_revision_number: number | null;
   revision_label: string | null;
   state: PrintJobState;
@@ -179,6 +191,57 @@ export interface TrashedModelRead {
 export interface TrashPurgeRead {
   purged_model_ids: number[];
   purged_count: number;
+  /** The physical-storage outcome after the catalog rows were purged. */
+  storage_cleanup_status?: StorageCleanupStatus;
+  storage_completed?: number;
+  storage_pending?: number;
+  storage_blocked?: number;
+}
+
+export type StorageCleanupStatus = "completed" | "pending" | "blocked" | "partial";
+
+function isStorageCleanupStatus(value: string | null | undefined): value is StorageCleanupStatus {
+  return value === "completed" || value === "pending" || value === "blocked" || value === "partial";
+}
+
+/**
+ * Normalize responses from pre-0.13 servers and derive a useful status when a
+ * rolling upgrade returns the legacy counters without the new discriminator.
+ */
+export function normalizeTrashPurgeRead(
+  value: Partial<TrashPurgeRead> | null | undefined,
+): TrashPurgeRead & { storage_cleanup_status: StorageCleanupStatus } {
+  const payload = value ?? {};
+  const completed = payload.storage_completed ?? 0;
+  const pending = payload.storage_pending ?? 0;
+  const blocked = payload.storage_blocked ?? 0;
+  const hasMixedOutcome =
+    (completed > 0 && (pending > 0 || blocked > 0)) || (pending > 0 && blocked > 0);
+  const explicitStatus = payload.storage_cleanup_status;
+
+  let status: StorageCleanupStatus;
+  if (isStorageCleanupStatus(explicitStatus)) {
+    status = explicitStatus;
+  } else if (completed === 0 && pending === 0 && blocked === 0) {
+    status = "completed";
+  } else if (hasMixedOutcome) {
+    status = "partial";
+  } else if (blocked > 0) {
+    status = "blocked";
+  } else if (pending > 0) {
+    status = "pending";
+  } else {
+    status = "completed";
+  }
+
+  return {
+    purged_model_ids: payload.purged_model_ids ?? [],
+    purged_count: payload.purged_count ?? 0,
+    storage_completed: completed,
+    storage_pending: pending,
+    storage_blocked: blocked,
+    storage_cleanup_status: status,
+  };
 }
 
 export interface ModelBatchFailure {
@@ -326,8 +389,17 @@ export interface IngestJobStatus {
   total_steps?: number | null;
   label?: string | null;
   progress?: number | null;
-  result?: Record<string, unknown> | null;
-  stage?: "resolving" | "downloading" | "inspecting" | "extracting" | "hashing" | "ingesting" | "thumbnailing" | "completed" | null;
+  result?: IngestJobResult | null;
+  stage?:
+    | "resolving"
+    | "downloading"
+    | "inspecting"
+    | "extracting"
+    | "hashing"
+    | "ingesting"
+    | "thumbnailing"
+    | "completed"
+    | null;
   current_item?: string | null;
   processed?: number;
   total?: number | null;
@@ -340,6 +412,48 @@ export interface IngestJobStatus {
   thumbnail_reason?: string | null;
   retryable?: boolean;
   failed_items?: Array<{ name: string; reason: string; retryable: boolean }>;
+}
+
+/** One member/file outcome inside a multi-item import result. */
+export interface IngestJobResultItem {
+  model_id?: number | null;
+  file_id?: number | null;
+  name?: string;
+  member?: string;
+  deduplicated?: boolean;
+  error?: string | null;
+}
+
+/**
+ * The job-kind-specific payload a finished ingest job carries. Which keys arrive
+ * depends on `kind`: the review flows stage one of the manifests, a collection
+ * import reports counts plus per-member outcomes, and a plain single-artifact
+ * ingest reports whether it created a new Model.
+ */
+export interface IngestJobResult {
+  kind?: "archive_manifest" | "model_files_manifest" | "collection_manifest" | "collection_import";
+  // kind === "archive_manifest"
+  archive_id?: string;
+  archive_name?: string;
+  entries?: ArchiveEntry[];
+  // kind === "model_files_manifest"
+  files_token?: string;
+  page_title?: string;
+  files?: ModelFile[];
+  // kind === "collection_manifest"
+  collection_token?: string;
+  collection_name?: string;
+  target_collection?: string;
+  members?: CollectionMember[];
+  // kind === "collection_import"
+  collection?: string | null;
+  imported?: number;
+  total?: number;
+  items?: IngestJobResultItem[];
+  // Plain single-artifact ingest.
+  created?: boolean;
+  resumed?: boolean;
+  name?: string;
 }
 
 export interface ArchiveEntry {
@@ -492,8 +606,7 @@ export interface OutlinerModelRead {
   collection_id: number | null;
 }
 
-export interface ListModelPageParams
-  extends Omit<ListModelsParams, "offset"> {
+export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
   sort?: ModelSort;
   cursor?: string;
 }
@@ -544,7 +657,10 @@ export interface SavedViewRead {
   updated_at: string;
 }
 
-export interface ModelStarRead { model_id: number; starred: boolean }
+export interface ModelStarRead {
+  model_id: number;
+  starred: boolean;
+}
 
 export interface CollectionCreate {
   name: string;
@@ -563,6 +679,7 @@ export interface CollectionRead {
   parent_id: number | null;
   model_count: number;
   effective_role: CollectionRole | null;
+  tags: string[];
 }
 
 export interface CollectionPermissionRead {
@@ -641,4 +758,5 @@ export interface TagRead {
   name: string;
   slug: string;
   model_count: number;
+  multipart_model_count?: number;
 }

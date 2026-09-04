@@ -1,12 +1,14 @@
-import type { PrinterCreate, PrinterProvider, PrinterRead } from "@/types";
+import type { PrinterCreate, PrinterRead } from "@/types";
 import { SHARED_PRINTER_CONTRACT } from "@/generated/printer-contracts";
 
-export type PrinterSetupKind =
-  (typeof SHARED_PRINTER_CONTRACT.setupOptions)[number]["value"];
+export type PrinterSetupKind = (typeof SHARED_PRINTER_CONTRACT.setupOptions)[number]["value"];
 
-const SETUP_DESCRIPTION_OVERLAY: Partial<Record<PrinterSetupKind, string>> = {
-  prusalink: "Local Prusa FDM connection; Prusa Connect cloud is not used.",
-};
+// The shared contract's PrusaLink blurb mentions Prusa Connect; PrintStash only
+// speaks to the local PrusaLink API, so the frontend states that explicitly.
+function setupDescription(kind: PrinterSetupKind, contractDescription: string): string {
+  if (kind === "prusalink") return "Local Prusa FDM connection; Prusa Connect cloud is not used.";
+  return contractDescription;
+}
 
 export const PRINTER_SETUP_OPTIONS: Array<{
   value: PrinterSetupKind;
@@ -15,7 +17,7 @@ export const PRINTER_SETUP_OPTIONS: Array<{
 }> = SHARED_PRINTER_CONTRACT.setupOptions.map(({ value, label, description }) => ({
   value,
   label,
-  description: SETUP_DESCRIPTION_OVERLAY[value] ?? description,
+  description: setupDescription(value, description),
 }));
 
 // Curated so the model picker on the printer card is a select, not free text
@@ -104,10 +106,7 @@ export const PRINTER_MODEL_OPTIONS: string[] = [
   "Qidi X-Max 3",
 ];
 
-export function providerLabel(
-  value: Pick<PrinterRead, "provider" | "provider_variant"> | PrinterProvider,
-): string {
-  const printer = typeof value === "string" ? { provider: value, provider_variant: null } : value;
+export function providerLabel(printer: Pick<PrinterRead, "provider" | "provider_variant">): string {
   if (printer.provider === "prusalink") return "PrusaLink";
   if (printer.provider === "octoprint") return "OctoPrint";
   if (printer.provider === "bambu_lan") return "Bambu LAN";
@@ -137,10 +136,9 @@ export function providerAddress(
   return printer.moonraker_url;
 }
 
-export function setupProviderFields(kind: PrinterSetupKind): Pick<
-  PrinterCreate,
-  "provider" | "provider_variant"
-> {
+export function setupProviderFields(
+  kind: PrinterSetupKind,
+): Pick<PrinterCreate, "provider" | "provider_variant"> {
   const option = SHARED_PRINTER_CONTRACT.setupOptions.find(({ value }) => value === kind);
   if (!option) throw new Error(`Unknown printer setup kind: ${kind}`);
   return option.variant

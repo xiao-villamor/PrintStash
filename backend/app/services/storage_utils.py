@@ -15,7 +15,15 @@ from dataclasses import dataclass, field
 from sqlmodel import Session, select
 
 from app.core.config import settings
-from app.db.models import Collection, Document, File
+from app.db.models import (
+    SENTINEL_FILE_HASH,
+    Collection,
+    Document,
+    File,
+    ModelSourceCover,
+    MultipartModel,
+    ThumbnailGeneration,
+)
 from app.services.storage_backend import get_backend
 
 _COLLECTION_IMAGE_RE = re.compile(r"/collections/(\d+)/images/([^\s)\]?#]+)")
@@ -57,8 +65,21 @@ def ownership_snapshot(
     result = StorageOwnershipSnapshot()
 
     files = list(session.exec(select(File)).all())
+    generation_keys: dict[int, set[str]] = {}
+    for generation in session.exec(select(ThumbnailGeneration)).all():
+        if generation.storage_key:
+            generation_keys.setdefault(generation.file_id, set()).add(
+                generation.storage_key
+            )
     for row in files:
         if row.id is None:
+            continue
+        # External print jobs use a database-only placeholder whose path is
+        # /dev/null. It is not a vault blob and must never enter backup,
+        # restore, or audit ownership sets. Match the reserved hash as well as
+        # the path so a real missing vault artifact is still surfaced by
+        # backup.stat_size() rather than silently omitted.
+        if row.path == "/dev/null" and row.sha256 == SENTINEL_FILE_HASH:
             continue
         blob = OwnedBlob(
             key=row.path,
@@ -69,14 +90,35 @@ def ownership_snapshot(
             display_name=row.original_filename,
         )
         (result.external if row.is_external else result.primary).append(blob)
+        current_thumbnail = row.thumbnail_path or backend.thumbnail_key(row.id)
         result.derived.append(
             OwnedBlob(
-                key=backend.thumbnail_key(row.id),
+                key=current_thumbnail,
                 resource_type="thumbnail",
                 resource_id=row.id,
                 display_name=row.original_filename,
             )
         )
+        if current_thumbnail != backend.thumbnail_key(row.id):
+            result.derived.append(
+                OwnedBlob(
+                    key=backend.thumbnail_key(row.id),
+                    resource_type="legacy_webp_thumbnail",
+                    resource_id=row.id,
+                    display_name=row.original_filename,
+                )
+            )
+        for generation_key in sorted(generation_keys.get(row.id, set())):
+            if generation_key == current_thumbnail:
+                continue
+            result.derived.append(
+                OwnedBlob(
+                    key=generation_key,
+                    resource_type="thumbnail_generation",
+                    resource_id=row.id,
+                    display_name=row.original_filename,
+                )
+            )
         result.derived.append(
             OwnedBlob(
                 key=backend.legacy_thumbnail_key(row.id),
@@ -135,6 +177,31 @@ def ownership_snapshot(
                     )
                 )
 
+    # Provenance covers are vault-owned blobs even though they are not attached
+    # to a File.  Keep them in the census so backup/restore cannot silently lose
+    # the private representative image.
+    for row in session.exec(select(ModelSourceCover)).all():
+        result.primary.append(
+            OwnedBlob(
+                key=row.storage_key,
+                resource_type="model_source_cover",
+                resource_id=row.id or 0,
+                expected_size=row.size_bytes,
+                display_name="source-cover.webp",
+            )
+        )
+    for row in session.exec(select(MultipartModel)).all():
+        if row.id is None or row.cover_filename is None:
+            continue
+        result.primary.append(
+            OwnedBlob(
+                key=backend.multipart_model_cover_key(row.id, row.cover_filename),
+                resource_type="multipart_model_cover",
+                resource_id=row.id,
+                expected_size=row.cover_size_bytes,
+                display_name="multipart-cover.webp",
+            )
+        )
     if discover:
         result.discovered_keys.update(backend.walk_keys())
         # Local storage keeps derived objects under a separate root. S3's

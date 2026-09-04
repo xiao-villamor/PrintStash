@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine.url import make_url
 
@@ -26,6 +26,21 @@ _overlay_lock = asyncio.Lock()
 # therefore never usable: ``runtime_config.ensure_jwt_secret`` replaces it with a
 # generated one on first boot.
 DEFAULT_JWT_SECRET = "changeme_jwt_secret_please_change"
+
+# Headroom the whole-request ceiling gets over the per-file cap.
+#
+# `max_upload_mb` is a limit on one *file* — that is what it is called in the UI
+# and what a user reads it as. A multipart request carrying a file at the cap is
+# necessarily larger than the file: boundaries, part headers, and the form fields
+# beside it (`model_name`, `collection`, `tags`). With one number for both, the
+# outer ceiling always fired first and the per-file guard could never run, so a
+# file *at* the documented limit was rejected as `request_too_large` — and
+# nothing could ever answer `upload_too_large`.
+#
+# 16 MiB is far more than any part header set, and small enough that the outer
+# ceiling still bounds what a lying `content-length` or an endless stream can
+# make the process buffer.
+MULTIPART_OVERHEAD_BYTES = 16 * 1024 * 1024
 
 
 class Settings(BaseSettings):
@@ -43,6 +58,23 @@ class Settings(BaseSettings):
     )
 
     storage_backend: str = "local"
+    storage_provider: str = ""
+    storage_provider_config: str = ""
+    storage_provider_secrets: str = ""
+    storage_identity: str = ""
+    storage_provider_error: str = ""
+    storage_root: str = ""
+    webdav_endpoint_url: str = ""
+    webdav_username: str = ""
+    webdav_password: str = ""
+    sftp_host: str = ""
+    sftp_port: int = 22
+    sftp_username: str = ""
+    sftp_host_key: str = ""
+    sftp_password: str = ""
+    sftp_private_key_path: str = ""
+    sftp_passphrase: str = ""
+    storage_allow_unverified: bool = False
     data_dir: Path = Path("/data/files")
     thumb_dir: Path = Path("/data/thumbs")
     staging_dir: Path = Path("/data/staging")
@@ -50,14 +82,14 @@ class Settings(BaseSettings):
     s3_bucket: str = ""
     s3_endpoint_url: str = ""
     s3_region: str = "auto"
+    s3_addressing_style: str = Field(default="auto", pattern=r"^(auto|path|virtual)$")
     s3_access_key: str = ""
     s3_secret_key: str = ""
+    # Historical installs default to the literal ``vault-data`` prefix. Typed
+    # provider configuration may select another normalized namespace.
+    s3_root: str = "vault-data"
     s3_presigned_url_expire_seconds: int = Field(default=900, gt=0)
     s3_multipart_threshold_mb: int = Field(default=50, gt=0)
-    # Zero disables the corresponding lifecycle action.
-    s3_lifecycle_expiration_days: int = Field(default=0, ge=0)
-    s3_lifecycle_transition_days: int = Field(default=0, ge=0)
-    s3_transition_storage_class: str = "STANDARD_IA"
 
     db_url: str = "sqlite:////data/db/printstash.sqlite"
     sqlite_synchronous: str = "NORMAL"
@@ -91,6 +123,10 @@ class Settings(BaseSettings):
     oidc_display_name: str = "Single sign-on"
     oidc_redirect_uri: str = ""
     oidc_allow_insecure_http: bool = False
+    # MyMiniFactory OAuth application credentials.  Both values are redacted by
+    # Pydantic's SecretStr in settings dumps, exceptions, and repr output.
+    mmf_client_id: SecretStr | None = None
+    mmf_client_secret: SecretStr | None = None
     # Short-lived token embedded in slicer ("Open in slicer") download URLs so an
     # external slicer process can fetch the file without the user's login session.
     slicer_download_token_expire_minutes: int = Field(default=15, gt=0)
@@ -102,13 +138,37 @@ class Settings(BaseSettings):
     staging_max_active_per_user: int = Field(default=4, gt=0)
     staging_max_gb: int = Field(default=4, gt=0)
     staging_min_free_gb: int = Field(default=1, ge=0)
+    # Browser captures remain available for review; once importing begins the
+    # shorter worker lease bounds abandoned staged bytes.
+    staging_review_lease_days: int = Field(default=30, gt=0)
+    staging_import_lease_hours: int = Field(default=24, gt=0)
     fleet_batch_max_quantity: int = Field(default=100, gt=0)
     ingest_worker_count: int = Field(default=2, gt=0)
     media_worker_timeout_seconds: int = Field(default=180, gt=0)
     # Best-effort archive ceiling for files recovered from a Bambu printer's
     # short-lived FTPS cache. Zero disables automatic external-job capture.
     bambu_external_capture_max_mb: int = Field(default=256, ge=0)
+    # On-demand 3MF embedded toolpath preview limits. The service reads at
+    # most cap+1 bytes and rejects high-compression-ratio members before read.
+    three_mf_preview_max_uncompressed_mb: int = Field(default=32, gt=0)
+    three_mf_preview_max_archive_mb: int = Field(default=128, gt=0)
+    three_mf_preview_max_entries: int = Field(default=10_000, gt=0)
+    three_mf_preview_max_central_directory_mb: int = Field(default=8, gt=0)
+    three_mf_preview_max_ratio: float = Field(default=100.0, gt=0)
+    three_mf_preview_max_concurrent: int = Field(default=2, gt=0)
+    # Outbound metadata providers are deliberately capped even when an operator
+    # raises related application limits. These settings only allow tightening
+    # the safe defaults; retry and redirect handling stays in the transport.
+    capture_provider_max_attempts: int = Field(default=3, ge=1, le=3)
+    capture_provider_connect_timeout_seconds: float = Field(default=5, gt=0, le=5)
+    capture_provider_total_timeout_seconds: float = Field(default=30, gt=0, le=30)
+    capture_provider_concurrency: int = Field(default=4, ge=1, le=4)
+    capture_provider_retry_after_max_seconds: float = Field(default=10, ge=0, le=10)
     log_level: str = "INFO"
+    # A restart request exits the API process gracefully. Enable this only when
+    # Docker, systemd, Kubernetes, or another supervisor is configured to
+    # relaunch it; source/dev launches stay safely disabled by default.
+    restart_enabled: bool = False
 
     # Static ceiling on mesh density for geometry extraction + thumbnail
     # rendering. Loading + rasterising a mesh peaks (measured) at ~0.8–2 GB of RSS
@@ -180,6 +240,11 @@ class Settings(BaseSettings):
     # the detected cgroup/host limit, just like other mesh work.
     mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
+    # Oversized STL previews run in a disposable, streaming worker. The worker
+    # deadline is intentionally capped by the service so an operator override
+    # cannot leave an ingestion thread waiting indefinitely.
+    mesh_stream_timeout_seconds: int = Field(default=45, gt=0, le=45)
+
     # Optional static bearer token guarding the Prometheus /metrics endpoint.
     # Empty = open on the trusted internal network (see docs/known-limitations).
     metrics_token: str = ""
@@ -193,25 +258,17 @@ class Settings(BaseSettings):
     max_archive_depth: int = Field(default=32, gt=0)
     max_archive_path_bytes: int = Field(default=1024, gt=0)
 
-    # Headless-browser fallback for Cloudflare-gated imports (MakerWorld). When
-    # enabled, pages that return the bot challenge are re-fetched with Chromium
-    # which solves the challenge automatically. See services/browser_fetch.py.
-    makerworld_browser_enabled: bool = True
-    makerworld_browser_headless: bool = True
-    browser_fetch_timeout_seconds: int = Field(default=45, gt=0)
-
-    # Instance-level MakerWorld session cookie. MakerWorld auth-gates file
-    # downloads, so anonymous URL import can list a collection but never fetch its
-    # files. Setting this once (admin pastes a logged-in `k=v; k2=v2` cookie
-    # header) lets every import reuse it, so end users paste nothing. A per-request
-    # `makerworld_cookie` still overrides it. Sessions expire — when downloads
-    # start failing with `makerworld_login_required`, re-paste a fresh value.
+    # Deprecated compatibility input. MakerWorld files are transferred by the
+    # browser extension and this value is never used for network requests.
     makerworld_cookie: str = ""
 
     backup_dir: Path = Path("/data/backups")
     # Zero means eligible for cleanup immediately; negative retention is invalid.
     backup_retention_days: int = Field(default=30, ge=0)
     trash_retention_days: int = Field(default=30, ge=0)
+    # Approved GC plans retain restorable catalog rows for this interval before
+    # any exact owned object may be physically deleted.
+    gc_quarantine_days: int = Field(default=7, ge=1, le=90)
 
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
@@ -220,7 +277,7 @@ class Settings(BaseSettings):
     backup_s3_secret_key: str = ""
 
     app_name: str = "PrintStash"
-    app_version: str = "0.12.1"
+    app_version: str = "0.13.0"
 
     @model_validator(mode="after")
     def validate_numeric_relationships(self) -> Settings:
@@ -230,15 +287,6 @@ class Settings(BaseSettings):
             )
         if self.sqlite_synchronous.upper() not in {"NORMAL", "FULL"}:
             raise ValueError("sqlite_synchronous must be NORMAL or FULL")
-        if (
-            self.s3_lifecycle_expiration_days
-            and self.s3_lifecycle_transition_days
-            and self.s3_lifecycle_transition_days >= self.s3_lifecycle_expiration_days
-        ):
-            raise ValueError(
-                "s3_lifecycle_transition_days must be lower than "
-                "s3_lifecycle_expiration_days"
-            )
         return self
 
     @property
@@ -248,6 +296,10 @@ class Settings(BaseSettings):
     @property
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
+
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
 
 
 class ConfigResolver:
@@ -283,6 +335,10 @@ class ConfigResolver:
         max_mb = _overlay.get("max_upload_mb", self._frozen.max_upload_mb)
         return max_mb * 1024 * 1024
 
+    @property
+    def max_request_bytes(self) -> int:
+        return self.max_upload_bytes + MULTIPART_OVERHEAD_BYTES
+
 
 # Public: same name, new type — transparent to all existing call sites.
 settings = ConfigResolver(Settings())
@@ -306,13 +362,19 @@ def _sqlite_db_path(db_url: str) -> Path | None:
     return Path(database)
 
 
-def ensure_dirs() -> None:
-    """Create required storage directories at startup. Idempotent."""
+def ensure_dirs(*, create_managed_roots: bool = False) -> None:
+    """Create app-owned directories, optionally provisioning local roots.
+
+    Runtime configuration and normal startup may create staging, inbox,
+    backups, and the SQLite parent.  Managed data/thumb roots are mount points
+    and must already exist and be enrolled; only the first-run setup flow may
+    opt into creating them explicitly.
+    """
     settings.staging_dir.mkdir(parents=True, exist_ok=True)
     settings.incoming_dir.mkdir(parents=True, exist_ok=True)
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
 
-    if settings.storage_backend == "local":
+    if create_managed_roots and settings.storage_backend == "local":
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         settings.thumb_dir.mkdir(parents=True, exist_ok=True)
 

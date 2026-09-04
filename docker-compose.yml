@@ -12,7 +12,7 @@ services:
     # The SPA is served by nginx, which proxies /api/v1 (incl. WebSockets) to
     # the api service same-origin — so no browser-side API/WS URL is needed.
     environment:
-      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_UPLOAD_MB:-512}m
+      NGINX_CLIENT_MAX_BODY_SIZE: ${VAULT_MAX_REQUEST_MB:-528}m
     networks:
       - printstash_net
     depends_on:
@@ -49,9 +49,6 @@ services:
       VAULT_S3_SECRET_KEY: ${VAULT_S3_SECRET_KEY:-}
       VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS: ${VAULT_S3_PRESIGNED_URL_EXPIRE_SECONDS:-900}
       VAULT_S3_MULTIPART_THRESHOLD_MB: ${VAULT_S3_MULTIPART_THRESHOLD_MB:-50}
-      VAULT_S3_LIFECYCLE_EXPIRATION_DAYS: ${VAULT_S3_LIFECYCLE_EXPIRATION_DAYS:-0}
-      VAULT_S3_LIFECYCLE_TRANSITION_DAYS: ${VAULT_S3_LIFECYCLE_TRANSITION_DAYS:-0}
-      VAULT_S3_TRANSITION_STORAGE_CLASS: ${VAULT_S3_TRANSITION_STORAGE_CLASS:-STANDARD_IA}
       VAULT_JWT_SECRET: ${VAULT_JWT_SECRET:-changeme_jwt_secret_please_change}
       VAULT_SETUP_TOKEN: ${VAULT_SETUP_TOKEN:-}
       VAULT_SECRETS_KEY: ${VAULT_SECRETS_KEY:-}
@@ -71,6 +68,13 @@ services:
       VAULT_OIDC_ALLOW_INSECURE_HTTP: ${VAULT_OIDC_ALLOW_INSECURE_HTTP:-false}
       VAULT_MAX_UPLOAD_MB: ${VAULT_MAX_UPLOAD_MB:-512}
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      # Settings can request a graceful API exit because this service has an
+      # unless-stopped restart policy. Disable if you remove that supervisor.
+      VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}
+      # The API runs as this host identity so bind-mounted data remains
+      # writable. Defaults match the image's unprivileged account.
+      PUID: "${PUID:-10001}"
+      PGID: "${PGID:-10001}"
       TZ: UTC
       # Trust X-Forwarded-For only from these peer IPs/CIDRs (uvicorn
       # --proxy-headers is already on in the image CMD). Leave unset if you
@@ -108,8 +112,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-printstash}
       POSTGRES_USER: ${POSTGRES_USER:-printstash}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-printstash}
-    ports:
-      - "5432:5432"
+    # Internal-only by default. Use `docker compose exec postgres psql ...`
+    # instead of publishing the database to every host interface.
     volumes:
       - printstash_postgres:/var/lib/postgresql/data
     networks:
@@ -131,9 +135,7 @@ services:
       AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:-printstash}
       AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:-printstash-secret}
     command: mini -dir=/data -master.telemetry=false
-    ports:
-      - "${SEAWEEDFS_S3_PORT:-9000}:8333"
-      - "${SEAWEEDFS_ADMIN_PORT:-9001}:23646"
+    # Internal-only by default. The API reaches S3 at http://seaweedfs:8333.
     volumes:
       - printstash_seaweedfs:/data
     networks:

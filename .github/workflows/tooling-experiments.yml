@@ -1,0 +1,108 @@
+name: Tooling experiments
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_serial_backend:
+        description: Also run the long serial backend baseline
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend timing experiments
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Time authoritative jsdom tests
+        run: /usr/bin/time -v pnpm test:jsdom
+
+      - name: Time happy-dom compatibility lane
+        run: /usr/bin/time -v pnpm test:happy-dom
+
+      - name: Time audited fast tests
+        run: /usr/bin/time -v pnpm test:fast
+
+      - name: Time normal production build
+        run: /usr/bin/time -v pnpm build
+
+      - name: Time native Oxc React Compiler build
+        run: /usr/bin/time -v pnpm build:react-compiler
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify bundled development with browser E2E
+        run: pnpm test:e2e:bundle
+
+      - name: Measure baseline production UX
+        run: pnpm test:perf
+
+      - name: Measure React Compiler production UX
+        run: pnpm test:perf:react-compiler
+
+      - name: Upload browser timing samples
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-performance-samples
+          path: frontend/test-results/performance-*/**/performance-metrics
+          if-no-files-found: warn
+          retention-days: 14
+
+  backend:
+    name: Backend timing experiments
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Time serial backend baseline
+        if: ${{ inputs.run_serial_backend }}
+        run: /usr/bin/time -v uv run pytest tests -q
+
+      - name: Time fast backend feature lane
+        run: /usr/bin/time -v ./scripts/test.sh fast -q
+
+      - name: Time parallel backend suite
+        run: /usr/bin/time -v ./scripts/test-parallel.sh tests -q

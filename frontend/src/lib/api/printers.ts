@@ -27,10 +27,7 @@ import {
   StartPrinterFile,
 } from "@/types";
 
-export function listPrinters(
-  group?: string,
-  options?: GetJsonOptions,
-): Promise<PrinterRead[]> {
+export function listPrinters(group?: string, options?: GetJsonOptions): Promise<PrinterRead[]> {
   const query = group ? `?group=${encodeURIComponent(group)}` : "";
   return getJson<PrinterRead[]>(`/api/v1/printers${query}`, options);
 }
@@ -60,39 +57,33 @@ export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
   return sendJson<PrinterRead>("/api/v1/printers", "POST", payload);
 }
 
-export function updatePrinter(
-  id: number,
-  payload: PrinterUpdate,
-): Promise<PrinterRead> {
-  return sendJson<PrinterRead>(
-    `/api/v1/printers/${id}`,
-    "PATCH",
-    payload,
-  );
+export function updatePrinter(id: number, payload: PrinterUpdate): Promise<PrinterRead> {
+  return sendJson<PrinterRead>(`/api/v1/printers/${id}`, "PATCH", payload);
 }
 
 export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {
-  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, { fresh: true });
+  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, {
+    fresh: true,
+  });
 }
 
 export function updatePrinterManualMaterialState(
   id: number,
   payload: ManualMaterialStateUpdate,
 ): Promise<PrinterMaterialStateRead> {
-  return sendJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state/manual`, "PUT", payload);
+  return sendJson<PrinterMaterialStateRead>(
+    `/api/v1/printers/${id}/material-state/manual`,
+    "PUT",
+    payload,
+  );
 }
 
 export function deletePrinter(id: number): Promise<void> {
   return sendAction(`/api/v1/printers/${id}`, "DELETE");
 }
 
-export function listPrinterPermissions(
-  id: number,
-): Promise<PrinterPermissionRead[]> {
-  return getJson<PrinterPermissionRead[]>(
-    `/api/v1/printers/${id}/permissions`,
-    { fresh: true },
-  );
+export function listPrinterPermissions(id: number): Promise<PrinterPermissionRead[]> {
+  return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, { fresh: true });
 }
 
 export function updatePrinterPermission(
@@ -107,42 +98,19 @@ export function updatePrinterPermission(
   );
 }
 
-export function deletePrinterPermission(
-  printerId: number,
-  userId: number,
-): Promise<void> {
-  return sendAction(
-    `/api/v1/printers/${printerId}/permissions/${userId}`,
-    "DELETE",
-  );
+export function deletePrinterPermission(printerId: number, userId: number): Promise<void> {
+  return sendAction(`/api/v1/printers/${printerId}/permissions/${userId}`, "DELETE");
 }
 
-export function sendToPrinter(
-  id: number,
-  payload: SendToPrinter,
-): Promise<PrintJobRead> {
-  return sendJson<PrintJobRead>(
-    `/api/v1/printers/${id}/send`,
-    "POST",
-    payload,
-  );
+export function sendToPrinter(id: number, payload: SendToPrinter): Promise<PrintJobRead> {
+  return sendJson<PrintJobRead>(`/api/v1/printers/${id}/send`, "POST", payload);
 }
 
-export function startPrinterFile(
-  id: number,
-  payload: StartPrinterFile,
-): Promise<PrintJobRead> {
-  return sendJson<PrintJobRead>(
-    `/api/v1/printers/${id}/start`,
-    "POST",
-    payload,
-  );
+export function startPrinterFile(id: number, payload: StartPrinterFile): Promise<PrintJobRead> {
+  return sendJson<PrintJobRead>(`/api/v1/printers/${id}/start`, "POST", payload);
 }
 
-function printerControl(
-  id: number,
-  action: "pause" | "resume" | "cancel",
-): Promise<void> {
+function printerControl(id: number, action: "pause" | "resume" | "cancel"): Promise<void> {
   return sendAction(`/api/v1/printers/${id}/${action}`, "POST");
 }
 
@@ -189,32 +157,22 @@ export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {
 }
 
 export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
-  return sendJson<PrinterFileRead[]>(
-    `/api/v1/printers/${id}/files/sync`,
-    "POST",
-    {},
-  );
+  return sendJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files/sync`, "POST", {});
 }
 
 export async function deletePrinterFile(
   id: number,
   printerFileId: number,
 ): Promise<PrinterFileRead[]> {
-  const res = await fetch(
-    getUrl(`/api/v1/printers/${id}/files/${printerFileId}`),
-    {
-      method: "DELETE",
-      headers: authHeaders(),
-    },
-  );
+  const res = await fetch(getUrl(`/api/v1/printers/${id}/files/${printerFileId}`), {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   invalidateApiCache(`/api/v1/printers/${id}/files/${printerFileId}`);
   return handleResponse<PrinterFileRead[]>(res);
 }
 
-export function listPrinterJobs(
-  id: number,
-  limit = 50,
-): Promise<PrintJobRead[]> {
+export function listPrinterJobs(id: number, limit = 50): Promise<PrintJobRead[]> {
   return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`);
 }
 
@@ -224,7 +182,5 @@ export async function openPrinterWS(id: number): Promise<WebSocket> {
     "POST",
     {},
   );
-  return new WebSocket(
-    getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`),
-  );
+  return new WebSocket(getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`));
 }

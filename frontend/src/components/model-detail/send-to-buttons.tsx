@@ -1,17 +1,28 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { FileCode2, Loader2, Printer as PrinterIcon, Send, WifiOff } from "lucide-react";
 
-import { checkFleetCompatibility, createFleetBatch, enqueueFleetJob, sendToPrinter } from "@/lib/api";
+import {
+  checkFleetCompatibility,
+  createFleetBatch,
+  enqueueFleetJob,
+  sendToPrinter,
+} from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { formatGrams } from "@/lib/format";
 import { createTask, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
-import { CompatibilityRead, FileRead, JobPriority, ModelPrinterFileRead, RoutingStrategy } from "@/types";
+import {
+  CompatibilityRead,
+  FileRead,
+  JobPriority,
+  ModelPrinterFileRead,
+  RoutingStrategy,
+} from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,21 +33,62 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 const selectClassName =
   "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
+/** Decode a `<select>` value into the routing strategy it names, or nothing. */
+function parseRoutingStrategy(value: string): RoutingStrategy | null {
+  return value === "manual" || value === "default" || value === "least_busy" ? value : null;
+}
+
+/** Decode a `<select>` value into the queue priority it names, or nothing. */
+function parseJobPriority(value: string): JobPriority | null {
+  return value === "low" || value === "normal" || value === "rush" ? value : null;
+}
+
+function printArtifactFormat(filename: string): "gcode_text" | "bgcode_binary" {
+  return filename.toLowerCase().endsWith(".bgcode") ? "bgcode_binary" : "gcode_text";
+}
+
+/**
+ * The four fleet commands this panel issues. Named as a seam so a test can
+ * drive the panel and observe the submitted payload without a network; app
+ * code never passes it and gets the real API client.
+ */
+export interface SendToCommands {
+  checkFleetCompatibility: typeof checkFleetCompatibility;
+  createFleetBatch: typeof createFleetBatch;
+  enqueueFleetJob: typeof enqueueFleetJob;
+  sendToPrinter: typeof sendToPrinter;
+}
+
+const API_COMMANDS: SendToCommands = {
+  checkFleetCompatibility,
+  createFleetBatch,
+  enqueueFleetJob,
+  sendToPrinter,
+};
+
 export function SendToButtons({
   gcodeFiles,
   printerFiles,
   open,
   onOpenChange,
   preselectFileId,
+  commands = API_COMMANDS,
 }: {
   gcodeFiles: Pick<
     FileRead,
-    "id" | "original_filename" | "version" | "gcode_revision_number" | "revision_label" | "is_recommended" | "metadata"
+    | "id"
+    | "original_filename"
+    | "version"
+    | "gcode_revision_number"
+    | "revision_label"
+    | "is_recommended"
+    | "metadata"
   >[];
   printerFiles: ModelPrinterFileRead[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   preselectFileId?: number;
+  commands?: SendToCommands;
 }) {
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -45,6 +97,8 @@ export function SendToButtons({
   const setShowSend = onOpenChange ?? setInternalOpen;
   const defaultFile = gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
   const [selectedFile, setSelectedFile] = useState<number>(defaultFile?.id ?? 0);
+  const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
+  const selectedFileFormat = printArtifactFormat(selectedFileDetails?.original_filename ?? "");
 
   useEffect(() => {
     if (showSend && preselectFileId) {
@@ -83,29 +137,39 @@ export function SendToButtons({
   const [error, setError] = useState<string | null>(null);
   // Send failures live in local `error`; surface a printers load failure too.
   const displayError =
-    error ??
-    (printersQuery.error instanceof Error ? printersQuery.error.message : null);
+    error ?? (printersQuery.error instanceof Error ? printersQuery.error.message : null);
 
   // Default-select a capable printer once printers load (not gated on the panel
   // being open) so the collapsed "x/y online" indicator reflects a selection.
   useEffect(() => {
     setSelectedPrinterIds((current) => {
       const capableIds = printers
-        .filter((printer) => printer.access.can_print && printer.capabilities.can_upload)
+        .filter(
+          (printer) =>
+            printer.access.can_print &&
+            printer.capabilities.can_upload &&
+            printer.capabilities.accepted_print_formats.includes(selectedFileFormat),
+        )
         .map((printer) => printer.id);
       if (capableIds.length === 0) return [];
       const kept = current.filter((id) => capableIds.includes(id));
       return kept.length > 0 ? kept : [capableIds[0]];
     });
-  }, [printers]);
+  }, [printers, selectedFileFormat]);
 
   const selectedPrinters = useMemo(
     () => printers.filter((printer) => selectedPrinterIds.includes(printer.id)),
     [printers, selectedPrinterIds],
   );
   const availablePrinters = useMemo(
-    () => printers.filter((printer) => printer.access.can_print && printer.capabilities.can_upload),
-    [printers],
+    () =>
+      printers.filter(
+        (printer) =>
+          printer.access.can_print &&
+          printer.capabilities.can_upload &&
+          printer.capabilities.accepted_print_formats.includes(selectedFileFormat),
+      ),
+    [printers, selectedFileFormat],
   );
   const selectedPrintersCanStart = selectedPrinters.every(
     (printer) => printer.capabilities.can_start,
@@ -126,24 +190,23 @@ export function SendToButtons({
       return;
     }
     setSelectedPrinterIds((current) =>
-      current.includes(id)
-        ? current.filter((currentId) => currentId !== id)
-        : [...current, id],
+      current.includes(id) ? current.filter((currentId) => currentId !== id) : [...current, id],
     );
   }
 
   async function send(allowMismatch = false) {
     if (!selectedFile) return;
-    const targetPrinterIds = deliveryMode === "send" || routingStrategy === "manual"
-      ? selectedPrinters.map((printer) => printer.id)
-      : [];
+    const targetPrinterIds =
+      deliveryMode === "send" || routingStrategy === "manual"
+        ? selectedPrinters.map((printer) => printer.id)
+        : [];
     if (!allowMismatch && targetPrinterIds.length > 0) {
       try {
-        const report = await checkFleetCompatibility(selectedFile, targetPrinterIds);
+        const report = await commands.checkFleetCompatibility(selectedFile, targetPrinterIds);
         setCompatibility(report);
         if (
-          report.printers.some((row) => row.verdict === "mismatch")
-          && (deliveryMode === "queue" || startPrint)
+          report.printers.some((row) => row.verdict === "mismatch") &&
+          (deliveryMode === "queue" || startPrint)
         ) {
           setConfirmMismatch(true);
           return;
@@ -155,7 +218,10 @@ export function SendToButtons({
     }
     if (deliveryMode === "queue") {
       if (routingStrategy === "manual" && selectedPrinters.length === 0) return;
-      const spool = selectedSpoolId !== "" ? spools.find((candidate) => candidate.id === selectedSpoolId) : undefined;
+      const spool =
+        selectedSpoolId !== ""
+          ? spools.find((candidate) => candidate.id === selectedSpoolId)
+          : undefined;
       setSending(true);
       setError(null);
       try {
@@ -168,14 +234,19 @@ export function SendToButtons({
           spool_filament_id: spool?.filament_id ?? null,
           priority,
           target_group: targetGroup.trim() || null,
-          compatibility_policy: allowMismatch ? "allow_mismatch" as const : "safe" as const,
+          compatibility_policy: allowMismatch ? ("allow_mismatch" as const) : ("safe" as const),
         };
-        if (quantity > 1) await createFleetBatch({
-          ...payload,
-          quantity,
-          ...(routingStrategy === "manual" ? {} : { spool_id: null, spool_name: null, spool_filament_id: null }),
-        });
-        else await enqueueFleetJob(payload);
+        if (quantity > 1) {
+          const batch = { ...payload, quantity };
+          // An auto-routed batch spreads copies over printers the user never
+          // picked, so a spool chosen for one of them cannot travel with it.
+          if (routingStrategy !== "manual") {
+            batch.spool_id = null;
+            batch.spool_name = null;
+            batch.spool_filament_id = null;
+          }
+          await commands.createFleetBatch(batch);
+        } else await commands.enqueueFleetJob(payload);
         setShowSend(false);
         toast.success(quantity > 1 ? `Created ${quantity}-copy batch` : "Added to fleet queue");
       } catch (e: any) {
@@ -204,16 +275,12 @@ export function SendToButtons({
       const results = await Promise.allSettled(
         selectedPrinters.map(async (printer) => {
           const spool =
-            selectedSpoolId !== ""
-              ? spools.find((s) => s.id === selectedSpoolId)
-              : undefined;
-          const job = await sendToPrinter(printer.id, {
+            selectedSpoolId !== "" ? spools.find((s) => s.id === selectedSpoolId) : undefined;
+          const job = await commands.sendToPrinter(printer.id, {
             file_id: selectedFile,
             start_print: startPrint,
-            spool_id: selectedSpoolId === "" ? null : (selectedSpoolId as number),
-            spool_name: spool
-              ? spool.filament_name || spool.name || `Spool ${spool.id}`
-              : null,
+            spool_id: selectedSpoolId === "" ? null : selectedSpoolId,
+            spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
             spool_filament_id: spool ? spool.filament_id : null,
             compatibility_policy: allowMismatch ? "allow_mismatch" : "safe",
           });
@@ -231,13 +298,20 @@ export function SendToButtons({
       const failures = results
         .map((result, index) => ({ result, printer: selectedPrinters[index] }))
         .filter(
-          (entry): entry is { result: PromiseRejectedResult; printer: (typeof selectedPrinters)[number] } =>
-            entry.result.status === "rejected",
+          (
+            entry,
+          ): entry is {
+            result: PromiseRejectedResult;
+            printer: (typeof selectedPrinters)[number];
+          } => entry.result.status === "rejected",
         );
 
       if (failures.length > 0) {
         const reasons = failures
-          .map(({ printer, result }) => `${printer.name}: ${result.reason?.message ?? "unknown error"}`)
+          .map(
+            ({ printer, result }) =>
+              `${printer.name}: ${result.reason?.message ?? "unknown error"}`,
+          )
           .join("; ");
         const message = `${successes.length}/${selectedPrinters.length} printers succeeded — ${reasons}`;
         setError(message);
@@ -273,8 +347,8 @@ export function SendToButtons({
     }
   }
 
-  const selectedFileDetails = gcodeFiles.find((file) => file.id === selectedFile);
-  const selectedSpool = selectedSpoolId !== "" ? spools.find((spool) => spool.id === selectedSpoolId) : undefined;
+  const selectedSpool =
+    selectedSpoolId !== "" ? spools.find((spool) => spool.id === selectedSpoolId) : undefined;
   // ponytail: single-file check only — a multi-plate build evaluated as one set
   // needs a batch-send feature that doesn't exist yet (#64 follow-up).
   const requiredWeightG = selectedFileDetails?.metadata?.filament_weight_g ?? null;
@@ -289,268 +363,425 @@ export function SendToButtons({
     : null;
 
   return (
-    <Localized><>
-      <ConfirmModal
-        open={confirmMismatch}
-        onClose={() => setConfirmMismatch(false)}
-        onConfirm={() => { setConfirmMismatch(false); void send(true); }}
-        title="Print with a known material mismatch?"
-        description="The selected G-code material or nozzle does not match the printer’s known loaded state. Continuing records an audited override. Color differences alone do not block printing."
-        confirmLabel="Print anyway"
-      />
-      <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">Printer status</span>
-        <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
-          {printersLoading ? (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
-              <span className="font-mono text-xs text-muted-foreground">Checking…</span>
-            </>
-          ) : printers.length === 0 ? (
-            <>
-              <WifiOff className="h-3 w-3 text-muted-foreground" />
-              <span className="font-mono text-xs text-muted-foreground">No printers</span>
-            </>
-          ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
-            <>
-              <span className="h-2 w-2 rounded-full bg-success" />
-              <span className="font-mono text-xs font-bold tracking-wider text-success">
-                {onlineCount}/{selectedPrinters.length} online
-              </span>
-            </>
-          ) : (
-            <>
-              <WifiOff className="h-3 w-3 text-warning" />
-              <span className="font-mono text-xs capitalize text-warning">
-                No selected printer online
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-      {displayError && !showSend && (
-        <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
-          {displayError}
-        </div>
-      )}
-
-      {printers.length === 0 ? (
-        <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
-          <div className="flex items-center gap-2">
-            <WifiOff className="h-4 w-4 text-on-surface-variant" />
-            <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
-              No printers configured
+    <Localized>
+      <>
+        <ConfirmModal
+          open={confirmMismatch}
+          onClose={() => setConfirmMismatch(false)}
+          onConfirm={() => {
+            setConfirmMismatch(false);
+            void send(true);
+          }}
+          title="Print with a known material mismatch?"
+          description="The selected G-code material or nozzle does not match the printer’s known loaded state. Continuing records an audited override. Color differences alone do not block printing."
+          confirmLabel="Print anyway"
+        />
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              Printer status
             </span>
+            <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
+              {printersLoading ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                  <span className="font-mono text-xs text-muted-foreground">Checking…</span>
+                </>
+              ) : printers.length === 0 ? (
+                <>
+                  <WifiOff className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-mono text-xs text-muted-foreground">No printers</span>
+                </>
+              ) : selectedPrinters.length > 0 && onlineCount > 0 ? (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-success" />
+                  <span className="font-mono text-xs font-bold tracking-wider text-success">
+                    {onlineCount}/{selectedPrinters.length} online
+                  </span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="h-3 w-3 text-warning" />
+                  <span className="font-mono text-xs capitalize text-warning">
+                    No selected printer online
+                  </span>
+                </>
+              )}
+            </div>
           </div>
-          <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
-            Connect a supported printer to send files directly from the Vault.
-          </p>
-          <Button asChild size="sm" className="mt-1 w-full">
-            <Link href="/printers"><PrinterIcon className="h-4 w-4" /> Configure printer</Link>
-          </Button>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <Button
-            onClick={() => {
-              if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
-              setShowSend(true);
-            }}
-            disabled={!auth.isAuthenticated}
-            className="w-full"
-          >
-            {!auth.isAuthenticated ? (
-              <><Send className="h-4 w-4" /> Sign in to send</>
-            ) : (
-              <><Send className="h-4 w-4" /> Send to printer</>
-            )}
-          </Button>
-          <Button asChild variant="outline" size="sm" className="w-full">
-            <Link href="/printers">Manage printers</Link>
-          </Button>
-        </div>
-      )}
-      </div>
+          {displayError && !showSend && (
+            <div className="rounded border border-error/30 bg-error-container/20 p-2 text-2xs text-error font-mono break-words">
+              {displayError}
+            </div>
+          )}
 
-      <Modal
-        open={showSend}
-        onClose={() => { if (!sending) setShowSend(false); }}
-        title="Send to printer"
-        className="flex max-h-[calc(100vh-2rem)] max-w-2xl flex-col overflow-hidden"
-      >
-        <div
-          data-testid="send-dialog-scroll-region"
-          className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1"
+          {printers.length === 0 ? (
+            <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
+              <div className="flex items-center gap-2">
+                <WifiOff className="h-4 w-4 text-on-surface-variant" />
+                <span className="font-mono text-xs uppercase tracking-wider text-on-surface">
+                  No printers configured
+                </span>
+              </div>
+              <p className="font-mono text-2xs text-on-surface-variant leading-relaxed">
+                Connect a supported printer to send files directly from the Vault.
+              </p>
+              <Button asChild size="sm" className="mt-1 w-full">
+                <Link href="/printers">
+                  <PrinterIcon className="h-4 w-4" /> Configure printer
+                </Link>
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={() => {
+                  if (!auth.isAuthenticated) {
+                    auth.showAuthRequiredToast();
+                    return;
+                  }
+                  setShowSend(true);
+                }}
+                disabled={!auth.isAuthenticated}
+                className="w-full"
+              >
+                {!auth.isAuthenticated ? (
+                  <>
+                    <Send className="h-4 w-4" /> Sign in to send
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4" /> Send to printer
+                  </>
+                )}
+              </Button>
+              <Button asChild variant="outline" size="sm" className="w-full">
+                <Link href="/printers">Manage printers</Link>
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <Modal
+          open={showSend}
+          onClose={() => {
+            if (!sending) setShowSend(false);
+          }}
+          title="Send to printer"
+          className="flex max-h-[calc(100vh-2rem)] max-w-2xl flex-col overflow-hidden"
         >
-          <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
-              <FileCode2 className="h-5 w-5" />
+          <div
+            data-testid="send-dialog-scroll-region"
+            className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1"
+          >
+            <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/50 p-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                <FileCode2 className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {selectedFileDetails?.original_filename ?? "Select G-code revision"}
+                </p>
+                <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
+                  {selectedPrinters.length} printer{selectedPrinters.length === 1 ? "" : "s"}{" "}
+                  selected
+                </p>
+              </div>
             </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-foreground">
-                {selectedFileDetails?.original_filename ?? "Select G-code revision"}
-              </p>
-              <p className="mt-0.5 font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-                {selectedPrinters.length} printer{selectedPrinters.length === 1 ? "" : "s"} selected
-              </p>
-            </div>
-          </div>
 
-          <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-foreground">Action</legend>
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant={deliveryMode === "send" ? "secondary" : "outline"} onClick={() => setDeliveryMode("send")}>Send now</Button>
-              <Button type="button" variant={deliveryMode === "queue" ? "secondary" : "outline"} onClick={() => { setDeliveryMode("queue"); setStartPrint(false); if (!user?.is_superuser) setRoutingStrategy("manual"); }}>Add to queue</Button>
-            </div>
-          </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium text-foreground">Action</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant={deliveryMode === "send" ? "secondary" : "outline"}
+                  onClick={() => setDeliveryMode("send")}
+                >
+                  Send now
+                </Button>
+                <Button
+                  type="button"
+                  variant={deliveryMode === "queue" ? "secondary" : "outline"}
+                  onClick={() => {
+                    setDeliveryMode("queue");
+                    setStartPrint(false);
+                    if (!user?.is_superuser) setRoutingStrategy("manual");
+                  }}
+                >
+                  Add to queue
+                </Button>
+              </div>
+            </fieldset>
 
-          {deliveryMode === "queue" && (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block space-y-1.5 text-sm font-medium text-foreground">Routing<select value={routingStrategy} onChange={(event) => setRoutingStrategy(event.target.value as RoutingStrategy)} className={selectClassName}>{user?.is_superuser && <option value="least_busy">Least busy eligible printer</option>}{user?.is_superuser && <option value="default">Default printer</option>}<option value="manual">Choose printer</option></select></label>
-              <label className="block space-y-1.5 text-sm font-medium text-foreground">Copies<input className={selectClassName} type="number" min={1} value={quantity || ""} onChange={(event) => setQuantity(Number(event.target.value))} /></label>
-              <label className="block space-y-1.5 text-sm font-medium text-foreground">Priority<select className={selectClassName} value={priority} onChange={(event) => setPriority(event.target.value as JobPriority)}><option value="low">Low</option><option value="normal">Normal</option><option value="rush">Rush</option></select></label>
-              <label className="block space-y-1.5 text-sm font-medium text-foreground">Printer group<input className={selectClassName} value={targetGroup} onChange={(event) => setTargetGroup(event.target.value)} placeholder="Any group" /></label>
-            </div>
-          )}
-
-          {compatibility && (deliveryMode === "send" || routingStrategy === "manual") && (
-            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
-              Compatibility: {compatibility.printers.map((row) => `${printers.find((printer) => printer.id === row.printer_id)?.name ?? row.printer_id}: ${row.verdict}`).join(" · ")}
-              {compatibility.printers.some((row) => row.verdict === "unknown") && <span className="mt-1 block">Unknown state remains usable and will not block this action.</span>}
-            </div>
-          )}
-
-          {(deliveryMode === "send" || routingStrategy === "manual") && <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-foreground">Printers</legend>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {printers.map((printer) => {
-                const disabled = !printer.access.can_print || !printer.capabilities.can_upload;
-                const selected = selectedPrinterIds.includes(printer.id);
-                const offline = printer.status === "offline" || printer.status === "unknown";
-                return (
-                  <div
-                    key={printer.id}
-                    onClick={() => { if (!disabled && !sending) togglePrinter(printer.id); }}
-                    className={`flex min-w-0 items-center gap-3 rounded-lg border p-3 transition-[background-color,border-color] duration-press ${
-                      selected
-                        ? "border-primary bg-primary-soft"
-                        : "border-border bg-background hover:bg-popover-hover"
-                    } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+            {deliveryMode === "queue" && (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                  Routing
+                  <select
+                    value={routingStrategy}
+                    onChange={(event) => {
+                      const strategy = parseRoutingStrategy(event.target.value);
+                      if (strategy) setRoutingStrategy(strategy);
+                    }}
+                    className={selectClassName}
                   >
-                    <Checkbox
-                      checked={selected}
-                      onChange={() => togglePrinter(printer.id)}
-                      disabled={disabled || sending}
-                      ariaLabel={`Select ${printer.name}`}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-foreground">{printer.name}</span>
-                      <span className="mt-1 flex flex-wrap gap-1">
-                        <Badge variant={offline ? "warning" : "success"} className="font-mono text-3xs uppercase tracking-wider">
-                          {printer.status}
-                        </Badge>
-                        <Badge variant="outline" className="font-mono text-3xs uppercase tracking-wider">
-                          {disabled ? "Upload unsupported" : printer.capabilities.can_start ? "Upload + start" : "Upload only"}
-                        </Badge>
-                      </span>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </fieldset>}
+                    {user?.is_superuser && (
+                      <option value="least_busy">Least busy eligible printer</option>
+                    )}
+                    {user?.is_superuser && <option value="default">Default printer</option>}
+                    <option value="manual">Choose printer</option>
+                  </select>
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                  Copies
+                  <input
+                    className={selectClassName}
+                    type="number"
+                    min={1}
+                    value={quantity || ""}
+                    onChange={(event) => setQuantity(Number(event.target.value))}
+                  />
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                  Priority
+                  <select
+                    className={selectClassName}
+                    value={priority}
+                    onChange={(event) => {
+                      const next = parseJobPriority(event.target.value);
+                      if (next) setPriority(next);
+                    }}
+                  >
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="rush">Rush</option>
+                  </select>
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-foreground">
+                  Printer group
+                  <input
+                    className={selectClassName}
+                    value={targetGroup}
+                    onChange={(event) => setTargetGroup(event.target.value)}
+                    placeholder="Any group"
+                  />
+                </label>
+              </div>
+            )}
 
-          {availablePrinters.length === 0 && (
-            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-              No configured printer supports Vault upload/send.
-            </div>
-          )}
+            {compatibility && (deliveryMode === "send" || routingStrategy === "manual") && (
+              <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                Compatibility:{" "}
+                {compatibility.printers
+                  .map(
+                    (row) =>
+                      `${printers.find((printer) => printer.id === row.printer_id)?.name ?? row.printer_id}: ${row.verdict}`,
+                  )
+                  .join(" · ")}
+                {compatibility.printers.some((row) => row.verdict === "unknown") && (
+                  <span className="mt-1 block">
+                    Unknown state remains usable and will not block this action.
+                  </span>
+                )}
+              </div>
+            )}
 
-          <div className={`grid gap-4 ${spoolmanEnabled && spools.length > 0 ? "sm:grid-cols-2" : ""}`}>
-            <label className="space-y-1.5 text-sm font-medium text-foreground">
-              G-code revision
-              <select value={selectedFile} onChange={(e) => setSelectedFile(Number(e.target.value))} className={selectClassName}>
-                {gcodeFiles.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    Rev {file.gcode_revision_number ?? file.version}
-                    {file.revision_label ? ` · ${file.revision_label}` : ""}
-                    {file.id === defaultFile?.id ? " · Recommended" : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {spoolmanEnabled && spools.length > 0 && (
+            {(deliveryMode === "send" || routingStrategy === "manual") && (
+              <fieldset className="space-y-2">
+                <legend className="mb-2 text-sm font-medium text-foreground">Printers</legend>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {printers.map((printer) => {
+                    const formatSupported =
+                      printer.capabilities.accepted_print_formats.includes(selectedFileFormat);
+                    const disabled =
+                      !printer.access.can_print ||
+                      !printer.capabilities.can_upload ||
+                      !formatSupported;
+                    const selected = selectedPrinterIds.includes(printer.id);
+                    const offline = printer.status === "offline" || printer.status === "unknown";
+                    return (
+                      <div
+                        key={printer.id}
+                        onClick={() => {
+                          if (!disabled && !sending) togglePrinter(printer.id);
+                        }}
+                        className={`flex min-w-0 items-center gap-3 rounded-lg border p-3 transition-[background-color,border-color] duration-press ${
+                          selected
+                            ? "border-primary bg-primary-soft"
+                            : "border-border bg-background hover:bg-popover-hover"
+                        } ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+                      >
+                        <Checkbox
+                          checked={selected}
+                          onChange={() => togglePrinter(printer.id)}
+                          disabled={disabled || sending}
+                          ariaLabel={`Select ${printer.name}`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">
+                            {printer.name}
+                          </span>
+                          <span className="mt-1 flex flex-wrap gap-1">
+                            <Badge
+                              variant={offline ? "warning" : "success"}
+                              className="font-mono text-3xs uppercase tracking-wider"
+                            >
+                              {printer.status}
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className="font-mono text-3xs uppercase tracking-wider"
+                            >
+                              {!printer.access.can_print
+                                ? "No print access"
+                                : !printer.capabilities.can_upload
+                                  ? "Upload unsupported"
+                                  : !formatSupported
+                                    ? "Format unsupported"
+                                    : printer.capabilities.can_start
+                                      ? "Upload + start"
+                                      : "Upload only"}
+                            </Badge>
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            )}
+
+            {availablePrinters.length === 0 && (
+              <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                No configured printer supports Vault upload/send.
+              </div>
+            )}
+
+            <div
+              className={`grid gap-4 ${spoolmanEnabled && spools.length > 0 ? "sm:grid-cols-2" : ""}`}
+            >
               <label className="space-y-1.5 text-sm font-medium text-foreground">
-                Spool
+                G-code revision
                 <select
-                  value={selectedSpoolId}
-                  onChange={(e) => setSelectedSpoolId(e.target.value ? Number(e.target.value) : "")}
+                  value={selectedFile}
+                  onChange={(e) => setSelectedFile(Number(e.target.value))}
                   className={selectClassName}
                 >
-                  <option value="">No spool</option>
-                  {spools.map((spool) => (
-                    <option key={spool.id} value={spool.id}>
-                      {(spool.filament_name || spool.name || `Spool ${spool.id}`) +
-                        (spool.vendor_name ? ` · ${spool.vendor_name}` : "") +
-                        (spool.location ? ` · ${spool.location}` : "") +
-                        (spool.remaining_weight != null ? ` (${formatGrams(spool.remaining_weight)} left)` : "")}
+                  {gcodeFiles.map((file) => (
+                    <option key={file.id} value={file.id}>
+                      Rev {file.gcode_revision_number ?? file.version}
+                      {file.revision_label ? ` · ${file.revision_label}` : ""}
+                      {file.id === defaultFile?.id ? " · Recommended" : ""}
                     </option>
                   ))}
                 </select>
               </label>
+              {spoolmanEnabled && spools.length > 0 && (
+                <label className="space-y-1.5 text-sm font-medium text-foreground">
+                  Spool
+                  <select
+                    value={selectedSpoolId}
+                    onChange={(e) =>
+                      setSelectedSpoolId(e.target.value ? Number(e.target.value) : "")
+                    }
+                    className={selectClassName}
+                  >
+                    <option value="">No spool</option>
+                    {spools.map((spool) => (
+                      <option key={spool.id} value={spool.id}>
+                        {(spool.filament_name || spool.name || `Spool ${spool.id}`) +
+                          (spool.vendor_name ? ` · ${spool.vendor_name}` : "") +
+                          (spool.location ? ` · ${spool.location}` : "") +
+                          (spool.remaining_weight != null
+                            ? ` (${formatGrams(spool.remaining_weight)} left)`
+                            : "")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {spoolCoverageWarning && (
+              <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+                {spoolCoverageWarning}
+              </div>
+            )}
+
+            {deliveryMode === "send" && (
+              <label
+                className={`flex items-start gap-3 rounded-lg border p-3 ${startPrint ? "border-warning/50 bg-warning/10" : "border-border bg-background"}`}
+              >
+                <Checkbox
+                  checked={startPrint}
+                  onChange={setStartPrint}
+                  disabled={!selectedPrintersCanStart || sending}
+                  ariaLabel="Start print immediately"
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-foreground">
+                    Start print immediately
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
+                    Off by default. When enabled, selected printers begin printing after upload.
+                  </span>
+                  {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
+                    <span className="mt-1 block text-xs text-warning">
+                      Remove upload-only printers to enable this option.
+                    </span>
+                  )}
+                </span>
+              </label>
+            )}
+
+            {selectedUploads.length > 0 && (
+              <div className="rounded-md border border-success/30 bg-success/10 p-3 text-xs text-success">
+                Already uploaded to{" "}
+                {selectedUploads
+                  .map((upload) => `${upload.printer_name} as ${upload.remote_filename}`)
+                  .join(", ")}
+                .
+              </div>
+            )}
+            {displayError && (
+              <div
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              >
+                {displayError}
+              </div>
             )}
           </div>
 
-          {spoolCoverageWarning && (
-            <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-              {spoolCoverageWarning}
-            </div>
-          )}
-
-          {deliveryMode === "send" && <label className={`flex items-start gap-3 rounded-lg border p-3 ${startPrint ? "border-warning/50 bg-warning/10" : "border-border bg-background"}`}>
-            <Checkbox
-              checked={startPrint}
-              onChange={setStartPrint}
-              disabled={!selectedPrintersCanStart || sending}
-              ariaLabel="Start print immediately"
-              className="mt-0.5"
-            />
-            <span>
-              <span className="block text-sm font-medium text-foreground">Start print immediately</span>
-              <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                Off by default. When enabled, selected printers begin printing after upload.
-              </span>
-              {!selectedPrintersCanStart && selectedPrinters.length > 0 && (
-                <span className="mt-1 block text-xs text-warning">Remove upload-only printers to enable this option.</span>
-              )}
-            </span>
-          </label>}
-
-          {selectedUploads.length > 0 && (
-            <div className="rounded-md border border-success/30 bg-success/10 p-3 text-xs text-success">
-              Already uploaded to {selectedUploads.map((upload) => `${upload.printer_name} as ${upload.remote_filename}`).join(", ")}.
-            </div>
-          )}
-          {displayError && (
-            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {displayError}
-            </div>
-          )}
-        </div>
-
-        <div className="-mx-6 -mb-6 mt-5 flex shrink-0 justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
-          <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>Cancel</Button>
-          <Button
-            onClick={() => void send()}
-            loading={sending}
-            disabled={!selectedFile || (deliveryMode === "send" ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart) : quantity < 1 || routingStrategy === "manual" && selectedPrinters.length === 0)}
-          >
-            {!sending && <Send className="h-4 w-4" />}
-            {sending ? (deliveryMode === "queue" ? "Queuing…" : "Sending…") : deliveryMode === "queue" ? "Add to queue" : startPrint ? "Send & start print" : "Send to printer"}
-          </Button>
-        </div>
-      </Modal>
-    </></Localized>
+          <div className="-mx-6 -mb-6 mt-5 flex shrink-0 justify-end gap-2 border-t border-border bg-muted/30 px-6 py-4">
+            <Button variant="outline" onClick={() => setShowSend(false)} disabled={sending}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void send()}
+              loading={sending}
+              disabled={
+                !selectedFile ||
+                (deliveryMode === "send"
+                  ? selectedPrinters.length === 0 || (startPrint && !selectedPrintersCanStart)
+                  : quantity < 1 || (routingStrategy === "manual" && selectedPrinters.length === 0))
+              }
+            >
+              {!sending && <Send className="h-4 w-4" />}
+              {sending
+                ? deliveryMode === "queue"
+                  ? "Queuing…"
+                  : "Sending…"
+                : deliveryMode === "queue"
+                  ? "Add to queue"
+                  : startPrint
+                    ? "Send & start print"
+                    : "Send to printer"}
+            </Button>
+          </div>
+        </Modal>
+      </>
+    </Localized>
   );
 }

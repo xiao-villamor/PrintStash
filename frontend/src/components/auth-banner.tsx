@@ -1,20 +1,28 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import { AlertTriangle, X } from "lucide-react";
-import {
-  isLoggedIn,
-  onAuthChange,
-  onUnauthorized,
-} from "@/lib/auth";
+import { isLoggedIn, onAuthChange, onUnauthorized } from "@/lib/auth";
 import { toast } from "@/lib/toast";
+
+type AuthPromptReason = "missing" | "rejected" | "expired";
+
+const TOAST_MESSAGES = {
+  missing: "Authentication required — sign in to continue.",
+  rejected: "Credentials were rejected by the server. Sign in again.",
+  expired: "Your session has expired. Please sign in again.",
+} satisfies Record<AuthPromptReason, string>;
+
+const BANNER_MESSAGES = {
+  missing: "An action requires authentication. Sign in to continue.",
+  rejected: "Server rejected the stored credentials. Sign in again.",
+  expired: "Your session has expired. Please sign in again.",
+} satisfies Record<AuthPromptReason, string>;
 
 export function AuthBanner() {
   const [show, setShow] = useState(false);
-  const [reason, setReason] = useState<"missing" | "rejected" | "expired">(
-    "missing",
-  );
+  const [reason, setReason] = useState<AuthPromptReason>("missing");
   const firstFire = useRef(true);
 
   useEffect(() => {
@@ -25,22 +33,12 @@ export function AuthBanner() {
     }
     const offAuth = onAuthChange(update);
     const offUnauth = onUnauthorized(() => {
-      let r: "missing" | "rejected" | "expired";
-      if (isLoggedIn()) {
-        r = "expired";
-      } else {
-        r = "missing";
-      }
+      const r = isLoggedIn() ? "expired" : "missing";
       setReason(r);
       setShow(true);
       // Toast only on subsequent 401s, not the automatic bootstrap probe.
       if (!firstFire.current) {
-        const msgs: Record<string, string> = {
-          missing: "Authentication required — sign in to continue.",
-          rejected: "Credentials were rejected by the server. Sign in again.",
-          expired: "Your session has expired. Please sign in again.",
-        };
-        toast.warning(msgs[r]);
+        toast.warning(TOAST_MESSAGES[r]);
       }
       firstFire.current = false;
     });
@@ -52,19 +50,10 @@ export function AuthBanner() {
 
   if (!show) return null;
 
-  const messages: Record<string, string> = {
-    missing:
-      "An action requires authentication. Sign in to continue.",
-    rejected:
-      "Server rejected the stored credentials. Sign in again.",
-    expired:
-      "Your session has expired. Please sign in again.",
-  };
-
   return (
     <div className="bg-amber-500/10 border-b border-amber-500/30 px-6 py-2 flex items-center gap-3 text-xs font-mono text-amber-800 dark:text-amber-200">
       <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-      <span className="flex-1">{messages[reason]}</span>
+      <span className="flex-1">{BANNER_MESSAGES[reason]}</span>
       {!isLoggedIn() && (
         <Link
           href="/login"

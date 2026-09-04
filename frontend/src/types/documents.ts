@@ -8,6 +8,7 @@ export interface DocumentListItem {
   kind: DocumentKind;
   collection: string | null;
   collection_id: number | null;
+  multipart_model_id: number | null;
   filename: string | null;
   effective_role: CollectionRole | null;
   updated_at: string;

@@ -13,10 +13,17 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
+- Multipart Models currently reference existing Models as named pieces and
+  alternatives. They do not encode quantities, compatibility rules between
+  pieces, or selectable G-code revisions. Models and their files remain in the
+  main Models view; deleting a Multipart Model removes only the grouping.
+  Members that are trashed or inaccessible remain visible as unavailable in the
+  grouping until they are restored or replaced.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,
-  status, upload/start, file inventory/deletion, and pause/resume/cancel are
-  implemented; Prusa Connect cloud, SLA printers, raw G-code controls, and
-  measured filament consumption are not.
+  status, streamed plain-text G-code and validated `.bgcode` upload/start, file
+  inventory/deletion, and pause/resume/cancel are implemented. BGCODE preview,
+  Prusa Connect cloud, SLA printers, raw G-code controls, and measured filament
+  consumption are not.
 - Elegoo Neptune 4, 4 Pro, 4 Plus, and 4 Max use Moonraker. Centauri Carbon and
   Carbon 2 have beta local status/control support and beta chunked HTTP
   upload, but no file inventory, deletion, or print-history import. Neptune
@@ -40,8 +47,39 @@ manufacturing platform.
 - Docker Compose is the recommended install path.
 - SQLite and local disk are the default path and the best-tested path for home
   installs.
+- Local data and thumbnail roots are bound to the installation with a role-specific
+  marker. If a configured mount is missing, has the wrong marker, or cannot prove
+  create-only publication, PrintStash keeps the installation available for
+  administration and readable data but blocks storage mutations. The unverified
+  storage acknowledgement does not bypass this identity check. A legacy markerless
+  root can be enrolled by a superuser only after verifying the exact role and path;
+  a mismatched marker must be fixed at the mount/configuration layer.
 - Postgres, S3/R2-compatible storage, SeaweedFS, and cloud backup targets are optional and
   should be treated as larger-install paths.
+- Storage support maturity is separate from the measured safety tier. Local storage
+  and the generic/native S3 path are stable. Cloudflare R2, Backblaze B2, Wasabi,
+  self-hosted S3 presets, Nextcloud, generic WebDAV, and SFTP are beta until their
+  real-service compatibility matrices and independent deployments are broader.
+- Library-source discovery supports mounted folders plus OpenDAL-backed S3,
+  WebDAV and Google Drive. SFTP shares the same connection/source layer but uses
+  AsyncSSH to preserve pinned-host-key and exclusive-create guarantees.
+  Automated contracts run against SeaweedFS, Nextcloud and OpenSSH, but
+  that is protocol evidence rather than certification of every Unraid,
+  Synology, TrueNAS, OpenMediaVault, QNAP, CasaOS or Proxmox release. Remote
+  sources are read-only; only mounted sources may use create-only write-back.
+- Remote backup profiles can replicate every locally committed archive to S3,
+  WebDAV, SFTP or Google Drive. Restore revalidates the durable provider identity
+  and archive hash. Google Drive is beta and cannot prove an immutable delete,
+  so automatic remote retention is disabled and its replicas never satisfy the
+  independent S3 witness required for automatic Vault garbage collection.
+- The built-in scheduler supports one opt-in backup per UTC day. It records the
+  day's attempt before creating the archive so a failing destination cannot
+  trigger an unbounded retry loop; operators should monitor backup availability
+  and retry manually after correcting a failure.
+- Remote discovery is deliberately bounded and eventually consistent. A full
+  epoch can span several scheduled slices, and provider failures apply a
+  24-hour backoff. Absence is not applied until an epoch completes, and empty or
+  unexpectedly large removal sets require operator investigation.
 - The built-in database backup and restore operation supports file-backed
   SQLite only. PostgreSQL installations must use operator-managed `pg_dump`
   and restore procedures; the backup API exposes this capability explicitly
@@ -77,6 +115,8 @@ manufacturing platform.
   mesh input cap still applies first and is format-blind. Operators can adjust
   the deadline with `VAULT_MESH_STEP_TIMEOUT_SECONDS`; memory continues to use
   `VAULT_MESH_MEMORY_BUDGET_FRACTION` rather than a STEP-only byte guess.
+- Oversized STL previews run in a bounded streaming worker with a 45 s deadline;
+  operators can adjust it with `VAULT_MESH_STREAM_TIMEOUT_SECONDS` (up to 45 s).
 - The lite image intentionally omits browser-assisted imports and STEP/STP
   tessellation. It still includes NumPy, Pillow, and Trimesh, so STL/OBJ/3MF
   thumbnail generation does not depend on Chromium, OpenGL, or Cascadio.
@@ -94,6 +134,13 @@ manufacturing platform.
   STL/3MF/G-code blobs, secrets, API keys, or printer credentials.
 - Full backup/restore is available separately for moving or recovering an
   install.
+- Full backups include the database and PrintStash-managed primary/thumbnail
+  objects. Files referenced through a Library source remain at their external
+  paths and must be backed up separately by the operator.
+- Backup manifests bind managed objects to the storage provider and namespace they
+  came from. Restore does not silently retarget those objects to a different remote
+  namespace. Valid pre-ledger local backups require explicit superuser adoption
+  before they appear in the normal backup list.
 - The G-code toolpath viewer is a browser-side visualization aid. It is not a
   slicer-grade simulator and does not validate firmware-specific macros,
   acceleration, pressure advance, or printer safety.
@@ -138,14 +185,39 @@ manufacturing platform.
   declared member sizes, and manifest compatibility. It does not restore an
   individual blob or prove that every application-level database invariant is
   healthy.
+- A logical trash purge can complete while physical cleanup remains blocked. On a
+  provider that cannot prove an atomic quarantine or immutable object identity,
+  PrintStash retains the remote bytes and reports the cleanup as blocked instead of
+  risking deletion of replacement data. Scheduled purge never supplies the one-time
+  acknowledgement used by an administrator.
+- Scheduled retention creates a preview but cannot approve it. Automatic
+  physical GC requires Verified active storage, a recent fully verified backup
+  on an independent S3 provider, and the quarantine interval. PostgreSQL and
+  installations without that backup topology retain expired bytes until an
+  operator uses a supported explicit workflow.
 
 ## Pending Imports And Facets
 
 - Authenticated source sites may still require a fresh browser session through
   the existing final import flow. Pending Imports and the browser helper never
   persist or copy source-site cookies.
-- URL captures are limited to existing Printables, MakerWorld, Thingiverse,
-  direct-file, and safe archive resolvers. The browser helper does no scraping.
+- Printables server capture is intentionally limited to fields and file choices
+  available from its supported server endpoints. The browser extension can
+  capture richer visible-page information, but no capture path guarantees every
+  field a source site displays.
+- MakerWorld packages require browser transfer. Thingiverse requires extension
+  capture or manual file upload: the server does not acquire Thingiverse files,
+  while the extension can transfer selected individual files from an active
+  page. Cults credentials provide metadata only and do not enable
+  automatic file acquisition.
+- Browser staging is temporary. A review item whose staged browser upload is no
+  longer available fails with `staging_expired` and must be captured again.
+- URL captures are limited to supported providers, direct files, and safe
+  archives. The browser helper is not a general-purpose scraper.
+- Capture provenance is additive metadata, not a source-site archive: raw HTML,
+  source-site cookies, OAuth codes, signed download URLs, and resolved download
+  credentials are not retained. Active provider credentials are encrypted at
+  rest and never returned by capture APIs.
 - Facet counts describe Models in the currently filtered, accessible scope.
   They are not self-excluding counts; selecting a value can therefore narrow
   values in other groups.

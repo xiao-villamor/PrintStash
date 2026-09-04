@@ -1,11 +1,25 @@
+/*
+ * Turning whatever came back from the API into something a person can act on.
+ *
+ * Three shapes arrive here and only one of them is an `ApiError`: a FastAPI
+ * `{"detail": "..."}` body, a bare HTTP status with an unparseable body, and a
+ * `fetch` rejection that never reached the server at all. All three have to end
+ * as a code the UI can branch on and a sentence a user can read, because the
+ * alternative is the raw string — and "TypeError: Failed to fetch" in a toast is
+ * indistinguishable from a bug in PrintStash.
+ *
+ * `isAuthError` is the one flag with behaviour attached: it drives the automatic
+ * token refresh, so a 401 that failed to be recognised logs the user out, and a
+ * 500 wrongly recognised as one puts them in a refresh loop.
+ *
+ * Unknown codes are humanised rather than hidden. A code nobody has written copy
+ * for yet still has to render as a sentence, or every new backend error surfaces
+ * to users as a blank message.
+ */
+
 import { describe, expect, it } from "vitest";
 
-import {
-  ApiError,
-  getErrorMessage,
-  parseApiError,
-  userMessage,
-} from "@/lib/errors";
+import { ApiError, getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 
 describe("ApiError", () => {
   it("flags 401 as an auth error", () => {
@@ -27,9 +41,7 @@ describe("parseApiError", () => {
   });
 
   it("extracts status and the FastAPI detail code from an HTTP message", () => {
-    const err = parseApiError(
-      new Error('HTTP 404: {"detail":"model_not_found"}'),
-    );
+    const err = parseApiError(new Error('HTTP 404: {"detail":"model_not_found"}'));
     expect(err.status).toBe(404);
     expect(err.code).toBe("model_not_found");
   });
@@ -69,11 +81,9 @@ describe("parseApiError", () => {
   });
 });
 
-describe("getErrorMessage / userMessage", () => {
+describe("getErrorMessage", () => {
   it("maps known codes to friendly copy", () => {
-    expect(getErrorMessage("invalid_credentials")).toBe(
-      "Invalid username or password.",
-    );
+    expect(getErrorMessage("invalid_credentials")).toBe("Invalid username or password.");
     expect(getErrorMessage("collection_not_empty")).toMatch(/still has models/);
     expect(getErrorMessage("archive_blob_hash_mismatch")).toMatch(/Vault audit/);
   });
@@ -83,8 +93,8 @@ describe("getErrorMessage / userMessage", () => {
   });
 
   it("userMessage parses then maps in one step", () => {
-    expect(
-      userMessage(new Error('HTTP 401: {"detail":"invalid_credentials"}')),
-    ).toBe("Invalid username or password.");
+    expect(userMessage(new Error('HTTP 401: {"detail":"invalid_credentials"}'))).toBe(
+      "Invalid username or password.",
+    );
   });
 });

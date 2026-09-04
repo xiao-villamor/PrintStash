@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Link } from "@/lib/navigation";
-import { PrinterRead } from "@/types";
+import { Link } from "@/lib/link";
+import { PrinterRead, type PrinterCreate, type PrinterStatus } from "@/types";
 import { createPrinter, deletePrinter, updatePrinter } from "@/lib/api";
 import { usePrinterDashboard, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
@@ -29,25 +29,46 @@ import { translateUiText } from "@/components/ui/localized";
 import { FleetMaintenancePanel, FleetQueuePanel } from "@/components/fleet-panels";
 import { usePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { printerArtwork } from "@/lib/orca-printer-images";
-import { Plus, Trash2, RefreshCw, ArrowRight, Pencil, Printer as PrinterIcon, Network, Clock3, Search, Check, CircleAlert, Layers3, Play } from "lucide-react";
+import {
+  Plus,
+  Trash2,
+  RefreshCw,
+  ArrowRight,
+  Pencil,
+  Printer as PrinterIcon,
+  Network,
+  Clock3,
+  Search,
+  Check,
+  CircleAlert,
+  Layers3,
+  Play,
+} from "lucide-react";
 
-const STATUS_COLORS: Record<string, string> = {
+// `satisfies` keeps the literal keys (so a status can't be misspelled here) while
+// still requiring every PrinterStatus to have an entry.
+const STATUS_COLORS = {
   ready: "bg-emerald-500",
   printing: "bg-primary",
   paused: "bg-amber-500",
   offline: "bg-slate-400",
   unknown: "bg-slate-400",
   error: "bg-red-600",
-};
+} satisfies Record<PrinterStatus, string>;
 
-const STATUS_PRIORITY: Record<string, number> = {
+const STATUS_PRIORITY = {
   printing: 0,
   paused: 1,
   error: 2,
   offline: 3,
   ready: 4,
   unknown: 5,
-};
+} satisfies Record<PrinterStatus, number>;
+
+/** Resolve a <select> value back to the setup kind it was rendered from. */
+function parseSetupKind(value: string): PrinterSetupKind | null {
+  return PRINTER_SETUP_OPTIONS.find((option) => option.value === value)?.value ?? null;
+}
 
 export function PrintersPage() {
   const { user } = useAuth();
@@ -59,8 +80,7 @@ export function PrintersPage() {
   const printers = useMemo(() => printersQuery.data ?? [], [printersQuery.data]);
   const dashboard = dashboardQuery.data;
   const loading = printersQuery.isLoading;
-  const error =
-    printersQuery.error instanceof Error ? printersQuery.error.message : null;
+  const error = printersQuery.error instanceof Error ? printersQuery.error.message : null;
   const [addOpen, setAddOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterRead | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -68,9 +88,16 @@ export function PrintersPage() {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<"fleet" | "queue" | "maintenance">("fleet");
   const visiblePrinters = useMemo(
-    () => printers
-      .filter((printer) => selectedGroup === null || (printer.group || "__ungrouped") === selectedGroup)
-      .sort((a, b) => (STATUS_PRIORITY[a.status] ?? 99) - (STATUS_PRIORITY[b.status] ?? 99) || a.name.localeCompare(b.name)),
+    () =>
+      printers
+        .filter(
+          (printer) => selectedGroup === null || (printer.group || "__ungrouped") === selectedGroup,
+        )
+        .sort(
+          (a, b) =>
+            (STATUS_PRIORITY[a.status] ?? 99) - (STATUS_PRIORITY[b.status] ?? 99) ||
+            a.name.localeCompare(b.name),
+        ),
     [printers, selectedGroup],
   );
   const statusCounts = useMemo(
@@ -117,249 +144,333 @@ export function PrintersPage() {
   return (
     <Localized>
       <>
-      <ConfirmModal
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDelete}
-        busy={deleteBusy}
-        title="Remove printer?"
-        description={deleteTarget ? `"${deleteTarget.name}" will be removed from PrintStash.` : "This printer will be removed from PrintStash."}
-        confirmLabel="Remove"
-      />
-      <div className="flex w-full flex-col gap-6">
-      <PageHeader
-        title="Printers"
-        description="Connected printer endpoints"
-        actions={
-          <>
-            <Button variant="outline" size="xs" onClick={() => { void printersQuery.refetch(); void dashboardQuery.refetch(); }}>
-              <RefreshCw className="h-3.5 w-3.5" />
-              Refresh
-            </Button>
-            <Button
-              size="xs"
-              onClick={() => {
-                if (!user?.is_superuser) return;
-                setAddOpen(true);
-              }}
-              disabled={!user?.is_superuser}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {user?.is_superuser ? "Add printer" : "Admin required"}
-            </Button>
-          </>
-        }
-      />
-
-      <TabBar
-        tabs={[
-          { key: "fleet", label: translateUiText(locale, "Fleet") },
-          ...(user?.is_superuser || printers.some((printer) => printer.access.can_print)
-            ? [{ key: "queue" as const, label: translateUiText(locale, "Queue") }]
-            : []),
-          ...(user?.is_superuser || printers.some((printer) => printer.access.can_admin)
-            ? [{ key: "maintenance" as const, label: translateUiText(locale, "Maintenance") }]
-            : []),
-        ]}
-        active={activeView}
-        onChange={setActiveView}
-        className="border-b border-border"
-        tabClassName="px-4 py-2.5 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        activeTabClassName="text-foreground"
-      />
-
-      {activeView === "fleet" && <>
-      {error && (
-        <div className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          {error}
-        </div>
-      )}
-
-      {!loading && printers.length > 0 && (
-        <section aria-label="Fleet summary" className="animate-panel-in space-y-3">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {[
-              { label: "Active jobs", value: dashboard?.active_jobs ?? 0, icon: Play, tone: "text-primary" },
-              { label: "Printing", value: statusCounts.printing ?? 0, icon: PrinterIcon, tone: "text-primary" },
-              { label: "Needs attention", value: attentionCount, icon: CircleAlert, tone: attentionCount ? "text-destructive" : "text-muted-foreground" },
-              { label: "Ready", value: statusCounts.ready ?? 0, icon: Check, tone: "text-success" },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.label} className="rounded-lg border border-border bg-card p-4 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-xs font-medium text-muted-foreground">{item.label}</span>
-                    <Icon className={`h-4 w-4 ${item.tone}`} />
-                  </div>
-                  <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-foreground">{item.value}</p>
-                </div>
-              );
-            })}
-          </div>
-          {printerGroups.length > 1 && (
-            <div className="flex flex-wrap items-center gap-2" aria-label="Filter printers by group">
-              <Button type="button" variant={selectedGroup === null ? "secondary" : "outline"} size="xs" onClick={() => setSelectedGroup(null)}>All groups</Button>
-              {printerGroups.map((group) => (
-                <Button key={group.name} type="button" variant={selectedGroup === group.name ? "secondary" : "outline"} size="xs" onClick={() => setSelectedGroup(group.name)}>
-                  <Layers3 className="h-3.5 w-3.5" />{group.name === "__ungrouped" ? "Ungrouped" : group.name}<span className="text-muted-foreground">{group.count}</span>
-                </Button>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {loading ? (
-        <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="bg-card border border-border rounded p-5 space-y-3"
-            >
-              <Skeleton className="h-5 w-32" />
-              <Skeleton className="h-4 w-48" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-          ))}
-        </div>
-      ) : printers.length === 0 ? (
-        <EmptyState
-          icon={PrinterIcon}
-          title="No printers configured yet."
-          action={user?.is_superuser ? (
-            <Button size="xs" onClick={() => setAddOpen(true)}>
-              <Plus className="h-3.5 w-3.5" />
-              Add your first printer
-            </Button>
-          ) : undefined}
-          className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
+        <ConfirmModal
+          open={!!deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={confirmDelete}
+          busy={deleteBusy}
+          title="Remove printer?"
+          description={
+            deleteTarget
+              ? `"${deleteTarget.name}" will be removed from PrintStash.`
+              : "This printer will be removed from PrintStash."
+          }
+          confirmLabel="Remove"
         />
-      ) : (
-        <div className="stagger-children grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {visiblePrinters.map((p) => (
-            <article
-              key={p.id}
-              className="animate-card-in flex min-h-72 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm"
-            >
-              {showCardImages && (
-                <PrinterCardArtwork
-                  key={`${p.id}:${p.model_name || p.detected_model || "unknown"}`}
-                  printer={p}
-                />
-              )}
-              <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-                <div className="min-w-0">
-                  <Link href={`/printers/${p.id}`} className="text-[15px] font-semibold text-foreground hover:text-primary">
-                    {p.name}
-                  </Link>
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-border bg-muted/50 px-2 font-mono text-3xs font-medium uppercase tracking-wider text-muted-foreground"
-                    >
-                      {providerLabel(p)}
-                    </Badge>
-                    {p.capabilities.support_level === "beta" && (
-                      <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-3xs uppercase tracking-wider text-amber-600">
-                        Beta
-                      </span>
-                    )}
-                    <Badge variant="outline" className="h-5 px-2 font-mono text-3xs uppercase tracking-wider">
-                      {p.access.role}
-                    </Badge>
-                  </div>
-                </div>
-                <span className="flex items-center gap-1.5 flex-shrink-0">
-                  <span
-                    className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-slate-400"}`}
-                  />
-                  <span className="text-3xs text-muted-foreground uppercase tracking-wider">
-                    {p.status}
-                  </span>
-                </span>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-4 px-5 py-4">
-                <dl className="grid gap-3 text-sm">
-                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
-                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <PrinterIcon className="h-3.5 w-3.5" /> Model
-                    </dt>
-                    <dd className="min-w-0">
-                      <PrinterModelBadge printer={p} canEdit={p.access.can_admin} />
-                    </dd>
-                  </div>
-                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
-                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Network className="h-3.5 w-3.5" /> Endpoint
-                    </dt>
-                    <dd className="truncate font-mono text-xs text-foreground" title={p.access.can_admin ? providerAddress(p) : "Restricted"}>
-                      {p.access.can_admin ? providerAddress(p) : "Restricted"}
-                    </dd>
-                  </div>
-                  <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
-                    <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <Clock3 className="h-3.5 w-3.5" /> Activity
-                    </dt>
-                    <dd className="text-xs text-foreground">
-                      {p.last_seen_at
-                        ? `Seen ${new Date(p.last_seen_at).toLocaleString()}`
-                        : "Never connected"}
-                    </dd>
-                  </div>
-                </dl>
-
-                {p.notes && (
-                  <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                    {p.notes}
-                  </p>
-                )}
-
-                {p.last_error && (
-                  <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs leading-relaxed text-destructive">
-                    <span className="font-medium">Connection issue: </span>
-                    <span className="line-clamp-2">{p.last_error}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between border-t border-border bg-muted/20 px-4 py-3">
-                <button
-                  onClick={(e) => {
-                    if (!p.access.can_admin) { e.preventDefault(); e.stopPropagation(); return; }
-                    handleDelete(p, e);
+        <div className="flex w-full flex-col gap-6">
+          <PageHeader
+            title="Printers"
+            description="Connected printer endpoints"
+            actions={
+              <>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    void printersQuery.refetch();
+                    void dashboardQuery.refetch();
                   }}
-                  disabled={!p.access.can_admin}
-                  className="flex items-center gap-1 rounded px-2 py-1 text-3xs uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <Trash2 className="h-3 w-3" />
-                  {p.access.can_admin ? "Remove" : "Restricted"}
-                </button>
-                <Link href={`/printers/${p.id}`} className="flex items-center gap-1 rounded border border-border px-2.5 py-1.5 text-3xs uppercase tracking-wider text-foreground transition-colors hover:border-primary hover:text-primary">
-                  Open
-                  <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
-            </article>
-          ))}
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  Refresh
+                </Button>
+                <Button
+                  size="xs"
+                  onClick={() => {
+                    if (!user?.is_superuser) return;
+                    setAddOpen(true);
+                  }}
+                  disabled={!user?.is_superuser}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {user?.is_superuser ? "Add printer" : "Admin required"}
+                </Button>
+              </>
+            }
+          />
+
+          <TabBar
+            tabs={[
+              { key: "fleet", label: translateUiText(locale, "Fleet") },
+              ...(user?.is_superuser || printers.some((printer) => printer.access.can_print)
+                ? [{ key: "queue" as const, label: translateUiText(locale, "Queue") }]
+                : []),
+              ...(user?.is_superuser || printers.some((printer) => printer.access.can_admin)
+                ? [{ key: "maintenance" as const, label: translateUiText(locale, "Maintenance") }]
+                : []),
+            ]}
+            active={activeView}
+            onChange={setActiveView}
+            className="border-b border-border"
+            tabClassName="px-4 py-2.5 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            activeTabClassName="text-foreground"
+          />
+
+          {activeView === "fleet" && (
+            <>
+              {error && (
+                <div className="animate-panel-in rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+
+              {!loading && printers.length > 0 && (
+                <section aria-label="Fleet summary" className="animate-panel-in space-y-3">
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {[
+                      {
+                        label: "Active jobs",
+                        value: dashboard?.active_jobs ?? 0,
+                        icon: Play,
+                        tone: "text-primary",
+                      },
+                      {
+                        label: "Printing",
+                        value: statusCounts.printing ?? 0,
+                        icon: PrinterIcon,
+                        tone: "text-primary",
+                      },
+                      {
+                        label: "Needs attention",
+                        value: attentionCount,
+                        icon: CircleAlert,
+                        tone: attentionCount ? "text-destructive" : "text-muted-foreground",
+                      },
+                      {
+                        label: "Ready",
+                        value: statusCounts.ready ?? 0,
+                        icon: Check,
+                        tone: "text-success",
+                      },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <div
+                          key={item.label}
+                          className="rounded-lg border border-border bg-card p-4 shadow-sm"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-xs font-medium text-muted-foreground">
+                              {item.label}
+                            </span>
+                            <Icon className={`h-4 w-4 ${item.tone}`} />
+                          </div>
+                          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-foreground">
+                            {item.value}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {printerGroups.length > 1 && (
+                    <div
+                      className="flex flex-wrap items-center gap-2"
+                      aria-label="Filter printers by group"
+                    >
+                      <Button
+                        type="button"
+                        variant={selectedGroup === null ? "secondary" : "outline"}
+                        size="xs"
+                        onClick={() => setSelectedGroup(null)}
+                      >
+                        All groups
+                      </Button>
+                      {printerGroups.map((group) => (
+                        <Button
+                          key={group.name}
+                          type="button"
+                          variant={selectedGroup === group.name ? "secondary" : "outline"}
+                          size="xs"
+                          onClick={() => setSelectedGroup(group.name)}
+                        >
+                          <Layers3 className="h-3.5 w-3.5" />
+                          {group.name === "__ungrouped" ? "Ungrouped" : group.name}
+                          <span className="text-muted-foreground">{group.count}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {loading ? (
+                <div className="grid animate-panel-in grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="bg-card border border-border rounded p-5 space-y-3">
+                      <Skeleton className="h-5 w-32" />
+                      <Skeleton className="h-4 w-48" />
+                      <Skeleton className="h-4 w-24" />
+                    </div>
+                  ))}
+                </div>
+              ) : printers.length === 0 ? (
+                <EmptyState
+                  icon={PrinterIcon}
+                  title="No printers configured yet."
+                  action={
+                    user?.is_superuser ? (
+                      <Button size="xs" onClick={() => setAddOpen(true)}>
+                        <Plus className="h-3.5 w-3.5" />
+                        Add your first printer
+                      </Button>
+                    ) : undefined
+                  }
+                  className="animate-panel-in rounded-lg border border-border bg-card shadow-sm"
+                />
+              ) : (
+                <div className="stagger-children grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {visiblePrinters.map((p) => (
+                    <article
+                      key={p.id}
+                      className="animate-card-in flex min-h-72 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm"
+                    >
+                      {showCardImages && (
+                        <PrinterCardArtwork
+                          key={`${p.id}:${p.model_name || p.detected_model || "unknown"}`}
+                          printer={p}
+                        />
+                      )}
+                      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+                        <div className="min-w-0">
+                          <Link
+                            href={`/printers/${p.id}`}
+                            className="text-[15px] font-semibold text-foreground hover:text-primary"
+                          >
+                            {p.name}
+                          </Link>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <Badge
+                              variant="outline"
+                              className="h-5 border-border bg-muted/50 px-2 font-mono text-3xs font-medium uppercase tracking-wider text-muted-foreground"
+                            >
+                              {providerLabel(p)}
+                            </Badge>
+                            {p.capabilities.support_level === "beta" && (
+                              <span className="rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-3xs uppercase tracking-wider text-amber-600">
+                                Beta
+                              </span>
+                            )}
+                            <Badge
+                              variant="outline"
+                              className="h-5 px-2 font-mono text-3xs uppercase tracking-wider"
+                            >
+                              {p.access.role}
+                            </Badge>
+                          </div>
+                        </div>
+                        <span className="flex items-center gap-1.5 flex-shrink-0">
+                          <span
+                            className={`w-2 h-2 rounded-full ${STATUS_COLORS[p.status] || "bg-slate-400"}`}
+                          />
+                          <span className="text-3xs text-muted-foreground uppercase tracking-wider">
+                            {p.status}
+                          </span>
+                        </span>
+                      </div>
+
+                      <div className="flex flex-1 flex-col gap-4 px-5 py-4">
+                        <dl className="grid gap-3 text-sm">
+                          <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                            <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <PrinterIcon className="h-3.5 w-3.5" /> Model
+                            </dt>
+                            <dd className="min-w-0">
+                              <PrinterModelBadge printer={p} canEdit={p.access.can_admin} />
+                            </dd>
+                          </div>
+                          <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                            <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Network className="h-3.5 w-3.5" /> Endpoint
+                            </dt>
+                            <dd
+                              className="truncate font-mono text-xs text-foreground"
+                              title={p.access.can_admin ? providerAddress(p) : "Restricted"}
+                            >
+                              {p.access.can_admin ? providerAddress(p) : "Restricted"}
+                            </dd>
+                          </div>
+                          <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3">
+                            <dt className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Clock3 className="h-3.5 w-3.5" /> Activity
+                            </dt>
+                            <dd className="text-xs text-foreground">
+                              {p.last_seen_at
+                                ? `Seen ${new Date(p.last_seen_at).toLocaleString()}`
+                                : "Never connected"}
+                            </dd>
+                          </div>
+                        </dl>
+
+                        {p.notes && (
+                          <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                            {p.notes}
+                          </p>
+                        )}
+
+                        {p.last_error && (
+                          <div
+                            role="alert"
+                            className="rounded-md border border-destructive/30 bg-destructive/10 p-2.5 text-xs leading-relaxed text-destructive"
+                          >
+                            <span className="font-medium">Connection issue: </span>
+                            <span className="line-clamp-2">{p.last_error}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-border bg-muted/20 px-4 py-3">
+                        <button
+                          onClick={(e) => {
+                            if (!p.access.can_admin) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              return;
+                            }
+                            handleDelete(p, e);
+                          }}
+                          disabled={!p.access.can_admin}
+                          className="flex items-center gap-1 rounded px-2 py-1 text-3xs uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          {p.access.can_admin ? "Remove" : "Restricted"}
+                        </button>
+                        <Link
+                          href={`/printers/${p.id}`}
+                          className="flex items-center gap-1 rounded border border-border px-2.5 py-1.5 text-3xs uppercase tracking-wider text-foreground transition-colors hover:border-primary hover:text-primary"
+                        >
+                          Open
+                          <ArrowRight className="h-3 w-3" />
+                        </Link>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {activeView === "queue" && (
+            <FleetQueuePanel printers={printers.filter((printer) => printer.access.can_print)} />
+          )}
+          {activeView === "maintenance" && (
+            <FleetMaintenancePanel
+              printers={printers.filter((printer) => printer.access.can_admin)}
+              onPrintersChanged={() => {
+                void printersQuery.refetch();
+              }}
+            />
+          )}
+
+          {addOpen && user?.is_superuser && (
+            <AddPrinterModal
+              onClose={() => setAddOpen(false)}
+              onCreated={() => {
+                // createPrinter already invalidated queryKeys.printers; just close.
+                setAddOpen(false);
+              }}
+            />
+          )}
         </div>
-      )}
-
-      </>}
-
-      {activeView === "queue" && <FleetQueuePanel printers={printers.filter((printer) => printer.access.can_print)} />}
-      {activeView === "maintenance" && <FleetMaintenancePanel printers={printers.filter((printer) => printer.access.can_admin)} onPrintersChanged={() => { void printersQuery.refetch(); }} />}
-
-      {addOpen && user?.is_superuser && (
-        <AddPrinterModal
-          onClose={() => setAddOpen(false)}
-          onCreated={() => {
-            // createPrinter already invalidated queryKeys.printers; just close.
-            setAddOpen(false);
-          }}
-        />
-      )}
-      </div>
       </>
     </Localized>
   );
@@ -396,13 +507,7 @@ function PrinterCardArtwork({ printer }: { printer: PrinterRead }) {
 
 const OTHER_MODEL_OPTION = "__other__";
 
-function PrinterModelBadge({
-  printer,
-  canEdit,
-}: {
-  printer: PrinterRead;
-  canEdit: boolean;
-}) {
+function PrinterModelBadge({ printer, canEdit }: { printer: PrinterRead; canEdit: boolean }) {
   const [editing, setEditing] = useState(false);
   const displayModel = printer.model_name || printer.detected_model;
   const [selected, setSelected] = useState(() =>
@@ -462,7 +567,10 @@ function PrinterModelBadge({
   );
 }
 
-const MODEL_BRANDS = ["All", ...Array.from(new Set(PRINTER_MODEL_OPTIONS.map((model) => model.split(" ")[0])))];
+const MODEL_BRANDS = [
+  "All",
+  ...Array.from(new Set(PRINTER_MODEL_OPTIONS.map((model) => model.split(" ")[0]))),
+];
 
 function PrinterModelPicker({
   selected,
@@ -484,97 +592,122 @@ function PrinterModelPicker({
   const [query, setQuery] = useState("");
   const [brand, setBrand] = useState("All");
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const models = PRINTER_MODEL_OPTIONS.filter((model) =>
-    (brand === "All" || model.startsWith(`${brand} `)) &&
-    (!normalizedQuery || model.toLocaleLowerCase().includes(normalizedQuery)),
+  const models = PRINTER_MODEL_OPTIONS.filter(
+    (model) =>
+      (brand === "All" || model.startsWith(`${brand} `)) &&
+      (!normalizedQuery || model.toLocaleLowerCase().includes(normalizedQuery)),
   );
   const canSave = Boolean(selected && (selected !== OTHER_MODEL_OPTION || customValue.trim()));
 
   return (
     <Localized>
-      <Modal open onClose={onClose} title="Select printer model" className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden">
-      <div className="border-b border-border pb-4">
-        <label className="relative block">
-          <span className="sr-only">Search printer models</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search printer models"
-            className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </label>
-        <div className="mt-3 flex gap-1 overflow-x-auto pb-1" aria-label="Printer brands">
-          {MODEL_BRANDS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              aria-pressed={brand === item}
-              onClick={() => setBrand(item)}
-              className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-press ease-out active:scale-[0.98] ${brand === item ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-popover-foreground"}`}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-4">
-        {models.length ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {models.map((model) => {
-              const artwork = printerArtwork(model);
-              const active = selected === model;
-              return (
-                <button
-                  key={model}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => onSelectedChange(model)}
-                  className={`group relative flex min-h-44 flex-col rounded-lg border bg-card p-3 text-left shadow-sm outline-none transition-[background-color,border-color,transform] duration-press ease-out hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] ${active ? "border-primary ring-2 ring-primary-soft" : "border-border"}`}
-                >
-                  {active && <span className="absolute right-2 top-2 z-10 rounded-full bg-primary p-1 text-primary-foreground"><Check className="h-3 w-3" /></span>}
-                  <img src={artwork.imageUrl} alt="" className="mb-2 h-28 w-full object-contain" referrerPolicy="no-referrer" />
-                  <span className="mt-auto text-xs font-semibold leading-snug text-foreground">{model}</span>
-                </button>
-              );
-            })}
+      <Modal
+        open
+        onClose={onClose}
+        title="Select printer model"
+        className="flex max-h-[min(48rem,calc(100vh-2rem))] max-w-5xl flex-col overflow-hidden"
+      >
+        <div className="border-b border-border pb-4">
+          <label className="relative block">
+            <span className="sr-only">Search printer models</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search printer models"
+              className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+          <div className="mt-3 flex gap-1 overflow-x-auto pb-1" aria-label="Printer brands">
+            {MODEL_BRANDS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-pressed={brand === item}
+                onClick={() => setBrand(item)}
+                className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-[background-color,color,transform] duration-press ease-out active:scale-[0.98] ${brand === item ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-popover-hover hover:text-popover-foreground"}`}
+              >
+                {item}
+              </button>
+            ))}
           </div>
-        ) : (
-          <div className="flex min-h-52 items-center justify-center text-sm text-muted-foreground">No printer models match your search.</div>
-        )}
-      </div>
-
-      <div className="border-t border-border bg-background pt-4">
-        <label className="flex items-center gap-3">
-          <input type="radio" checked={selected === OTHER_MODEL_OPTION} onChange={() => onSelectedChange(OTHER_MODEL_OPTION)} className="h-4 w-4 accent-primary" />
-          <span className="shrink-0 text-sm font-medium text-foreground">Custom model</span>
-          <input
-            value={customValue}
-            onFocus={() => onSelectedChange(OTHER_MODEL_OPTION)}
-            onChange={(event) => { onSelectedChange(OTHER_MODEL_OPTION); onCustomValueChange(event.target.value); }}
-            placeholder="Enter model name"
-            className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </label>
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-          <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>Save model</Button>
         </div>
-      </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20 p-4">
+          {models.length ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {models.map((model) => {
+                const artwork = printerArtwork(model);
+                const active = selected === model;
+                return (
+                  <button
+                    key={model}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => onSelectedChange(model)}
+                    className={`group relative flex min-h-44 flex-col rounded-lg border bg-card p-3 text-left shadow-sm outline-none transition-[background-color,border-color,transform] duration-press ease-out hover:border-primary/60 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.99] ${active ? "border-primary ring-2 ring-primary-soft" : "border-border"}`}
+                  >
+                    {active && (
+                      <span className="absolute right-2 top-2 z-10 rounded-full bg-primary p-1 text-primary-foreground">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    )}
+                    <img
+                      src={artwork.imageUrl}
+                      alt=""
+                      className="mb-2 h-28 w-full object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                    <span className="mt-auto text-xs font-semibold leading-snug text-foreground">
+                      {model}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex min-h-52 items-center justify-center text-sm text-muted-foreground">
+              No printer models match your search.
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-border bg-background pt-4">
+          <label className="flex items-center gap-3">
+            <input
+              type="radio"
+              checked={selected === OTHER_MODEL_OPTION}
+              onChange={() => onSelectedChange(OTHER_MODEL_OPTION)}
+              className="h-4 w-4 accent-primary"
+            />
+            <span className="shrink-0 text-sm font-medium text-foreground">Custom model</span>
+            <input
+              value={customValue}
+              onFocus={() => onSelectedChange(OTHER_MODEL_OPTION)}
+              onChange={(event) => {
+                onSelectedChange(OTHER_MODEL_OPTION);
+                onCustomValueChange(event.target.value);
+              }}
+              placeholder="Enter model name"
+              className="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </label>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="button" loading={saving} disabled={!canSave} onClick={onSave}>
+              Save model
+            </Button>
+          </div>
+        </div>
       </Modal>
     </Localized>
   );
 }
 
-function AddPrinterModal({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: () => void;
-}) {
+function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [setupKind, setSetupKind] = useState<PrinterSetupKind>("moonraker");
   const [url, setUrl] = useState("");
@@ -599,58 +732,44 @@ function AddPrinterModal({
     setSubmitting(true);
     setErr(null);
     try {
-      await createPrinter(
-        {
-          name: name.trim(),
-          ...setupProviderFields(setupKind),
-          ...(setupKind === "moonraker" || setupKind === "elegoo_neptune4"
-            ? {
-                moonraker_url: url.trim(),
-                api_key: moonrakerKey || undefined,
-              }
-            : {}),
-          ...(setupKind === "bambu_lan"
-            ? {
-                bambu_host: url.trim(),
-                bambu_serial: bambuSerial.trim(),
-                bambu_access_code: bambuAccessCode,
-              }
-            : {}),
-          ...(setupKind === "prusalink"
-            ? {
-                prusalink_url: url.trim(),
-                prusalink_auth_mode: prusaAuthMode,
-                prusalink_username:
-                  prusaAuthMode === "digest" ? prusaUsername.trim() : undefined,
-                prusalink_password:
-                  prusaAuthMode === "digest" ? prusaSecret : undefined,
-                prusalink_api_key:
-                  prusaAuthMode === "api_key" ? prusaSecret : undefined,
-              }
-            : {}),
-          ...(setupKind === "elegoo_centauri_carbon" ||
-          setupKind === "elegoo_centauri_carbon_2"
-            ? {
-                elegoo_centauri_host: url.trim(),
-                elegoo_centauri_access_code:
-                  setupKind === "elegoo_centauri_carbon_2"
-                    ? centauriAccessCode
-                    : undefined,
-                elegoo_centauri_mainboard_id:
-                  setupKind === "elegoo_centauri_carbon"
-                    ? centauriMainboardId.trim() || undefined
-                    : undefined,
-              }
-            : {}),
-          ...(setupKind === "octoprint"
-            ? {
-                octoprint_url: url.trim(),
-                octoprint_api_key: octoprintApiKey,
-              }
-            : {}),
-          notes: notes || undefined,
-        },
-      );
+      // Only the chosen provider's credentials are sent; each branch adds the
+      // fields that provider actually has.
+      const payload: PrinterCreate = {
+        name: name.trim(),
+        ...setupProviderFields(setupKind),
+        notes: notes || undefined,
+      };
+      if (setupKind === "moonraker" || setupKind === "elegoo_neptune4") {
+        payload.moonraker_url = url.trim();
+        payload.api_key = moonrakerKey || undefined;
+      } else if (setupKind === "bambu_lan") {
+        payload.bambu_host = url.trim();
+        payload.bambu_serial = bambuSerial.trim();
+        payload.bambu_access_code = bambuAccessCode;
+      } else if (setupKind === "prusalink") {
+        payload.prusalink_url = url.trim();
+        payload.prusalink_auth_mode = prusaAuthMode;
+        if (prusaAuthMode === "digest") {
+          payload.prusalink_username = prusaUsername.trim();
+          payload.prusalink_password = prusaSecret;
+        } else {
+          payload.prusalink_api_key = prusaSecret;
+        }
+      } else if (
+        setupKind === "elegoo_centauri_carbon" ||
+        setupKind === "elegoo_centauri_carbon_2"
+      ) {
+        payload.elegoo_centauri_host = url.trim();
+        if (setupKind === "elegoo_centauri_carbon_2") {
+          payload.elegoo_centauri_access_code = centauriAccessCode;
+        } else {
+          payload.elegoo_centauri_mainboard_id = centauriMainboardId.trim() || undefined;
+        }
+      } else if (setupKind === "octoprint") {
+        payload.octoprint_url = url.trim();
+        payload.octoprint_api_key = octoprintApiKey;
+      }
+      await createPrinter(payload);
       toast.success(`Printer "${name.trim()}" added`);
       onCreated();
     } catch (e: unknown) {
@@ -665,15 +784,16 @@ function AddPrinterModal({
   return (
     <Localized>
       <ModalShell
-      onClose={onClose}
-      className="bg-card border border-border rounded w-full max-w-md p-6 shadow-lg"
-    >
-        <h3 className="text-lg font-semibold text-foreground mb-5">
-          Add printer
-        </h3>
+        onClose={onClose}
+        className="bg-card border border-border rounded w-full max-w-md p-6 shadow-lg"
+      >
+        <h3 className="text-lg font-semibold text-foreground mb-5">Add printer</h3>
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label htmlFor="printer-name" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label
+              htmlFor="printer-name"
+              className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+            >
               Name
             </label>
             <input
@@ -686,20 +806,27 @@ function AddPrinterModal({
             />
           </div>
           <div>
-            <label htmlFor="printer-integration" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label
+              htmlFor="printer-integration"
+              className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+            >
               Integration
             </label>
             <select
               id="printer-integration"
               value={setupKind}
               onChange={(e) => {
-                setSetupKind(e.target.value as PrinterSetupKind);
+                const kind = parseSetupKind(e.target.value);
+                if (kind === null) return;
+                setSetupKind(kind);
                 setUrl("");
               }}
               className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
             >
               {PRINTER_SETUP_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
               ))}
             </select>
             <p className="mt-1.5 text-xs text-muted-foreground">
@@ -707,7 +834,10 @@ function AddPrinterModal({
             </p>
           </div>
           <div>
-            <label htmlFor="printer-address" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label
+              htmlFor="printer-address"
+              className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+            >
               {setupKind === "prusalink"
                 ? "PrusaLink URL"
                 : setupKind === "octoprint"
@@ -735,84 +865,188 @@ function AddPrinterModal({
               required
             />
           </div>
-          {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && <div>
-            <label htmlFor="moonraker-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
-              {setupKind === "elegoo_neptune4" ? "API key" : "Moonraker API key"}{" "}
-              <span className="font-normal normal-case tracking-normal opacity-60">
-                (optional)
-              </span>
-            </label>
-            <input
-              id="moonraker-api-key"
-              type="password"
-              value={moonrakerKey}
-              onChange={(e) => setMoonrakerKey(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-              placeholder="Leave blank if auth is disabled"
-            />
-          </div>}
-          {setupKind === "bambu_lan" && <>
+          {(setupKind === "moonraker" || setupKind === "elegoo_neptune4") && (
             <div>
-              <label htmlFor="bambu-serial" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Printer serial</label>
-              <input id="bambu-serial" value={bambuSerial} onChange={(e) => setBambuSerial(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
-            </div>
-            <div>
-              <label htmlFor="bambu-access-code" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">LAN access code</label>
-              <input id="bambu-access-code" type="password" value={bambuAccessCode} onChange={(e) => setBambuAccessCode(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
-            </div>
-          </>}
-          {setupKind === "prusalink" && <>
-            <div>
-              <label htmlFor="prusalink-auth" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Authentication</label>
-              <select id="prusalink-auth" value={prusaAuthMode} onChange={(e) => { setPrusaAuthMode(e.target.value as "digest" | "api_key"); setPrusaSecret(""); }} className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]">
-                <option value="digest">Username and password (recommended)</option>
-                <option value="api_key">Legacy API key</option>
-              </select>
-            </div>
-            {prusaAuthMode === "digest" && <div>
-              <label htmlFor="prusalink-username" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Username</label>
-              <input id="prusalink-username" value={prusaUsername} onChange={(e) => setPrusaUsername(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
-            </div>}
-            <div>
-              <label htmlFor="prusalink-secret" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">{prusaAuthMode === "digest" ? "Password" : "API key"}</label>
-              <input id="prusalink-secret" type="password" value={prusaSecret} onChange={(e) => setPrusaSecret(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
-            </div>
-          </>}
-          {setupKind === "octoprint" && <div>
-            <label htmlFor="octoprint-api-key" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">API key</label>
-            <input id="octoprint-api-key" type="password" value={octoprintApiKey} onChange={(e) => setOctoprintApiKey(e.target.value)} required className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]" />
-          </div>}
-          {setupKind === "elegoo_centauri_carbon" && <div>
-            <label htmlFor="centauri-mainboard-id" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
-              Mainboard ID <span className="font-normal normal-case tracking-normal opacity-60">(recommended)</span>
-            </label>
-            <input
-              id="centauri-mainboard-id"
-              value={centauriMainboardId}
-              onChange={(e) => setCentauriMainboardId(e.target.value)}
-              className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
-              placeholder="From printer discovery or diagnostics"
-            />
-            <p className="mt-1.5 text-xs text-muted-foreground">Needed for reliable printer commands while idle, paused, or errored.</p>
-          </div>}
-          {setupKind === "elegoo_centauri_carbon_2" && <>
-            <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">
-              Enable LAN Only in printer network settings before connecting.
-            </div>
-            <div>
-              <label htmlFor="centauri-access-code" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">Printer access code</label>
+              <label
+                htmlFor="moonraker-api-key"
+                className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+              >
+                {setupKind === "elegoo_neptune4" ? "API key" : "Moonraker API key"}{" "}
+                <span className="font-normal normal-case tracking-normal opacity-60">
+                  (optional)
+                </span>
+              </label>
               <input
-                id="centauri-access-code"
+                id="moonraker-api-key"
                 type="password"
-                value={centauriAccessCode}
-                onChange={(e) => setCentauriAccessCode(e.target.value)}
+                value={moonrakerKey}
+                onChange={(e) => setMoonrakerKey(e.target.value)}
+                className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px] focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+                placeholder="Leave blank if auth is disabled"
+              />
+            </div>
+          )}
+          {setupKind === "bambu_lan" && (
+            <>
+              <div>
+                <label
+                  htmlFor="bambu-serial"
+                  className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                >
+                  Printer serial
+                </label>
+                <input
+                  id="bambu-serial"
+                  value={bambuSerial}
+                  onChange={(e) => setBambuSerial(e.target.value)}
+                  required
+                  className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="bambu-access-code"
+                  className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                >
+                  LAN access code
+                </label>
+                <input
+                  id="bambu-access-code"
+                  type="password"
+                  value={bambuAccessCode}
+                  onChange={(e) => setBambuAccessCode(e.target.value)}
+                  required
+                  className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                />
+              </div>
+            </>
+          )}
+          {setupKind === "prusalink" && (
+            <>
+              <div>
+                <label
+                  htmlFor="prusalink-auth"
+                  className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                >
+                  Authentication
+                </label>
+                <select
+                  id="prusalink-auth"
+                  value={prusaAuthMode}
+                  onChange={(e) => {
+                    setPrusaAuthMode(e.target.value === "api_key" ? "api_key" : "digest");
+                    setPrusaSecret("");
+                  }}
+                  className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                >
+                  <option value="digest">Username and password (recommended)</option>
+                  <option value="api_key">Legacy API key</option>
+                </select>
+              </div>
+              {prusaAuthMode === "digest" && (
+                <div>
+                  <label
+                    htmlFor="prusalink-username"
+                    className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                  >
+                    Username
+                  </label>
+                  <input
+                    id="prusalink-username"
+                    value={prusaUsername}
+                    onChange={(e) => setPrusaUsername(e.target.value)}
+                    required
+                    className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                  />
+                </div>
+              )}
+              <div>
+                <label
+                  htmlFor="prusalink-secret"
+                  className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                >
+                  {prusaAuthMode === "digest" ? "Password" : "API key"}
+                </label>
+                <input
+                  id="prusalink-secret"
+                  type="password"
+                  value={prusaSecret}
+                  onChange={(e) => setPrusaSecret(e.target.value)}
+                  required
+                  className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                />
+              </div>
+            </>
+          )}
+          {setupKind === "octoprint" && (
+            <div>
+              <label
+                htmlFor="octoprint-api-key"
+                className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+              >
+                API key
+              </label>
+              <input
+                id="octoprint-api-key"
+                type="password"
+                value={octoprintApiKey}
+                onChange={(e) => setOctoprintApiKey(e.target.value)}
                 required
                 className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
               />
             </div>
-          </>}
+          )}
+          {setupKind === "elegoo_centauri_carbon" && (
+            <div>
+              <label
+                htmlFor="centauri-mainboard-id"
+                className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+              >
+                Mainboard ID{" "}
+                <span className="font-normal normal-case tracking-normal opacity-60">
+                  (recommended)
+                </span>
+              </label>
+              <input
+                id="centauri-mainboard-id"
+                value={centauriMainboardId}
+                onChange={(e) => setCentauriMainboardId(e.target.value)}
+                className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                placeholder="From printer discovery or diagnostics"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Needed for reliable printer commands while idle, paused, or errored.
+              </p>
+            </div>
+          )}
+          {setupKind === "elegoo_centauri_carbon_2" && (
+            <>
+              <div className="rounded border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-muted-foreground">
+                Enable LAN Only in printer network settings before connecting.
+              </div>
+              <div>
+                <label
+                  htmlFor="centauri-access-code"
+                  className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+                >
+                  Printer access code
+                </label>
+                <input
+                  id="centauri-access-code"
+                  type="password"
+                  value={centauriAccessCode}
+                  onChange={(e) => setCentauriAccessCode(e.target.value)}
+                  required
+                  className="w-full bg-background text-foreground text-sm border border-border rounded px-3 py-[7px]"
+                />
+              </div>
+            </>
+          )}
           <div>
-            <label htmlFor="printer-notes" className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5">
+            <label
+              htmlFor="printer-notes"
+              className="block text-xs text-muted-foreground tracking-wider uppercase mb-1.5"
+            >
               Notes
             </label>
             <input
@@ -829,18 +1063,10 @@ function AddPrinterModal({
             </div>
           )}
           <div className="flex justify-end gap-3 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-            >
+            <Button type="button" variant="outline" onClick={onClose}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              loading={submitting}
-              disabled={!name || !url}
-            >
+            <Button type="submit" loading={submitting} disabled={!name || !url}>
               Add printer
             </Button>
           </div>

@@ -29,7 +29,7 @@ extracts the expected fields.
 ### Technical Notes
 
 - Existing fixtures live in `backend/tests/fixtures/`.
-- Parser tests live in `backend/tests/test_gcode_parser.py`.
+- Parser tests live in `backend/tests/unit/services/test_gcode_parser.py`.
 - Prefer a small cropped header/footer sample if the full G-code is huge.
 
 ## 2. Document A Real Docker/NAS Install

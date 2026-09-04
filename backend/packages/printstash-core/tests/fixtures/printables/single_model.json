@@ -1,0 +1,22 @@
+{
+  "data": {
+    "print": {
+      "id": "123",
+      "name": "Calibration Cube",
+      "description": "A calibration model",
+      "instructions": "Print in PLA",
+      "attributionText": "Designed by PrintStash Tester",
+      "user": {"id": 99, "handle": "PrintStash Tester", "profileUrl": "https://www.printables.com/@printstash-tester"},
+      "license": {"name": "CC-BY-4.0", "url": "https://creativecommons.org/licenses/by/4.0/", "text": "Attribution required"},
+      "stls": [
+        {"id": "file-7", "name": "cube.stl", "fileSize": 123, "downloadUrl": "https://signed.example.test/cube.stl?signature=secret"}
+      ],
+      "otherFiles": [
+        {"id": "file-8", "name": "notes.txt", "fileSize": 45, "url": "https://signed.example.test/notes.txt?token=secret"}
+      ],
+      "unexpected": "must never escape"
+    }
+  },
+  "cookies": "must never escape",
+  "html": "<html>must never escape</html>"
+}

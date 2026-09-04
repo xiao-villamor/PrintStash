@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from typing import Awaitable, Callable, List, Optional
 
 from fastapi import (
@@ -11,10 +10,13 @@ from fastapi import (
     Depends,
     HTTPException,
     Query,
+    Request,
     Response,
     WebSocket,
     WebSocketDisconnect,
 )
+from printstash_core.gcode import declared_print_artifact_format
+from printstash_core.printers import ProviderRegistry
 from sqlmodel import Session, select
 from starlette.concurrency import run_in_threadpool
 
@@ -69,7 +71,11 @@ from app.services.printer_hub import (
     get_hub,
     get_hub_from_ws,
 )
-from app.services.printer_jobs import PrinterJobError, transfer_artifact
+from app.services.printer_jobs import (
+    PrinterJobError,
+    reproducibility_payload,
+    transfer_artifact,
+)
 from app.services.printer_provider import (
     ProviderError,
     capabilities_for_provider,
@@ -84,6 +90,50 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/printers", tags=["printers"])
 
 _DIAGNOSTIC_CHECK_TIMEOUT_SECONDS = 5.0
+
+_PRINTER_CONNECTION_FIELDS = frozenset(
+    {
+        "provider",
+        "moonraker_url",
+        "api_key",
+        "provider_variant",
+        "bambu_host",
+        "bambu_serial",
+        "bambu_access_code",
+        "prusalink_url",
+        "prusalink_auth_mode",
+        "prusalink_username",
+        "prusalink_password",
+        "prusalink_api_key",
+        "elegoo_centauri_host",
+        "elegoo_centauri_access_code",
+        "elegoo_centauri_mainboard_id",
+        "octoprint_url",
+        "octoprint_api_key",
+    }
+)
+
+
+def _require_superuser_for_connection_update(
+    payload: PrinterUpdate, current_user: User
+) -> None:
+    """Keep delegated printer admins inside the configured printer boundary."""
+    if current_user.is_superuser:
+        return
+    if payload.model_fields_set & _PRINTER_CONNECTION_FIELDS:
+        raise HTTPException(status_code=403, detail="admin_required")
+
+
+def _provider_client(request: Request, printer: Printer):
+    """Build a provider using this application's explicitly composed registry."""
+    registry: ProviderRegistry = request.app.state.printer_provider_registry
+    return get_provider_client(printer, registry=registry)
+
+
+def _provider_action_code(exc: ProviderError) -> str:
+    """Return the precise persisted reason when a provider supplies one."""
+
+    return str(getattr(exc, "action_code", None) or exc.code)
 
 
 def _validate_provider_config(p: Printer) -> None:
@@ -272,28 +322,6 @@ def _require_file_role(
     rbac.require_model_collection_role(session, user, model.collection_id, minimum)
 
 
-def _visible_model_ids(session: Session, user: User) -> set[int]:
-    if user.is_superuser:
-        return {
-            int(row)
-            for row in session.exec(select(Model.id).where(live(Model))).all()
-            if row is not None
-        }
-    collection_ids = rbac.accessible_collection_ids(session, user)
-    if not collection_ids:
-        return set()
-    return {
-        int(row)
-        for row in session.exec(
-            select(Model.id).where(
-                live(Model),
-                Model.collection_id.in_(collection_ids),  # type: ignore[union-attr]
-            )
-        ).all()
-        if row is not None
-    }
-
-
 async def _diagnostic_check(
     name: str,
     action: Callable[[], Awaitable[object]],
@@ -380,6 +408,7 @@ def farm_dashboard(
     active_jobs = session.exec(
         select(PrintJob).where(
             PrintJob.printer_id.in_(visible_ids),  # type: ignore[union-attr]
+            live(PrintJob),
             PrintJob.state.in_(
                 [
                     PrintJobState.QUEUED,
@@ -389,6 +418,7 @@ def farm_dashboard(
                     PrintJobState.UPLOADING,
                 ]
             ),
+            live(PrintJob),
         )
     ).all()
 
@@ -415,21 +445,23 @@ def farm_dashboard(
 )
 async def printer_diagnostics(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
+    # `require_printer_role` above selects `live(Printer)` and raises the same 404,
+    # so a trashed printer never reaches here. It owns that check; repeating it
+    # here only produced a statement no request could execute.
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
 
     summary = provider_diagnostic_summary(p.provider)
     checks: list[dict[str, object]] = []
 
     try:
-        provider = get_provider_client(p)
+        provider = _provider_client(request, p)
         checks.append({"name": "configuration", "ok": True})
     except ProviderError as exc:
         checks.append(
@@ -473,6 +505,7 @@ async def printer_diagnostics(
 )
 async def printer_config(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> MoonrakerConfigRead:
@@ -480,8 +513,6 @@ async def printer_config(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     if p.provider != PrinterProvider.MOONRAKER:
         raise HTTPException(
             status_code=409,
@@ -489,7 +520,7 @@ async def printer_config(
         )
 
     try:
-        provider = get_provider_client(p)
+        provider = _provider_client(request, p)
         server_info, printer_info, server_config, klipper_config = await asyncio.gather(
             provider.server_info(),
             provider.info(),
@@ -518,8 +549,6 @@ def get_printer(
         session, current_user, printer_id, PrinterRole.VIEW
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     return _to_read(p, role)
 
 
@@ -629,6 +658,7 @@ async def update_printer(
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
+    _require_superuser_for_connection_update(payload, current_user)
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
     if payload.provider is not None:
         p.provider = payload.provider
@@ -828,13 +858,15 @@ def delete_printer_permission(
     summary="Upload a vault file to the printer (optionally start the print)",
     description=(
         "Streams the chosen vault File to the configured provider. The File must "
-        "be a .gcode artifact. If start_print is true, the provider is asked to "
+        "be a printable G-code artifact accepted by the provider. If start_print "
+        "is true, the provider is asked to "
         "start the print immediately after upload."
     ),
 )
 async def send_to_printer(
     printer_id: int,
     payload: SendToPrinter,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> PrintJobRead:
@@ -842,12 +874,25 @@ async def send_to_printer(
         session, current_user, printer_id, PrinterRole.PRINT
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    provider = get_provider_client(p)
+    provider = _provider_client(request, p)
     if not provider.capabilities.can_upload:
         raise HTTPException(
             status_code=409,
             detail="operation_not_supported_for_provider",
         )
+    # Resolve and authorize the artifact before any provider I/O. Besides avoiding
+    # unnecessary traffic, this guarantees unsupported/corrupt requests cannot
+    # disclose a printer's live state or wake a device on the local network.
+    f = get_or_404(session, File, payload.file_id, "file_not_found")
+    if f.file_type != FileType.GCODE:
+        raise HTTPException(status_code=400, detail="file_not_gcode")
+    artifact_format = declared_print_artifact_format(f.original_filename)
+    if not provider.capabilities.accepts_format(artifact_format):
+        raise HTTPException(
+            status_code=409,
+            detail="artifact_format_not_supported",
+        )
+    _require_file_role(session, current_user, f, CollectionRole.EDIT)
     if provider.capabilities.requires_ready_before_send:
         try:
             status = await provider.query_status()
@@ -861,15 +906,6 @@ async def send_to_printer(
         ).lower()
         if state not in {"standby", "ready", "idle", "complete", "cancelled"}:
             raise HTTPException(status_code=409, detail="printer_not_ready")
-    f = get_or_404(session, File, payload.file_id, "file_not_found")
-    if f.file_type != FileType.GCODE:
-        raise HTTPException(status_code=400, detail="file_not_gcode")
-    # Binary G-code (PrusaSlicer .bgcode) is indexed for its metadata, but the
-    # providers we drive print plain-text G-code
-    # only — never hand them a .bgcode blob.
-    if Path(f.original_filename).suffix.lower() == ".bgcode":
-        raise HTTPException(status_code=400, detail="binary_gcode_not_printable")
-    _require_file_role(session, current_user, f, CollectionRole.EDIT)
     if payload.start_print:
         try:
             compatibility = materials.compatibility_for_printer(
@@ -893,7 +929,10 @@ async def send_to_printer(
         if payload.remote_filename
         else build_traceable_remote_filename(f)
     )
-    if not remote_name.lower().endswith((".gcode", ".g", ".gco")):
+    if artifact_format.value == "bgcode_binary":
+        if not remote_name.lower().endswith(".bgcode"):
+            remote_name += ".bgcode"
+    elif not remote_name.lower().endswith((".gcode", ".g", ".gco")):
         remote_name += ".gcode"
 
     job = PrintJob(
@@ -927,18 +966,24 @@ async def send_to_printer(
         )
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
-        job.error = exc.code
+        job.error = _provider_action_code(exc)
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=exc.code) from exc
+        raise HTTPException(status_code=502, detail=_provider_action_code(exc)) from exc
     except PrinterJobError as exc:
         job.state = PrintJobState.FAILED
         job.error = exc.code
         job.finished_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=exc.code) from exc
+        status_code = {
+            "invalid_binary_gcode": 400,
+            "print_artifact_extension_mismatch": 400,
+            "artifact_format_not_supported": 409,
+            "file_blob_missing": 410,
+        }.get(exc.code, 502)
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -960,7 +1005,20 @@ async def send_to_printer(
     session.add(job)
     session.commit()
     session.refresh(job)
-    out = PrintJobRead(**job.model_dump())
+    out = PrintJobRead(
+        **job.model_dump(
+            exclude={"artifact_capture_error_code", "artifact_capture_error_message"}
+        ),
+        **reproducibility_payload(
+            job,
+            file_type=f.file_type,
+            download_url=(
+                f"/api/v1/files/{job.file_id}/download"
+                if job.source == "vault" or job.artifact_evidence.endswith("_archived")
+                else None
+            ),
+        ),
+    )
     upsert_printer_file(
         session,
         printer_id=printer_id,
@@ -986,6 +1044,7 @@ async def send_to_printer(
 async def start_printer_file(
     printer_id: int,
     payload: StartPrinterFile,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> PrintJobRead:
@@ -993,7 +1052,7 @@ async def start_printer_file(
         session, current_user, printer_id, PrinterRole.PRINT
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    provider = get_provider_client(p)
+    provider = _provider_client(request, p)
     if not provider.capabilities.can_start:
         raise HTTPException(
             status_code=409,
@@ -1049,12 +1108,12 @@ async def start_printer_file(
         await provider.start(payload.remote_filename)
     except ProviderError as exc:
         job.state = PrintJobState.FAILED
-        job.error = exc.code
+        job.error = _provider_action_code(exc)
         job.finished_at = utcnow()
         job.updated_at = utcnow()
         session.add(job)
         session.commit()
-        raise HTTPException(status_code=502, detail=exc.code) from exc
+        raise HTTPException(status_code=502, detail=_provider_action_code(exc)) from exc
     except Exception as exc:
         logger.error("printer start failed printer=%s", printer_id)
         job.state = PrintJobState.FAILED
@@ -1065,12 +1124,27 @@ async def start_printer_file(
         session.commit()
         raise HTTPException(status_code=502, detail="provider_error") from exc
 
-    return PrintJobRead(**job.model_dump())
+    return PrintJobRead(
+        **job.model_dump(
+            exclude={"artifact_capture_error_code", "artifact_capture_error_message"}
+        ),
+        **reproducibility_payload(
+            job,
+            file_type=file_row.file_type if file_row is not None else None,
+            download_url=(
+                f"/api/v1/files/{job.file_id}/download"
+                if job.source == "vault" or job.artifact_evidence.endswith("_archived")
+                else None
+            ),
+        ),
+    )
 
 
-async def _printer_control(printer_id: int, session: Session, action: str) -> dict:
+async def _printer_control(
+    request: Request, printer_id: int, session: Session, action: str
+) -> dict:
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    client = get_provider_client(p)
+    client = _provider_client(request, p)
     cap_map = {
         "start": client.capabilities.can_start,
         "pause": client.capabilities.can_pause,
@@ -1094,6 +1168,7 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
         active_jobs = session.exec(
             select(PrintJob).where(
                 PrintJob.printer_id == printer_id,
+                live(PrintJob),
                 PrintJob.state.in_(  # type: ignore[union-attr]
                     [
                         PrintJobState.STARTED,
@@ -1101,6 +1176,7 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
                         PrintJobState.PAUSED,
                     ]
                 ),
+                live(PrintJob),
             )
         ).all()
         for job in active_jobs:
@@ -1119,13 +1195,14 @@ async def _printer_control(printer_id: int, session: Session, action: str) -> di
 )
 async def pause_printer(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    return await _printer_control(printer_id, session, "pause")
+    return await _printer_control(request, printer_id, session, "pause")
 
 
 @router.post(
@@ -1134,13 +1211,14 @@ async def pause_printer(
 )
 async def resume_printer(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    return await _printer_control(printer_id, session, "resume")
+    return await _printer_control(request, printer_id, session, "resume")
 
 
 @router.post(
@@ -1149,20 +1227,22 @@ async def resume_printer(
 )
 async def cancel_printer(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    return await _printer_control(printer_id, session, "cancel")
+    return await _printer_control(request, printer_id, session, "cancel")
 
 
-def _require_gcode_provider(session: Session, printer_id: int):
+def _require_gcode_provider(request: Request, session: Session, printer_id: int):
+    # Every caller runs `require_printer_role` first, which selects `live(Printer)`
+    # and raises this same 404 for a trashed printer, so the liveness check has one
+    # owner rather than two and this helper cannot hold a branch nothing reaches.
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    if p.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
-    provider = get_provider_client(p)
+    provider = _provider_client(request, p)
     if not provider.capabilities.can_send_gcode:
         raise HTTPException(
             status_code=409, detail="operation_not_supported_for_provider"
@@ -1188,13 +1268,14 @@ async def _run_gcode(provider, script: str) -> dict:
 async def set_printer_temperature(
     printer_id: int,
     payload: SetTemperature,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    provider = _require_gcode_provider(session, printer_id)
+    provider = _require_gcode_provider(request, session, printer_id)
     code = "M104" if payload.heater == "extruder" else "M140"
     return await _run_gcode(provider, f"{code} S{payload.target:g}")
 
@@ -1206,13 +1287,14 @@ async def set_printer_temperature(
 async def home_printer(
     printer_id: int,
     payload: HomeAxes,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    provider = _require_gcode_provider(session, printer_id)
+    provider = _require_gcode_provider(request, session, printer_id)
     script = "G28" if not payload.axes else "G28 " + " ".join(payload.axes.upper())
     return await _run_gcode(provider, script)
 
@@ -1223,13 +1305,14 @@ async def home_printer(
 )
 async def emergency_stop_printer(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> dict:
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.CONTROL
     )
-    provider = _require_gcode_provider(session, printer_id)
+    provider = _require_gcode_provider(request, session, printer_id)
     try:
         await provider.emergency_stop()
     except ProviderError as exc:
@@ -1290,6 +1373,7 @@ def list_files_on_printer(
 )
 async def sync_files_on_printer(
     printer_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
@@ -1297,7 +1381,7 @@ async def sync_files_on_printer(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    provider = get_provider_client(p)
+    provider = _provider_client(request, p)
     if not provider.capabilities.can_list_files:
         raise HTTPException(
             status_code=409,
@@ -1326,6 +1410,7 @@ async def sync_files_on_printer(
 async def delete_file_on_printer(
     printer_id: int,
     printer_file_id: int,
+    request: Request,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> List[PrinterFileRead]:
@@ -1333,7 +1418,7 @@ async def delete_file_on_printer(
         session, current_user, printer_id, PrinterRole.ADMIN
     )
     p = get_or_404(session, Printer, printer_id, "printer_not_found")
-    provider = get_provider_client(p)
+    provider = _provider_client(request, p)
     if not provider.capabilities.can_list_files:
         raise HTTPException(
             status_code=409,
@@ -1388,11 +1473,39 @@ def list_jobs(
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.VIEW
     )
-    stmt = select(PrintJob).where(PrintJob.printer_id == printer_id)
+    stmt = select(PrintJob).where(
+        PrintJob.printer_id == printer_id,
+        live(PrintJob),
+    )
     rows = session.exec(
         stmt.order_by(PrintJob.created_at.desc()).limit(limit)  # type: ignore[attr-defined]
     ).all()
-    return [PrintJobRead(**j.model_dump()) for j in rows]
+    file_types = {
+        file.id: file.file_type
+        for file in session.exec(
+            select(File).where(File.id.in_({job.file_id for job in rows}))  # type: ignore[attr-defined]
+        ).all()
+    }
+    return [
+        PrintJobRead(
+            **j.model_dump(
+                exclude={
+                    "artifact_capture_error_code",
+                    "artifact_capture_error_message",
+                }
+            ),
+            **reproducibility_payload(
+                j,
+                file_type=file_types.get(j.file_id),
+                download_url=(
+                    f"/api/v1/files/{j.file_id}/download"
+                    if j.source == "vault" or j.artifact_evidence.endswith("_archived")
+                    else None
+                ),
+            ),
+        )
+        for j in rows
+    ]
 
 
 @router.post("/{printer_id}/ws-ticket")
@@ -1404,9 +1517,6 @@ def create_ws_ticket(
     printer_rbac.require_printer_role(
         session, current_user, printer_id, PrinterRole.VIEW
     )
-    printer = session.get(Printer, printer_id)
-    if printer is None or printer.deleted_at is not None:
-        raise HTTPException(status_code=404, detail="printer_not_found")
     return {
         "ticket": ws_tickets.issue(current_user.id, printer_id),
         "expires_in": ws_tickets.TTL_SECONDS,

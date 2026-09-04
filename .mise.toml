@@ -79,14 +79,19 @@ run = "docker compose down"
 description = "Run all linters"
 run = """
   cd backend && uv run ruff check . && uv run ruff format --check .
-  cd frontend && pnpm lint
+  cd frontend && pnpm lint && pnpm format:check
   """
 
 [tasks."lint:fix"]
 description = "Auto-fix linter issues"
 run = """
   cd backend && uv run ruff check --fix . && uv run ruff format .
+  cd frontend && pnpm lint:fix && pnpm format
   """
+
+[tasks.format]
+description = "Format the frontend with oxfmt"
+run = "cd frontend && pnpm format"
 
 [tasks.test]
 description = "Run all tests"
@@ -104,8 +109,8 @@ description = "Run frontend E2E tests"
 run = "cd frontend && pnpm test:e2e"
 
 [tasks.typecheck]
-description = "Run type checking (tsc --noEmit)"
-run = "cd frontend && pnpm exec tsc --noEmit"
+description = "Run type checking (tsc --noEmit, TypeScript 7 native compiler)"
+run = "cd frontend && pnpm typecheck"
 
 [tasks.clean]
 description = "Clean all build artifacts"

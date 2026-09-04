@@ -1,221 +1,449 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Download, ExternalLink, Inbox, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  FileCheck2,
+  Files,
+  Inbox,
+  RefreshCw,
+  Trash2,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Card } from "@/components/ui/card";
+import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TabBar } from "@/components/ui/tabs";
 import {
-  capturePendingImport,
   batchPendingImports,
   dismissPendingImport,
-  importPendingImport,
   listPendingImports,
   retryPendingImport,
-  updatePendingImport,
 } from "@/lib/api";
-import { useCollections } from "@/lib/queries";
+import { createCompletionChainedPoller } from "@/lib/completion-chained-polling";
+import { Link } from "@/lib/link";
+import { useI18n } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
-import { Link } from "@/lib/navigation";
 import type { InboxItem } from "@/types";
 
 const ACTIVE = new Set(["captured", "resolving", "importing"]);
 
-function choices(item: InboxItem) {
+export interface InboxPageDeps {
+  listPendingImports: typeof listPendingImports;
+  retryPendingImport: typeof retryPendingImport;
+  dismissPendingImport: typeof dismissPendingImport;
+  batchPendingImports: typeof batchPendingImports;
+}
+
+const inboxPageDeps: InboxPageDeps = {
+  listPendingImports,
+  retryPendingImport,
+  dismissPendingImport,
+  batchPendingImports,
+};
+
+type InboxTab = "queue" | "completed";
+
+function ImportList({
+  label,
+  items,
+  locale,
+  t,
+  retry,
+  deletingId,
+  onDelete,
+}: {
+  label: string;
+  items: InboxItem[];
+  locale: string;
+  t: ReturnType<typeof useI18n>["t"];
+  retry: typeof retryPendingImport;
+  deletingId: number | null;
+  onDelete: (item: InboxItem) => void;
+}) {
+  return (
+    <ul aria-label={label} className="divide-y divide-border">
+      {items.map((item) => {
+        const title = capturedTitle(item) || item.source_hostname || t("inbox.pendingImport");
+        const provider = providerLabel(item) || t("inbox.sourcePreparing");
+        const fileCount = manifestFiles(item).length;
+        const StateIcon = stateIcon(item);
+        return (
+          <li
+            key={item.id}
+            className="animate-card-in grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-4 sm:px-5"
+          >
+            <div className="flex min-w-0 items-start gap-3 sm:contents">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
+                <StateIcon className={stateIconClass(item)} aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="line-clamp-2 break-words text-sm font-semibold leading-5 text-foreground">
+                  {title}
+                </h3>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/80">{provider}</span>
+                  <span className="inline-flex items-center gap-1">
+                    <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                    {new Date(item.completed_at || item.created_at).toLocaleDateString(locale)}
+                  </span>
+                  {fileCount > 0 && (
+                    <span className="inline-flex items-center gap-1">
+                      <Files className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t("inbox.fileSummary", { count: String(fileCount) })}
+                    </span>
+                  )}
+                  {item.results.length > 0 && (
+                    <span>{t("inbox.resultSummary", { count: String(item.results.length) })}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex min-w-0 shrink-0 items-center justify-between gap-3 border-t border-border pt-3 sm:justify-end sm:border-0 sm:pt-0">
+              <Badge
+                variant={
+                  item.state === "completed"
+                    ? "success"
+                    : item.state === "failed"
+                      ? "destructive"
+                      : "secondary"
+                }
+              >
+                {statusLabel(item, t)}
+              </Badge>
+              <div className="flex flex-wrap justify-end gap-2">
+                {item.state === "failed" && item.retryable && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() =>
+                      void retry(item.id)
+                        .then(() => toast.success(t("inbox.retryQueued")))
+                        .catch(toast.error)
+                    }
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("inbox.retry")}
+                  </Button>
+                )}
+                {item.state === "completed" && item.resulting_model_id ? (
+                  <Button size="xs" variant="outline" asChild>
+                    <Link href={`/models/${item.resulting_model_id}`}>{t("inbox.openModel")}</Link>
+                  </Button>
+                ) : (
+                  <Button size="xs" asChild>
+                    <Link href={`/inbox/${item.id}`}>
+                      {item.state === "review" ? t("inbox.review") : t("inbox.view")}
+                    </Link>
+                  </Button>
+                )}
+                {item.state !== "importing" && item.state !== "resolving" && (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={t("inbox.delete")}
+                    title={t("inbox.delete")}
+                    loading={deletingId === item.id}
+                    onClick={() => onDelete(item)}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function capturedTitle(item: InboxItem): string | null {
+  if (item.manifest.schema_version === 2) {
+    const title = item.manifest.source.fields.title?.value.trim();
+    if (title) return title;
+  }
+  return item.display_title?.trim() || null;
+}
+
+function manifestFiles(item: InboxItem) {
   if (item.manifest.kind === "archive") return item.manifest.entries ?? [];
   if (item.manifest.kind === "model_files") return item.manifest.files ?? [];
-  if (item.manifest.kind === "collection") return item.manifest.members ?? [];
   return [];
 }
 
-export default function InboxPage() {
+function providerLabel(item: InboxItem): string | null {
+  const provider =
+    item.manifest.schema_version === 2
+      ? item.manifest.source.provider
+      : item.source_hostname?.replace(/^www\./, "").split(".")[0];
+  if (!provider) return null;
+  switch (provider.toLowerCase()) {
+    case "cults3d":
+      return "Cults3D";
+    case "makerworld":
+      return "MakerWorld";
+    case "myminifactory":
+      return "MyMiniFactory";
+    case "printables":
+      return "Printables";
+    case "thingiverse":
+      return "Thingiverse";
+    default:
+      return provider.charAt(0).toUpperCase() + provider.slice(1);
+  }
+}
+
+function stateIcon(item: InboxItem): LucideIcon {
+  if (item.state === "completed") return CheckCircle2;
+  if (item.state === "failed") return CircleAlert;
+  if (item.state === "review") return FileCheck2;
+  return Clock3;
+}
+
+function stateIconClass(item: InboxItem): string {
+  if (item.state === "completed") return "h-4 w-4 text-success";
+  if (item.state === "failed") return "h-4 w-4 text-destructive";
+  if (item.state === "review") return "h-4 w-4 text-primary";
+  return "h-4 w-4 text-muted-foreground";
+}
+
+function statusLabel(item: InboxItem, t: ReturnType<typeof useI18n>["t"]): string {
+  if (item.completion === "partial") return t("inbox.partial");
+  if (item.state === "review") return t("inbox.needsReview");
+  if (item.state === "completed") return t("inbox.completed");
+  switch (item.state) {
+    case "captured":
+      return t("inbox.state.captured");
+    case "resolving":
+      return t("inbox.state.resolving");
+    case "importing":
+      return t("inbox.state.importing");
+    case "failed":
+      return t("inbox.state.failed");
+    default:
+      return item.state;
+  }
+}
+
+export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDeps }) {
+  const { locale, t } = useI18n();
   const [items, setItems] = useState<InboxItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
-  const [collectionId, setCollectionId] = useState<number | null>(null);
-  const [tags, setTags] = useState("");
-  const [capturing, setCapturing] = useState(false);
-  const [selected, setSelected] = useState<Record<number, string[]>>({});
-  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set());
-  const [bulkTags, setBulkTags] = useState("");
-  const collections = useCollections().data ?? [];
-
-  const refresh = useCallback(async () => {
-    try { setItems(await listPendingImports(true)); }
-    catch (error) { toast.error(error); }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { void refresh(); }, [refresh]);
+  const [activeTab, setActiveTab] = useState<InboxTab>("queue");
+  const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
+  const [clearingCompleted, setClearingCompleted] = useState(false);
+  const poller = useMemo(
+    () =>
+      createCompletionChainedPoller<InboxItem[]>({
+        request: () => deps.listPendingImports(true),
+        intervalMs: 1_500,
+        shouldContinue: (next) => next.some((item) => ACTIVE.has(item.state)),
+        onResult: (next) => {
+          setItems(next);
+          setLoading(false);
+        },
+        onError: (error) => {
+          toast.error(error);
+          setLoading(false);
+        },
+      }),
+    [deps],
+  );
   useEffect(() => {
-    if (!items.some((item) => ACTIVE.has(item.state))) return;
-    const timer = window.setInterval(() => void refresh(), 1500);
-    return () => window.clearInterval(timer);
-  }, [items, refresh]);
-
-  const pendingCount = useMemo(
-    () => items.filter((item) => !["completed", "dismissed"].includes(item.state)).length,
+    poller.refresh();
+    return () => poller.stop();
+  }, [poller]);
+  useEffect(() => {
+    if (loading) return;
+    if (items.some((item) => ACTIVE.has(item.state))) poller.start();
+    else poller.stop();
+  }, [items, loading, poller]);
+  const groups = useMemo(
+    () => ({
+      queue: items.filter((item) => item.state !== "completed" && item.state !== "dismissed"),
+      done: items.filter((item) => item.state === "completed"),
+    }),
     [items],
   );
 
-  async function capture(event: React.FormEvent) {
-    event.preventDefault();
-    if (!url.trim()) return;
-    setCapturing(true);
+  async function deleteImport() {
+    if (!deleteTarget) return;
+    poller.stop();
+    setDeletingId(deleteTarget.id);
     try {
-      await capturePendingImport({
-        url: url.trim(),
-        title: title.trim() || undefined,
-        collection_id: collectionId,
-        tags: tags.split(",").map((item) => item.trim()).filter(Boolean),
-      });
-      setUrl(""); setTitle(""); setTags("");
-      await refresh();
-      toast.success("Added to Pending Imports");
-    } catch (error) { toast.error(error); }
-    finally { setCapturing(false); }
+      await deps.dismissPendingImport(deleteTarget.id);
+      setItems((current) => current.filter((item) => item.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      toast.success(t("inbox.deleteSuccess"));
+    } catch (error) {
+      toast.error(error);
+      if (items.some((item) => ACTIVE.has(item.state))) poller.start();
+    } finally {
+      setDeletingId(null);
+    }
   }
 
-  function toggleChoice(itemId: number, id: string) {
-    setSelected((current) => {
-      const values = current[itemId] ?? [];
-      return { ...current, [itemId]: values.includes(id) ? values.filter((value) => value !== id) : [...values, id] };
-    });
-  }
-
-  async function action(task: () => Promise<unknown>, success?: string) {
-    try { await task(); if (success) toast.success(success); await refresh(); }
-    catch (error) { toast.error(error); }
-  }
-
-  function toggleBulk(itemId: number) {
-    setBulkSelected((current) => {
-      const next = new Set(current);
-      if (next.has(itemId)) next.delete(itemId); else next.add(itemId);
-      return next;
-    });
-  }
-
-  async function bulkAction(actionName: "retry" | "import" | "dismiss" | "set_collection" | "add_tags") {
-    if (bulkSelected.size === 0) return;
-    const tagValues = bulkTags.split(",").map((item) => item.trim()).filter(Boolean);
-    if (actionName === "add_tags" && tagValues.length === 0) {
-      toast.error("Enter at least one tag to add");
+  async function clearCompleted() {
+    const itemIds = groups.done.map((item) => item.id);
+    if (!itemIds.length) {
+      setClearCompletedOpen(false);
       return;
     }
-    await action(
-      () => batchPendingImports({
-        item_ids: [...bulkSelected],
-        action: actionName,
-        ...(actionName === "set_collection" ? { collection_id: collectionId } : {}),
-        ...(actionName === "add_tags" ? { tags: tagValues } : {}),
-      }),
-      `${bulkSelected.size} item${bulkSelected.size === 1 ? "" : "s"} updated`,
-    );
-    setBulkSelected(new Set());
-    if (actionName === "add_tags") setBulkTags("");
+    poller.stop();
+    setClearingCompleted(true);
+    try {
+      await deps.batchPendingImports({ item_ids: itemIds, action: "dismiss" });
+      setItems((current) => current.filter((item) => item.state !== "completed"));
+      setClearCompletedOpen(false);
+      toast.success(t("inbox.clearCompletedSuccess"));
+    } catch (error) {
+      toast.error(error);
+      if (items.some((item) => ACTIVE.has(item.state))) poller.start();
+    } finally {
+      setClearingCompleted(false);
+    }
   }
+
+  const visibleItems = activeTab === "queue" ? groups.queue : groups.done;
+  const tabClass =
+    "flex min-w-32 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <PageContainer>
-      <PageHeader
-        title="Pending Imports"
-        description={`${pendingCount} capture${pendingCount === 1 ? "" : "s"} waiting for review or import.`}
-      />
-
-      <Card className="mb-5">
-        <CardContent className="pt-6">
-          <form onSubmit={capture} className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
-            <Input type="url" required placeholder="https://printables.com/model/..." value={url} onChange={(event) => setUrl(event.target.value)} aria-label="Model URL" />
-            <Input placeholder="Optional title" value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Display title" />
-            <select value={collectionId ?? ""} onChange={(event) => setCollectionId(event.target.value ? Number(event.target.value) : null)} className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring" aria-label="Target Collection">
-              <option value="">Choose during review</option>
-              {collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.path}</option>)}
-            </select>
-            <Input placeholder="tags, comma separated" value={tags} onChange={(event) => setTags(event.target.value)} aria-label="Tags" />
-            <Button type="submit" loading={capturing}><Download className="h-4 w-4" /> Capture</Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      {loading ? <p className="text-sm text-muted-foreground">Loading Pending Imports…</p> : items.length === 0 ? (
-        <EmptyState icon={Inbox} title="Capture now, organize later" description="Paste a supported model page or direct file URL. PrintStash will resolve it safely and keep review choices across restarts." />
-      ) : (
-        <div className="space-y-3">
-          {bulkSelected.size > 0 && (
-            <div className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-md border border-border bg-card p-3 shadow-sm">
-              <span className="mr-auto text-sm font-medium">{bulkSelected.size} selected</span>
-              <Button size="xs" variant="outline" onClick={() => void bulkAction("set_collection")}>Set collection</Button>
-              <Input value={bulkTags} onChange={(event) => setBulkTags(event.target.value)} placeholder="tags, comma separated" aria-label="Tags to add" className="h-8 w-44 text-xs" />
-              <Button size="xs" variant="outline" onClick={() => void bulkAction("add_tags")}>Add tags</Button>
-              <Button size="xs" variant="outline" onClick={() => void bulkAction("retry")}>Retry eligible</Button>
-              <Button size="xs" onClick={() => void bulkAction("import")}>Import ready</Button>
-              <Button size="xs" variant="ghost" onClick={() => void bulkAction("dismiss")}>Dismiss</Button>
-            </div>
+      <PageHeader title={t("inbox.title")} description={t("inbox.description")} />
+      <Card className="overflow-hidden">
+        <div className="flex flex-col gap-3 border-b bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <TabBar
+            tabs={[
+              {
+                key: "queue",
+                label: (
+                  <>
+                    <Inbox className="h-4 w-4" aria-hidden="true" />
+                    {t("inbox.queue")}
+                    <Badge variant="secondary">{groups.queue.length}</Badge>
+                  </>
+                ),
+              },
+              {
+                key: "completed",
+                label: (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                    {t("inbox.completed")}
+                    <Badge variant="secondary">{groups.done.length}</Badge>
+                  </>
+                ),
+              },
+            ]}
+            active={activeTab}
+            onChange={setActiveTab}
+            showIndicator={false}
+            className="gap-1 rounded-lg bg-background p-1 shadow-sm ring-1 ring-border"
+            tabClassName={tabClass}
+            activeTabClassName="bg-accent text-accent-foreground"
+          />
+          {groups.done.length > 0 && (
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              onClick={() => setClearCompletedOpen(true)}
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("inbox.clearCompleted")}
+            </Button>
           )}
-          {items.filter((item) => item.state !== "dismissed").map((item) => {
-            const itemChoices = choices(item);
-            const chosen = selected[item.id] ?? item.manifest.selected_ids ?? [];
-            return (
-              <Card key={item.id} className="animate-card-in">
-                <CardContent className="space-y-3 pt-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                    <Checkbox checked={bulkSelected.has(item.id)} onChange={() => toggleBulk(item.id)} aria-label={`Select ${item.display_title || item.source_hostname || "pending import"}`} />
-                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                      {item.state === "completed" ? <CheckCircle2 className="h-4 w-4 text-success" /> : <Clock3 className="h-4 w-4" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h2 className="truncate text-sm font-semibold">{item.display_title || item.source_hostname || "Pending Import"}</h2>
-                      <a href={item.source_url ?? "#"} target="_blank" rel="noreferrer" className="flex items-center gap-1 truncate text-xs text-muted-foreground hover:text-foreground">{item.source_hostname}<ExternalLink className="h-3 w-3" /></a>
-                    </div>
-                    <Badge variant={item.state === "completed" ? "success" : item.state === "failed" ? "destructive" : item.state === "review" ? "warning" : "secondary"}>{item.state}</Badge>
-                  </div>
-
-                  {item.error_code && <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">{item.error_code.replaceAll("_", " ")}</p>}
-
-                  {!["importing", "completed", "dismissed"].includes(item.state) && (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <select value={item.target_collection_id ?? ""} onChange={(event) => void action(() => updatePendingImport(item.id, { collection_id: event.target.value ? Number(event.target.value) : null }))} className="h-9 rounded-md border border-input bg-background px-3 text-xs text-foreground" aria-label="Target Collection">
-                        <option value="">No collection selected</option>
-                        {collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.path}</option>)}
-                      </select>
-                      <Input defaultValue={item.requested_tags.join(", ")} onBlur={(event) => void action(() => updatePendingImport(item.id, { tags: event.target.value.split(",").map((tag) => tag.trim()).filter(Boolean) }))} placeholder="tags, comma separated" aria-label="Import tags" />
-                    </div>
-                  )}
-
-                  {itemChoices.length > 0 && item.state === "review" && (
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {itemChoices.map((choice) => (
-                        <label key={choice.id} className="flex cursor-pointer items-center gap-2 rounded-md border border-border p-2 text-xs hover:bg-muted">
-                          <Checkbox checked={chosen.includes(choice.id)} onChange={() => toggleChoice(item.id, choice.id)} />
-                          <span className="min-w-0 flex-1 truncate">{"name" in choice ? choice.name : choice.title}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap justify-end gap-2">
-                    {item.state === "review" && (
-                      <Button size="xs" onClick={() => void action(async () => {
-                        await updatePendingImport(item.id, { selected_ids: chosen });
-                        await importPendingImport(item.id, chosen);
-                      }, "Import started")}>Import</Button>
-                    )}
-                    {item.state === "failed" && item.retryable && <Button size="xs" variant="outline" onClick={() => void action(() => retryPendingImport(item.id), "Retry queued")}><RefreshCw className="h-3.5 w-3.5" /> Retry</Button>}
-                    {item.state === "completed" && item.resulting_model_id && <Button size="xs" variant="outline" asChild><Link href={`/models/${item.resulting_model_id}`}>Open Model</Link></Button>}
-                    {item.state !== "importing" && <Button size="xs" variant="ghost" onClick={() => void action(() => dismissPendingImport(item.id))}><Trash2 className="h-3.5 w-3.5" /> Dismiss</Button>}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
         </div>
-      )}
+        <div className="flex items-start gap-3 border-b px-4 py-4 sm:px-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            {activeTab === "queue" ? (
+              <Inbox className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <FileCheck2 className="h-4 w-4" aria-hidden="true" />
+            )}
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-foreground">
+              {activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {activeTab === "queue"
+                ? t("inbox.queueDescription")
+                : t("inbox.completedDescription")}
+            </p>
+          </div>
+        </div>
+        {loading ? (
+          <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : visibleItems.length ? (
+          <ImportList
+            label={activeTab === "queue" ? t("inbox.queueTitle") : t("inbox.completed")}
+            items={visibleItems}
+            locale={locale}
+            t={t}
+            retry={deps.retryPendingImport}
+            deletingId={deletingId}
+            onDelete={setDeleteTarget}
+          />
+        ) : (
+          <EmptyState
+            className="min-h-56 rounded-none border-0 shadow-none"
+            icon={activeTab === "queue" ? Inbox : FileCheck2}
+            title={
+              activeTab === "queue" ? t("inbox.emptyQueueTitle") : t("inbox.emptyCompletedTitle")
+            }
+            description={
+              activeTab === "queue"
+                ? t("inbox.emptyQueueDescription")
+                : t("inbox.emptyCompletedDescription")
+            }
+          />
+        )}
+      </Card>
+      <ConfirmModal
+        open={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => void deleteImport()}
+        title={
+          deleteTarget?.state === "completed"
+            ? t("inbox.deleteCompletedTitle")
+            : t("inbox.deleteTitle")
+        }
+        description={
+          deleteTarget?.state === "completed"
+            ? t("inbox.deleteCompletedDescription")
+            : t("inbox.deleteDescription")
+        }
+        confirmLabel={t("inbox.deleteConfirm")}
+        busy={deletingId !== null}
+      />
+      <ConfirmModal
+        open={clearCompletedOpen}
+        onClose={() => setClearCompletedOpen(false)}
+        onConfirm={() => void clearCompleted()}
+        title={t("inbox.clearCompletedTitle")}
+        description={t("inbox.clearCompletedDescription", {
+          count: String(groups.done.length),
+        })}
+        confirmLabel={t("inbox.clearCompleted")}
+        busy={clearingCompleted}
+      />
     </PageContainer>
   );
 }

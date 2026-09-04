@@ -1,3 +1,12 @@
+/**
+ * Notes and manuals living beside the models they belong to.
+ *
+ * Documents are the one part of the library that is edited in place rather than uploaded,
+ * so the round trip — write, save, reload, read back — is the whole contract. The PDF
+ * case is here because rendering one goes through pdf.js in the browser, which no unit
+ * test can stand in for.
+ */
+import { devices } from "@playwright/test";
 import { test, expect, type Page } from "./helpers";
 import { createCollectionViaVault } from "./util";
 
@@ -18,7 +27,7 @@ async function openDocsTab(page: Page, col: string): Promise<void> {
   await expect(
     page.getByRole("button", { name: /Add a description for this collection/ }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Documents" }).click();
+  await page.getByRole("tab", { name: "Documents" }).click();
   await expect(page.getByText("No documents here yet.")).toBeVisible();
 }
 
@@ -44,83 +53,115 @@ function minimalPdf(): Buffer {
   return Buffer.from(body, "latin1");
 }
 
-test("create, edit and preview a markdown document in a collection", async ({ page }) => {
-  const col = `e2e-docs-${Date.now()}`;
-  await makeCollection(page, col);
-  await openDocsTab(page, col);
+test.describe("documents", () => {
+  test("create, edit and preview a markdown document in a collection", async ({ page }) => {
+    const col = `e2e-docs-${Date.now()}`;
+    await makeCollection(page, col);
+    await openDocsTab(page, col);
 
-  // New markdown doc → editor (the name input is the lg/semibold header field;
-  // the top-bar search is also an <input>, so scope by class).
-  await page.getByRole("button", { name: "New document" }).click();
-  await expect(page).toHaveURL(/\/documents\/new/);
-  await page.locator("input.font-semibold").fill("Assembly guide");
-  await page.getByPlaceholder(/Write markdown/).fill("# Step one\n\nGlue part A to part B.");
-  await page.getByRole("button", { name: "Save" }).click();
+    // New markdown doc → editor (the name input is the lg/semibold header field;
+    // the top-bar search is also an <input>, so scope by class).
+    await page.getByRole("button", { name: "New document" }).click();
+    await expect(page).toHaveURL(/\/documents\/new/);
+    await page.locator("input.font-semibold").fill("Assembly guide");
+    // The table is the reason this body is not just a heading: GFM tables are an
+    // extension, so a renderer without it shows the pipes as literal text and a
+    // build guide's parts list becomes unreadable.
+    await page
+      .getByPlaceholder(/Write markdown/)
+      .fill(
+        "# Step one\n\nGlue part A to part B.\n\n| Part | Material |\n| --- | --- |\n| A | PLA |\n| B | PETG |",
+      );
+    await page.getByRole("button", { name: "Save" }).click();
 
-  // Saved → real row; the app keeps you in the editor. Switch to Preview to see
-  // the rendered markdown.
-  await expect(page).toHaveURL(/\/documents\/\d+$/);
-  await page.getByRole("button", { name: "Preview" }).click();
-  await expect(page.getByRole("heading", { name: "Step one" })).toBeVisible();
-  await expect(page.getByText("Glue part A to part B.")).toBeVisible();
+    // Saved → real row; the app keeps you in the editor. Switch to Preview to see
+    // the rendered markdown.
+    await expect(page).toHaveURL(/\/documents\/\d+$/);
+    await page.getByRole("button", { name: "Preview" }).click();
+    await expect(page.getByRole("heading", { name: "Step one" })).toBeVisible();
+    await expect(page.getByText("Glue part A to part B.")).toBeVisible();
+    await expect(page.getByRole("table")).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Part" })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Material" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "A", exact: true })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "PLA" })).toBeVisible();
 
-  // Edit an existing doc → Save returns to preview automatically.
-  await page.getByRole("button", { name: "Edit" }).click();
-  await page.getByPlaceholder(/Write markdown/).fill("# Step one\n\nUse the M3 bolts.");
-  await page.getByRole("button", { name: "Save" }).click();
-  await expect(page.getByText("Use the M3 bolts.")).toBeVisible();
+    // Edit an existing doc → Save returns to preview automatically.
+    await page.getByRole("button", { name: "Edit" }).click();
+    await page.getByPlaceholder(/Write markdown/).fill("# Step one\n\nUse the M3 bolts.");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Use the M3 bolts.")).toBeVisible();
 
-  // It shows up as a card back on the Documents tab.
-  await page.goto(`/?c=${col}&v=docs`);
-  const card = page.getByText("Assembly guide");
-  await expect(card).toBeVisible();
+    // It shows up as a card back on the Documents tab.
+    await page.goto(`/?c=${col}&v=docs`);
+    const card = page.getByText("Assembly guide");
+    await expect(card).toBeVisible();
 
-  // Cleanup: delete the doc through the shared confirmation dialog.
-  await card.hover();
-  await page.getByTitle("Delete document").click();
-  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText("No documents here yet.")).toBeVisible();
+    // Cleanup: delete the doc through the shared confirmation dialog.
+    await card.hover();
+    await page.getByTitle("Delete document").click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByText("No documents here yet.")).toBeVisible();
+  });
+
+  test("edit a collection README and have it persist", async ({ page }) => {
+    const col = `e2e-readme-${Date.now()}`;
+    await makeCollection(page, col);
+
+    await page.goto(`/?c=${col}`);
+    await page.getByRole("button", { name: /Add a description for this collection/ }).click();
+    await page
+      .getByPlaceholder(/short description of this collection/i)
+      .fill("## Printed parts\n\nDownload, slice, print.");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Printed parts" })).toBeVisible();
+
+    // Survives a reload — proves it persisted, not just optimistic UI.
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Printed parts" })).toBeVisible();
+  });
 });
 
-test("edit a collection README and have it persist", async ({ page }) => {
-  const col = `e2e-readme-${Date.now()}`;
-  await makeCollection(page, col);
+test.describe("PDF documents", () => {
+  test.use({
+    viewport: devices["Pixel 5"].viewport,
+    userAgent: devices["Pixel 5"].userAgent,
+    deviceScaleFactor: devices["Pixel 5"].deviceScaleFactor,
+    isMobile: devices["Pixel 5"].isMobile,
+    hasTouch: devices["Pixel 5"].hasTouch,
+  });
 
-  await page.goto(`/?c=${col}`);
-  await page.getByRole("button", { name: /Add a description for this collection/ }).click();
-  await page
-    .getByPlaceholder(/short description of this collection/i)
-    .fill("## Printed parts\n\nDownload, slice, print.");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Printed parts" })).toBeVisible();
+  test("renders an uploaded PDF in the pdf.js viewer", async ({ page }) => {
+    const col = `e2e-pdf-${Date.now()}`;
+    const workerRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("pdf.worker")) workerRequests.push(request.url());
+    });
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await makeCollection(page, col);
+    await openDocsTab(page, col);
+    await page.setViewportSize({ width: 393, height: 851 });
 
-  // Survives a reload — proves it persisted, not just optimistic UI.
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "Printed parts" })).toBeVisible();
-});
+    await page
+      .locator('input[accept=".pdf,.md,.markdown,.txt"]')
+      .setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: minimalPdf() });
 
-test("upload a PDF and render it in the pdf.js viewer", async ({ page }) => {
-  const col = `e2e-pdf-${Date.now()}`;
-  await makeCollection(page, col);
-  await openDocsTab(page, col);
+    // Lands on the doc detail page with the themed pdf.js viewer.
+    await expect(page).toHaveURL(/\/documents\/\d+$/);
+    // Worker + render can take a moment; assert the page counter resolves.
+    await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
+    expect(workerRequests).toHaveLength(1);
+    expect(workerRequests[0]).toContain("?cache=pdfjs-worker-compat-v1");
+    await expect(page.getByTitle("Zoom in")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
 
-  await page
-    .locator('input[accept=".pdf,.md,.markdown,.txt"]')
-    .setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: minimalPdf() });
-
-  // Lands on the doc detail page with the themed pdf.js viewer.
-  await expect(page).toHaveURL(/\/documents\/\d+$/);
-  // Worker + render can take a moment; assert the page counter resolves.
-  await expect(page.getByText("1 / 1")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTitle("Zoom in")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
-
-  // Cleanup: back to the Documents tab and delete the only doc there.
-  await page.goto(`/?c=${col}&v=docs`);
-  const docCard = page.locator('a[href^="/documents/"]').first();
-  await expect(docCard).toBeVisible();
-  await docCard.hover();
-  await page.getByTitle("Delete document").click();
-  await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
-  await expect(page.getByText("No documents here yet.")).toBeVisible();
+    // Cleanup: back to the Documents tab and delete the only doc there.
+    await page.goto(`/?c=${col}&v=docs`);
+    const docCard = page.locator('a[href^="/documents/"]').first();
+    await expect(docCard).toBeVisible();
+    await docCard.hover();
+    await page.getByTitle("Delete document").click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByText("No documents here yet.")).toBeVisible();
+  });
 });

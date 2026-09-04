@@ -1,30 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import {
-  Check,
-  CheckCircle2,
-  Clock,
-  Loader2,
-  Plus,
-  RefreshCw,
-  XCircle,
-} from "lucide-react";
+import { Check, CheckCircle2, Clock, Loader2, Plus, RefreshCw, XCircle } from "lucide-react";
 
-import {
-  createManualPrintJob,
-  getModelPrintJobs,
-  importPrintJobsFromPrinter,
-} from "@/lib/api";
+import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
 import { usePrinters, useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { formatCost, formatDuration, formatGrams, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import { FileRead, ModelPrintJobRead } from "@/types";
+import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
+import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
 import { PRINT_JOB_PRESENTATION, printJobToneClass } from "./presentation";
 import { Localized } from "@/components/ui/localized";
 
-type PrintHistoryMode = "manual" | "auto";
+const PRINT_HISTORY_MODES = ["manual", "auto"] as const;
+type PrintHistoryMode = (typeof PRINT_HISTORY_MODES)[number];
 
 export function PrintHistorySection({
   jobs,
@@ -42,12 +33,14 @@ export function PrintHistorySection({
 
   // Manual form state
   const printers = usePrinters().data ?? [];
-  const [selectedPrinterId, setSelectedPrinterId] = useState<number | "">("");
+  // `null` is "nothing selected"; the empty-string the <select> needs for that is
+  // produced at the JSX boundary, so the ids stay numbers everywhere else.
+  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
   // When the printer isn't a registered one, log against this free-text name.
   const [adhocPrinter, setAdhocPrinter] = useState(false);
   const [adhocPrinterName, setAdhocPrinterName] = useState("");
-  const [selectedFileId, setSelectedFileId] = useState<number | "">(gcodeFiles[0]?.id ?? "");
-  const [selectedSpoolId, setSelectedSpoolId] = useState<number | "">("");
+  const [selectedFileId, setSelectedFileId] = useState<number | null>(gcodeFiles[0]?.id ?? null);
+  const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
   const [jobState, setJobState] = useState("completed");
   const [startedAt, setStartedAt] = useState("");
   const [finishedAt, setFinishedAt] = useState("");
@@ -66,11 +59,11 @@ export function PrintHistorySection({
   function openAdd() {
     setShowAdd(true);
     setMode("manual");
-    setSelectedPrinterId("");
+    setSelectedPrinterId(null);
     setAdhocPrinter(false);
     setAdhocPrinterName("");
-    setSelectedFileId(gcodeFiles[0]?.id ?? "");
-    setSelectedSpoolId("");
+    setSelectedFileId(gcodeFiles[0]?.id ?? null);
+    setSelectedSpoolId(null);
     setJobState("completed");
     setStartedAt("");
     setFinishedAt("");
@@ -89,18 +82,14 @@ export function PrintHistorySection({
     setSubmitting(true);
     try {
       const spool =
-        selectedSpoolId !== ""
-          ? spools.find((s) => s.id === selectedSpoolId)
-          : undefined;
+        selectedSpoolId !== null ? spools.find((s) => s.id === selectedSpoolId) : undefined;
       const job = await createManualPrintJob(modelId, {
-        printer_id: adhocPrinter ? null : (selectedPrinterId as number),
+        printer_id: adhocPrinter ? null : selectedPrinterId,
         printer_name: adhocPrinter ? adhocPrinterName.trim() : null,
-        file_id: selectedFileId as number,
+        file_id: selectedFileId,
         state: jobState,
-        spool_id: selectedSpoolId === "" ? null : (selectedSpoolId as number),
-        spool_name: spool
-          ? spool.filament_name || spool.name || `Spool ${spool.id}`
-          : null,
+        spool_id: selectedSpoolId,
+        spool_name: spool ? spool.filament_name || spool.name || `Spool ${spool.id}` : null,
         spool_filament_id: spool ? spool.filament_id : null,
         started_at: startedAt || null,
         finished_at: finishedAt || null,
@@ -122,7 +111,7 @@ export function PrintHistorySection({
     setImportResults([]);
     setImportDone(false);
     try {
-      const results = await importPrintJobsFromPrinter(modelId, selectedPrinterId as number);
+      const results = await importPrintJobsFromPrinter(modelId, selectedPrinterId);
       setImportResults(results.map((r) => ({ filename: r.filename, imported: r.imported })));
       setImportDone(true);
       const imported = results.filter((r) => r.imported).length;
@@ -141,293 +130,360 @@ export function PrintHistorySection({
   }
 
   return (
-    <Localized><section>
-      <div className="flex items-center justify-between mb-4 pb-1 border-b border-outline-variant">
-        <h2 className="text-lg font-semibold text-on-surface flex items-center gap-2">
-          <Clock className="h-4 w-4" /> Print History
-        </h2>
-        <button
-          onClick={openAdd}
-          className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low"
-        >
-          <Plus className="h-3.5 w-3.5" /> Add Record
-        </button>
-      </div>
+    <Localized>
+      <section>
+        <div className="flex items-center justify-between mb-4 pb-1 border-b border-outline-variant">
+          <h2 className="text-lg font-semibold text-on-surface flex items-center gap-2">
+            <Clock className="h-4 w-4" /> Print History
+          </h2>
+          <button
+            onClick={openAdd}
+            className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add Record
+          </button>
+        </div>
 
-      {/* Add record panel */}
-      {showAdd && (
-        <div className="mb-4 border border-outline-variant rounded bg-surface-container-low p-3 space-y-3">
-          {/* Mode toggle */}
-          <div className="flex gap-1">
-            {(["manual", "auto"] as PrintHistoryMode[]).map((m) => (
-              <button
-                key={m}
-                onClick={() => { setMode(m); setImportResults([]); setImportDone(false); }}
-                className={`px-3 py-1 font-mono text-3xs uppercase tracking-wider rounded transition-colors ${
-                  mode === m
-                    ? "bg-accent text-accent-foreground"
-                    : "text-on-surface-variant hover:bg-surface-container-high"
-                }`}
-              >
-                {m === "manual" ? "Manual Entry" : "Auto from Printer"}
-              </button>
-            ))}
-          </div>
+        {/* Add record panel */}
+        {showAdd && (
+          <div className="mb-4 border border-outline-variant rounded bg-surface-container-low p-3 space-y-3">
+            {/* Mode toggle */}
+            <div className="flex gap-1">
+              {PRINT_HISTORY_MODES.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => {
+                    setMode(m);
+                    setImportResults([]);
+                    setImportDone(false);
+                  }}
+                  className={`px-3 py-1 font-mono text-3xs uppercase tracking-wider rounded transition-colors ${
+                    mode === m
+                      ? "bg-accent text-accent-foreground"
+                      : "text-on-surface-variant hover:bg-surface-container-high"
+                  }`}
+                >
+                  {m === "manual" ? "Manual Entry" : "Auto from Printer"}
+                </button>
+              ))}
+            </div>
 
-          {mode === "manual" ? (
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Printer</label>
-                  <select
-                    value={adhocPrinter ? "__adhoc__" : selectedPrinterId}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (v === "__adhoc__") {
-                        setAdhocPrinter(true);
-                        setSelectedPrinterId("");
-                      } else {
-                        setAdhocPrinter(false);
-                        setSelectedPrinterId(v ? Number(v) : "");
+            {mode === "manual" ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Printer
+                    </label>
+                    <select
+                      value={adhocPrinter ? "__adhoc__" : (selectedPrinterId ?? "")}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === "__adhoc__") {
+                          setAdhocPrinter(true);
+                          setSelectedPrinterId(null);
+                        } else {
+                          setAdhocPrinter(false);
+                          setSelectedPrinterId(v ? Number(v) : null);
+                        }
+                      }}
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">Select printer…</option>
+                      {printers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                      <option value="__adhoc__">Other (not listed)…</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      G-code Revision
+                    </label>
+                    <select
+                      value={selectedFileId ?? ""}
+                      onChange={(e) =>
+                        setSelectedFileId(e.target.value ? Number(e.target.value) : null)
                       }
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">Select revision…</option>
+                      {gcodeFiles.map((f, i) => (
+                        <option key={f.id} value={f.id}>
+                          Rev {i + 1} — {f.original_filename}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                {adhocPrinter && (
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Printer name
+                    </label>
+                    <input
+                      value={adhocPrinterName}
+                      onChange={(e) => setAdhocPrinterName(e.target.value)}
+                      maxLength={128}
+                      placeholder="e.g. Garage Prusa MK4"
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    Result
+                  </label>
+                  <select
+                    value={jobState}
+                    onChange={(e) => setJobState(e.target.value)}
+                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+                {spoolmanEnabled && spools.length > 0 && (
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Spool (opt.)
+                    </label>
+                    <select
+                      value={selectedSpoolId ?? ""}
+                      onChange={(e) =>
+                        setSelectedSpoolId(e.target.value ? Number(e.target.value) : null)
+                      }
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">No spool</option>
+                      {spools.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {(s.filament_name || s.name || `Spool ${s.id}`) +
+                            (s.vendor_name ? ` · ${s.vendor_name}` : "") +
+                            (s.remaining_weight != null
+                              ? ` (${formatGrams(s.remaining_weight)} left)`
+                              : "")}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Started (opt.)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={startedAt}
+                      onChange={(e) => setStartedAt(e.target.value)}
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Finished (opt.)
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={finishedAt}
+                      onChange={(e) => setFinishedAt(e.target.value)}
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+                {jobState === "failed" && (
+                  <div>
+                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                      Error (opt.)
+                    </label>
+                    <input
+                      value={jobError}
+                      onChange={(e) => setJobError(e.target.value)}
+                      placeholder="Describe what went wrong…"
+                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={submitManual}
+                    disabled={submitting || !manualPrinterReady || !selectedFileId}
+                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                  >
+                    {submitting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setShowAdd(false)}
+                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="font-mono text-2xs text-on-surface-variant">
+                  Fetch recent print history from a Moonraker printer and import jobs matching this
+                  model&apos;s G-code files.
+                </p>
+                <div>
+                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    Printer
+                  </label>
+                  <select
+                    value={selectedPrinterId ?? ""}
+                    onChange={(e) => {
+                      setSelectedPrinterId(e.target.value ? Number(e.target.value) : null);
+                      setImportResults([]);
+                      setImportDone(false);
                     }}
                     className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">Select printer…</option>
-                    {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    <option value="__adhoc__">Other (not listed)…</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">G-code Revision</label>
-                  <select
-                    value={selectedFileId}
-                    onChange={(e) => setSelectedFileId(e.target.value ? Number(e.target.value) : "")}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="">Select revision…</option>
-                    {gcodeFiles.map((f, i) => (
-                      <option key={f.id} value={f.id}>Rev {i + 1} — {f.original_filename}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {adhocPrinter && (
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Printer name</label>
-                  <input
-                    value={adhocPrinterName}
-                    onChange={(e) => setAdhocPrinterName(e.target.value)}
-                    maxLength={128}
-                    placeholder="e.g. Garage Prusa MK4"
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-              )}
-              <div>
-                <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Result</label>
-                <select
-                  value={jobState}
-                  onChange={(e) => setJobState(e.target.value)}
-                  className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="completed">Completed</option>
-                  <option value="failed">Failed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-              {spoolmanEnabled && spools.length > 0 && (
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Spool (opt.)</label>
-                  <select
-                    value={selectedSpoolId}
-                    onChange={(e) => setSelectedSpoolId(e.target.value ? Number(e.target.value) : "")}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  >
-                    <option value="">No spool</option>
-                    {spools.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {(s.filament_name || s.name || `Spool ${s.id}`) +
-                          (s.vendor_name ? ` · ${s.vendor_name}` : "") +
-                          (s.remaining_weight != null
-                            ? ` (${formatGrams(s.remaining_weight)} left)`
-                            : "")}
+                    {printers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
                       </option>
                     ))}
                   </select>
                 </div>
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Started (opt.)</label>
-                  <input
-                    type="datetime-local"
-                    value={startedAt}
-                    onChange={(e) => setStartedAt(e.target.value)}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Finished (opt.)</label>
-                  <input
-                    type="datetime-local"
-                    value={finishedAt}
-                    onChange={(e) => setFinishedAt(e.target.value)}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
+                {importDone && importResults.length > 0 && (
+                  <div className="space-y-1">
+                    {importResults.map((r) => (
+                      <div key={r.filename} className="flex items-center gap-2 font-mono text-2xs">
+                        {r.imported ? (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5 text-on-surface-variant shrink-0" />
+                        )}
+                        <span
+                          className={r.imported ? "text-on-surface" : "text-on-surface-variant"}
+                        >
+                          {r.filename}
+                        </span>
+                        <span className="opacity-50">
+                          {r.imported ? "imported" : "already exists"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {importDone && importResults.length === 0 && (
+                  <p className="font-mono text-2xs text-on-surface-variant">
+                    No matching jobs found on this printer.
+                  </p>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={runAutoImport}
+                    disabled={importing || !selectedPrinterId}
+                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                  >
+                    {importing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    Fetch &amp; Import
+                  </button>
+                  <button
+                    onClick={() => setShowAdd(false)}
+                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                  >
+                    Close
+                  </button>
                 </div>
               </div>
-              {jobState === "failed" && (
-                <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Error (opt.)</label>
-                  <input
-                    value={jobError}
-                    onChange={(e) => setJobError(e.target.value)}
-                    placeholder="Describe what went wrong…"
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                  />
-                </div>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={submitManual}
-                  disabled={submitting || !manualPrinterReady || !selectedFileId}
-                  className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                >
-                  {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                  Save
-                </button>
-                <button onClick={() => setShowAdd(false)} className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <p className="font-mono text-2xs text-on-surface-variant">
-                Fetch recent print history from a Moonraker printer and import jobs matching this model&apos;s G-code files.
-              </p>
-              <div>
-                <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">Printer</label>
-                <select
-                  value={selectedPrinterId}
-                  onChange={(e) => { setSelectedPrinterId(e.target.value ? Number(e.target.value) : ""); setImportResults([]); setImportDone(false); }}
-                  className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-                >
-                  <option value="">Select printer…</option>
-                  {printers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              {importDone && importResults.length > 0 && (
-                <div className="space-y-1">
-                  {importResults.map((r) => (
-                    <div key={r.filename} className="flex items-center gap-2 font-mono text-2xs">
-                      {r.imported
-                        ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-                        : <XCircle className="h-3.5 w-3.5 text-on-surface-variant shrink-0" />
-                      }
-                      <span className={r.imported ? "text-on-surface" : "text-on-surface-variant"}>{r.filename}</span>
-                      <span className="opacity-50">{r.imported ? "imported" : "already exists"}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {importDone && importResults.length === 0 && (
-                <p className="font-mono text-2xs text-on-surface-variant">No matching jobs found on this printer.</p>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={runAutoImport}
-                  disabled={importing || !selectedPrinterId}
-                  className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
-                >
-                  {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  Fetch &amp; Import
-                </button>
-                <button onClick={() => setShowAdd(false)} className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors">
-                  Close
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      {jobs.length === 0 ? (
-        <p className="font-mono text-xs text-on-surface-variant">
-          No print history yet. Add a record manually or import from a printer.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {jobs.map((job) => {
-            const present = PRINT_JOB_PRESENTATION[job.state];
-            const Icon =
-              present.tone === "success" ? CheckCircle2 : present.tone === "error" ? XCircle : Clock;
-            return (
-              <div
-                key={job.id}
-                className="p-3 border border-outline-variant rounded bg-surface space-y-1"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Icon
-                      className={`h-4 w-4 shrink-0 ${
-                        present.tone === "success"
-                          ? "text-emerald-600"
-                          : present.tone === "error"
-                            ? "text-error"
-                            : "text-amber-600"
-                      }`}
-                    />
-                    <span className="font-mono text-[13px] text-on-surface truncate">
-                      {job.source === "external"
-                        ? job.external_display_name ?? job.remote_filename
-                        : `Rev ${job.gcode_revision_number ?? "—"}`} · {job.printer_name}
+        {jobs.length === 0 ? (
+          <p className="font-mono text-xs text-on-surface-variant">
+            No print history yet. Add a record manually or import from a printer.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {jobs.map((job) => {
+              const present = PRINT_JOB_PRESENTATION[job.state];
+              const Icon =
+                present.tone === "success"
+                  ? CheckCircle2
+                  : present.tone === "error"
+                    ? XCircle
+                    : Clock;
+              return (
+                <div
+                  key={job.id}
+                  className="p-3 border border-outline-variant rounded bg-surface space-y-1"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Icon
+                        className={`h-4 w-4 shrink-0 ${
+                          present.tone === "success"
+                            ? "text-emerald-600"
+                            : present.tone === "error"
+                              ? "text-error"
+                              : "text-amber-600"
+                        }`}
+                      />
+                      <span className="font-mono text-[13px] text-on-surface truncate">
+                        {job.source === "external"
+                          ? printJobArtifactLabel(job)
+                          : `Rev ${job.gcode_revision_number ?? "—"}`}{" "}
+                        · {job.printer_name}
+                      </span>
+                    </div>
+                    <span
+                      className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${printJobToneClass(present.tone)}`}
+                    >
+                      {present.label}
                     </span>
                   </div>
-                  <span className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${printJobToneClass(present.tone)}`}>
-                    {present.label}
-                  </span>
+                  <p className="font-mono text-2xs text-on-surface-variant">
+                    {job.material_type ? `${job.material_type} · ` : ""}
+                    {timeAgo(job.created_at)}
+                  </p>
+                  {job.source === "external" && (
+                    <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
+                      {job.artifact_evidence.replaceAll("_", " ")}
+                    </p>
+                  )}
+                  <PrintJobReproducibility job={job} previewHref={`/models/${modelId}`} />
+                  {(job.actual_duration_s != null || job.filament_used_g != null) && (
+                    <p className="font-mono text-2xs text-on-surface-variant">
+                      <span className="text-emerald-600">measured</span>
+                      {job.actual_duration_s != null
+                        ? ` · ${formatDuration(job.actual_duration_s)}`
+                        : ""}
+                      {job.filament_used_g != null ? ` · ${formatGrams(job.filament_used_g)}` : ""}
+                      {job.filament_cost != null ? ` · ${formatCost(job.filament_cost)}` : ""}
+                    </p>
+                  )}
+                  {job.spool_name && (
+                    <p className="font-mono text-2xs text-on-surface-variant">
+                      spool · {job.spool_name}
+                    </p>
+                  )}
+                  {job.error && (
+                    <p className="font-mono text-2xs text-error break-words">{job.error}</p>
+                  )}
                 </div>
-                <p className="font-mono text-2xs text-on-surface-variant">
-                  {job.material_type ? `${job.material_type} · ` : ""}
-                  {timeAgo(job.created_at)}
-                </p>
-                {job.source === "external" && (
-                  <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
-                    {job.artifact_evidence.replaceAll("_", " ")}
-                  </p>
-                )}
-                {(job.actual_duration_s != null ||
-                  job.filament_used_g != null) && (
-                  <p className="font-mono text-2xs text-on-surface-variant">
-                    <span className="text-emerald-600">measured</span>
-                    {job.actual_duration_s != null
-                      ? ` · ${formatDuration(job.actual_duration_s)}`
-                      : ""}
-                    {job.filament_used_g != null
-                      ? ` · ${formatGrams(job.filament_used_g)}`
-                      : ""}
-                    {job.filament_cost != null
-                      ? ` · ${formatCost(job.filament_cost)}`
-                      : ""}
-                  </p>
-                )}
-                {job.spool_name && (
-                  <p className="font-mono text-2xs text-on-surface-variant">
-                    spool · {job.spool_name}
-                  </p>
-                )}
-                {job.error && (
-                  <p className="font-mono text-2xs text-error break-words">
-                    {job.error}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section></Localized>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    </Localized>
   );
 }

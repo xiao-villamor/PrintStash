@@ -26,7 +26,7 @@ const SLICERS: Slicer[] = [
 ];
 
 function isMacOS() {
-  if (typeof navigator === "undefined") return false;
+  if (!("navigator" in globalThis)) return false;
   // navigator.platform is deprecated but still the most reliable signal here;
   // fall back to the user-agent string.
   const platform = navigator.platform ?? "";
@@ -67,10 +67,9 @@ export function SlicerOpenButton({
       // send our bearer token. The backend returns a short-lived, filename-
       // bearing download URL (the path carries the extension so the slicer can
       // detect the format) with a file-scoped token embedded.
-      const { url } = await getJson<{ url: string }>(
-        `/api/v1/files/${fileId}/slicer-url`,
-        { fresh: true },
-      );
+      const { url } = await getJson<{ url: string }>(`/api/v1/files/${fileId}/slicer-url`, {
+        fresh: true,
+      });
       const fileUrl = `${window.location.origin}${url}`;
       window.location.assign(slicerHref(scheme, fileUrl));
     } catch {

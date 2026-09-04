@@ -1,0 +1,115 @@
+# Authentik Blueprint v1. All values are disposable and are supplied through
+# Compose environment variables. This file creates the OIDC client plus two
+# users so both ordinary and admin-group provisioning can be checked.
+version: 1
+metadata:
+  name: PrintStash manual-test OIDC
+context:
+  client_id: !Env [PRINTSTASH_OIDC_CLIENT_ID, printstash-manual]
+  client_secret: !Env [PRINTSTASH_OIDC_CLIENT_SECRET, printstash-manual-client-secret]
+  redirect_uri: !Env [PRINTSTASH_OIDC_REDIRECT_URI, http://localhost:3100/api/v1/auth/oidc/callback]
+  admin_group: !Env [PRINTSTASH_OIDC_ADMIN_GROUP, printstash-admins]
+  admin_username: !Env [PRINTSTASH_OIDC_ADMIN_USERNAME, printstash-admin]
+  admin_password: !Env [PRINTSTASH_OIDC_ADMIN_PASSWORD, printstash-admin-test]
+  admin_email: !Env [PRINTSTASH_OIDC_ADMIN_EMAIL, printstash-admin@example.test]
+  user_username: !Env [PRINTSTASH_OIDC_USER_USERNAME, printstash-user]
+  user_password: !Env [PRINTSTASH_OIDC_USER_PASSWORD, printstash-user-test]
+  user_email: !Env [PRINTSTASH_OIDC_USER_EMAIL, printstash-user@example.test]
+entries:
+  - model: authentik_core.group
+    id: printstash-admin-group
+    state: present
+    identifiers:
+      name: !Context admin_group
+    attrs:
+      name: !Context admin_group
+      is_superuser: false
+
+  - model: authentik_core.group
+    id: printstash-user-group
+    state: present
+    identifiers:
+      name: printstash-users
+    attrs:
+      name: printstash-users
+      is_superuser: false
+
+  - model: authentik_core.user
+    id: printstash-admin-user
+    state: present
+    identifiers:
+      username: !Context admin_username
+    attrs:
+      username: !Context admin_username
+      name: PrintStash Manual Admin
+      email: !Context admin_email
+      password: !Context admin_password
+      is_active: true
+      groups:
+        - !KeyOf printstash-admin-group
+
+  - model: authentik_core.user
+    id: printstash-user
+    state: present
+    identifiers:
+      username: !Context user_username
+    attrs:
+      username: !Context user_username
+      name: PrintStash Manual User
+      email: !Context user_email
+      password: !Context user_password
+      is_active: true
+      groups:
+        - !KeyOf printstash-user-group
+
+  # PrintStash requests the conventional `groups` scope explicitly. Authentik
+  # includes groups in its built-in profile mapping, but does not necessarily
+  # ship a standalone groups scope, so create one for strict scope validation.
+  - model: authentik_providers_oauth2.scopemapping
+    id: printstash-groups-scope
+    state: present
+    identifiers:
+      name: PrintStash Groups OIDC
+    attrs:
+      name: PrintStash Groups OIDC
+      scope_name: groups
+      description: PrintStash test group membership
+      expression: |
+        return {"groups": [group.name for group in request.user.groups.all()]}
+
+  - model: authentik_providers_oauth2.oauth2provider
+    id: printstash-oidc-provider
+    state: present
+    identifiers:
+      name: PrintStash Manual OIDC
+    attrs:
+      name: PrintStash Manual OIDC
+      client_type: confidential
+      client_id: !Context client_id
+      client_secret: !Context client_secret
+      grant_types:
+        - authorization_code
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      issuer_mode: per_provider
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+      redirect_uris:
+        - matching_mode: strict
+          url: !Context redirect_uri
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, profile]]
+        - !KeyOf printstash-groups-scope
+
+  - model: authentik_core.application
+    id: printstash-oidc-application
+    state: present
+    identifiers:
+      slug: printstash
+    attrs:
+      name: PrintStash
+      slug: printstash
+      provider: !KeyOf printstash-oidc-provider
+      policy_engine_mode: any

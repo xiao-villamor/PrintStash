@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Import model to PrintStash</title>
+  </head>
+  <body>
+    <main>
+      <header class="header">
+        <img class="brand-mark" src="/icon.svg" alt="" width="36" height="36" />
+        <div>
+          <p class="eyebrow">PrintStash</p>
+          <h1>Model importer</h1>
+          <p class="release-version" id="runtime-marker">Version</p>
+        </div>
+      </header>
+
+      <section
+        id="connection-status"
+        class="connection-status"
+        data-state="checking"
+        aria-live="polite"
+      >
+        <span class="connection-indicator" aria-hidden="true"></span>
+        <div class="connection-copy">
+          <p id="connection-title" class="connection-title">Checking connection…</p>
+          <p id="connection-detail" class="connection-detail">Reading saved settings</p>
+        </div>
+        <button id="edit-connection" class="text-button" type="button" hidden>Edit</button>
+      </section>
+
+      <section class="page-context" aria-labelledby="current-page-label">
+        <p id="current-page-label" class="section-label">Current page</p>
+        <p id="page" class="page-title">Reading current page…</p>
+        <p id="source" class="source">Detecting a supported model source…</p>
+      </section>
+
+      <section
+        id="status"
+        class="status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        hidden
+      >
+        <p id="status-title" class="status-title" hidden></p>
+        <p id="status-message" class="status-message"></p>
+        <details id="status-details" class="status-details" hidden>
+          <summary>Technical details</summary>
+          <code id="status-code"></code>
+        </details>
+      </section>
+
+      <section id="connection-panel" class="connection-panel" aria-labelledby="connection-label">
+        <div class="section-heading">
+          <div>
+            <p id="connection-label" class="section-label">Connect PrintStash</p>
+            <p class="section-description">
+              Pair this browser without saving your PrintStash login.
+            </p>
+          </div>
+          <div class="connection-actions">
+            <button id="disconnect" class="text-button destructive" type="button" hidden>
+              Disconnect
+            </button>
+            <button id="cancel-edit" class="text-button" type="button" hidden>Cancel</button>
+          </div>
+        </div>
+        <form id="connection-form">
+          <label
+            ><span>Vault URL</span
+            ><input
+              id="vault"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              spellcheck="false"
+              placeholder="https://prints.example.com"
+              required
+          /></label>
+          <label
+            ><span>Pairing code</span
+            ><input
+              id="pairing-code"
+              type="password"
+              autocomplete="one-time-code"
+              spellcheck="false"
+              placeholder="Code from PrintStash Settings"
+          /></label>
+          <p class="credential-help">
+            Create a browser pairing code in PrintStash Settings, then paste it here. The code is
+            exchanged once for a browser-only credential.
+          </p>
+          <details class="credential-help">
+            <summary>Use legacy API-key setup</summary>
+            <label
+              ><span>Username</span
+              ><input
+                id="username"
+                type="text"
+                autocomplete="username"
+                spellcheck="false"
+                placeholder="your username" /></label
+            ><label
+              ><span>Named API key</span
+              ><input
+                id="key"
+                type="password"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="psk_…"
+            /></label>
+          </details>
+          <div class="setup-actions">
+            <button id="open-api-settings" class="secondary" type="button">Open settings</button>
+            <button id="connect" type="submit">Pair browser</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="import-panel" class="import-panel" aria-labelledby="import-label" hidden>
+        <div>
+          <p id="import-label" class="section-label">Pending Imports</p>
+          <p id="import-hint" class="section-description">
+            Connect PrintStash to enable importing.
+          </p>
+        </div>
+        <fieldset id="candidate-panel" class="candidate-panel" hidden>
+          <legend>Select Printables files</legend>
+          <div id="candidate-list" class="candidate-list"></div>
+        </fieldset>
+        <fieldset id="manual-file-panel" class="candidate-panel" hidden>
+          <legend>Attach downloaded model file</legend>
+          <input
+            id="manual-file"
+            type="file"
+            accept=".3mf,.stl,.obj,.step,.stp,.gcode,.g,.gco,.bgcode,.zip"
+          />
+        </fieldset>
+        <button id="capture" class="wide" type="button" disabled>Send to Pending Imports</button>
+      </section>
+      <button id="open-inbox" class="secondary wide" hidden>Open Pending Imports</button>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

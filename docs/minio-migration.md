@@ -35,8 +35,9 @@ export SEAWEEDFS_MIGRATION_TARGET_BUCKET=printstash-vault
 ```
 
 Use the credentials and bucket name from the existing deployment when they
-differ. The temporary MinIO API and console bind to host ports 19000 and 19001;
-override `MINIO_MIGRATION_API_PORT` or `MINIO_MIGRATION_CONSOLE_PORT` if needed.
+differ. The temporary MinIO API and console stay on the internal Compose network
+and are not published to host ports. Use `docker compose exec` if you need to
+inspect the migration containers directly.
 
 ## 3. Copy and verify
 

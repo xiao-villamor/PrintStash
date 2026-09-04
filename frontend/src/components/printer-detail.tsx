@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
+import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
 import {
   MoonrakerConfigRead,
   PrintJobRead,
@@ -39,7 +40,9 @@ import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { FleetMaintenancePanel } from "@/components/fleet-panels";
 import { PrinterMaterials } from "@/components/printer-materials";
+import { PrintJobReproducibility } from "@/components/print-job-reproducibility";
 import { cn } from "@/lib/utils";
+import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 import { Localized } from "@/components/ui/localized";
 import { PRINTER_MODEL_OPTIONS, providerAddress, providerLabel } from "@/lib/printer-providers";
 import {
@@ -69,14 +72,14 @@ const PREHEAT_PRESETS: { name: string; hotend: number; bed: number }[] = [
   { name: "ABS", hotend: 245, bed: 100 },
 ];
 
-const STATUS_COLORS: Record<PrinterStatus, string> = {
+const STATUS_COLORS = {
   ready: "bg-success",
   printing: "bg-primary",
   paused: "bg-warning",
   offline: "bg-muted-foreground",
   unknown: "bg-muted-foreground",
   error: "bg-destructive",
-};
+} satisfies Record<PrinterStatus, string>;
 
 const BTN_SECONDARY = cn(buttonVariants({ variant: "outline", size: "xs" }), "hover:bg-muted");
 const BTN_DANGER = cn(
@@ -84,7 +87,8 @@ const BTN_DANGER = cn(
   "border-red-300/50 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40",
 );
 const SECTION_CLASS = "overflow-hidden rounded-lg border border-border bg-background";
-const SECTION_HEADER_CLASS = "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
+const SECTION_HEADER_CLASS =
+  "flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4";
 
 function checkLabel(name: string): string {
   return name.replaceAll("_", " ");
@@ -94,24 +98,34 @@ function actionLabel(name: string): string {
   return name.replaceAll("_", " ");
 }
 
-function deepMerge<T extends Record<string, any>>(a: T, b: Partial<T>): T {
-  const out: any = { ...a };
-  for (const k of Object.keys(b)) {
-    const av = (a as any)[k];
-    const bv = (b as any)[k];
-    if (
-      av &&
-      bv &&
-      typeof av === "object" &&
-      typeof bv === "object" &&
-      !Array.isArray(av) &&
-      !Array.isArray(bv)
-    ) {
-      out[k] = deepMerge(av, bv);
-    } else {
-      out[k] = bv;
-    }
-  }
+/**
+ * A nested printer object inside a snapshot. `instanceof Object` is false for every
+ * JSON scalar and for null, and `Array.isArray` peels off `toolhead.position` and
+ * friends, leaving exactly the values that are worth merging into.
+ */
+function isSnapshotSection(value: ProviderJsonValue): value is ProviderJsonObject {
+  return value instanceof Object && !Array.isArray(value);
+}
+
+/**
+ * Fold one field of a Moonraker `update` patch over the field the snapshot already
+ * holds. A patch carries only what changed, so two nested objects merge key-by-key;
+ * arrays and scalars replace the previous value wholesale.
+ */
+function mergeSnapshotField(
+  previous: ProviderJsonValue,
+  next: ProviderJsonValue,
+): ProviderJsonValue {
+  if (!isSnapshotSection(previous) || !isSnapshotSection(next)) return next;
+  const merged: ProviderJsonObject = { ...previous };
+  for (const k of Object.keys(next)) merged[k] = mergeSnapshotField(previous[k], next[k]);
+  return merged;
+}
+
+/** Apply a Moonraker `update` patch to the held snapshot without dropping untouched fields. */
+function mergeSnapshot(a: PrinterSnapshot, b: PrinterSnapshot): PrinterSnapshot {
+  const out: PrinterSnapshot = { ...a };
+  for (const k of Object.keys(b)) out[k] = mergeSnapshotField(a[k], b[k]);
   return out;
 }
 
@@ -123,9 +137,7 @@ export function PrinterDetailPage({
   initialPrinter?: PrinterRead;
 }) {
   const auth = useRequireAuth();
-  const [printer, setPrinter] = useState<PrinterRead | null>(
-    initialPrinter ?? null,
-  );
+  const [printer, setPrinter] = useState<PrinterRead | null>(initialPrinter ?? null);
   const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
   const [moonrakerConfig, setMoonrakerConfig] = useState<MoonrakerConfigRead | null>(null);
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
@@ -137,7 +149,16 @@ export function PrinterDetailPage({
   const [machineBusy, setMachineBusy] = useState<string | null>(null);
   const [hotendTarget, setHotendTarget] = useState("");
   const [bedTarget, setBedTarget] = useState("");
-  const [activeTab, setActiveTab] = useState<"status" | "files" | "jobs" | "materials" | "maintenance" | "config" | "diagnostics" | "settings">("status");
+  const [activeTab, setActiveTab] = useState<
+    | "status"
+    | "files"
+    | "jobs"
+    | "materials"
+    | "maintenance"
+    | "config"
+    | "diagnostics"
+    | "settings"
+  >("status");
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
@@ -212,7 +233,7 @@ export function PrinterDetailPage({
           if (msg.type === "snapshot") {
             setSnapshot(msg.data || {});
           } else if (msg.type === "update") {
-            setSnapshot((prev) => deepMerge(prev, msg.data || {}));
+            setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
           }
           const state = msg?.data?.print_stats?.state;
           if (state) loadJobs();
@@ -245,11 +266,11 @@ export function PrinterDetailPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printer?.id, printer?.access.can_admin]);
 
-  async function control(
-    action: "pause" | "resume" | "cancel",
-    fn: () => Promise<void>,
-  ) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+  async function control(action: "pause" | "resume" | "cancel", fn: () => Promise<void>) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setBusy(action);
     try {
       await fn();
@@ -260,12 +281,11 @@ export function PrinterDetailPage({
     }
   }
 
-  async function machineAction(
-    key: string,
-    fn: () => Promise<unknown>,
-    successMsg: string,
-  ) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+  async function machineAction<T>(key: string, fn: () => Promise<T>, successMsg: string) {
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setMachineBusy(key);
     try {
       await fn();
@@ -313,21 +333,23 @@ export function PrinterDetailPage({
   }
 
   function emergencyStop() {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setConfirmEmergencyStop(true);
   }
 
   async function confirmEmergencyStopAction() {
-    await machineAction(
-      "estop",
-      () => emergencyStopPrinter(printerId),
-      "Emergency stop sent",
-    );
+    await machineAction("estop", () => emergencyStopPrinter(printerId), "Emergency stop sent");
     setConfirmEmergencyStop(false);
   }
 
   async function syncFiles() {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setSyncingFiles(true);
     setError(null);
     try {
@@ -343,7 +365,10 @@ export function PrinterDetailPage({
   }
 
   async function startRemoteFile(file: PrinterFileRead) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setStartingFileId(file.id);
     setError(null);
     try {
@@ -362,7 +387,10 @@ export function PrinterDetailPage({
   }
 
   function deleteRemoteFile(file: PrinterFileRead) {
-    if (!auth.isAuthenticated) { auth.showAuthRequiredToast(); return; }
+    if (!auth.isAuthenticated) {
+      auth.showAuthRequiredToast();
+      return;
+    }
     setDeleteTarget(file);
   }
 
@@ -390,7 +418,7 @@ export function PrinterDetailPage({
   const bed = snapshot.heater_bed || {};
   const toolhead = snapshot.toolhead || {};
   const webhook = snapshot.webhooks || {};
-  const progress = typeof vs.progress === "number" ? vs.progress * 100 : null;
+  const progress = vs.progress == null ? null : vs.progress * 100;
   const hasCurrentPrint = Boolean(ps.filename || ps.state === "printing" || ps.state === "paused");
 
   if (!printer) {
@@ -403,774 +431,802 @@ export function PrinterDetailPage({
   }
 
   return (
-    <Localized><>
-      <ConfirmModal
-        open={confirmEmergencyStop}
-        onClose={() => { if (machineBusy !== "estop") setConfirmEmergencyStop(false); }}
-        onConfirm={confirmEmergencyStopAction}
-        busy={machineBusy === "estop"}
-        title="Emergency stop printer?"
-        description="This halts the printer immediately and requires a firmware restart."
-        confirmLabel="Emergency stop"
-      />
-      <ConfirmModal
-        open={!!deleteTarget}
-        onClose={() => { if (deletingFileId === null) setDeleteTarget(null); }}
-        onConfirm={confirmDeleteRemoteFile}
-        busy={deletingFileId !== null}
-        title="Delete printer file?"
-        description={deleteTarget ? `${deleteTarget.remote_filename} will be deleted from ${printer.name}.` : "This file will be deleted from the printer."}
-      />
-      <div className="w-full space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <Link
-          href="/printers"
-          className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-        >
-          <ArrowLeft className="h-4 w-4" /> Printers
-        </Link>
-        <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5">
-          {wsConnected ? (
-            <>
-              <Wifi className="h-3 w-3 text-emerald-500" />
-              <span className="font-mono text-3xs font-semibold uppercase tracking-wider text-emerald-600">
-                Live
-              </span>
-            </>
-          ) : (
-            <>
-              <WifiOff className="h-3 w-3 text-amber-500" />
-              <span className="font-mono text-3xs uppercase tracking-wider text-amber-500">
-                Reconnecting…
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Title */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">
-            {printer.name}
-          </h1>
-          <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-            {providerLabel(printer)}
-          </span>
-          {printer.capabilities.support_level === "beta" && (
-            <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
-              Beta
-            </span>
-          )}
-          <span className="flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1">
-            <span
-              className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
-            />
-            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {printer.status}
-            </span>
-          </span>
-        </div>
-        <p className="font-mono text-xs text-muted-foreground break-all">
-          {printer.access.can_admin ? providerAddress(printer) : `${printer.access.role} access`}
-        </p>
-      </div>
-
-      {printer.capabilities.support_notes.length > 0 && (
-        <div className="rounded border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
-          {printer.capabilities.support_notes.join(" ")}
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StatusMetric label="Klipper" value={webhook.state || printer.status} />
-        <StatusMetric label="File" value={ps.filename || "Idle"} truncate />
-        <StatusMetric label="Progress" value={progress != null ? `${progress.toFixed(1)}%` : "—"} />
-        <StatusMetric label="Homed" value={toolhead.homed_axes || "—"} />
-      </div>
-
-      <div className="border-b border-border">
-        <TabBar
-          tabs={[
-            { key: "status" as const, label: "Status" },
-            { key: "files" as const, label: "Files" },
-            { key: "jobs" as const, label: "Jobs" },
-            ...(printer.access.can_print
-              ? [{ key: "materials" as const, label: "Materials & tools" }]
-              : []),
-            ...(printer.access.can_admin
-              ? [{ key: "maintenance" as const, label: "Maintenance" }]
-              : []),
-            ...(printer.provider === "moonraker" && printer.access.can_admin
-              ? [{ key: "config" as const, label: "Config" }]
-              : []),
-            ...(printer.access.can_admin
-              ? [
-                  { key: "diagnostics" as const, label: "Diagnostics" },
-                  { key: "settings" as const, label: "Settings" },
-                ]
-              : []),
-          ]}
-          active={activeTab}
-          onChange={(k) => {
-            setActiveTab(k);
-            if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
-            if (k === "diagnostics" && !diagnostics) loadDiagnostics();
+    <Localized>
+      <>
+        <ConfirmModal
+          open={confirmEmergencyStop}
+          onClose={() => {
+            if (machineBusy !== "estop") setConfirmEmergencyStop(false);
           }}
-          className="gap-1 overflow-x-auto -mb-px"
-          tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
-          activeTabClassName="text-primary"
+          onConfirm={confirmEmergencyStopAction}
+          busy={machineBusy === "estop"}
+          title="Emergency stop printer?"
+          description="This halts the printer immediately and requires a firmware restart."
+          confirmLabel="Emergency stop"
         />
-      </div>
-
-      {activeTab === "status" && (
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 animate-panel-in">
-        {/* Current print */}
-        <section className={`${SECTION_CLASS} lg:col-span-2`}>
-          <div className={SECTION_HEADER_CLASS}>
-            <h2 className="text-sm font-semibold text-foreground">
-              Current print
-            </h2>
-          </div>
-          {hasCurrentPrint ? (
-          <div className="space-y-5 p-6">
-            <Row label="FILE" value={ps.filename || "—"} truncate />
-            <Row label="STATE" value={ps.state || "—"} capitalize />
-
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  Progress
-                </span>
-                <span className="font-mono text-xs text-foreground font-semibold">
-                  {progress != null ? `${progress.toFixed(1)}%` : "—"}
-                </span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded bg-muted">
-                <div
-                  className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
-                  style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Row label="ELAPSED" value={formatDuration(ps.print_duration)} stack />
-              <Row label="TOTAL" value={formatDuration(ps.total_duration)} stack />
-            </div>
-
-            <div className="border-t border-border pt-4 space-y-3">
-              <div className="flex flex-wrap gap-2">
-                <ControlButton
-                  onClick={() => control("pause", () => pausePrinter(printerId))}
-                  disabled={!printer.access.can_control || !printer.capabilities.can_pause || ps.state !== "printing" || busy !== null}
-                  busy={busy === "pause"}
-                  icon={Pause}
-                  label={printer.access.can_control ? "Pause" : "No access"}
-                />
-                <ControlButton
-                  onClick={() => control("resume", () => resumePrinter(printerId))}
-                  disabled={!printer.access.can_control || !printer.capabilities.can_resume || ps.state !== "paused" || busy !== null}
-                  busy={busy === "resume"}
-                  icon={Play}
-                  label={printer.access.can_control ? "Resume" : "No access"}
-                />
-                <ControlButton
-                  onClick={() => control("cancel", () => cancelPrinter(printerId))}
-                  disabled={
-                    !printer.access.can_control ||
-                    !printer.capabilities.can_cancel ||
-                    (ps.state !== "printing" && ps.state !== "paused") ||
-                    busy !== null
-                  }
-                  busy={busy === "cancel"}
-                  icon={Square}
-                  label={printer.access.can_control ? "Cancel" : "No access"}
-                  destructive
-                />
-              </div>
-              <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                {printer.access.can_control
-                  ? "Controls permitted by your printer role."
-                  : "Control role required."}
-              </p>
-            </div>
-          </div>
-          ) : (
-            <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
-              <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
-                <FileText className="h-5 w-5" />
-              </span>
-              <h3 className="text-sm font-semibold text-foreground">No active print</h3>
-              <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                {printer.status === "offline"
-                  ? "Printer is offline. Print details will appear after it reconnects."
-                  : "Start a file from the Files tab to see live progress and controls here."}
-              </p>
-              {printer.status !== "offline" && printer.capabilities.can_list_files && (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("files")}
-                  className={cn(BTN_SECONDARY, "mt-5")}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  Browse files
-                </button>
+        <ConfirmModal
+          open={!!deleteTarget}
+          onClose={() => {
+            if (deletingFileId === null) setDeleteTarget(null);
+          }}
+          onConfirm={confirmDeleteRemoteFile}
+          busy={deletingFileId !== null}
+          title="Delete printer file?"
+          description={
+            deleteTarget
+              ? `${deleteTarget.remote_filename} will be deleted from ${printer.name}.`
+              : "This file will be deleted from the printer."
+          }
+        />
+        <div className="w-full space-y-6">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <Link
+              href="/printers"
+              className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+            >
+              <ArrowLeft className="h-4 w-4" /> Printers
+            </Link>
+            <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5">
+              {wsConnected ? (
+                <>
+                  <Wifi className="h-3 w-3 text-emerald-500" />
+                  <span className="font-mono text-3xs font-semibold uppercase tracking-wider text-emerald-600">
+                    Live
+                  </span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="h-3 w-3 text-amber-500" />
+                  <span className="font-mono text-3xs uppercase tracking-wider text-amber-500">
+                    Reconnecting…
+                  </span>
+                </>
               )}
             </div>
-          )}
-        </section>
-
-        {/* Temperatures */}
-        <section className={SECTION_CLASS}>
-          <div className={SECTION_HEADER_CLASS}>
-            <div className="flex items-center gap-2">
-            <Thermometer className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Temperatures
-            </h2>
-            </div>
           </div>
-          <div className="space-y-5 p-5">
-            <div className="grid grid-cols-2 gap-3">
-              <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
-              <TempRow label="Bed" cur={bed.temperature} tgt={bed.target} />
-            </div>
 
-            {printer.capabilities.can_send_gcode && (
-              <div className="border-t border-border pt-4 space-y-4">
-                <div className="space-y-2">
-                  <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                    Preheat
-                  </span>
-                  <div className="flex flex-wrap gap-2">
-                    {PREHEAT_PRESETS.map((p) => (
+          {/* Title */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">{printer.name}</h1>
+              <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                {providerLabel(printer)}
+              </span>
+              {printer.capabilities.support_level === "beta" && (
+                <span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600">
+                  Beta
+                </span>
+              )}
+              <span className="flex items-center gap-1.5 rounded border border-border bg-background px-2 py-1">
+                <span
+                  className={`w-2 h-2 rounded-full ${STATUS_COLORS[printer.status] || "bg-slate-400"}`}
+                />
+                <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                  {printer.status}
+                </span>
+              </span>
+            </div>
+            <p className="font-mono text-xs text-muted-foreground break-all">
+              {printer.access.can_admin
+                ? providerAddress(printer)
+                : `${printer.access.role} access`}
+            </p>
+          </div>
+
+          {printer.capabilities.support_notes.length > 0 && (
+            <div className="rounded border border-border bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
+              {printer.capabilities.support_notes.join(" ")}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
+              {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <StatusMetric label="Klipper" value={webhook.state || printer.status} />
+            <StatusMetric label="File" value={ps.filename || "Idle"} truncate />
+            <StatusMetric
+              label="Progress"
+              value={progress != null ? `${progress.toFixed(1)}%` : "—"}
+            />
+            <StatusMetric label="Homed" value={toolhead.homed_axes || "—"} />
+          </div>
+
+          <div className="border-b border-border">
+            <TabBar
+              tabs={[
+                { key: "status" as const, label: "Status" },
+                { key: "files" as const, label: "Files" },
+                { key: "jobs" as const, label: "Jobs" },
+                ...(printer.access.can_print
+                  ? [{ key: "materials" as const, label: "Materials & tools" }]
+                  : []),
+                ...(printer.access.can_admin
+                  ? [{ key: "maintenance" as const, label: "Maintenance" }]
+                  : []),
+                ...(printer.provider === "moonraker" && printer.access.can_admin
+                  ? [{ key: "config" as const, label: "Config" }]
+                  : []),
+                ...(printer.access.can_admin
+                  ? [
+                      { key: "diagnostics" as const, label: "Diagnostics" },
+                      { key: "settings" as const, label: "Settings" },
+                    ]
+                  : []),
+              ]}
+              active={activeTab}
+              onChange={(k) => {
+                setActiveTab(k);
+                if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
+                if (k === "diagnostics" && !diagnostics) loadDiagnostics();
+              }}
+              className="gap-1 overflow-x-auto -mb-px"
+              tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
+              activeTabClassName="text-primary"
+            />
+          </div>
+
+          {activeTab === "status" && (
+            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 animate-panel-in">
+              {/* Current print */}
+              <section className={`${SECTION_CLASS} lg:col-span-2`}>
+                <div className={SECTION_HEADER_CLASS}>
+                  <h2 className="text-sm font-semibold text-foreground">Current print</h2>
+                </div>
+                {hasCurrentPrint ? (
+                  <div className="space-y-5 p-6">
+                    <Row label="FILE" value={ps.filename || "—"} truncate />
+                    <Row label="STATE" value={ps.state || "—"} capitalize />
+
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                          Progress
+                        </span>
+                        <span className="font-mono text-xs text-foreground font-semibold">
+                          {progress != null ? `${progress.toFixed(1)}%` : "—"}
+                        </span>
+                      </div>
+                      <div className="h-2 w-full overflow-hidden rounded bg-muted">
+                        <div
+                          className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
+                          style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <Row label="ELAPSED" value={formatDuration(ps.print_duration)} stack />
+                      <Row label="TOTAL" value={formatDuration(ps.total_duration)} stack />
+                    </div>
+
+                    <div className="border-t border-border pt-4 space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        <ControlButton
+                          onClick={() => control("pause", () => pausePrinter(printerId))}
+                          disabled={
+                            !printer.access.can_control ||
+                            !printer.capabilities.can_pause ||
+                            ps.state !== "printing" ||
+                            busy !== null
+                          }
+                          busy={busy === "pause"}
+                          icon={Pause}
+                          label={printer.access.can_control ? "Pause" : "No access"}
+                        />
+                        <ControlButton
+                          onClick={() => control("resume", () => resumePrinter(printerId))}
+                          disabled={
+                            !printer.access.can_control ||
+                            !printer.capabilities.can_resume ||
+                            ps.state !== "paused" ||
+                            busy !== null
+                          }
+                          busy={busy === "resume"}
+                          icon={Play}
+                          label={printer.access.can_control ? "Resume" : "No access"}
+                        />
+                        <ControlButton
+                          onClick={() => control("cancel", () => cancelPrinter(printerId))}
+                          disabled={
+                            !printer.access.can_control ||
+                            !printer.capabilities.can_cancel ||
+                            (ps.state !== "printing" && ps.state !== "paused") ||
+                            busy !== null
+                          }
+                          busy={busy === "cancel"}
+                          icon={Square}
+                          label={printer.access.can_control ? "Cancel" : "No access"}
+                          destructive
+                        />
+                      </div>
+                      <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        {printer.access.can_control
+                          ? "Controls permitted by your printer role."
+                          : "Control role required."}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
+                    <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
+                      <FileText className="h-5 w-5" />
+                    </span>
+                    <h3 className="text-sm font-semibold text-foreground">No active print</h3>
+                    <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                      {printer.status === "offline"
+                        ? "Printer is offline. Print details will appear after it reconnects."
+                        : "Start a file from the Files tab to see live progress and controls here."}
+                    </p>
+                    {printer.status !== "offline" && printer.capabilities.can_list_files && (
                       <button
-                        key={p.name}
-                        onClick={() => preheat(p)}
-                        disabled={!printer.access.can_control || machineBusy !== null}
-                        title={`Hotend ${p.hotend}°C · Bed ${p.bed}°C`}
-                        className={BTN_SECONDARY}
+                        type="button"
+                        onClick={() => setActiveTab("files")}
+                        className={cn(BTN_SECONDARY, "mt-5")}
                       >
-                        {machineBusy === `preheat-${p.name}` && (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        )}
-                        {p.name}
+                        <FileText className="h-3.5 w-3.5" />
+                        Browse files
                       </button>
-                    ))}
-                    <button
-                      onClick={cooldown}
-                      disabled={!printer.access.can_control || machineBusy !== null}
-                      className={BTN_SECONDARY}
-                    >
-                      {machineBusy === "cooldown" && (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      )}
-                      Cooldown
-                    </button>
+                    )}
+                  </div>
+                )}
+              </section>
+
+              {/* Temperatures */}
+              <section className={SECTION_CLASS}>
+                <div className={SECTION_HEADER_CLASS}>
+                  <div className="flex items-center gap-2">
+                    <Thermometer className="h-4 w-4 text-muted-foreground" />
+                    <h2 className="text-sm font-semibold text-foreground">Temperatures</h2>
                   </div>
                 </div>
+                <div className="space-y-5 p-5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <TempRow label="Hotend" cur={ext.temperature} tgt={ext.target} />
+                    <TempRow label="Bed" cur={bed.temperature} tgt={bed.target} />
+                  </div>
 
-                <SetTempInput
-                  label="Hotend target"
-                  value={hotendTarget}
-                  onChange={setHotendTarget}
-                  onApply={() =>
-                    applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
-                  }
-                  busy={machineBusy === "set-extruder"}
-                  disabled={!printer.access.can_control || machineBusy !== null}
-                />
-                <SetTempInput
-                  label="Bed target"
-                  value={bedTarget}
-                  onChange={setBedTarget}
-                  onApply={() =>
-                    applyTemp("bed", bedTarget, () => setBedTarget(""))
-                  }
-                  busy={machineBusy === "set-bed"}
-                  disabled={!printer.access.can_control || machineBusy !== null}
-                />
-
-                <div className="border-t border-border pt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() =>
-                      void machineAction(
-                        "home",
-                        () => homePrinter(printerId),
-                        "Homing all axes",
-                      )
-                    }
-                    disabled={!printer.access.can_control || machineBusy !== null}
-                    className={BTN_SECONDARY}
-                  >
-                    {machineBusy === "home" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Home className="h-3.5 w-3.5" />
-                    )}
-                    Home all
-                  </button>
-                  <button
-                    onClick={emergencyStop}
-                    disabled={!printer.access.can_control || machineBusy !== null}
-                    className={BTN_DANGER}
-                  >
-                    {machineBusy === "estop" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Power className="h-3.5 w-3.5" />
-                    )}
-                    E-stop
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
-      )}
-
-      {activeTab === "files" && (
-      <section className={`${SECTION_CLASS} animate-panel-in`}>
-        <div className={SECTION_HEADER_CLASS}>
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Printer files
-            </h2>
-            <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
-              {printerFiles.length}
-            </span>
-          </div>
-          <button
-            onClick={syncFiles}
-            disabled={syncingFiles || !printer.access.can_admin || !printer.capabilities.can_list_files}
-            title={auth.blockReason ?? "Sync printer files"}
-            className={BTN_SECONDARY}
-          >
-            {syncingFiles ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-3.5 w-3.5" />
-            )}
-            {syncingFiles ? "Syncing" : "Sync"}
-          </button>
-        </div>
-        {printer.last_error && printer.status === "offline" && (
-          <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-2xs text-red-600 break-words dark:bg-red-950/20">
-            {printer.last_error}
-          </div>
-        )}
-        {printerFiles.length === 0 ? (
-          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-            {printer.capabilities.can_list_files
-              ? "No printer files synced yet."
-              : "Printer file inventory is not supported by this provider."}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  <th className="py-3 px-4 font-medium">Remote file</th>
-                  <th className="py-3 px-4 font-medium">Vault match</th>
-                  <th className="py-3 px-4 font-medium text-right">Size</th>
-                  <th className="py-3 px-4 font-medium">Status</th>
-                  <th className="py-3 px-4 font-medium">Last seen</th>
-                  <th className="py-3 px-4 font-medium text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {printerFiles.map((f) => (
-                  <tr
-                    key={f.id}
-                    className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
-                  >
-                    <td className="py-3 px-4 font-mono text-xs text-foreground max-w-[320px] truncate" title={f.remote_filename}>
-                      {f.remote_filename}
-                    </td>
-                    <td className="py-3 px-4">
-                      {f.model_id ? (
-                        <Link
-                          href={`/models/${f.model_id}`}
-                          className="font-mono text-xs text-foreground hover:text-primary hover:underline"
-                        >
-                          {f.model_name ?? f.original_filename}
-                        </Link>
-                      ) : (
-                        <span className="font-mono text-xs text-muted-foreground">
-                          External
+                  {printer.capabilities.can_send_gcode && (
+                    <div className="border-t border-border pt-4 space-y-4">
+                      <div className="space-y-2">
+                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                          Preheat
                         </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs text-foreground whitespace-nowrap">
-                      {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
-                        {f.matched_by}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(f.last_seen_at).toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => startRemoteFile(f)}
-                        disabled={
-                          !printer.access.can_print ||
-                          !printer.capabilities.can_start ||
-                          startingFileId !== null ||
-                          deletingFileId !== null
-                        }
-                        title={auth.blockReason ?? "Start this printer file"}
-                        className={BTN_SECONDARY}
-                      >
-                        {startingFileId === f.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Play className="h-3 w-3" />
-                        )}
-                        Start
-                      </button>
-                      <button
-                        onClick={() => deleteRemoteFile(f)}
-                        disabled={
-                          !printer.access.can_admin ||
-                          printer.provider !== "moonraker" ||
-                          deletingFileId !== null ||
-                          startingFileId !== null ||
-                          ps.filename === f.remote_filename
-                        }
-                        title={
-                          ps.filename === f.remote_filename
-                            ? "Cannot delete active print file"
-                            : auth.blockReason ?? "Delete this printer file"
-                        }
-                        className={BTN_DANGER}
-                      >
-                        {deletingFileId === f.id ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-3 w-3" />
-                        )}
-                        Delete
-                      </button>
+                        <div className="flex flex-wrap gap-2">
+                          {PREHEAT_PRESETS.map((p) => (
+                            <button
+                              key={p.name}
+                              onClick={() => preheat(p)}
+                              disabled={!printer.access.can_control || machineBusy !== null}
+                              title={`Hotend ${p.hotend}°C · Bed ${p.bed}°C`}
+                              className={BTN_SECONDARY}
+                            >
+                              {machineBusy === `preheat-${p.name}` && (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              )}
+                              {p.name}
+                            </button>
+                          ))}
+                          <button
+                            onClick={cooldown}
+                            disabled={!printer.access.can_control || machineBusy !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            {machineBusy === "cooldown" && (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            )}
+                            Cooldown
+                          </button>
+                        </div>
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-      )}
 
-      {activeTab === "settings" && (
-        <PrinterSettings
-          printer={printer}
-          canEdit={printer.access.can_admin}
-          onSaved={(updated) => setPrinter(updated)}
-        />
-      )}
+                      <SetTempInput
+                        label="Hotend target"
+                        value={hotendTarget}
+                        onChange={setHotendTarget}
+                        onApply={() =>
+                          applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
+                        }
+                        busy={machineBusy === "set-extruder"}
+                        disabled={!printer.access.can_control || machineBusy !== null}
+                      />
+                      <SetTempInput
+                        label="Bed target"
+                        value={bedTarget}
+                        onChange={setBedTarget}
+                        onApply={() => applyTemp("bed", bedTarget, () => setBedTarget(""))}
+                        busy={machineBusy === "set-bed"}
+                        disabled={!printer.access.can_control || machineBusy !== null}
+                      />
 
-      {activeTab === "materials" && <PrinterMaterials printer={printer} />}
+                      <div className="border-t border-border pt-4 flex flex-wrap gap-2">
+                        <button
+                          onClick={() =>
+                            void machineAction(
+                              "home",
+                              () => homePrinter(printerId),
+                              "Homing all axes",
+                            )
+                          }
+                          disabled={!printer.access.can_control || machineBusy !== null}
+                          className={BTN_SECONDARY}
+                        >
+                          {machineBusy === "home" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Home className="h-3.5 w-3.5" />
+                          )}
+                          Home all
+                        </button>
+                        <button
+                          onClick={emergencyStop}
+                          disabled={!printer.access.can_control || machineBusy !== null}
+                          className={BTN_DANGER}
+                        >
+                          {machineBusy === "estop" ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Power className="h-3.5 w-3.5" />
+                          )}
+                          E-stop
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
 
-      {activeTab === "maintenance" && (
-        <div className="animate-panel-in">
-          <FleetMaintenancePanel printers={[printer]} onPrintersChanged={() => { void loadPrinter(); }} />
-        </div>
-      )}
+          {activeTab === "files" && (
+            <section className={`${SECTION_CLASS} animate-panel-in`}>
+              <div className={SECTION_HEADER_CLASS}>
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold text-foreground">Printer files</h2>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
+                    {printerFiles.length}
+                  </span>
+                </div>
+                <button
+                  onClick={syncFiles}
+                  disabled={
+                    syncingFiles ||
+                    !printer.access.can_admin ||
+                    !printer.capabilities.can_list_files
+                  }
+                  title={auth.blockReason ?? "Sync printer files"}
+                  className={BTN_SECONDARY}
+                >
+                  {syncingFiles ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                  )}
+                  {syncingFiles ? "Syncing" : "Sync"}
+                </button>
+              </div>
+              {printer.last_error && printer.status === "offline" && (
+                <div className="border-b border-border bg-red-50/30 px-6 py-3 font-mono text-2xs text-red-600 break-words dark:bg-red-950/20">
+                  {printer.last_error}
+                </div>
+              )}
+              {printerFiles.length === 0 ? (
+                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
+                  {printer.capabilities.can_list_files
+                    ? "No printer files synced yet."
+                    : "Printer file inventory is not supported by this provider."}
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <th className="py-3 px-4 font-medium">Remote file</th>
+                        <th className="py-3 px-4 font-medium">Vault match</th>
+                        <th className="py-3 px-4 font-medium text-right">Size</th>
+                        <th className="py-3 px-4 font-medium">Status</th>
+                        <th className="py-3 px-4 font-medium">Last seen</th>
+                        <th className="py-3 px-4 font-medium text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {printerFiles.map((f) => (
+                        <tr
+                          key={f.id}
+                          className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                        >
+                          <td
+                            className="py-3 px-4 font-mono text-xs text-foreground max-w-[320px] truncate"
+                            title={f.remote_filename}
+                          >
+                            {f.remote_filename}
+                          </td>
+                          <td className="py-3 px-4">
+                            {f.model_id ? (
+                              <Link
+                                href={`/models/${f.model_id}`}
+                                className="font-mono text-xs text-foreground hover:text-primary hover:underline"
+                              >
+                                {f.model_name ?? f.original_filename}
+                              </Link>
+                            ) : (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                External
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-xs text-foreground whitespace-nowrap">
+                            {f.size_bytes != null ? formatBytes(f.size_bytes) : "—"}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600">
+                              {f.matched_by}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(f.last_seen_at).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => startRemoteFile(f)}
+                                disabled={
+                                  !printer.access.can_print ||
+                                  !printer.capabilities.can_start ||
+                                  startingFileId !== null ||
+                                  deletingFileId !== null
+                                }
+                                title={auth.blockReason ?? "Start this printer file"}
+                                className={BTN_SECONDARY}
+                              >
+                                {startingFileId === f.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Play className="h-3 w-3" />
+                                )}
+                                Start
+                              </button>
+                              <button
+                                onClick={() => deleteRemoteFile(f)}
+                                disabled={
+                                  !printer.access.can_admin ||
+                                  printer.provider !== "moonraker" ||
+                                  deletingFileId !== null ||
+                                  startingFileId !== null ||
+                                  ps.filename === f.remote_filename
+                                }
+                                title={
+                                  ps.filename === f.remote_filename
+                                    ? "Cannot delete active print file"
+                                    : (auth.blockReason ?? "Delete this printer file")
+                                }
+                                className={BTN_DANGER}
+                              >
+                                {deletingFileId === f.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3 w-3" />
+                                )}
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
 
-      {/* History */}
-      {activeTab === "jobs" && (
-      <section className={`${SECTION_CLASS} animate-panel-in`}>
-        <div className={SECTION_HEADER_CLASS}>
-          <h2 className="text-sm font-semibold text-foreground">
-            Print history
-          </h2>
-          {jobs.length > 0 && (
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs font-semibold text-muted-foreground">
-              {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
-            </span>
+          {activeTab === "settings" && (
+            <PrinterSettings
+              printer={printer}
+              canEdit={printer.access.can_admin}
+              onSaved={(updated) => setPrinter(updated)}
+            />
+          )}
+
+          {activeTab === "materials" && <PrinterMaterials printer={printer} />}
+
+          {activeTab === "maintenance" && (
+            <div className="animate-panel-in">
+              <FleetMaintenancePanel
+                printers={[printer]}
+                onPrintersChanged={() => {
+                  void loadPrinter();
+                }}
+              />
+            </div>
+          )}
+
+          {/* History */}
+          {activeTab === "jobs" && (
+            <section className={`${SECTION_CLASS} animate-panel-in`}>
+              <div className={SECTION_HEADER_CLASS}>
+                <h2 className="text-sm font-semibold text-foreground">Print history</h2>
+                {jobs.length > 0 && (
+                  <span className="rounded-full bg-muted px-2 py-0.5 font-mono text-3xs font-semibold text-muted-foreground">
+                    {jobs.length} {jobs.length === 1 ? "job" : "jobs"}
+                  </span>
+                )}
+              </div>
+              {jobs.length === 0 ? (
+                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
+                  No print jobs yet.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <th className="py-3 px-4 font-medium">When</th>
+                        <th className="py-3 px-4 font-medium">File</th>
+                        <th className="py-3 px-4 font-medium">State</th>
+                        <th className="py-3 px-4 font-medium text-right">Progress</th>
+                        <th className="py-3 px-4 font-medium">Started</th>
+                        <th className="py-3 px-4 font-medium">Finished</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobs.map((j) => (
+                        <tr
+                          key={j.id}
+                          className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
+                        >
+                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {new Date(j.created_at).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-4 max-w-[260px]">
+                            {j.artifact_evidence === "vault" ||
+                            j.artifact_evidence.endsWith("_archived") ? (
+                              <Link
+                                href={`/models/${j.model_id}`}
+                                className="font-mono text-xs text-foreground hover:text-primary hover:underline"
+                                title={printJobArtifactLabel(j)}
+                              >
+                                {printJobArtifactLabel(j)}
+                              </Link>
+                            ) : (
+                              <span
+                                className="font-mono text-xs text-foreground"
+                                title={printJobArtifactLabel(j)}
+                              >
+                                {printJobArtifactLabel(j)}
+                              </span>
+                            )}
+                            {j.source === "external" && (
+                              <span className="mt-1 block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                                {j.artifact_evidence.replaceAll("_", " ")}
+                              </span>
+                            )}
+                            <PrintJobReproducibility
+                              job={j}
+                              previewHref={
+                                j.artifact_evidence === "vault" ||
+                                j.artifact_evidence.endsWith("_archived")
+                                  ? `/models/${j.model_id}`
+                                  : null
+                              }
+                            />
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">
+                              {j.state}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-xs text-foreground">
+                            {(j.progress * 100).toFixed(0)}%
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {j.started_at ? new Date(j.started_at).toLocaleTimeString() : "—"}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                            {j.finished_at ? new Date(j.finished_at).toLocaleTimeString() : "—"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "config" && printer.provider === "moonraker" && (
+            <section className={`${SECTION_CLASS} animate-panel-in`}>
+              <div className={SECTION_HEADER_CLASS}>
+                <div className="flex items-center gap-2">
+                  <Settings className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold text-foreground">
+                    Moonraker and Klipper config
+                  </h2>
+                </div>
+                <button
+                  onClick={loadMoonrakerConfig}
+                  disabled={loadingConfig}
+                  className={BTN_SECONDARY}
+                >
+                  {loadingConfig ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                  )}
+                  {loadingConfig ? "Loading" : "Refresh"}
+                </button>
+              </div>
+              {!moonrakerConfig ? (
+                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
+                  {loadingConfig ? "Loading config…" : "Config not loaded."}
+                </div>
+              ) : (
+                <div className="p-4 sm:p-6 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <ConfigSummary title="Moonraker" data={moonrakerConfig.server_info} />
+                    <ConfigSummary title="Klipper" data={moonrakerConfig.printer_info} />
+                  </div>
+                  <ConfigBlock title="Moonraker config" data={moonrakerConfig.moonraker_config} />
+                  <ConfigBlock title="Klipper config" data={moonrakerConfig.klipper_config} />
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "diagnostics" && (
+            <section className={`${SECTION_CLASS} animate-panel-in`}>
+              <div className={SECTION_HEADER_CLASS}>
+                <div className="flex items-center gap-2">
+                  <Info className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-semibold text-foreground">Provider diagnostics</h2>
+                </div>
+                <button
+                  onClick={loadDiagnostics}
+                  disabled={checkingDiagnostics}
+                  className={BTN_SECONDARY}
+                >
+                  {checkingDiagnostics ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-3.5 w-3.5" />
+                  )}
+                  {checkingDiagnostics ? "Checking" : "Refresh"}
+                </button>
+              </div>
+
+              {!diagnostics ? (
+                <div className="p-10 text-center font-mono text-xs text-muted-foreground">
+                  Diagnostics have not loaded yet.
+                </div>
+              ) : (
+                <div className="p-4 sm:p-6 space-y-5">
+                  <div
+                    className={`rounded border p-4 ${
+                      diagnostics.ok
+                        ? "border-emerald-500/30 bg-emerald-500/10"
+                        : "border-amber-500/40 bg-amber-500/10"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {diagnostics.ok ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      )}
+                      <span
+                        className={`font-mono text-xs uppercase tracking-wider font-semibold ${
+                          diagnostics.ok ? "text-emerald-600" : "text-amber-600"
+                        }`}
+                      >
+                        {diagnostics.ok ? "Provider reachable" : "Needs attention"}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {providerLabel({ provider: diagnostics.provider })} is marked{" "}
+                      {diagnostics.support_level}.
+                    </p>
+                  </div>
+
+                  {diagnostics.notes.length > 0 && (
+                    <div className="rounded border border-border bg-muted/40 p-4 space-y-2">
+                      {diagnostics.notes.map((note) => (
+                        <p key={note} className="text-sm text-muted-foreground leading-relaxed">
+                          {note}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded border border-border overflow-hidden">
+                      <div className="border-b border-border px-4 py-3">
+                        <h3 className="text-sm font-semibold text-foreground">Checks</h3>
+                      </div>
+                      <div className="divide-y divide-border">
+                        {diagnostics.checks.map((check) => (
+                          <div key={check.name} className="px-4 py-3 flex items-start gap-3">
+                            {check.ok ? (
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
+                            ) : (
+                              <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="font-mono text-xs uppercase tracking-wider text-foreground">
+                                {checkLabel(check.name)}
+                              </div>
+                              {!check.ok && (
+                                <div className="mt-1 font-mono text-2xs text-red-600 break-words">
+                                  {check.code ?? "provider_error"}
+                                  {check.detail ? `: ${check.detail}` : ""}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-border overflow-hidden">
+                      <div className="border-b border-border px-4 py-3">
+                        <h3 className="text-sm font-semibold text-foreground">Capabilities</h3>
+                      </div>
+                      <div className="grid grid-cols-2 gap-px bg-border">
+                        {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
+                          <div key={name} className="bg-background px-4 py-3">
+                            <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                              {checkLabel(name.replace(/^can_/, ""))}
+                            </div>
+                            <div
+                              className={`mt-1 font-mono text-xs font-semibold ${
+                                enabled ? "text-emerald-600" : "text-muted-foreground"
+                              }`}
+                            >
+                              {enabled ? "Supported" : "Unavailable"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {diagnostics.unsupported_actions.length > 0 && (
+                    <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
+                      <div className="font-mono text-3xs uppercase tracking-wider text-amber-600 font-semibold">
+                        Unsupported in this provider
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {diagnostics.unsupported_actions.map((action) => (
+                          <span
+                            key={action}
+                            className="rounded border border-amber-500/40 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600"
+                          >
+                            {actionLabel(action)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
           )}
         </div>
-        {jobs.length === 0 ? (
-          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-            No print jobs yet.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                  <th className="py-3 px-4 font-medium">When</th>
-                  <th className="py-3 px-4 font-medium">File</th>
-                  <th className="py-3 px-4 font-medium">State</th>
-                  <th className="py-3 px-4 font-medium text-right">Progress</th>
-                  <th className="py-3 px-4 font-medium">Started</th>
-                  <th className="py-3 px-4 font-medium">Finished</th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((j) => (
-                  <tr
-                    key={j.id}
-                    className="border-b border-border transition-colors last:border-0 hover:bg-muted/30"
-                  >
-                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {new Date(j.created_at).toLocaleString()}
-                    </td>
-                    <td className="py-3 px-4 max-w-[260px] truncate">
-                      {j.artifact_evidence === "vault" ||
-                      j.artifact_evidence.endsWith("_archived") ? (
-                        <Link
-                          href={`/models/${j.model_id}`}
-                          className="font-mono text-xs text-foreground hover:text-primary hover:underline"
-                          title={j.external_display_name ?? j.remote_filename}
-                        >
-                          {j.external_display_name ?? j.remote_filename}
-                        </Link>
-                      ) : (
-                        <span
-                          className="font-mono text-xs text-foreground"
-                          title={j.external_gcode_file ?? j.remote_filename}
-                        >
-                          {j.external_display_name ?? j.remote_filename}
-                        </span>
-                      )}
-                      {j.source === "external" && (
-                        <span className="mt-1 block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {j.artifact_evidence.replaceAll("_", " ")}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase tracking-wider text-foreground">
-                        {j.state}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs text-foreground">
-                      {(j.progress * 100).toFixed(0)}%
-                    </td>
-                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {j.started_at
-                        ? new Date(j.started_at).toLocaleTimeString()
-                        : "—"}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                      {j.finished_at
-                        ? new Date(j.finished_at).toLocaleTimeString()
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-      )}
-
-      {activeTab === "config" && printer.provider === "moonraker" && (
-      <section className={`${SECTION_CLASS} animate-panel-in`}>
-        <div className={SECTION_HEADER_CLASS}>
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Moonraker and Klipper config
-            </h2>
-          </div>
-          <button
-            onClick={loadMoonrakerConfig}
-            disabled={loadingConfig}
-            className={BTN_SECONDARY}
-          >
-            {loadingConfig ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-3.5 w-3.5" />
-            )}
-            {loadingConfig ? "Loading" : "Refresh"}
-          </button>
-        </div>
-        {!moonrakerConfig ? (
-          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-            {loadingConfig ? "Loading config…" : "Config not loaded."}
-          </div>
-        ) : (
-          <div className="p-4 sm:p-6 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ConfigSummary title="Moonraker" data={moonrakerConfig.server_info} />
-              <ConfigSummary title="Klipper" data={moonrakerConfig.printer_info} />
-            </div>
-            <ConfigBlock title="Moonraker config" data={moonrakerConfig.moonraker_config} />
-            <ConfigBlock title="Klipper config" data={moonrakerConfig.klipper_config} />
-          </div>
-        )}
-      </section>
-      )}
-
-      {activeTab === "diagnostics" && (
-      <section className={`${SECTION_CLASS} animate-panel-in`}>
-        <div className={SECTION_HEADER_CLASS}>
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Provider diagnostics
-            </h2>
-          </div>
-          <button
-            onClick={loadDiagnostics}
-            disabled={checkingDiagnostics}
-            className={BTN_SECONDARY}
-          >
-            {checkingDiagnostics ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCcw className="h-3.5 w-3.5" />
-            )}
-            {checkingDiagnostics ? "Checking" : "Refresh"}
-          </button>
-        </div>
-
-        {!diagnostics ? (
-          <div className="p-10 text-center font-mono text-xs text-muted-foreground">
-            Diagnostics have not loaded yet.
-          </div>
-        ) : (
-          <div className="p-4 sm:p-6 space-y-5">
-            <div className={`rounded border p-4 ${
-              diagnostics.ok
-                ? "border-emerald-500/30 bg-emerald-500/10"
-                : "border-amber-500/40 bg-amber-500/10"
-            }`}>
-              <div className="flex items-center gap-2">
-                {diagnostics.ok ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                ) : (
-                  <AlertTriangle className="h-4 w-4 text-amber-600" />
-                )}
-                <span className={`font-mono text-xs uppercase tracking-wider font-semibold ${
-                  diagnostics.ok ? "text-emerald-600" : "text-amber-600"
-                }`}>
-                  {diagnostics.ok ? "Provider reachable" : "Needs attention"}
-                </span>
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {providerLabel(diagnostics.provider)} is marked {diagnostics.support_level}.
-              </p>
-            </div>
-
-            {diagnostics.notes.length > 0 && (
-              <div className="rounded border border-border bg-muted/40 p-4 space-y-2">
-                {diagnostics.notes.map((note) => (
-                  <p key={note} className="text-sm text-muted-foreground leading-relaxed">
-                    {note}
-                  </p>
-                ))}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="rounded border border-border overflow-hidden">
-                <div className="border-b border-border px-4 py-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Checks
-                  </h3>
-                </div>
-                <div className="divide-y divide-border">
-                  {diagnostics.checks.map((check) => (
-                    <div key={check.name} className="px-4 py-3 flex items-start gap-3">
-                      {check.ok ? (
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
-                      ) : (
-                        <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-red-600" />
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="font-mono text-xs uppercase tracking-wider text-foreground">
-                          {checkLabel(check.name)}
-                        </div>
-                        {!check.ok && (
-                          <div className="mt-1 font-mono text-2xs text-red-600 break-words">
-                            {check.code ?? "provider_error"}
-                            {check.detail ? `: ${check.detail}` : ""}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded border border-border overflow-hidden">
-                <div className="border-b border-border px-4 py-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Capabilities
-                  </h3>
-                </div>
-                <div className="grid grid-cols-2 gap-px bg-border">
-                  {Object.entries(diagnostics.capabilities).map(([name, enabled]) => (
-                    <div key={name} className="bg-background px-4 py-3">
-                      <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        {checkLabel(name.replace(/^can_/, ""))}
-                      </div>
-                      <div className={`mt-1 font-mono text-xs font-semibold ${
-                        enabled ? "text-emerald-600" : "text-muted-foreground"
-                      }`}>
-                        {enabled ? "Supported" : "Unavailable"}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {diagnostics.unsupported_actions.length > 0 && (
-              <div className="rounded border border-amber-500/40 bg-amber-500/10 p-4">
-                <div className="font-mono text-3xs uppercase tracking-wider text-amber-600 font-semibold">
-                  Unsupported in this provider
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {diagnostics.unsupported_actions.map((action) => (
-                    <span
-                      key={action}
-                      className="rounded border border-amber-500/40 px-2 py-1 font-mono text-3xs uppercase tracking-wider text-amber-600"
-                    >
-                      {actionLabel(action)}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-      )}
-      </div>
-    </></Localized>
+      </>
+    </Localized>
   );
 }
 
-function ConfigSummary({
-  title,
-  data,
-}: {
-  title: string;
-  data: Record<string, any>;
-}) {
+function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObject }) {
+  // Scalars only: nested objects and arrays are unreadable in a two-column summary and
+  // are already shown in full by the raw ConfigBlock below. `instanceof Object` is false
+  // for every JSON scalar and for null, which is exactly the set worth summarising.
   const rows = Object.entries(data)
-    .filter(([, value]) => value == null || ["string", "number", "boolean"].includes(typeof value))
+    .filter(([, value]) => !(value instanceof Object))
     .slice(0, 8);
 
   return (
@@ -1180,9 +1236,7 @@ function ConfigSummary({
       </div>
       <div className="divide-y divide-border">
         {rows.length === 0 ? (
-          <div className="px-4 py-3 font-mono text-xs text-muted-foreground">
-            —
-          </div>
+          <div className="px-4 py-3 font-mono text-xs text-muted-foreground">—</div>
         ) : (
           rows.map(([key, value]) => (
             <div key={key} className="grid grid-cols-[minmax(120px,0.45fr)_1fr] gap-3 px-4 py-3">
@@ -1218,20 +1272,27 @@ function PrinterSettings({
   const [username, setUsername] = useState(printer.prusalink_username ?? "");
   const [mainboardId, setMainboardId] = useState(printer.elegoo_centauri_mainboard_id ?? "");
   const [secret, setSecret] = useState("");
-  const [providerMaterialSync, setProviderMaterialSync] = useState(printer.provider_material_sync_enabled ?? true);
-  const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(printer.operator_release_required ?? false);
+  const [providerMaterialSync, setProviderMaterialSync] = useState(
+    printer.provider_material_sync_enabled ?? true,
+  );
+  const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(
+    printer.operator_release_required ?? false,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const secretLabel = printer.provider === "bambu_lan"
-    ? "LAN access code"
-    : printer.provider === "prusalink"
-      ? printer.prusalink_auth_mode === "api_key" ? "API key" : "Password"
-      : printer.provider === "elegoo_centauri"
-        ? "Printer access code"
-        : printer.provider === "octoprint"
+  const secretLabel =
+    printer.provider === "bambu_lan"
+      ? "LAN access code"
+      : printer.provider === "prusalink"
+        ? printer.prusalink_auth_mode === "api_key"
           ? "API key"
-          : "Moonraker API key";
+          : "Password"
+        : printer.provider === "elegoo_centauri"
+          ? "Printer access code"
+          : printer.provider === "octoprint"
+            ? "API key"
+            : "Moonraker API key";
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -1283,91 +1344,174 @@ function PrinterSettings({
   }
 
   return (
-    <Localized><form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
-      <div className={SECTION_HEADER_CLASS}>
-        <div className="flex items-center gap-2">
-          <Settings className="h-4 w-4 text-muted-foreground" />
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Printer settings</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Connection and display details</p>
+    <Localized>
+      <form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
+        <div className={SECTION_HEADER_CLASS}>
+          <div className="flex items-center gap-2">
+            <Settings className="h-4 w-4 text-muted-foreground" />
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Printer settings</h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">Connection and display details</p>
+            </div>
+          </div>
+          <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
+            Save changes
+          </Button>
+        </div>
+        <div className="grid gap-6 p-5 lg:grid-cols-2 lg:p-6">
+          <div className="space-y-4">
+            <SettingsField label="Name">
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                disabled={!canEdit}
+              />
+            </SettingsField>
+            <SettingsField label="Model" hint="Pick a known model or type your own">
+              {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
+              <Input
+                list="printer-model-options"
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+                placeholder={printer.detected_model ?? "Auto-detected"}
+                disabled={!canEdit}
+              />
+              <datalist id="printer-model-options">
+                {PRINTER_MODEL_OPTIONS.map((model) => (
+                  <option key={model} value={model} />
+                ))}
+              </datalist>
+            </SettingsField>
+            <SettingsField label="Group" hint="Optional farm grouping">
+              <Input
+                value={group}
+                onChange={(e) => setGroup(e.target.value)}
+                placeholder="Workshop"
+                disabled={!canEdit}
+              />
+            </SettingsField>
+            <SettingsField label="Notes">
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                disabled={!canEdit}
+                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </SettingsField>
+          </div>
+          <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Connection</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {providerLabel(printer)} configuration
+              </p>
+            </div>
+            <SettingsField
+              label={
+                printer.provider === "moonraker" ||
+                printer.provider === "prusalink" ||
+                printer.provider === "octoprint"
+                  ? "URL"
+                  : "Host or IP"
+              }
+            >
+              <Input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                required
+                disabled={!canEdit}
+              />
+            </SettingsField>
+            {printer.provider === "bambu_lan" && (
+              <SettingsField label="Printer serial">
+                <Input
+                  value={serial}
+                  onChange={(e) => setSerial(e.target.value)}
+                  required
+                  disabled={!canEdit}
+                />
+              </SettingsField>
+            )}
+            {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
+              <SettingsField label="Username">
+                <Input
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  required
+                  disabled={!canEdit}
+                />
+              </SettingsField>
+            )}
+            {printer.provider === "elegoo_centauri" &&
+              printer.provider_variant === "elegoo_centauri_carbon" && (
+                <SettingsField
+                  label="Mainboard ID"
+                  hint="Needed for reliable printer commands while idle, paused, or errored."
+                >
+                  <Input
+                    value={mainboardId}
+                    onChange={(e) => setMainboardId(e.target.value)}
+                    disabled={!canEdit}
+                  />
+                </SettingsField>
+              )}
+            <SettingsField label={secretLabel} hint="Leave blank to keep current value">
+              <Input
+                type="password"
+                value={secret}
+                onChange={(e) => setSecret(e.target.value)}
+                placeholder="Unchanged"
+                disabled={!canEdit}
+              />
+            </SettingsField>
+            <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
+              <input
+                type="checkbox"
+                checked={providerMaterialSync}
+                onChange={(event) => setProviderMaterialSync(event.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                <span className="block text-sm font-medium text-foreground">
+                  Provider material sync
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  Import supported AMS or active-Spoolman state. Turn off to use manual state
+                  exclusively.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
+              <input
+                type="checkbox"
+                checked={operatorReleaseRequired}
+                onChange={(event) => setOperatorReleaseRequired(event.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                <span className="block text-sm font-medium text-foreground">
+                  Require operator release
+                </span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">
+                  After a managed print completes, block scheduling until an operator releases or
+                  holds the printer.
+                </span>
+              </span>
+            </label>
+            {!canEdit && <p className="text-xs text-warning">Sign in to edit printer settings.</p>}
+            {error && (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+              </p>
+            )}
           </div>
         </div>
-        <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
-          Save changes
-        </Button>
-      </div>
-      <div className="grid gap-6 p-5 lg:grid-cols-2 lg:p-6">
-        <div className="space-y-4">
-          <SettingsField label="Name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} required disabled={!canEdit} />
-          </SettingsField>
-          <SettingsField label="Model" hint="Pick a known model or type your own">
-            {/* ponytail: native datalist — suggestions from the catalog, free text still allowed */}
-            <Input
-              list="printer-model-options"
-              value={modelName}
-              onChange={(e) => setModelName(e.target.value)}
-              placeholder={printer.detected_model ?? "Auto-detected"}
-              disabled={!canEdit}
-            />
-            <datalist id="printer-model-options">
-              {PRINTER_MODEL_OPTIONS.map((model) => (
-                <option key={model} value={model} />
-              ))}
-            </datalist>
-          </SettingsField>
-          <SettingsField label="Group" hint="Optional farm grouping">
-            <Input value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Workshop" disabled={!canEdit} />
-          </SettingsField>
-          <SettingsField label="Notes">
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={4}
-              disabled={!canEdit}
-              className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            />
-          </SettingsField>
-        </div>
-        <div className="space-y-4 rounded-lg border border-border bg-muted/20 p-4">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Connection</p>
-            <p className="mt-1 text-xs text-muted-foreground">{providerLabel(printer)} configuration</p>
-          </div>
-          <SettingsField label={printer.provider === "moonraker" || printer.provider === "prusalink" || printer.provider === "octoprint" ? "URL" : "Host or IP"}>
-            <Input value={address} onChange={(e) => setAddress(e.target.value)} required disabled={!canEdit} />
-          </SettingsField>
-          {printer.provider === "bambu_lan" && (
-            <SettingsField label="Printer serial">
-              <Input value={serial} onChange={(e) => setSerial(e.target.value)} required disabled={!canEdit} />
-            </SettingsField>
-          )}
-          {printer.provider === "prusalink" && printer.prusalink_auth_mode !== "api_key" && (
-            <SettingsField label="Username">
-              <Input value={username} onChange={(e) => setUsername(e.target.value)} required disabled={!canEdit} />
-            </SettingsField>
-          )}
-          {printer.provider === "elegoo_centauri" && printer.provider_variant === "elegoo_centauri_carbon" && (
-            <SettingsField label="Mainboard ID" hint="Needed for reliable printer commands while idle, paused, or errored.">
-              <Input value={mainboardId} onChange={(e) => setMainboardId(e.target.value)} disabled={!canEdit} />
-            </SettingsField>
-          )}
-          <SettingsField label={secretLabel} hint="Leave blank to keep current value">
-            <Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="Unchanged" disabled={!canEdit} />
-          </SettingsField>
-          <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
-            <input type="checkbox" checked={providerMaterialSync} onChange={(event) => setProviderMaterialSync(event.target.checked)} disabled={!canEdit} className="mt-0.5 h-4 w-4" />
-            <span><span className="block text-sm font-medium text-foreground">Provider material sync</span><span className="mt-0.5 block text-xs text-muted-foreground">Import supported AMS or active-Spoolman state. Turn off to use manual state exclusively.</span></span>
-          </label>
-          <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
-            <input type="checkbox" checked={operatorReleaseRequired} onChange={(event) => setOperatorReleaseRequired(event.target.checked)} disabled={!canEdit} className="mt-0.5 h-4 w-4" />
-            <span><span className="block text-sm font-medium text-foreground">Require operator release</span><span className="mt-0.5 block text-xs text-muted-foreground">After a managed print completes, block scheduling until an operator releases or holds the printer.</span></span>
-          </label>
-          {!canEdit && <p className="text-xs text-warning">Sign in to edit printer settings.</p>}
-          {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
-        </div>
-      </div>
-    </form></Localized>
+      </form>
+    </Localized>
   );
 }
 
@@ -1391,13 +1535,7 @@ function SettingsField({
   );
 }
 
-function ConfigBlock({
-  title,
-  data,
-}: {
-  title: string;
-  data: Record<string, any>;
-}) {
+function ConfigBlock({ title, data }: { title: string; data: ProviderJsonObject }) {
   return (
     <div className="rounded border border-border overflow-hidden">
       <div className="border-b border-border px-4 py-3">
@@ -1453,9 +1591,7 @@ function Row({
         <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
           {label}
         </div>
-        <div className="font-mono text-sm text-foreground font-semibold">
-          {value}
-        </div>
+        <div className="font-mono text-sm text-foreground font-semibold">{value}</div>
       </div>
     );
   }
@@ -1498,11 +1634,7 @@ function ControlButton({
           : "border border-border text-foreground hover:bg-muted"
       }`}
     >
-      {busy ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <Icon className="h-3.5 w-3.5" />
-      )}
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Icon className="h-3.5 w-3.5" />}
       {label}
     </button>
   );
@@ -1542,11 +1674,7 @@ function SetTempInput({
           className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </label>
-      <button
-        onClick={onApply}
-        disabled={disabled || value === ""}
-        className={BTN_SECONDARY}
-      >
+      <button onClick={onApply} disabled={disabled || value === ""} className={BTN_SECONDARY}>
         {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
         Set
       </button>
@@ -1554,18 +1682,9 @@ function SetTempInput({
   );
 }
 
-function TempRow({
-  label,
-  cur,
-  tgt,
-}: {
-  label: string;
-  cur?: number;
-  tgt?: number;
-}) {
-  const pct = tgt != null && tgt > 0 && cur != null
-    ? Math.min(100, Math.max(0, (cur / tgt) * 100))
-    : null;
+function TempRow({ label, cur, tgt }: { label: string; cur?: number; tgt?: number }) {
+  const pct =
+    tgt != null && tgt > 0 && cur != null ? Math.min(100, Math.max(0, (cur / tgt) * 100)) : null;
   return (
     <div className="rounded-md border border-border bg-muted/30 p-3">
       <div className="flex items-center gap-1.5">

@@ -10,10 +10,17 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Query,
     Request,
     Response,
 )
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.core.config import settings
@@ -25,9 +32,16 @@ from app.db.scopes import live
 from app.db.session import SessionFactory, get_session, get_session_factory
 from app.schemas.ingest import IngestResponse
 from app.services import auth, rbac
+from app.services.artifact_content import (
+    ArtifactContentError,
+    ArtifactContentMissingError,
+    presigned_download_url,
+    resolve,
+)
 from app.services.jobs import registry
 from app.services.storage_backend import StorageCollisionError, get_backend
-from app.services.storage_ownership import record_creation
+from app.services.storage_ownership import publish_bytes
+from app.services.three_mf_preview import EmbeddedGcodeError, read_embedded_gcode_path
 
 logger = get_logger(__name__)
 
@@ -51,10 +65,13 @@ def _live_file(session: Session, file_id: int) -> File:
 
 def _accessible_file(session: Session, file_id: int, user: User) -> File:
     f = _live_file(session, file_id)
+    model = session.get(Model, f.model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="file_not_found")
     rbac.require_model_collection_role(
         session,
         user,
-        session.get(Model, f.model_id).collection_id,
+        model.collection_id,
         CollectionRole.VIEW,
     )
     return f
@@ -86,6 +103,39 @@ def _serve_file(
     )
 
 
+def _serve_artifact(
+    artifact: File,
+    filename: str,
+    media_type: str = "application/octet-stream",
+    *,
+    headers: dict[str, str] | None = None,
+):
+    handle = resolve(artifact)
+    if handle.backend is not None:
+        direct = handle.backend.direct_path(artifact.path)
+        if direct is not None:
+            if not direct.exists():
+                raise HTTPException(status_code=410, detail="file_blob_missing")
+            return FileResponse(
+                path=str(direct),
+                filename=filename,
+                media_type=media_type,
+                headers=headers,
+            )
+    try:
+        chunks = handle.stream()
+    except ArtifactContentMissingError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    return StreamingResponse(
+        chunks,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            **(headers or {}),
+        },
+    )
+
+
 def _serve_download(
     session: Session,
     file_id: int,
@@ -102,9 +152,7 @@ def _serve_download(
         f = _live_file(session, file_id)
     else:
         raise HTTPException(status_code=401, detail="not_authenticated")
-    if not get_backend().exists(f.path):
-        raise HTTPException(status_code=410, detail="file_blob_missing")
-    return _serve_file(f.path, f.original_filename)
+    return _serve_artifact(f, f.original_filename)
 
 
 @router.get(
@@ -119,6 +167,68 @@ def download_file(
     session: Session = Depends(get_session),
 ):
     return _serve_download(session, file_id, slicer_token, current_user)
+
+
+@router.get(
+    "/{file_id}/embedded-gcode",
+    response_class=PlainTextResponse,
+    responses={
+        200: {
+            "description": "Embedded G-code text",
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+        },
+        404: {"description": "Artifact is inaccessible or preview is unavailable"},
+        410: {"description": "Artifact blob is missing from storage"},
+        413: {"description": "Archive or embedded toolpath exceeds configured limits"},
+        429: {"description": "Preview concurrency capacity is exhausted"},
+    },
+    summary="Serve a Bambu 3MF's embedded G-code preview",
+    description=(
+        "Reads Metadata/plate_<N>.gcode on demand from an authorized 3MF. "
+        "The selected member is bounded and is never extracted or persisted."
+    ),
+)
+def embedded_gcode(
+    file_id: int,
+    plate_index: int | None = Query(default=None, ge=0),
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    artifact = _accessible_file(session, file_id, current_user)
+    if artifact.file_type != FileType.THREE_MF:
+        raise HTTPException(status_code=404, detail="embedded_gcode_not_supported")
+    archive_cap = settings.three_mf_preview_max_archive_mb * 1024 * 1024
+    if artifact.size_bytes > archive_cap:
+        raise HTTPException(status_code=413, detail="embedded_gcode_archive_too_large")
+    try:
+        with resolve(artifact).materialize() as path:
+            embedded = read_embedded_gcode_path(path, plate_index=plate_index)
+    except EmbeddedGcodeError as exc:
+        status_code = (
+            413
+            if exc.code
+            in {
+                "embedded_gcode_too_large",
+                "embedded_gcode_bomb",
+                "embedded_gcode_archive_too_large",
+                "embedded_gcode_too_many_entries",
+                "embedded_gcode_central_directory_too_large",
+            }
+            else 429
+            if exc.code == "embedded_gcode_busy"
+            else 404
+        )
+        raise HTTPException(status_code=status_code, detail=exc.code) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    except ArtifactContentError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
+    return PlainTextResponse(
+        content=embedded.content,
+        headers={
+            "Content-Disposition": f'inline; filename="{embedded.filename}"',
+        },
+    )
 
 
 @router.get(
@@ -177,8 +287,7 @@ def download_url(
     session: Session = Depends(get_session),
 ) -> dict:
     f = _accessible_file(session, file_id, current_user)
-    backend = get_backend()
-    url = backend.presigned_download_url(f.path, f.original_filename)
+    url = presigned_download_url(f, f.original_filename)
     if url:
         return {
             "url": url,
@@ -198,8 +307,7 @@ def download_direct(
     session: Session = Depends(get_session),
 ):
     f = _accessible_file(session, file_id, current_user)
-    backend = get_backend()
-    url = backend.presigned_download_url(f.path, f.original_filename)
+    url = presigned_download_url(f, f.original_filename)
     if url:
         return RedirectResponse(url=url, status_code=307)
     return download_file(file_id=file_id, current_user=current_user, session=session)
@@ -215,8 +323,8 @@ def file_thumbnail(
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
-    _accessible_file(session, file_id, current_user)
-    return thumbnail_response(file_id, request)
+    file_row = _accessible_file(session, file_id, current_user)
+    return thumbnail_response(file_id, request, thumbnail_path=file_row.thumbnail_path)
 
 
 def _etag_matches(request: Request | None, etag: str) -> bool:
@@ -228,12 +336,20 @@ def _etag_matches(request: Request | None, etag: str) -> bool:
     )
 
 
-def thumbnail_response(file_id: int, request: Request | None = None):
+def thumbnail_response(
+    file_id: int,
+    request: Request | None = None,
+    *,
+    thumbnail_path: str | None = None,
+):
     """Serve a file's thumbnail. No access checks — authorise the caller first."""
     backend = get_backend()
-    thumb_key = backend.thumbnail_key(file_id)
+    thumb_key = thumbnail_path or backend.thumbnail_key(file_id)
     filename, media_type = f"{file_id}.webp", "image/webp"
     info = backend.object_info(thumb_key)
+    if info is None and thumbnail_path is not None:
+        thumb_key = backend.thumbnail_key(file_id)
+        info = backend.object_info(thumb_key)
     if info is None:
         # Thumbnails written before the WebP switch are still PNG on disk.
         thumb_key = backend.legacy_thumbnail_key(file_id)
@@ -243,7 +359,9 @@ def thumbnail_response(file_id: int, request: Request | None = None):
             raise HTTPException(status_code=404, detail="thumbnail_not_found")
     # Thumbnails only change on explicit rebuilds; let the browser cache them
     # so the library grid doesn't re-request every image on each visit.
-    headers = {"Cache-Control": "public, max-age=3600"}
+    # Revalidate cheaply so a newly-published immutable generation is visible
+    # immediately instead of leaving cards stale for the previous one-hour TTL.
+    headers = {"Cache-Control": "public, max-age=0, must-revalidate"}
     if info.etag:
         headers["ETag"] = info.etag
         if _etag_matches(request, info.etag):
@@ -277,10 +395,6 @@ def file_as_stl(
 def stl_response(f: File, request: Request):
     """Serve a mesh File as binary STL (cached). No access checks — callers
     are responsible for authorising access to *f* first."""
-    backend = get_backend()
-    if not backend.exists(f.path):
-        raise HTTPException(status_code=410, detail="file_blob_missing")
-
     stem = Path(f.original_filename).stem
     # File blobs are immutable (content-addressed by sha256), so the rendered
     # STL never changes (content-addressed), but keep the browser TTL modest;
@@ -298,8 +412,8 @@ def stl_response(f: File, request: Request):
     # Already STL: stream the blob straight through, no conversion — never read
     # a (potentially multi-GB) STL fully into memory just to serve it.
     if Path(f.original_filename).suffix.lower() == ".stl":
-        return _serve_file(
-            f.path,
+        return _serve_artifact(
+            f,
             f"{stem}.stl",
             media_type="application/sla",
             headers=cache_headers,
@@ -307,6 +421,7 @@ def stl_response(f: File, request: Request):
 
     # 3MF/OBJ: trimesh conversion is expensive, so cache the result keyed by the
     # source sha256 and serve the cached STL on every subsequent request.
+    backend = get_backend()
     cache_key = backend.stl_cache_key(f.sha256)
     if backend.exists(cache_key):
         return _serve_file(
@@ -319,17 +434,22 @@ def stl_response(f: File, request: Request):
     # Lazy import: trimesh is heavy; pull it in only when we must convert.
     from app.services import mesh_processing
 
-    with backend.local_path(f.path) as path:
-        data = mesh_processing.to_stl_bytes(path)
+    try:
+        with resolve(f).materialize() as path:
+            data = mesh_processing.to_stl_bytes(path)
+    except ArtifactContentMissingError as exc:
+        raise HTTPException(status_code=410, detail="file_blob_missing") from exc
     if data is None:
         raise HTTPException(status_code=500, detail="stl_conversion_failed")
 
-    receipt = None
     try:
-        receipt = backend.create_bytes(data, cache_key)
         with get_session_factory().scoped_session() as ownership_session:
-            record_creation(
-                ownership_session, receipt, object_kind="derived_stl_cache"
+            publish_bytes(
+                ownership_session,
+                backend,
+                cache_key,
+                data,
+                object_kind="derived_stl_cache",
             )
             ownership_session.commit()
     except StorageCollisionError:
@@ -337,8 +457,6 @@ def stl_response(f: File, request: Request):
         # subsequent requests will use the already-published cache object.
         pass
     except Exception:
-        if receipt is not None:
-            backend.rollback_create(receipt)
         logger.warning("stl cache write failed for file %s", f.id, exc_info=True)
 
     # Freshly converted bytes are already in memory (and bounded by the render
@@ -357,7 +475,8 @@ def _run_thumbnail_rebuild(
     job_id: str, force: bool, session_factory: SessionFactory
 ) -> None:
     """Walk models and re-render thumbnails. Runs as a background task."""
-    from app.services.thumbnail_repair import regenerate_model_thumbnail
+    from app.services.thumbnail_generations import ThumbnailEnsureOutcome
+    from app.services.thumbnail_repair import regenerate_model_thumbnail_result
 
     registry.update(job_id, state="running", label="scanning_models")
     try:
@@ -365,79 +484,112 @@ def _run_thumbnail_rebuild(
             stmt = select(Model).where(live(Model))
             if not force:
                 stmt = stmt.where(Model.thumbnail_file_id.is_(None))  # type: ignore[union-attr]
-            models = session.exec(stmt).all()
+            total = session.exec(
+                select(func.count()).select_from(stmt.subquery())
+            ).one()
             registry.update(
                 job_id,
                 stage="thumbnailing",
                 processed=0,
-                total=len(models),
-                total_steps=len(models),
+                total=total,
+                total_steps=total,
             )
 
             rebuilt: list[int] = []
+            cached: list[int] = []
+            coalesced: list[int] = []
+            negative_cached: list[int] = []
             skipped: list[int] = []
             failed: list[int] = []
-
-            for index, m in enumerate(models):
-                assert m.id is not None
-                registry.update(
-                    job_id,
-                    step=index + 1,
-                    total_steps=len(models),
-                    label=f"rendering model {m.id}",
-                    progress=index / len(models) * 100,
-                    stage="thumbnailing",
-                    processed=index,
-                    total=len(models),
-                )
-                mesh_file = session.exec(
-                    select(File)
-                    .where(File.model_id == m.id, File.file_type.in_(_MESH_TYPES))  # type: ignore[attr-defined]
-                    .order_by(File.version.desc())  # type: ignore[attr-defined]
-                ).first()
-                if mesh_file is None:
-                    skipped.append(m.id)
-                    continue
-
-                try:
-                    regenerated = regenerate_model_thumbnail(session, m.id)
-                except Exception:  # noqa: BLE001 — defensive, log and continue
-                    logger.exception(
-                        "rebuild: thumbnail regeneration crashed for model %s", m.id
+            processed = 0
+            after_id = 0
+            while True:
+                page_stmt = (
+                    stmt.where(Model.id > after_id).order_by(Model.id).limit(100)
+                )  # type: ignore[operator,union-attr]
+                models = session.exec(page_stmt).all()
+                if not models:
+                    break
+                for m in models:
+                    assert m.id is not None
+                    processed += 1
+                    registry.update(
+                        job_id,
+                        step=processed,
+                        total_steps=total,
+                        label=f"rendering model {m.id}",
+                        progress=(processed - 1) / max(total, 1) * 100,
+                        stage="thumbnailing",
+                        processed=processed - 1,
+                        total=total,
                     )
-                    regenerated = False
+                    mesh_file = session.exec(
+                        select(File)
+                        .where(
+                            File.model_id == m.id,
+                            File.file_type.in_(_MESH_TYPES),  # type: ignore[attr-defined]
+                            live(File),
+                        )
+                        .order_by(File.version.desc())  # type: ignore[attr-defined]
+                    ).first()
+                    if mesh_file is None:
+                        skipped.append(m.id)
+                        continue
 
-                if not regenerated:
-                    failed.append(m.id)
-                    continue
-                rebuilt.append(m.id)
-                logger.info(
-                    "rebuild: thumbnail regenerated for model %s file %s",
-                    m.id,
-                    mesh_file.id,
-                )
+                    try:
+                        result = regenerate_model_thumbnail_result(
+                            session, m.id, force=force
+                        )
+                    except Exception:  # noqa: BLE001 — task boundary
+                        logger.exception(
+                            "rebuild: thumbnail regeneration crashed for model %s",
+                            m.id,
+                        )
+                        failed.append(m.id)
+                        continue
+
+                    if result.outcome is ThumbnailEnsureOutcome.GENERATED:
+                        rebuilt.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.CACHED:
+                        cached.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.COALESCED:
+                        coalesced.append(m.id)
+                    elif result.outcome is ThumbnailEnsureOutcome.NEGATIVE_CACHED:
+                        negative_cached.append(m.id)
+                    else:
+                        failed.append(m.id)
+                after_id = models[-1].id or after_id
 
             registry.update(
                 job_id,
                 state="completed",
                 stage="completed",
-                processed=len(models),
-                total=len(models),
-                succeeded=len(rebuilt),
+                processed=processed,
+                total=total,
+                succeeded=len(rebuilt) + len(cached),
                 skipped=len(skipped),
                 failed=len(failed),
                 completion="partial" if failed else "complete",
                 thumbnail_status=(
-                    "failed" if failed else "generated" if rebuilt else "skipped"
+                    "failed"
+                    if failed
+                    else "generated"
+                    if rebuilt or cached
+                    else "skipped"
                 ),
                 thumbnail_reason=(
                     "renderer_no_output"
                     if failed
-                    else "no_mesh" if skipped and not rebuilt else None
+                    else "no_mesh"
+                    if skipped and not rebuilt
+                    else None
                 ),
                 result={
-                    "scanned": len(models),
+                    "scanned": processed,
                     "rebuilt": rebuilt,
+                    "cache_hits": cached,
+                    "coalesced": coalesced,
+                    "negative_cached": negative_cached,
                     "skipped_no_mesh": skipped,
                     "failed_render": failed,
                 },

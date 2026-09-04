@@ -1,0 +1,4 @@
+# Manual fixtures and imported files are disposable; retain only placeholders.
+*
+!.gitignore
+!.gitkeep

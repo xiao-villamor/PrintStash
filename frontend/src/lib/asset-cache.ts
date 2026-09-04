@@ -79,7 +79,7 @@ export function invalidateCachedAsset(path: string): void {
 
 function evictIfNeeded(): void {
   while (urlCache.size > CACHE_LIMIT) {
-    const oldest = urlCache.keys().next().value as string | undefined;
+    const oldest = urlCache.keys().next().value;
     if (oldest === undefined) break;
     const url = urlCache.get(oldest);
     urlCache.delete(oldest);

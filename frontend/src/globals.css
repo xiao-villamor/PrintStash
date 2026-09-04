@@ -1,14 +1,16 @@
+@import "tailwindcss" source(none);
 @config "../tailwind.config.cjs";
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@plugin "@tailwindcss/typography";
+@source "./app";
+@source "./components";
+@source "./pages";
+@source "../packages/ui/src";
 
 @layer base {
   :root {
     /* Font families (previously injected by next/font; now from @fontsource). */
-    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-    --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
     --background: #f8fafc;
     --foreground: #1e293b;
     --card: #ffffff;
@@ -180,13 +182,27 @@
 }
 
 @layer utilities {
-  .bg-chart-blue { background-color: var(--chart-1); }
-  .bg-chart-cyan { background-color: var(--chart-2); }
-  .bg-chart-violet { background-color: var(--chart-3); }
-  .bg-chart-cyan-soft { background-color: color-mix(in srgb, var(--chart-2) 14%, transparent); }
-  .bg-chart-violet-soft { background-color: color-mix(in srgb, var(--chart-3) 14%, transparent); }
-  .text-chart-cyan { color: var(--chart-2); }
-  .text-chart-violet { color: var(--chart-3); }
+  .bg-chart-blue {
+    background-color: var(--chart-1);
+  }
+  .bg-chart-cyan {
+    background-color: var(--chart-2);
+  }
+  .bg-chart-violet {
+    background-color: var(--chart-3);
+  }
+  .bg-chart-cyan-soft {
+    background-color: color-mix(in srgb, var(--chart-2) 14%, transparent);
+  }
+  .bg-chart-violet-soft {
+    background-color: color-mix(in srgb, var(--chart-3) 14%, transparent);
+  }
+  .text-chart-cyan {
+    color: var(--chart-2);
+  }
+  .text-chart-violet {
+    color: var(--chart-3);
+  }
 }
 
 @layer base {
@@ -194,7 +210,7 @@
     @apply border-border;
   }
   html {
-    font-family: 'Inter', var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-family: var(--font-sans);
   }
   body {
     @apply bg-background text-foreground antialiased;
@@ -215,8 +231,14 @@
 }
 
 @keyframes theme-icon-in {
-  from { opacity: 0; transform: rotate(-30deg) scale(0.9); }
-  to   { opacity: 1; transform: rotate(0deg) scale(1); }
+  from {
+    opacity: 0;
+    transform: rotate(-30deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
 }
 
 @keyframes slide-in-left {
@@ -350,16 +372,36 @@
      as a sequence instead of one flat block. Capped at ~10: a 60-card page must
      land well inside the 300ms UI budget, so everything past the 10th shares the
      last slot. Purely decorative — the cards are already interactive underneath. */
-  .stagger-children > *:nth-child(1) { animation-delay: 0ms; }
-  .stagger-children > *:nth-child(2) { animation-delay: 30ms; }
-  .stagger-children > *:nth-child(3) { animation-delay: 60ms; }
-  .stagger-children > *:nth-child(4) { animation-delay: 90ms; }
-  .stagger-children > *:nth-child(5) { animation-delay: 120ms; }
-  .stagger-children > *:nth-child(6) { animation-delay: 150ms; }
-  .stagger-children > *:nth-child(7) { animation-delay: 180ms; }
-  .stagger-children > *:nth-child(8) { animation-delay: 210ms; }
-  .stagger-children > *:nth-child(9) { animation-delay: 240ms; }
-  .stagger-children > *:nth-child(n + 10) { animation-delay: 270ms; }
+  .stagger-children > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger-children > *:nth-child(2) {
+    animation-delay: 30ms;
+  }
+  .stagger-children > *:nth-child(3) {
+    animation-delay: 60ms;
+  }
+  .stagger-children > *:nth-child(4) {
+    animation-delay: 90ms;
+  }
+  .stagger-children > *:nth-child(5) {
+    animation-delay: 120ms;
+  }
+  .stagger-children > *:nth-child(6) {
+    animation-delay: 150ms;
+  }
+  .stagger-children > *:nth-child(7) {
+    animation-delay: 180ms;
+  }
+  .stagger-children > *:nth-child(8) {
+    animation-delay: 210ms;
+  }
+  .stagger-children > *:nth-child(9) {
+    animation-delay: 240ms;
+  }
+  .stagger-children > *:nth-child(n + 10) {
+    animation-delay: 270ms;
+  }
 
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom, 8px);

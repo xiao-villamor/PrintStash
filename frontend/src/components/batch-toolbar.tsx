@@ -70,23 +70,27 @@ export function BatchToolbar({
             <FolderInput className="h-4 w-4 text-muted-foreground" />
             Move
           </button>
-          {modelCount > 0 && selectedCollections.length === 0 && <button
-            type="button"
-            onClick={() => setTagOpen(true)}
-            disabled={busy}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <Tag className="h-4 w-4 text-muted-foreground" />
-            Tag
-          </button>}
-          {selectedCollections.length > 0 && <button
-            type="button"
-            onClick={() => setRenameOpen(true)}
-            disabled={busy}
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <Pencil className="h-4 w-4 text-muted-foreground" /> Rename
-          </button>}
+          {modelCount > 0 && selectedCollections.length === 0 && (
+            <button
+              type="button"
+              onClick={() => setTagOpen(true)}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Tag className="h-4 w-4 text-muted-foreground" />
+              Tag
+            </button>
+          )}
+          {selectedCollections.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setRenameOpen(true)}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Pencil className="h-4 w-4 text-muted-foreground" /> Rename
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setDeleteOpen(true)}
@@ -123,24 +127,29 @@ export function BatchToolbar({
         }}
       />
 
-      {modelCount > 0 && selectedCollections.length === 0 && <TagDialog
-        open={tagOpen}
-        count={count}
-        tags={tags}
-        busy={busy}
-        onClose={() => setTagOpen(false)}
-        onConfirm={(add, remove) => {
-          setTagOpen(false);
-          onApplyTags(add, remove);
-        }}
-      />}
+      {modelCount > 0 && selectedCollections.length === 0 && (
+        <TagDialog
+          open={tagOpen}
+          count={count}
+          tags={tags}
+          busy={busy}
+          onClose={() => setTagOpen(false)}
+          onConfirm={(add, remove) => {
+            setTagOpen(false);
+            onApplyTags(add, remove);
+          }}
+        />
+      )}
 
       <RenameCollectionsDialog
         open={renameOpen}
         collections={selectedCollections}
         busy={busy}
         onClose={() => setRenameOpen(false)}
-        onConfirm={(names) => { setRenameOpen(false); onRenameCollections(names); }}
+        onConfirm={(names) => {
+          setRenameOpen(false);
+          onRenameCollections(names);
+        }}
       />
 
       <ConfirmModal
@@ -151,7 +160,11 @@ export function BatchToolbar({
           onDeleteSelection();
         }}
         title={`Delete ${count} selected item${count !== 1 ? "s" : ""}?`}
-        description={selectedCollections.length ? "Selected folders and their contents move to trash." : "They move to trash and can be restored until purged."}
+        description={
+          selectedCollections.length
+            ? "Selected folders and their contents move to trash."
+            : "They move to trash and can be restored until purged."
+        }
         confirmLabel="Delete"
         busy={busy}
       />
@@ -180,41 +193,71 @@ function MoveDialog({
 }) {
   const [target, setTarget] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const blockedPaths = useMemo(() => selectedCollections.map((collection) => collection.path), [selectedCollections]);
+  const blockedPaths = useMemo(
+    () => selectedCollections.map((collection) => collection.path),
+    [selectedCollections],
+  );
   const sorted = useMemo(
-    () => collections
-      .filter((collection) => !blockedPaths.some((path) => collection.path === path || collection.path.startsWith(`${path}/`)))
-      .filter((collection) => collection.path.toLowerCase().includes(query.trim().toLowerCase()))
-      .sort((a, b) => a.path.localeCompare(b.path)),
+    () =>
+      collections
+        .filter(
+          (collection) =>
+            !blockedPaths.some(
+              (path) => collection.path === path || collection.path.startsWith(`${path}/`),
+            ),
+        )
+        .filter((collection) => collection.path.toLowerCase().includes(query.trim().toLowerCase()))
+        .sort((a, b) => a.path.localeCompare(b.path)),
     [blockedPaths, collections, query],
   );
 
   return (
-    <Modal open={open} onClose={onClose} title={`Move ${count} item${count !== 1 ? "s" : ""}`} className="max-w-md">
-      <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find destination..." aria-label="Find destination" className="mb-2" />
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Move ${count} item${count !== 1 ? "s" : ""}`}
+      className="max-w-md"
+    >
+      <Input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Find destination..."
+        aria-label="Find destination"
+        className="mb-2"
+      />
       <div className="max-h-72 overflow-y-auto rounded border border-border">
-        {canMoveToRoot && <button
-          type="button"
-          onClick={() => setTarget("")}
-          className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-            target === "" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"
-          }`}
-        >
-          None (root)
-        </button>}
+        {canMoveToRoot && (
+          <button
+            type="button"
+            onClick={() => setTarget("")}
+            className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
+              target === ""
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            None (root)
+          </button>
+        )}
         {sorted.map((c) => (
           <button
             key={c.id}
             type="button"
             onClick={() => setTarget(c.path)}
             className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-              target === c.path ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted"
+              target === c.path
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted"
             }`}
           >
             {c.path} <span className="opacity-50">({c.model_count})</span>
           </button>
         ))}
-        {sorted.length === 0 && <p className="px-3 py-6 text-center text-sm text-muted-foreground">No valid destinations</p>}
+        {sorted.length === 0 && (
+          <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+            No valid destinations
+          </p>
+        )}
       </div>
       <div className="mt-5 flex gap-3">
         <button
@@ -229,7 +272,10 @@ function MoveDialog({
           type="button"
           onClick={() => {
             if (target === null) return;
-            const parentId = target === "" ? null : collections.find((collection) => collection.path === target)?.id ?? null;
+            const parentId =
+              target === ""
+                ? null
+                : (collections.find((collection) => collection.path === target)?.id ?? null);
             onConfirm(target, parentId);
           }}
           disabled={busy || target === null}
@@ -256,18 +302,30 @@ function RenameCollectionsDialog({
   onConfirm: (names: Record<number, string>) => void;
 }) {
   const [names, setNames] = useState<Record<number, string>>({});
-  const values = Object.fromEntries(collections.map((collection) => [collection.id, names[collection.id] ?? collection.name]));
-  const valid = collections.length > 0 && collections.every((collection) => values[collection.id].trim());
+  const values = Object.fromEntries(
+    collections.map((collection) => [collection.id, names[collection.id] ?? collection.name]),
+  );
+  const valid =
+    collections.length > 0 && collections.every((collection) => values[collection.id].trim());
 
   return (
-    <Modal open={open} onClose={onClose} title={`Rename ${collections.length} folder${collections.length !== 1 ? "s" : ""}`} className="max-w-md">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={`Rename ${collections.length} folder${collections.length !== 1 ? "s" : ""}`}
+      className="max-w-md"
+    >
       <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
         {collections.map((collection) => (
           <label key={collection.id} className="block space-y-1">
-            <span className="block truncate font-mono text-3xs text-muted-foreground">{collection.path}</span>
+            <span className="block truncate font-mono text-3xs text-muted-foreground">
+              {collection.path}
+            </span>
             <input
               value={values[collection.id]}
-              onChange={(event) => setNames((current) => ({ ...current, [collection.id]: event.target.value }))}
+              onChange={(event) =>
+                setNames((current) => ({ ...current, [collection.id]: event.target.value }))
+              }
               maxLength={100}
               className="h-9 w-full rounded border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
@@ -275,8 +333,22 @@ function RenameCollectionsDialog({
         ))}
       </div>
       <div className="mt-5 flex justify-end gap-2">
-        <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50">Cancel</button>
-        <button type="button" onClick={() => onConfirm(values)} disabled={busy || !valid} className="h-9 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50">Rename</button>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="h-9 rounded border border-border px-4 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onConfirm(values)}
+          disabled={busy || !valid}
+          className="h-9 rounded bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover disabled:opacity-50"
+        >
+          Rename
+        </button>
       </div>
     </Modal>
   );
@@ -400,9 +472,7 @@ function ChipEditor({
   });
 
   const chipClasses =
-    accent === "add"
-      ? "bg-accent text-accent-foreground"
-      : "bg-destructive/10 text-destructive";
+    accent === "add" ? "bg-accent text-accent-foreground" : "bg-destructive/10 text-destructive";
 
   return (
     <div>
@@ -424,7 +494,9 @@ function ChipEditor({
               onChange(values.slice(0, -1));
             }
           }}
-          placeholder={accent === "add" ? "Search or create — press Enter" : "Search tags — press Enter"}
+          placeholder={
+            accent === "add" ? "Search or create — press Enter" : "Search tags — press Enter"
+          }
           className="w-full h-10 bg-background text-foreground font-mono text-sm border border-border rounded px-3 focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
         />
         {input && (filtered.length > 0 || canCreate) && (

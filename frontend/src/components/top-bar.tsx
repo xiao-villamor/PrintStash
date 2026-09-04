@@ -1,14 +1,15 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState, useTransition } from "react";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "@/lib/navigation";
-import { Link } from "@/lib/navigation";
+import { Link } from "@/lib/link";
 import {
   BarChart3,
   Bell,
   Box,
   ChevronDown,
   BookOpen,
+  Inbox,
   LogOut,
   Printer,
   Search,
@@ -34,6 +35,14 @@ import {
 
 const WIKI_URL = "https://xiao-villamor.github.io/PrintStash/";
 
+// `lastVaultHref` reads the remembered collection out of localStorage — an
+// external store. Same-tab writes are picked up on the next render (a route
+// change re-renders the bar); the `storage` event covers other tabs.
+function subscribeLastVaultHref(onStoreChange: () => void): () => void {
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
+
 function TopBarSearch() {
   const { t } = useI18n();
   const router = useRouter();
@@ -41,15 +50,22 @@ function TopBarSearch() {
   const searchParams = useSearchParams();
   const q = searchParams.get("q") ?? "";
   const [value, setValue] = useState(q);
+  const [syncedQuery, setSyncedQuery] = useState(q);
   const inputRef = useRef<HTMLInputElement>(null);
   const [, startTransition] = useTransition();
 
-  useEffect(() => { setValue(q); }, [q]);
+  // The URL owns the search term: a back/forward navigation or an inbound
+  // /?q=… link has to land in the box. Adjusting during render keeps the input
+  // from flashing the stale term for a frame.
+  if (syncedQuery !== q) {
+    setSyncedQuery(q);
+    setValue(q);
+  }
 
   useEffect(() => {
     if (pathname !== "/") return;
     function focusSearch(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof HTMLElement ? event.target : null;
       if (
         event.key !== "/" ||
         event.metaKey ||
@@ -109,7 +125,9 @@ function TopBarSearch() {
           onChange={(e) => setValue(e.target.value)}
         />
         <div className="absolute inset-y-0 right-0 pr-3 hidden sm:flex items-center pointer-events-none">
-          <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">/</span>
+          <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">
+            /
+          </span>
         </div>
         {value && (
           <button
@@ -131,23 +149,21 @@ export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, logout } = useAuth();
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   // The logo returns to the model browser, restoring the last folder the user
-  // was in rather than always resetting to "All Models". Recomputed whenever the
-  // route changes (e.g. arriving on Settings) so it reflects the remembered
-  // collection at click time.
-  const [homeHref, setHomeHref] = useState("/");
-  useEffect(() => {
-    setHomeHref(lastVaultHref());
-  }, [pathname]);
+  // was in rather than always resetting to "All Models", so it reflects the
+  // remembered collection at click time.
+  const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
 
   useEffect(() => {
-    setTasks(listTasks());
     const unsubscribe = subscribeTasks(() => setTasks(listTasks()));
     const stopSync = startImportJobSync();
-    return () => { unsubscribe(); stopSync(); };
+    return () => {
+      unsubscribe();
+      stopSync();
+    };
   }, []);
 
   async function handleLogout() {
@@ -159,11 +175,16 @@ export function TopBar() {
   return (
     <header className="h-16 bg-background border-b border-border flex items-center justify-between px-4 z-dropdown relative">
       {/* Logo */}
-      <Link href={homeHref} className="flex items-center space-x-2 hover:opacity-80 transition-opacity">
+      <Link
+        href={homeHref}
+        className="flex items-center space-x-2 hover:opacity-80 transition-opacity"
+      >
         <div className="w-8 h-8 bg-primary rounded flex items-center justify-center flex-shrink-0">
           <BrandMark className="h-6 w-6 text-primary-foreground" />
         </div>
-        <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">PrintStash</span>
+        <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">
+          PrintStash
+        </span>
       </Link>
 
       {/* Search */}
@@ -248,7 +269,9 @@ export function TopBar() {
                 <span className="text-sm font-medium text-foreground group-hover:text-foreground hidden sm:block">
                   {user?.username ?? "…"}
                 </span>
-                <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform group-hover:text-muted-foreground hidden sm:block ${profileOpen ? "rotate-180" : ""}`} />
+                <ChevronDown
+                  className={`h-4 w-4 text-muted-foreground transition-transform group-hover:text-muted-foreground hidden sm:block ${profileOpen ? "rotate-180" : ""}`}
+                />
               </button>
             }
           >
@@ -279,6 +302,7 @@ function ProfileMenu({
   const { t } = useI18n();
   const items = [
     { href: "/", label: t("nav.vault"), icon: Box },
+    { href: "/inbox", label: t("nav.inbox"), icon: Inbox },
     { href: "/printers", label: t("nav.printers"), icon: Printer, adminOnly: true },
     { href: "/statistics", label: t("nav.statistics"), icon: BarChart3, adminOnly: true },
     { href: "/profiles", label: t("nav.profiles"), icon: SlidersHorizontal },
@@ -287,9 +311,7 @@ function ProfileMenu({
   ].filter((item) => !item.adminOnly || isAdmin);
 
   return (
-    <div
-      className="w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl"
-    >
+    <div className="w-48 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl">
       {items.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const className = `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
@@ -299,14 +321,27 @@ function ProfileMenu({
         } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
         if (item.external) {
           return (
-            <a key={item.href} href={item.href} role="menuitem" onClick={onNavigate} className={className}>
+            <a
+              key={item.href}
+              href={item.href}
+              role="menuitem"
+              onClick={onNavigate}
+              className={className}
+            >
               <item.icon className="h-4 w-4" />
               <span>{item.label}</span>
             </a>
           );
         }
         return (
-          <Link key={item.href} href={item.href} role="menuitem" aria-current={active ? "page" : undefined} onClick={onNavigate} className={className}>
+          <Link
+            key={item.href}
+            href={item.href}
+            role="menuitem"
+            aria-current={active ? "page" : undefined}
+            onClick={onNavigate}
+            className={className}
+          >
             <item.icon className="h-4 w-4" />
             <span>{item.label}</span>
           </Link>

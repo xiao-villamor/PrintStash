@@ -1,4 +1,11 @@
-import { authHeaders, getJson, getUrl, handleResponse, sendAction, sendJson } from "@/lib/api/request";
+import {
+  authHeaders,
+  getJson,
+  getUrl,
+  handleResponse,
+  sendAction,
+  sendJson,
+} from "@/lib/api/request";
 import {
   ApiKeyCreateResponse,
   ApiKeyRead,
@@ -55,10 +62,7 @@ export function updateAdminUser(id: number, payload: UserUpdate): Promise<UserRe
   return sendJson<UserRead>(`/api/v1/admin/users/${id}`, "PATCH", payload);
 }
 
-export function resetAdminUserPassword(
-  id: number,
-  payload: UserPasswordUpdate,
-): Promise<UserRead> {
+export function resetAdminUserPassword(id: number, payload: UserPasswordUpdate): Promise<UserRead> {
   return sendJson<UserRead>(`/api/v1/admin/users/${id}/password`, "POST", payload);
 }
 

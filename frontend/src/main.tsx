@@ -8,14 +8,7 @@ import { I18nProvider } from "@/lib/i18n";
 import { DomLocalization } from "@/components/ui/localized";
 import { registerPwa } from "@/lib/pwa";
 
-import "@fontsource/inter/latin-400.css";
-import "@fontsource/inter/latin-500.css";
-import "@fontsource/inter/latin-600.css";
-import "@fontsource/inter/latin-700.css";
-import "@fontsource/jetbrains-mono/latin-400.css";
-import "@fontsource/jetbrains-mono/latin-500.css";
-import "@fontsource/jetbrains-mono/latin-600.css";
-
+import "@/fonts.css";
 import "@/globals.css";
 import { router } from "@/router";
 

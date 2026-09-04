@@ -7,8 +7,5 @@ export function getPrintStatistics(
   period: StatsPeriod,
   options?: GetJsonOptions,
 ): Promise<PrintStatisticsRead> {
-  return getJson<PrintStatisticsRead>(
-    `/api/v1/models/stats/prints?period=${period}`,
-    options,
-  );
+  return getJson<PrintStatisticsRead>(`/api/v1/models/stats/prints?period=${period}`, options);
 }

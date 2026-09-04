@@ -1,0 +1,203 @@
+{
+  "schema_version": 1,
+  "lane": "scripts/test-critical.sh",
+  "capabilities": [
+    {
+      "id": "critical-lane-governance",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/repo/test_critical_capabilities.py",
+          "node": "TestCriticalCapabilityManifest::test_every_required_capability_names_a_marked_test"
+        }
+      ]
+    },
+    {
+      "id": "backup-local-api",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_backup.py",
+          "node": "TestBackupRestore::test_backup_wipe_restore_round_trips_through_the_real_api"
+        }
+      ]
+    },
+    {
+      "id": "backup-browser-recovery",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/backup-recovery.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical restores a purged model with its Artifact bytes"
+        }
+      ]
+    },
+    {
+      "id": "backup-s3-only-recovery",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/contract/services/backup/test_s3.py",
+          "node": "TestBackupS3::test_restore_downloads_s3_only_backup_before_restoring"
+        }
+      ]
+    },
+    {
+      "id": "backup-remote-only-api",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_remote_backup.py",
+          "node": "TestRemoteBackup::test_remote_only_backup_restores_through_the_public_api"
+        }
+      ]
+    },
+    {
+      "id": "backup-remote-only-browser",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/critical/remote-backup.spec.ts",
+          "config": "playwright.critical-backup.config.ts",
+          "title": "@critical creates then restores a remote-only backup in the browser"
+        }
+      ]
+    },
+    {
+      "id": "backup-restore-interruption",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/services/backup/test_core.py",
+          "node": "TestRestoreDatabase::test_existing_swap_intent_with_inactive_marker_is_not_duplicated"
+        },
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/services/backup/test_core.py",
+          "node": "TestRestoreDatabase::test_restore_retracts_a_vanished_publication_generation"
+        }
+      ]
+    },
+    {
+      "id": "model-lifecycle-browser",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/models.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical upload, edit, trash, restore, and purge a model"
+        }
+      ]
+    },
+    {
+      "id": "model-gcode-ingestion",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_ingest.py",
+          "node": "TestMetadata::test_a_repeated_gcode_upload_dedupes_by_content_hash"
+        },
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/uploads.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical upload a BGCODE model; its slicer metadata is available"
+        }
+      ]
+    },
+    {
+      "id": "model-mesh-ingestion",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/uploads.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical upload an STL mesh-only model; the mesh lands as the source"
+        }
+      ]
+    },
+    {
+      "id": "model-organization",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/uploads.spec.ts",
+          "config": "playwright.real.config.ts",
+          "title": "@critical upload into a chosen collection"
+        },
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_library_transfer.py",
+          "node": "TestLibraryTransfer::test_export_from_instance_a_import_into_instance_b_preserves_everything"
+        }
+      ]
+    },
+    {
+      "id": "trash-purge",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_trash_legacy_ownership.py",
+          "node": "TestTrash::test_trash_purges_a_pre_ledger_artifact_it_can_verify"
+        }
+      ]
+    },
+    {
+      "id": "library-scan-local",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/integration/services/external_library/test_scan_real_folder.py",
+          "node": "TestScanLibrary::test_scan_real_world_folder"
+        }
+      ]
+    },
+    {
+      "id": "library-scan-remote",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/contract/services/storage_opendal/test_real_provider.py",
+          "node": "TestOpenDalLibrarySource::test_real_provider_content_is_materializable"
+        },
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_remote_library_scan.py",
+          "node": "TestRemoteLibraryScan::test_real_provider_scans_through_the_public_api"
+        }
+      ]
+    },
+    {
+      "id": "remote-storage-lifecycle",
+      "required": true,
+      "tests": [
+        {
+          "runtime": "pytest",
+          "path": "backend/tests/e2e/test_e2e_webdav_storage.py",
+          "node": "TestArtifactUpload::test_artifact_upload_is_committed_through_webdav"
+        },
+        {
+          "runtime": "playwright",
+          "path": "frontend/tests/e2e-real/storage/storage-provider.spec.ts",
+          "config": "playwright.storage.config.ts",
+          "title": "@critical configures WebDAV through restart with safe GC preview"
+        }
+      ]
+    }
+  ]
+}

@@ -46,9 +46,10 @@ class UrlIngestRequest(BaseModel):
     """Body for POST /ingest/url.
 
     ``url`` may be a direct file/.zip link *or* a model *page* on a supported
-    host (Printables / MakerWorld / Thingiverse); pages are resolved to their
-    download link server-side. The optional ``*_cookie`` fields carry a browser
-    session header for hosts that gate downloads behind login.
+    host (Printables / Thingiverse); pages are resolved to their download link
+    server-side. Authenticated MakerWorld packages are captured by the browser
+    extension and uploaded through the inbox. The optional cookie fields remain
+    accepted for backwards compatibility; ``makerworld_cookie`` is ignored.
     """
 
     url: str

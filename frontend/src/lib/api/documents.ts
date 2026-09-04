@@ -17,6 +17,7 @@ export function createDocument(payload: {
   name: string;
   collection_id: number | null;
   body?: string;
+  multipart_model_id?: number | null;
 }): Promise<DocumentRead> {
   return sendJson<DocumentRead>("/api/v1/documents", "POST", payload);
 }
@@ -25,11 +26,13 @@ export function uploadDocument(
   file: File,
   collectionId: number | null,
   name?: string,
+  multipartModelId?: number,
 ): Promise<DocumentRead> {
   const form = new FormData();
   form.append("file", file);
   if (collectionId != null) form.append("collection_id", String(collectionId));
   if (name) form.append("name", name);
+  if (multipartModelId != null) form.append("multipart_model_id", String(multipartModelId));
   return sendForm<DocumentRead>("/api/v1/documents/upload", form);
 }
 

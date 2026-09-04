@@ -1,14 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  Bell,
-  Loader2,
-  Plus,
-  Send,
-  Trash2,
-  Pencil,
-} from "lucide-react";
+import { Bell, Loader2, Plus, Send, Trash2, Pencil } from "lucide-react";
 import {
   createNotificationChannel,
   deleteNotificationChannel,
@@ -32,8 +25,7 @@ import { inputClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
 
-const CARD =
-  "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
+const CARD = "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
 const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
 const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "font-mono uppercase tracking-wider");
 const BTN_SECONDARY = cn(
@@ -49,6 +41,11 @@ const TARGETS: { value: NotificationTarget; label: string }[] = [
   { value: "ntfy", label: "ntfy" },
 ];
 
+/** Decode a `<select>` value back into a target, ignoring anything not offered. */
+function parseNotificationTarget(value: string): NotificationTarget | null {
+  return TARGETS.find((target) => target.value === value)?.value ?? null;
+}
+
 const EVENTS: { value: NotificationEvent; label: string }[] = [
   { value: "print_completed", label: "Print completed" },
   { value: "print_failed", label: "Print failed" },
@@ -56,12 +53,19 @@ const EVENTS: { value: NotificationEvent; label: string }[] = [
   { value: "printer_offline", label: "Printer offline" },
 ];
 
+/** One editable entry of a channel's `config` map. */
+interface TargetField {
+  key: string;
+  label: string;
+  placeholder: string;
+  secret?: boolean;
+  optional?: boolean;
+}
+
 // Config fields rendered per target. `secret` fields are masked on read; an
-// existing value survives an edit when left blank.
-const TARGET_FIELDS: Record<
-  NotificationTarget,
-  { key: string; label: string; placeholder: string; secret?: boolean; optional?: boolean }[]
-> = {
+// existing value survives an edit when left blank. `satisfies` keeps the check
+// that every target has a form while leaving each entry's own shape intact.
+const TARGET_FIELDS = {
   webhook: [
     { key: "url", label: "Webhook URL", placeholder: "https://example.com/hook", secret: true },
     {
@@ -87,9 +91,15 @@ const TARGET_FIELDS: Record<
   ntfy: [
     { key: "server_url", label: "Server URL", placeholder: "https://ntfy.sh" },
     { key: "topic", label: "Topic", placeholder: "my-printer-alerts" },
-    { key: "token", label: "Access token (optional)", placeholder: "tk_…", secret: true, optional: true },
+    {
+      key: "token",
+      label: "Access token (optional)",
+      placeholder: "tk_…",
+      secret: true,
+      optional: true,
+    },
   ],
-};
+} satisfies Record<NotificationTarget, TargetField[]>;
 
 interface DraftState {
   id: number | null; // null => creating
@@ -113,7 +123,13 @@ function emptyDraft(): DraftState {
   };
 }
 
-function statusBadge(status: string | null): { text: string; cls: string } {
+/** Delivery-status chip: its wording plus the token classes that colour it. */
+interface StatusBadge {
+  text: string;
+  cls: string;
+}
+
+function statusBadge(status: string | null): StatusBadge {
   if (status === "sent")
     return { text: "Delivered", cls: "text-green-600 dark:text-green-400 border-green-600/40" };
   if (status === "failed")
@@ -123,7 +139,42 @@ function statusBadge(status: string | null): { text: string; cls: string } {
   return { text: "—", cls: "text-muted-foreground border-border" };
 }
 
-export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
+/**
+ * Everything the panel reaches outside itself: the notification endpoints and the
+ * toast surface. Injectable so a test can drive the panel with fakes instead of
+ * replacing the modules underneath it.
+ */
+export interface NotificationsPanelDeps {
+  getNotificationsSettings: typeof getNotificationsSettings;
+  setNotificationsEnabled: typeof setNotificationsEnabled;
+  createNotificationChannel: typeof createNotificationChannel;
+  updateNotificationChannel: typeof updateNotificationChannel;
+  deleteNotificationChannel: typeof deleteNotificationChannel;
+  testNotificationChannel: typeof testNotificationChannel;
+  listNotificationDeliveries: typeof listNotificationDeliveries;
+  listPrinters: typeof listPrinters;
+  toast: Pick<typeof toast, "error" | "success" | "warning">;
+}
+
+const LIVE_DEPS: NotificationsPanelDeps = {
+  getNotificationsSettings,
+  setNotificationsEnabled,
+  createNotificationChannel,
+  updateNotificationChannel,
+  deleteNotificationChannel,
+  testNotificationChannel,
+  listNotificationDeliveries,
+  listPrinters,
+  toast,
+};
+
+export function NotificationsPanel({
+  canEdit,
+  deps = LIVE_DEPS,
+}: {
+  canEdit: boolean;
+  deps?: NotificationsPanelDeps;
+}) {
   const [enabled, setEnabled] = useState(false);
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [printers, setPrinters] = useState<PrinterRead[]>([]);
@@ -132,41 +183,43 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [busy, setBusy] = useState<number | "save" | "switch" | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const [settings, printerList, deliveryList] = await Promise.all([
-        getNotificationsSettings(),
-        listPrinters().catch(() => []),
-        listNotificationDeliveries(25).catch(() => []),
-      ]);
-      setEnabled(settings.enabled);
-      setChannels(settings.channels);
-      setPrinters(printerList);
-      setDeliveries(deliveryList);
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Promise chain rather than async/await: every state update then happens in a
+  // resolution callback, so the mount effect below only kicks off the requests.
+  const load = useCallback(
+    (): Promise<void> =>
+      Promise.all([
+        deps.getNotificationsSettings(),
+        deps.listPrinters().catch(() => []),
+        deps.listNotificationDeliveries(25).catch(() => []),
+      ])
+        .then(([settings, printerList, deliveryList]) => {
+          setEnabled(settings.enabled);
+          setChannels(settings.channels);
+          setPrinters(printerList);
+          setDeliveries(deliveryList);
+        })
+        .catch((e) => deps.toast.error(e))
+        .finally(() => setLoading(false)),
+    [deps],
+  );
 
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
 
   const toggleEnabled = useCallback(
     async (next: boolean) => {
       setBusy("switch");
       try {
-        await setNotificationsEnabled(next);
+        await deps.setNotificationsEnabled(next);
         setEnabled(next);
       } catch (e) {
-        toast.error(e);
+        deps.toast.error(e);
       } finally {
         setBusy(null);
       }
     },
-    [],
+    [deps],
   );
 
   const startEdit = useCallback((ch: NotificationChannel) => {
@@ -176,9 +229,7 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
       target: ch.target,
       // Secret values come back masked ("********"); start blank so an
       // untouched field is sent blank and the backend keeps the stored value.
-      config: Object.fromEntries(
-        Object.entries(ch.config).filter(([, v]) => v !== "********"),
-      ),
+      config: Object.fromEntries(Object.entries(ch.config).filter(([, v]) => v !== "********")),
       events: ch.events,
       printerIds: ch.printer_ids,
       enabled: ch.enabled,
@@ -188,11 +239,11 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
   const saveDraft = useCallback(async () => {
     if (!draft) return;
     if (!draft.name.trim()) {
-      toast.error("Channel name is required.");
+      deps.toast.error("Channel name is required.");
       return;
     }
     if (draft.events.length === 0) {
-      toast.error("Select at least one event.");
+      deps.toast.error("Select at least one event.");
       return;
     }
     setBusy("save");
@@ -205,51 +256,51 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
         enabled: draft.enabled,
       };
       if (draft.id === null) {
-        await createNotificationChannel({ ...body, target: draft.target });
-        toast.success("Channel created.");
+        await deps.createNotificationChannel({ ...body, target: draft.target });
+        deps.toast.success("Channel created.");
       } else {
-        await updateNotificationChannel(draft.id, body);
-        toast.success("Channel updated.");
+        await deps.updateNotificationChannel(draft.id, body);
+        deps.toast.success("Channel updated.");
       }
       setDraft(null);
       await load();
     } catch (e) {
-      toast.error(e);
+      deps.toast.error(e);
     } finally {
       setBusy(null);
     }
-  }, [draft, load]);
+  }, [deps, draft, load]);
 
   const removeChannel = useCallback(
     async (id: number) => {
       setBusy(id);
       try {
-        await deleteNotificationChannel(id);
+        await deps.deleteNotificationChannel(id);
         await load();
       } catch (e) {
-        toast.error(e);
+        deps.toast.error(e);
       } finally {
         setBusy(null);
       }
     },
-    [load],
+    [deps, load],
   );
 
   const sendTest = useCallback(
     async (id: number) => {
       setBusy(id);
       try {
-        const res = await testNotificationChannel(id);
-        if (res.ok) toast.success("Test notification sent.");
-        else toast.warning("Test failed", res.error ?? undefined);
+        const res = await deps.testNotificationChannel(id);
+        if (res.ok) deps.toast.success("Test notification sent.");
+        else deps.toast.warning("Test failed", res.error ?? undefined);
         await load();
       } catch (e) {
-        toast.error(e);
+        deps.toast.error(e);
       } finally {
         setBusy(null);
       }
     },
-    [load],
+    [deps, load],
   );
 
   if (loading) {
@@ -258,184 +309,188 @@ export function NotificationsPanel({ canEdit }: { canEdit: boolean }) {
 
   return (
     <Localized>
-    <div className="space-y-4">
-      {/* Master switch */}
-      <div className={`${CARD} px-4 sm:px-6 py-4 flex items-center justify-between gap-3`}>
-        <div className="min-w-0 flex items-start gap-2">
-          <Bell className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.
-            </p>
-          </div>
-        </div>
-        <label className="inline-flex items-center gap-2 flex-shrink-0">
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={!canEdit || busy === "switch"}
-            onChange={(e) => toggleEnabled(e.target.checked)}
-            className="h-4 w-4 accent-primary"
-          />
-          <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            {enabled ? "On" : "Off"}
-          </span>
-        </label>
-      </div>
-
-      {!canEdit && (
-        <p className="text-xs text-muted-foreground italic">
-          Only an administrator can manage notification channels.
-        </p>
-      )}
-
-      {/* Channel list */}
-      {canEdit && (
-        <div className="space-y-2">
-          {channels.length === 0 && !draft && (
-            <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
-              <Bell className="h-7 w-7 text-muted-foreground/50" />
-              <p className="text-sm font-medium text-foreground">No notification channels yet</p>
-              <p className="text-xs text-muted-foreground">Add a channel to start receiving print and printer alerts.</p>
+      <div className="space-y-4">
+        {/* Master switch */}
+        <div className={`${CARD} px-4 sm:px-6 py-4 flex items-center justify-between gap-3`}>
+          <div className="min-w-0 flex items-start gap-2">
+            <Bell className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Notifications</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.
+              </p>
             </div>
-          )}
-          {channels.map((ch) => {
-            const badge = statusBadge(ch.last_status);
-            return (
-              <div key={ch.id} className={`${CARD} px-4 py-3`}>
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground truncate">
-                        {ch.name}
-                      </span>
-                      <span className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
-                        {ch.target}
-                      </span>
-                      {!ch.enabled &&
-                        (ch.consecutive_failures > 0 ? (
-                          <span
-                            className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
-                            title={ch.last_error ?? undefined}
-                          >
-                            Auto-disabled
-                          </span>
-                        ) : (
-                          <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                            disabled
-                          </span>
-                        ))}
-                    </div>
-                    <p className="text-2xs text-muted-foreground mt-0.5 truncate">
-                      {ch.events.map((e) => EVENTS.find((x) => x.value === e)?.label ?? e).join(", ")}
-                      {ch.printer_ids
-                        ? ` · ${ch.printer_ids.length} printer(s)`
-                        : " · all printers"}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <span
-                      className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border ${badge.cls}`}
-                      title={ch.last_error ?? undefined}
-                    >
-                      {badge.text}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => sendTest(ch.id)}
-                      disabled={busy === ch.id}
-                      className={BTN_SECONDARY}
-                      title="Send a test notification"
-                    >
-                      {busy === ch.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Send className="h-3.5 w-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(ch)}
-                      className={BTN_SECONDARY}
-                      title="Edit channel"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeChannel(ch.id)}
-                      disabled={busy === ch.id}
-                      className={BTN_SECONDARY}
-                      title="Delete channel"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Draft form */}
-          {draft ? (
-            <ChannelForm
-              draft={draft}
-              setDraft={setDraft}
-              printers={printers}
-              onSave={saveDraft}
-              onCancel={() => setDraft(null)}
-              saving={busy === "save"}
-            />
-          ) : (
-            <button type="button" onClick={() => setDraft(emptyDraft())} className={BTN_PRIMARY}>
-              <Plus className="h-3.5 w-3.5" />
-              Add channel
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Recent deliveries */}
-      {canEdit && deliveries.length > 0 && (
-        <div className={CARD}>
-          <div className="px-4 py-3 border-b border-border">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Recent deliveries
-            </h4>
           </div>
-          <div className="divide-y divide-border">
-            {deliveries.map((d) => {
-              const badge = statusBadge(d.status);
+          <label className="inline-flex items-center gap-2 flex-shrink-0">
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={!canEdit || busy === "switch"}
+              onChange={(e) => toggleEnabled(e.target.checked)}
+              className="h-4 w-4 accent-primary"
+            />
+            <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              {enabled ? "On" : "Off"}
+            </span>
+          </label>
+        </div>
+
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground italic">
+            Only an administrator can manage notification channels.
+          </p>
+        )}
+
+        {/* Channel list */}
+        {canEdit && (
+          <div className="space-y-2">
+            {channels.length === 0 && !draft && (
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
+                <Bell className="h-7 w-7 text-muted-foreground/50" />
+                <p className="text-sm font-medium text-foreground">No notification channels yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Add a channel to start receiving print and printer alerts.
+                </p>
+              </div>
+            )}
+            {channels.map((ch) => {
+              const badge = statusBadge(ch.last_status);
               return (
-                <div
-                  key={d.id}
-                  className="px-4 py-2 flex items-center justify-between gap-3 text-xs"
-                >
-                  <span className="font-mono text-muted-foreground truncate">
-                    {EVENTS.find((e) => e.value === d.event_type)?.label ?? d.event_type}
-                  </span>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {d.attempts > 1 && (
-                      <span className="text-muted-foreground">×{d.attempts}</span>
-                    )}
-                    <span className="text-muted-foreground">
-                      {d.created_at ? new Date(d.created_at).toLocaleString() : ""}
-                    </span>
-                    <span
-                      className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
-                      title={d.last_error ?? undefined}
-                    >
-                      {badge.text}
-                    </span>
+                <div key={ch.id} className={`${CARD} px-4 py-3`}>
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-foreground truncate">
+                          {ch.name}
+                        </span>
+                        <span className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
+                          {ch.target}
+                        </span>
+                        {!ch.enabled &&
+                          (ch.consecutive_failures > 0 ? (
+                            <span
+                              className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
+                              title={ch.last_error ?? undefined}
+                            >
+                              Auto-disabled
+                            </span>
+                          ) : (
+                            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                              disabled
+                            </span>
+                          ))}
+                      </div>
+                      <p className="text-2xs text-muted-foreground mt-0.5 truncate">
+                        {ch.events
+                          .map((e) => EVENTS.find((x) => x.value === e)?.label ?? e)
+                          .join(", ")}
+                        {ch.printer_ids
+                          ? ` · ${ch.printer_ids.length} printer(s)`
+                          : " · all printers"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <span
+                        className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border ${badge.cls}`}
+                        title={ch.last_error ?? undefined}
+                      >
+                        {badge.text}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => sendTest(ch.id)}
+                        disabled={busy === ch.id}
+                        className={BTN_SECONDARY}
+                        title="Send a test notification"
+                      >
+                        {busy === ch.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Send className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(ch)}
+                        className={BTN_SECONDARY}
+                        title="Edit channel"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeChannel(ch.id)}
+                        disabled={busy === ch.id}
+                        className={BTN_SECONDARY}
+                        title="Delete channel"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
             })}
+
+            {/* Draft form */}
+            {draft ? (
+              <ChannelForm
+                draft={draft}
+                setDraft={setDraft}
+                printers={printers}
+                onSave={saveDraft}
+                onCancel={() => setDraft(null)}
+                saving={busy === "save"}
+              />
+            ) : (
+              <button type="button" onClick={() => setDraft(emptyDraft())} className={BTN_PRIMARY}>
+                <Plus className="h-3.5 w-3.5" />
+                Add channel
+              </button>
+            )}
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {/* Recent deliveries */}
+        {canEdit && deliveries.length > 0 && (
+          <div className={CARD}>
+            <div className="px-4 py-3 border-b border-border">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Recent deliveries
+              </h4>
+            </div>
+            <div className="divide-y divide-border">
+              {deliveries.map((d) => {
+                const badge = statusBadge(d.status);
+                return (
+                  <div
+                    key={d.id}
+                    className="px-4 py-2 flex items-center justify-between gap-3 text-xs"
+                  >
+                    <span className="font-mono text-muted-foreground truncate">
+                      {EVENTS.find((e) => e.value === d.event_type)?.label ?? d.event_type}
+                    </span>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {d.attempts > 1 && (
+                        <span className="text-muted-foreground">×{d.attempts}</span>
+                      )}
+                      <span className="text-muted-foreground">
+                        {d.created_at ? new Date(d.created_at).toLocaleString() : ""}
+                      </span>
+                      <span
+                        className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
+                        title={d.last_error ?? undefined}
+                      >
+                        {badge.text}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </Localized>
   );
 }
@@ -455,149 +510,154 @@ function ChannelForm({
   onCancel: () => void;
   saving: boolean;
 }) {
-  const fields = TARGET_FIELDS[draft.target];
+  const fields: TargetField[] = TARGET_FIELDS[draft.target];
   const scoped = draft.printerIds !== null;
 
   return (
     <Localized>
-    <form
-      className={`${CARD} p-4 space-y-3`}
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSave();
-      }}
-    >
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <form
+        className={`${CARD} p-4 space-y-3`}
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSave();
+        }}
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className={LABEL}>Name</label>
+            <input
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+              placeholder="Living-room printer alerts"
+              className={INPUT}
+            />
+          </div>
+          <div>
+            <label className={LABEL}>Type</label>
+            <select
+              value={draft.target}
+              disabled={draft.id !== null}
+              onChange={(e) => {
+                const target = parseNotificationTarget(e.target.value);
+                if (target) setDraft({ ...draft, target, config: {} });
+              }}
+              className={`${INPUT} disabled:opacity-60`}
+            >
+              {TARGETS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {fields.map((f) => (
+          <div key={f.key}>
+            <label className={LABEL}>{f.label}</label>
+            <input
+              type={f.secret ? "password" : "text"}
+              value={draft.config[f.key] ?? ""}
+              onChange={(e) =>
+                setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
+              }
+              placeholder={draft.id !== null && f.secret ? "•••••••• (unchanged)" : f.placeholder}
+              className={INPUT}
+              autoComplete="off"
+            />
+          </div>
+        ))}
+
         <div>
-          <label className={LABEL}>Name</label>
-          <input
-            value={draft.name}
-            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder="Living-room printer alerts"
-            className={INPUT}
-          />
-        </div>
-        <div>
-          <label className={LABEL}>Type</label>
-          <select
-            value={draft.target}
-            disabled={draft.id !== null}
-            onChange={(e) =>
-              setDraft({ ...draft, target: e.target.value as NotificationTarget, config: {} })
-            }
-            className={`${INPUT} disabled:opacity-60`}
-          >
-            {TARGETS.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {fields.map((f) => (
-        <div key={f.key}>
-          <label className={LABEL}>{f.label}</label>
-          <input
-            type={f.secret ? "password" : "text"}
-            value={draft.config[f.key] ?? ""}
-            onChange={(e) =>
-              setDraft({ ...draft, config: { ...draft.config, [f.key]: e.target.value } })
-            }
-            placeholder={
-              draft.id !== null && f.secret ? "•••••••• (unchanged)" : f.placeholder
-            }
-            className={INPUT}
-            autoComplete="off"
-          />
-        </div>
-      ))}
-
-      <div>
-        <label className={LABEL}>Events</label>
-        <div className="flex flex-wrap gap-3">
-          {EVENTS.map((ev) => (
-            <label key={ev.value} className="inline-flex items-center gap-1.5 text-xs text-foreground">
-              <input
-                type="checkbox"
-                checked={draft.events.includes(ev.value)}
-                onChange={(e) =>
-                  setDraft({
-                    ...draft,
-                    events: e.target.checked
-                      ? [...draft.events, ev.value]
-                      : draft.events.filter((x) => x !== ev.value),
-                  })
-                }
-                className="h-3.5 w-3.5 accent-primary"
-              />
-              {ev.label}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className={LABEL}>Printers</label>
-        <label className="inline-flex items-center gap-1.5 text-xs text-foreground mb-2">
-          <input
-            type="checkbox"
-            checked={!scoped}
-            onChange={(e) => setDraft({ ...draft, printerIds: e.target.checked ? null : [] })}
-            className="h-3.5 w-3.5 accent-primary"
-          />
-          All printers
-        </label>
-        {scoped && (
+          <label className={LABEL}>Events</label>
           <div className="flex flex-wrap gap-3">
-            {printers.length === 0 && (
-              <span className="text-2xs text-muted-foreground italic">
-                No printers configured.
-              </span>
-            )}
-            {printers.map((p) => (
-              <label key={p.id} className="inline-flex items-center gap-1.5 text-xs text-foreground">
+            {EVENTS.map((ev) => (
+              <label
+                key={ev.value}
+                className="inline-flex items-center gap-1.5 text-xs text-foreground"
+              >
                 <input
                   type="checkbox"
-                  checked={(draft.printerIds ?? []).includes(p.id)}
+                  checked={draft.events.includes(ev.value)}
                   onChange={(e) =>
                     setDraft({
                       ...draft,
-                      printerIds: e.target.checked
-                        ? [...(draft.printerIds ?? []), p.id]
-                        : (draft.printerIds ?? []).filter((x) => x !== p.id),
+                      events: e.target.checked
+                        ? [...draft.events, ev.value]
+                        : draft.events.filter((x) => x !== ev.value),
                     })
                   }
                   className="h-3.5 w-3.5 accent-primary"
                 />
-                {p.name}
+                {ev.label}
               </label>
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
-        <input
-          type="checkbox"
-          checked={draft.enabled}
-          onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
-          className="h-3.5 w-3.5 accent-primary"
-        />
-        Enabled
-      </label>
+        <div>
+          <label className={LABEL}>Printers</label>
+          <label className="inline-flex items-center gap-1.5 text-xs text-foreground mb-2">
+            <input
+              type="checkbox"
+              checked={!scoped}
+              onChange={(e) => setDraft({ ...draft, printerIds: e.target.checked ? null : [] })}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            All printers
+          </label>
+          {scoped && (
+            <div className="flex flex-wrap gap-3">
+              {printers.length === 0 && (
+                <span className="text-2xs text-muted-foreground italic">
+                  No printers configured.
+                </span>
+              )}
+              {printers.map((p) => (
+                <label
+                  key={p.id}
+                  className="inline-flex items-center gap-1.5 text-xs text-foreground"
+                >
+                  <input
+                    type="checkbox"
+                    checked={(draft.printerIds ?? []).includes(p.id)}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        printerIds: e.target.checked
+                          ? [...(draft.printerIds ?? []), p.id]
+                          : (draft.printerIds ?? []).filter((x) => x !== p.id),
+                      })
+                    }
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  {p.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
 
-      <div className="flex items-center gap-2 pt-1">
-        <button type="submit" disabled={saving} className={BTN_PRIMARY}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-          {draft.id === null ? "Create channel" : "Save changes"}
-        </button>
-        <button type="button" onClick={onCancel} disabled={saving} className={BTN_SECONDARY}>
-          Cancel
-        </button>
-      </div>
-    </form>
+        <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+            className="h-3.5 w-3.5 accent-primary"
+          />
+          Enabled
+        </label>
+
+        <div className="flex items-center gap-2 pt-1">
+          <button type="submit" disabled={saving} className={BTN_PRIMARY}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {draft.id === null ? "Create channel" : "Save changes"}
+          </button>
+          <button type="button" onClick={onCancel} disabled={saving} className={BTN_SECONDARY}>
+            Cancel
+          </button>
+        </div>
+      </form>
     </Localized>
   );
 }

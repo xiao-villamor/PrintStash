@@ -17,25 +17,36 @@ from app.api.v1 import (
     ingest,
     maintenance,
     models,
+    multipart_models,
     notifications,
     printer_profiles,
     printers,
+    provider_connections,
     saved_views,
     setup,
     share,
     spoolman,
+    storage,
+    storage_connections,
+    system,
     taxonomy,
 )
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(setup.router)
+api_router.include_router(storage.router)
+api_router.include_router(storage_connections.router)
+api_router.include_router(system.router)
 api_router.include_router(auth.router)
+api_router.include_router(provider_connections.router)
+api_router.include_router(provider_connections.pairing_router)
 api_router.include_router(admin.router)
 api_router.include_router(ingest.router)
 api_router.include_router(inbox.router)
 api_router.include_router(maintenance.router)
 api_router.include_router(models.router)
+api_router.include_router(multipart_models.router)
 api_router.include_router(saved_views.router)
 api_router.include_router(files.router)
 api_router.include_router(filaments.router)

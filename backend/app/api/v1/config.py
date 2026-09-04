@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from datetime import datetime
+from typing import Any, Literal, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.security import require_superuser
-from app.db.models import Collection, Document, File, Model
 from app.db.session import get_session
 from app.services import runtime_config
-from app.services.makerworld_auth import (
-    MakerWorldAuthError,
-    begin_login,
-    submit_code,
-)
+from app.services.storage_backend import get_backend
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -34,6 +30,11 @@ class VaultConfigRead(BaseModel):
     has_s3_access_key: bool = False
     has_s3_secret_key: bool = False
     backup_retention_days: int = 30
+    automatic_backups_enabled: bool = False
+    automatic_backup_time_utc: str = "02:00"
+    automatic_backup_last_attempt_at: datetime | None = None
+    manual_local_backup_enabled: bool = True
+    automatic_local_backup_enabled: bool = True
     trash_retention_days: int = 30
     backup_s3_bucket: str = ""
     backup_s3_endpoint_url: str = ""
@@ -58,6 +59,13 @@ class VaultConfigRead(BaseModel):
     oidc_display_name: str = "Single sign-on"
     oidc_redirect_uri: str = ""
     oidc_allow_insecure_http: bool = False
+    storage_tier: str = "unguarded"
+    storage_capabilities: dict[str, object] = Field(default_factory=dict)
+    storage_warnings: list[str] = Field(default_factory=list)
+    storage_probe_diagnostics: dict[str, object] = Field(default_factory=dict)
+    storage_unverified_acknowledged: bool = False
+    storage_provider: str = ""
+    storage_provider_config: dict[str, object] = Field(default_factory=dict)
 
 
 class VaultConfigUpdate(BaseModel):
@@ -80,6 +88,8 @@ class VaultConfigUpdate(BaseModel):
     oidc_allow_insecure_http: Optional[bool] = None
 
     storage_backend: Optional[str] = None
+    storage_provider: Optional[str] = Field(default=None, max_length=64)
+    storage_provider_config: Optional[dict[str, Any]] = None
     data_dir: Optional[str] = None
     thumb_dir: Optional[str] = None
     s3_bucket: Optional[str] = None
@@ -88,12 +98,57 @@ class VaultConfigUpdate(BaseModel):
     s3_access_key: Optional[str] = None
     s3_secret_key: Optional[str] = None
     backup_retention_days: Optional[int] = Field(default=None, ge=-1)
+    automatic_backups_enabled: Optional[bool] = None
+    automatic_backup_time_utc: Optional[str] = Field(
+        default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+    )
+    manual_local_backup_enabled: Optional[bool] = None
+    automatic_local_backup_enabled: Optional[bool] = None
     trash_retention_days: Optional[int] = Field(default=None, ge=-1)
     backup_s3_bucket: Optional[str] = None
     backup_s3_endpoint_url: Optional[str] = None
     backup_s3_region: Optional[str] = None
     backup_s3_access_key: Optional[str] = None
     backup_s3_secret_key: Optional[str] = None
+
+
+class StorageRootEnrollment(BaseModel):
+    """Explicit acknowledgement for enrolling an unprovable local root."""
+
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["data", "thumb"]
+    confirm: bool = False
+
+
+@router.post(
+    "/storage-roots/enroll",
+    summary="Enroll a local storage root after an explicit confirmation",
+    dependencies=[Depends(require_superuser)],
+)
+def enroll_storage_root(
+    body: StorageRootEnrollment,
+    session: Session = Depends(get_session),
+) -> dict[str, object]:
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400, detail="storage_root_confirmation_required"
+        )
+    if settings.storage_backend != "local":
+        raise HTTPException(status_code=409, detail="storage_backend_not_local")
+    from app.services.storage_backend import enroll_legacy_local_root
+
+    identity = runtime_config.ensure_storage_identity(session)
+    root = settings.data_dir if body.role == "data" else settings.thumb_dir
+    enrolled = enroll_legacy_local_root(
+        root,
+        role=body.role,
+        installation=identity,
+        proofs=[],
+        allow_empty=True,
+    )
+    if not enrolled:
+        raise HTTPException(status_code=409, detail="storage_root_enrollment_failed")
+    return {"enrolled": True, "role": body.role, "restart_required": True}
 
 
 @router.get(
@@ -109,11 +164,23 @@ def get_config(
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
     cfg = runtime_config.get_effective_config(session)
+    provider_config = runtime_config.get_sanitized_storage_provider(session)
+    if provider_config is not None:
+        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
+    backend = get_backend()
+    cfg.update(
+        storage_tier=backend.capabilities.tier.value,
+        storage_capabilities=backend.capabilities.as_dict(),
+        storage_warnings=list(backend.capabilities.warnings),
+        storage_probe_diagnostics=backend.probe_diagnostics,
+        storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
+    )
     return VaultConfigRead(**cfg)
 
 
 # --------------------------------------------------------------------------- #
-# MakerWorld login (Bambu account) — obtains the download session token.
+# Legacy MakerWorld connection contract. Imports now use the browser extension;
+# routes remain present so existing clients receive an actionable response.
 # --------------------------------------------------------------------------- #
 class MakerWorldStatus(BaseModel):
     connected: bool = False
@@ -156,84 +223,62 @@ class MakerWorldTokenRequest(BaseModel):
     summary="MakerWorld connection status",
 )
 def makerworld_status(session: Session = Depends(get_session)) -> MakerWorldStatus:
-    return MakerWorldStatus(**runtime_config.makerworld_status(session))
+    del session
+    return MakerWorldStatus(connected=False)
+
+
+def _makerworld_extension_only() -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="makerworld_extension_required",
+    )
 
 
 @router.post(
     "/makerworld/login",
     dependencies=[Depends(require_superuser)],
-    summary="Start MakerWorld login",
+    summary="Legacy MakerWorld login endpoint",
     description=(
-        "Submit MakerWorld (Bambu) email + password. Bambu usually emails a "
-        "verification code, so the response is typically ``need_email_code`` with "
-        "a ``login_token`` to pass to /makerworld/verify. The password is never "
-        "stored — only the resulting session token is, on success."
+        "Retained for client compatibility. MakerWorld imports now require the "
+        "browser extension and this endpoint returns HTTP 410."
     ),
 )
 async def makerworld_login(
     body: MakerWorldLoginRequest,
     session: Session = Depends(get_session),
 ) -> MakerWorldLoginResponse:
-    try:
-        result = await begin_login(body.account, body.password)
-    except MakerWorldAuthError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=exc.code
-        ) from exc
-    if result.status == "ok" and result.token:
-        runtime_config.set_makerworld_token(session, result.token)
-        return MakerWorldLoginResponse(status="ok", connected=True)
-    return MakerWorldLoginResponse(status=result.status, login_token=result.login_token)
+    del body, session
+    _makerworld_extension_only()
 
 
 @router.post(
     "/makerworld/verify",
     dependencies=[Depends(require_superuser)],
-    summary="Complete MakerWorld login with a verification code",
+    summary="Legacy MakerWorld verification endpoint",
 )
 async def makerworld_verify(
     body: MakerWorldVerifyRequest,
     session: Session = Depends(get_session),
 ) -> MakerWorldLoginResponse:
-    try:
-        result = await submit_code(body.login_token, body.code)
-    except MakerWorldAuthError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=exc.code
-        ) from exc
-    if not result.token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_code"
-        )
-    runtime_config.set_makerworld_token(session, result.token)
-    return MakerWorldLoginResponse(status="ok", connected=True)
+    del body, session
+    _makerworld_extension_only()
 
 
 @router.post(
     "/makerworld/token",
     dependencies=[Depends(require_superuser)],
-    summary="Connect MakerWorld with a pasted session token",
+    summary="Legacy MakerWorld token endpoint",
     description=(
-        "Store a MakerWorld session token directly (the ``token`` cookie value "
-        "copied from a logged-in browser). Use this for Google-SSO accounts, "
-        "which have no password to log in with."
+        "Retained for client compatibility. MakerWorld imports now require the "
+        "browser extension and this endpoint returns HTTP 410."
     ),
 )
 def makerworld_set_token(
     body: MakerWorldTokenRequest,
     session: Session = Depends(get_session),
 ) -> MakerWorldStatus:
-    token = body.token.strip()
-    # Be forgiving: accept a full ``token=<jwt>`` (or ``token=<jwt>; other=…``)
-    # cookie header pasted as-is, not just the bare value.
-    if token.lower().startswith("token="):
-        token = token.split("=", 1)[1].split(";", 1)[0].strip()
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="missing_token"
-        )
-    runtime_config.set_makerworld_token(session, token)
-    return MakerWorldStatus(**runtime_config.makerworld_status(session))
+    del body, session
+    _makerworld_extension_only()
 
 
 @router.delete(
@@ -263,6 +308,30 @@ def update_config(
     body: VaultConfigUpdate,
     session: Session = Depends(get_session),
 ) -> VaultConfigRead:
+    legacy_storage_fields = {
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "s3_bucket",
+        "s3_endpoint_url",
+        "s3_region",
+        "s3_access_key",
+        "s3_secret_key",
+    }
+    new_storage_supplied = (
+        body.storage_provider is not None or body.storage_provider_config is not None
+    )
+    legacy_storage_supplied = bool(body.model_fields_set & legacy_storage_fields)
+    if new_storage_supplied and legacy_storage_supplied:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="mixed_storage_provider_input",
+        )
+    if (body.storage_provider is None) != (body.storage_provider_config is None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="storage_provider_and_config_required",
+        )
     if body.storage_backend is not None and body.storage_backend not in (
         "",
         "local",
@@ -273,40 +342,32 @@ def update_config(
             detail="storage_backend must be 'local' or 's3'",
         )
 
-    def changed(value: str | None, current: object, *, path: bool = False) -> bool:
-        if value is None:
-            return False
-        if value == "":
-            # Clearing an override can expose a different environment default;
-            # treat it as a namespace change unless it is already empty.
-            return str(current) != ""
-        if path:
-            from pathlib import Path
-
-            return Path(value).expanduser().resolve(strict=False) != Path(
-                str(current)
-            ).expanduser().resolve(strict=False)
-        return value != str(current)
-
-    namespace_change = any(
-        (
-            changed(body.storage_backend, settings.storage_backend),
-            changed(body.data_dir, settings.data_dir, path=True),
-            changed(body.thumb_dir, settings.thumb_dir, path=True),
-            changed(body.s3_bucket, settings.s3_bucket),
-            changed(body.s3_endpoint_url, settings.s3_endpoint_url),
-            changed(body.s3_region, settings.s3_region),
+    try:
+        namespace_change, requested_provider = (
+            runtime_config.storage_namespace_change_requires_migration(
+                session,
+                storage_backend=body.storage_backend,
+                data_dir=body.data_dir,
+                thumb_dir=body.thumb_dir,
+                s3_bucket=body.s3_bucket,
+                s3_endpoint_url=body.s3_endpoint_url,
+                s3_region=body.s3_region,
+                storage_provider=body.storage_provider,
+                storage_provider_config=body.storage_provider_config,
+            )
         )
-    )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     if namespace_change:
         # Runtime remapping would make row-derived keys point at a new root or
         # bucket. There is intentionally no in-place shortcut: a future storage
         # migration must copy, verify, and atomically switch every exact object.
-        owned_state_exists = any(
-            session.exec(select(table.id).limit(1)).first() is not None
-            for table in (File, Document, Model, Collection)
-        )
-        if runtime_config.is_configured(session) or owned_state_exists:
+        if runtime_config.is_configured(session) or runtime_config.has_storage_state(
+            session
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="storage_migration_required",
@@ -320,19 +381,40 @@ def update_config(
             session, body.external_libraries_enabled
         )
 
+    if (
+        body.automatic_backups_enabled is not None
+        or body.automatic_backup_time_utc is not None
+        or body.manual_local_backup_enabled is not None
+        or body.automatic_local_backup_enabled is not None
+    ):
+        runtime_config.update_backup_schedule(
+            session,
+            enabled=body.automatic_backups_enabled,
+            time_utc=body.automatic_backup_time_utc,
+            manual_local_enabled=body.manual_local_backup_enabled,
+            automatic_local_enabled=body.automatic_local_backup_enabled,
+        )
+
     if body.currency is not None:
         runtime_config.set_currency(session, body.currency)
 
+    if requested_provider is not None:
+        runtime_config.update_storage_provider(
+            session,
+            provider=body.storage_provider or "",
+            raw_config=body.storage_provider_config or {},
+        )
+
     runtime_config.update_config(
         session,
-        storage_backend=body.storage_backend,
-        data_dir=body.data_dir,
-        thumb_dir=body.thumb_dir,
-        s3_bucket=body.s3_bucket,
-        s3_endpoint_url=body.s3_endpoint_url,
-        s3_region=body.s3_region,
-        s3_access_key=body.s3_access_key,
-        s3_secret_key=body.s3_secret_key,
+        storage_backend=None if new_storage_supplied else body.storage_backend,
+        data_dir=None if new_storage_supplied else body.data_dir,
+        thumb_dir=None if new_storage_supplied else body.thumb_dir,
+        s3_bucket=None if new_storage_supplied else body.s3_bucket,
+        s3_endpoint_url=None if new_storage_supplied else body.s3_endpoint_url,
+        s3_region=None if new_storage_supplied else body.s3_region,
+        s3_access_key=None if new_storage_supplied else body.s3_access_key,
+        s3_secret_key=None if new_storage_supplied else body.s3_secret_key,
         backup_retention_days=body.backup_retention_days,
         trash_retention_days=body.trash_retention_days,
         model_thumbnail_width=body.model_thumbnail_width,
@@ -355,4 +437,15 @@ def update_config(
     )
 
     cfg = runtime_config.get_effective_config(session)
+    provider_config = runtime_config.get_sanitized_storage_provider(session)
+    if provider_config is not None:
+        cfg["storage_provider"], cfg["storage_provider_config"] = provider_config
+    backend = get_backend()
+    cfg.update(
+        storage_tier=backend.capabilities.tier.value,
+        storage_capabilities=backend.capabilities.as_dict(),
+        storage_warnings=list(backend.capabilities.warnings),
+        storage_probe_diagnostics=backend.probe_diagnostics,
+        storage_unverified_acknowledged=bool(settings.storage_allow_unverified),
+    )
     return VaultConfigRead(**cfg)

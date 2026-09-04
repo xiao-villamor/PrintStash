@@ -4,6 +4,8 @@ import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from fastapi import Request
+
 
 @dataclass(frozen=True)
 class TaskEnvelope:
@@ -32,4 +34,7 @@ class LocalTaskQueue:
         return await self._queue.get()
 
 
-task_queue: TaskQueue = LocalTaskQueue()
+def get_task_queue(request: Request) -> TaskQueue:
+    """Return the queue constructed for this application lifespan."""
+
+    return request.app.state.task_queue

@@ -2,10 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
-import { CollectionRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
+import {
+  CollectionRead,
+  MultipartModelListItem,
+  OutlinerModelRead,
+  PrinterRead,
+  TagRead,
+} from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Localized } from "@/components/ui/localized";
-import { Box, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
+import { Box, Boxes, ChevronRight, Folder, FolderOpen, Search, Trash2, X } from "lucide-react";
 import {
   DndContext,
   DragEndEvent,
@@ -23,9 +30,101 @@ interface CollectionNode {
   children: CollectionNode[];
 }
 
+export type LibraryViewMode = "organized" | "all" | "multipart" | "components";
+
+const LIBRARY_VIEWS: LibraryViewMode[] = ["organized", "all", "multipart", "components"];
+
 type DragPayload =
   | { type: "model"; model: OutlinerModelRead }
   | { type: "collection"; collection: CollectionRead };
+
+/** Data every collection drop target in this sidebar registers with dnd-kit. */
+interface CollectionDropData {
+  /** Destination collection, or null for the "All Models" root. */
+  collectionPath: string | null;
+  collectionId: number | null;
+  collectionParentId?: number | null;
+}
+
+/**
+ * The payload of the drag in flight, or null when dnd-kit reports no active
+ * data. dnd-kit types `data.current` as an open bag, so it is narrowed back
+ * here — once — instead of at every read.
+ */
+function activeDragPayload(event: DragStartEvent | DragEndEvent): DragPayload | null {
+  const data = event.active.data.current;
+  if (data === undefined) return null;
+  // SAFETY: the only `useDraggable` calls in this file are DraggableModelLeaf
+  // and the collection row, and both build their `data` with
+  // `satisfies DragPayload`, so an active drag always carries one variant.
+  return data as DragPayload;
+}
+
+/**
+ * The collection under the pointer, or null when the drag ended outside one of
+ * this sidebar's drop targets.
+ */
+function collectionDropTarget(event: DragEndEvent): CollectionDropData | null {
+  const data = event.over?.data.current;
+  if (data === undefined || !("collectionPath" in data)) return null;
+  // SAFETY: `collectionPath` is registered by exactly two `useDroppable` calls
+  // in this file — a collection row and the "All Models" root — and both build
+  // their `data` with `satisfies CollectionDropData`.
+  return data as CollectionDropData;
+}
+
+const EXPANDED_KEY = "ps-filter-expanded";
+const ALL_EXPANDED_KEY = "ps-filter-all-expanded";
+
+/** The expanded collection paths persisted this session, or null if none are. */
+function readExpandedPaths(): Set<string> | null {
+  try {
+    const saved = sessionStorage.getItem(EXPANDED_KEY);
+    if (!saved) return null;
+    const parsed: unknown = JSON.parse(saved);
+    return Array.isArray(parsed) ? new Set(parsed.map(String)) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Is the "All Models" group expanded? Open unless this session closed it. */
+function readAllModelsExpanded(): boolean {
+  try {
+    return sessionStorage.getItem(ALL_EXPANDED_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * First-visit expansion: open every collection that has children or models, so
+ * a fresh session doesn't start fully collapsed.
+ */
+function autoExpandedPaths(
+  collections: CollectionRead[],
+  modelsByCollection: ReadonlyMap<string, OutlinerModelRead[]>,
+  multipartByCollection: ReadonlyMap<string, MultipartModelListItem[]>,
+): Set<string> {
+  const expanded = new Set<string>();
+  const parentIds = new Set(collections.map((c) => c.parent_id).filter((id) => id != null));
+  for (const collection of collections) {
+    if (
+      parentIds.has(collection.id) ||
+      modelsByCollection.has(collection.path) ||
+      multipartByCollection.has(collection.path)
+    ) {
+      expanded.add(collection.path);
+    }
+  }
+  return expanded;
+}
+
+/** The paths that must be open for `path` to be visible in the tree. */
+function ancestorPaths(path: string): string[] {
+  const parts = path.split("/");
+  return parts.slice(1).map((_, index) => parts.slice(0, index + 1).join("/"));
+}
 
 function buildTree(cats: CollectionRead[]): CollectionNode[] {
   const byId = new Map<number, CollectionNode>();
@@ -62,19 +161,76 @@ function DraggableModelLeaf({
 
   // No transform: Blender-style — source stays put (dimmed), only target highlights.
   return (
-    <Localized><div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      onDoubleClick={() => router.push(`/models/${model.id}`)}
-      className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
-        isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
-      }`}
-      title={model.name}
-    >
-      <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
-      <span className="truncate">{model.name}</span>
-    </div></Localized>
+    <Localized>
+      <div
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        onDoubleClick={() => router.push(`/models/${model.id}`)}
+        className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
+          isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
+        }`}
+        title={model.name}
+      >
+        <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
+        <span className="truncate">{model.name}</span>
+      </div>
+    </Localized>
+  );
+}
+
+function MultipartLeaf({ multipart }: { multipart: MultipartModelListItem }) {
+  const router = useRouter();
+
+  return (
+    <Localized>
+      <div
+        onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
+        className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+        title={`${multipart.name} · Multipart set`}
+      >
+        <Boxes className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+        <span className="truncate">{multipart.name}</span>
+      </div>
+    </Localized>
+  );
+}
+
+type OutlinerLeaf =
+  | { kind: "model"; model: OutlinerModelRead }
+  | { kind: "multipart"; multipart: MultipartModelListItem };
+
+function mergeLeaves(
+  models: OutlinerModelRead[],
+  multipartModels: MultipartModelListItem[],
+): OutlinerLeaf[] {
+  return [
+    ...models.map((model) => ({ kind: "model" as const, model })),
+    ...multipartModels.map((multipart) => ({ kind: "multipart" as const, multipart })),
+  ].sort((a, b) => {
+    const aName = a.kind === "model" ? a.model.name : a.multipart.name;
+    const bName = b.kind === "model" ? b.model.name : b.multipart.name;
+    return aName.localeCompare(bName);
+  });
+}
+
+function OutlinerLeaves({
+  leaves,
+  dragging,
+}: {
+  leaves: OutlinerLeaf[];
+  dragging: DragPayload | null;
+}) {
+  return leaves.map((leaf) =>
+    leaf.kind === "model" ? (
+      <DraggableModelLeaf
+        key={`model-${leaf.model.id}`}
+        model={leaf.model}
+        isDraggingThisModel={dragging?.type === "model" && dragging.model.id === leaf.model.id}
+      />
+    ) : (
+      <MultipartLeaf key={`multipart-${leaf.multipart.id}`} multipart={leaf.multipart} />
+    ),
   );
 }
 
@@ -89,8 +245,10 @@ function CollectionTreeRow({
   expanded,
   toggle,
   modelsByCollection,
+  multipartByCollection,
   visibleIds,
   visibleModelIds,
+  visibleMultipartIds,
   dragging,
   onDelete,
 }: {
@@ -100,24 +258,38 @@ function CollectionTreeRow({
   expanded: Set<string>;
   toggle: (path: string) => void;
   modelsByCollection: Map<string, OutlinerModelRead[]>;
+  multipartByCollection: Map<string, MultipartModelListItem[]>;
   visibleIds?: Set<number> | null;
   visibleModelIds?: Set<number> | null;
+  visibleMultipartIds?: Set<number> | null;
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
 
-  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    isDragging,
+  } = useDraggable({
     id: `collection-drag-${node.cat.id}`,
     data: { type: "collection", collection: node.cat } satisfies DragPayload,
   });
 
   const { setNodeRef: setDropRef, isOver } = useDroppable({
     id: `collection-drop-${node.cat.id}`,
-    data: { collectionPath: node.cat.path, collectionId: node.cat.id, collectionParentId: node.cat.parent_id },
+    data: {
+      collectionPath: node.cat.path,
+      collectionId: node.cat.id,
+      collectionParentId: node.cat.parent_id,
+    } satisfies CollectionDropData,
   });
 
-  const rowRef = (el: HTMLDivElement | null) => { setDragRef(el); setDropRef(el); };
+  const rowRef = (el: HTMLDivElement | null) => {
+    setDragRef(el);
+    setDropRef(el);
+  };
 
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -128,129 +300,189 @@ function CollectionTreeRow({
     } else {
       if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
     }
-    return () => { if (expandTimerRef.current) clearTimeout(expandTimerRef.current); };
+    return () => {
+      if (expandTimerRef.current) clearTimeout(expandTimerRef.current);
+    };
   }, [isOver, dragging]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isDraggingCollection = dragging?.type === "collection";
   const isSelf = isDraggingCollection && dragging.collection.id === node.cat.id;
-  const isDescendantOfDragged = isDraggingCollection && node.cat.path.startsWith(dragging.collection.path + "/");
+  const isDescendantOfDragged =
+    isDraggingCollection && node.cat.path.startsWith(dragging.collection.path + "/");
   const canDrop = !isSelf && !isDescendantOfDragged;
 
-  const visibleChildren = visibleIds ? node.children.filter((c) => visibleIds.has(c.cat.id)) : node.children;
+  const visibleChildren = visibleIds
+    ? node.children.filter((c) => visibleIds.has(c.cat.id))
+    : node.children;
   const allModelLeaves = modelsByCollection.get(node.cat.path) ?? [];
-  const modelLeaves = visibleModelIds ? allModelLeaves.filter((m) => visibleModelIds.has(m.id)) : allModelLeaves;
-  const isOpen = visibleIds ? visibleChildren.length > 0 || modelLeaves.length > 0 : expanded.has(node.cat.path);
+  const modelLeaves = visibleModelIds
+    ? allModelLeaves.filter((m) => visibleModelIds.has(m.id))
+    : allModelLeaves;
+  const allMultipartLeaves = multipartByCollection.get(node.cat.path) ?? [];
+  const multipartLeaves = visibleMultipartIds
+    ? allMultipartLeaves.filter((multipart) => visibleMultipartIds.has(multipart.id))
+    : allMultipartLeaves;
+  const isOpen = visibleIds
+    ? visibleChildren.length > 0 || modelLeaves.length > 0 || multipartLeaves.length > 0
+    : expanded.has(node.cat.path);
   const isSelected = selected === node.cat.path;
-  const hasNestedItems = visibleChildren.length > 0 || modelLeaves.length > 0;
+  const hasNestedItems =
+    visibleChildren.length > 0 || modelLeaves.length > 0 || multipartLeaves.length > 0;
   const displayChildren = visibleIds ? visibleChildren : node.children;
+  const leaves = mergeLeaves(modelLeaves, multipartLeaves);
 
   const descCount = countDescendants(node);
   const hasContent = descCount > 0 || node.cat.model_count > 0;
 
   return (
-    <Localized><div style={isDragging ? { opacity: 0.3 } : undefined} className={isDragging ? "pointer-events-none" : undefined}>
-      {confirming ? (
-        <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
-          <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
-            Delete &ldquo;{node.cat.name}&rdquo;?
-          </p>
-          {hasContent && (
-            <p className="text-3xs text-muted-foreground mb-1.5 leading-snug">
-              {descCount > 0 && <span>{descCount} subcollection{descCount !== 1 ? "s" : ""}</span>}
-              {descCount > 0 && node.cat.model_count > 0 && " · "}
-              {node.cat.model_count > 0 && <span>{node.cat.model_count} model{node.cat.model_count !== 1 ? "s" : ""} → recycle bin</span>}
+    <Localized>
+      <div
+        style={isDragging ? { opacity: 0.3 } : undefined}
+        className={isDragging ? "pointer-events-none" : undefined}
+      >
+        {confirming ? (
+          <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
+            <p className="text-2xs font-medium text-red-700 dark:text-red-400 truncate mb-0.5">
+              Delete &ldquo;{node.cat.name}&rdquo;?
             </p>
-          )}
-          <div className="flex gap-1">
-            <button type="button" onClick={() => setConfirming(false)}
-              className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-muted hover:bg-muted/70 text-muted-foreground transition-colors">
-              Cancel
-            </button>
-            <button type="button"
-              onClick={() => { onDelete?.(node.cat.id, hasContent); setConfirming(false); }}
-              className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors">
-              Delete
-            </button>
+            {hasContent && (
+              <p className="text-3xs text-muted-foreground mb-1.5 leading-snug">
+                {descCount > 0 && (
+                  <span>
+                    {descCount} subcollection{descCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {descCount > 0 && node.cat.model_count > 0 && " · "}
+                {node.cat.model_count > 0 && (
+                  <span>
+                    {node.cat.model_count} model{node.cat.model_count !== 1 ? "s" : ""} → recycle
+                    bin
+                  </span>
+                )}
+              </p>
+            )}
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-muted hover:bg-muted/70 text-muted-foreground transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDelete?.(node.cat.id, hasContent);
+                  setConfirming(false);
+                }}
+                className="flex-1 rounded px-1.5 py-0.5 text-3xs font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div
-          ref={rowRef}
-          className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
-            isOver && dragging !== null && canDrop
-              ? "z-10 bg-accent"
-              : isSelected
-              ? "text-accent-foreground bg-accent"
-              : "text-foreground hover:bg-muted"
-          }`}
-        >
-          {hasNestedItems ? (
-            <button type="button" onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); toggle(node.cat.path); }}
-              className="rounded p-0.5 hover:bg-muted/80 flex-shrink-0" aria-label={isOpen ? "Collapse" : "Expand"}>
-              <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`} />
+        ) : (
+          <div
+            ref={rowRef}
+            className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+              isOver && dragging !== null && canDrop
+                ? "z-10 bg-accent"
+                : isSelected
+                  ? "text-accent-foreground bg-accent"
+                  : "text-foreground hover:bg-muted"
+            }`}
+          >
+            {hasNestedItems ? (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle(node.cat.path);
+                }}
+                className="rounded p-0.5 hover:bg-muted/80 flex-shrink-0"
+                aria-label={isOpen ? "Collapse" : "Expand"}
+              >
+                <ChevronRight
+                  className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
+                />
+              </button>
+            ) : (
+              <span className="inline-block w-4 flex-shrink-0" />
+            )}
+            <button
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onSelect(isSelected ? null : node.cat.path)}
+              className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
+              title={node.cat.path}
+              {...attributes}
+            >
+              {isOpen || isSelected ? (
+                <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
+              ) : (
+                <Folder className="h-3.5 w-3.5 flex-shrink-0" />
+              )}
+              <span className="truncate">{node.cat.name}</span>
             </button>
-          ) : (
-            <span className="inline-block w-4 flex-shrink-0" />
-          )}
-          <button type="button" onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => onSelect(isSelected ? null : node.cat.path)}
-            className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
-            title={node.cat.path} {...attributes}>
-            {isOpen || isSelected
-              ? <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
-              : <Folder className="h-3.5 w-3.5 flex-shrink-0" />}
-            <span className="truncate">{node.cat.name}</span>
-          </button>
-          <span {...listeners} onPointerDown={(e) => e.stopPropagation()}
-            className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover/row:opacity-100 flex-shrink-0"
-            title="Drag to reorder">
-            <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
-              <circle cx="5" cy="4" r="1.2" /><circle cx="11" cy="4" r="1.2" />
-              <circle cx="5" cy="8" r="1.2" /><circle cx="11" cy="8" r="1.2" />
-              <circle cx="5" cy="12" r="1.2" /><circle cx="11" cy="12" r="1.2" />
-            </svg>
-          </span>
-          {onDelete && (
-            <button type="button" onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setConfirming(true); }}
-              className="p-0.5 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover/row:opacity-100 flex-shrink-0 rounded transition-colors"
-              title="Delete collection">
-              <Trash2 className="h-2.5 w-2.5" />
-            </button>
-          )}
-          <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-            {node.cat.model_count}
-          </span>
-        </div>
-      )}
-      {isOpen && hasNestedItems && !confirming && (
-        <div className="ml-4 border-l border-border pl-3 min-w-0">
-          {displayChildren.map((child) => (
-            <CollectionTreeRow
-              key={child.cat.id}
-              node={child}
-              selected={selected}
-              onSelect={onSelect}
-              expanded={expanded}
-              toggle={toggle}
-              modelsByCollection={modelsByCollection}
-              visibleIds={visibleIds}
-              visibleModelIds={visibleModelIds}
-              dragging={dragging}
-              onDelete={onDelete}
-            />
-          ))}
-          {modelLeaves.map((model) => (
-            <DraggableModelLeaf
-              key={model.id}
-              model={model}
-              isDraggingThisModel={dragging?.type === "model" && dragging.model.id === model.id}
-            />
-          ))}
-        </div>
-      )}
-    </div></Localized>
+            <span
+              {...listeners}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover/row:opacity-100 flex-shrink-0"
+              title="Drag to reorder"
+            >
+              <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
+                <circle cx="5" cy="4" r="1.2" />
+                <circle cx="11" cy="4" r="1.2" />
+                <circle cx="5" cy="8" r="1.2" />
+                <circle cx="11" cy="8" r="1.2" />
+                <circle cx="5" cy="12" r="1.2" />
+                <circle cx="11" cy="12" r="1.2" />
+              </svg>
+            </span>
+            {onDelete && (
+              <button
+                type="button"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConfirming(true);
+                }}
+                className="p-0.5 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover/row:opacity-100 flex-shrink-0 rounded transition-colors"
+                title="Delete collection"
+              >
+                <Trash2 className="h-2.5 w-2.5" />
+              </button>
+            )}
+            <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
+              {allModelLeaves.length + allMultipartLeaves.length}
+            </span>
+          </div>
+        )}
+        {isOpen && hasNestedItems && !confirming && (
+          <div className="ml-4 border-l border-border pl-3 min-w-0">
+            {displayChildren.map((child) => (
+              <CollectionTreeRow
+                key={child.cat.id}
+                node={child}
+                selected={selected}
+                onSelect={onSelect}
+                expanded={expanded}
+                toggle={toggle}
+                modelsByCollection={modelsByCollection}
+                multipartByCollection={multipartByCollection}
+                visibleIds={visibleIds}
+                visibleModelIds={visibleModelIds}
+                visibleMultipartIds={visibleMultipartIds}
+                dragging={dragging}
+                onDelete={onDelete}
+              />
+            ))}
+            <OutlinerLeaves leaves={leaves} dragging={dragging} />
+          </div>
+        )}
+      </div>
+    </Localized>
   );
 }
 
@@ -260,88 +492,98 @@ function DroppableAllModels({
   isExpanded,
   onToggleExpand,
   rootModels,
+  rootMultipartModels,
   dragging,
   visibleModelIds,
+  visibleMultipartIds,
 }: {
   selected: boolean;
   onClick: () => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
   rootModels: OutlinerModelRead[];
+  rootMultipartModels: MultipartModelListItem[];
   dragging: DragPayload | null;
   visibleModelIds: Set<number> | null;
+  visibleMultipartIds: Set<number> | null;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: "collection-root",
-    data: { collectionPath: null, collectionId: null },
+    data: { collectionPath: null, collectionId: null } satisfies CollectionDropData,
   });
 
   const displayModels = visibleModelIds
     ? rootModels.filter((m) => visibleModelIds.has(m.id))
     : rootModels;
+  const displayMultipartModels = visibleMultipartIds
+    ? rootMultipartModels.filter((multipart) => visibleMultipartIds.has(multipart.id))
+    : rootMultipartModels;
+  const leaves = mergeLeaves(displayModels, displayMultipartModels);
 
   return (
-    <Localized><>
-      <div
-        ref={setNodeRef}
-        role="button"
-        tabIndex={0}
-        aria-label="All Models"
-        onClick={onClick}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            onClick();
-          }
-        }}
-        className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-          isOver && dragging !== null
-            ? "z-10 bg-accent"
-            : selected
-            ? "text-accent-foreground bg-accent"
-            : "text-foreground hover:bg-muted"
-        }`}
-      >
-        {rootModels.length > 0 ? (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onToggleExpand(); }}
-            className="rounded p-0.5 hover:bg-muted flex-shrink-0 mr-1"
-            aria-label={isExpanded ? "Collapse" : "Expand"}
-          >
-            <ChevronRight className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`} />
-          </button>
-        ) : (
-          <ChevronRight className={`h-4 w-4 mr-1 rotate-90 ${selected ? "text-primary" : "text-muted-foreground"}`} />
-        )}
-        <FolderOpen className="h-4 w-4 mr-2 text-primary" />
-        All Models
-      </div>
-      {isExpanded && displayModels.length > 0 && (
-        <div className="ml-5 border-l border-border pl-4 min-w-0">
-          {displayModels.map((model) => (
-            <DraggableModelLeaf
-              key={model.id}
-              model={model}
-              isDraggingThisModel={
-                dragging?.type === "model" && dragging.model.id === model.id
-              }
+    <Localized>
+      <>
+        <div
+          ref={setNodeRef}
+          role="button"
+          tabIndex={0}
+          aria-label="All Models"
+          onClick={onClick}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onClick();
+            }
+          }}
+          className={`relative w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+            isOver && dragging !== null
+              ? "z-10 bg-accent"
+              : selected
+                ? "text-accent-foreground bg-accent"
+                : "text-foreground hover:bg-muted"
+          }`}
+        >
+          {rootModels.length > 0 || rootMultipartModels.length > 0 ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleExpand();
+              }}
+              className="rounded p-0.5 hover:bg-muted flex-shrink-0 mr-1"
+              aria-label={isExpanded ? "Collapse" : "Expand"}
+            >
+              <ChevronRight
+                className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              />
+            </button>
+          ) : (
+            <ChevronRight
+              className={`h-4 w-4 mr-1 rotate-90 ${selected ? "text-primary" : "text-muted-foreground"}`}
             />
-          ))}
-          {displayModels.length > 8 && (
-            <div className="px-2 py-1 text-3xs text-muted-foreground">
-              +{displayModels.length - 8} more
-            </div>
           )}
+          <FolderOpen className="h-4 w-4 mr-2 text-primary" />
+          All Models
         </div>
-      )}
-    </></Localized>
+        {isExpanded && leaves.length > 0 && (
+          <div className="ml-5 border-l border-border pl-4 min-w-0">
+            <OutlinerLeaves leaves={leaves} dragging={dragging} />
+            {leaves.length > 8 && (
+              <div className="px-2 py-1 text-3xs text-muted-foreground">
+                +{leaves.length - 8} more
+              </div>
+            )}
+          </div>
+        )}
+      </>
+    </Localized>
   );
 }
 
 export function FilterSidebarContent({
   collections,
   models = [],
+  multipartModels = [],
   tags,
   printers,
   selectedCollection,
@@ -360,7 +602,10 @@ export function FilterSidebarContent({
   outlinerFilter,
   canViewPrinters = true,
   structuredFilters,
+  libraryView,
+  onLibraryViewChange,
 }: FilterSidebarProps) {
+  const { t } = useI18n();
   const tree = useMemo(() => buildTree(collections), [collections]);
   const outlinerQ = (outlinerFilter ?? "").trim().toLowerCase();
   // When a tag/printer filter is active the `models` list is already narrowed to
@@ -370,14 +615,44 @@ export function FilterSidebarContent({
     selectedTags.length > 0 || selectedPrinterId !== null || selectedPrinterPresence !== null;
   const treeFiltered = !!outlinerQ || facetFilterActive;
 
+  const memberModelIds = useMemo(
+    () => new Set(multipartModels.flatMap((multipart) => multipart.member_model_ids)),
+    [multipartModels],
+  );
+  const treeModels = useMemo(() => {
+    if (libraryView === "multipart") return [];
+    if (libraryView === "components") {
+      return models.filter((model) => memberModelIds.has(model.id));
+    }
+    if (libraryView === "organized") {
+      return models.filter((model) => !memberModelIds.has(model.id));
+    }
+    return models;
+  }, [libraryView, memberModelIds, models]);
+  const treeMultipartModels = useMemo(
+    () => (libraryView === "components" ? [] : multipartModels),
+    [libraryView, multipartModels],
+  );
+
   const visibleModelIds = useMemo<Set<number> | null>(() => {
     if (!treeFiltered) return null;
     const result = new Set<number>();
-    for (const m of models) {
+    for (const m of treeModels) {
       if (!outlinerQ || m.name.toLowerCase().includes(outlinerQ)) result.add(m.id);
     }
     return result;
-  }, [models, outlinerQ, treeFiltered]);
+  }, [outlinerQ, treeFiltered, treeModels]);
+
+  const visibleMultipartIds = useMemo<Set<number> | null>(() => {
+    if (!treeFiltered) return null;
+    const result = new Set<number>();
+    for (const multipart of treeMultipartModels) {
+      if (!outlinerQ || multipart.name.toLowerCase().includes(outlinerQ)) {
+        result.add(multipart.id);
+      }
+    }
+    return result;
+  }, [outlinerQ, treeFiltered, treeMultipartModels]);
 
   const visibleCollectionIds = useMemo<Set<number> | null>(() => {
     if (!treeFiltered) return null;
@@ -386,7 +661,10 @@ export function FilterSidebarContent({
     const addWithAncestors = (c: CollectionRead) => {
       result.add(c.id);
       let cur = c.parent_id != null ? byId.get(c.parent_id) : undefined;
-      while (cur) { result.add(cur.id); cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined; }
+      while (cur) {
+        result.add(cur.id);
+        cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined;
+      }
     };
     // A text query also matches collections by name; a tag/printer filter only
     // surfaces collections that actually contain matching models.
@@ -395,13 +673,26 @@ export function FilterSidebarContent({
         if (c.name.toLowerCase().includes(outlinerQ)) addWithAncestors(c);
       }
     }
-    for (const m of models) {
+    for (const m of treeModels) {
       if (!m.collection || !visibleModelIds?.has(m.id)) continue;
       const col = collections.find((c) => c.path === m.collection);
       if (col) addWithAncestors(col);
     }
+    for (const multipart of treeMultipartModels) {
+      if (!multipart.collection || !visibleMultipartIds?.has(multipart.id)) continue;
+      const col = collections.find((c) => c.path === multipart.collection);
+      if (col) addWithAncestors(col);
+    }
     return result;
-  }, [collections, models, outlinerQ, treeFiltered, visibleModelIds]);
+  }, [
+    collections,
+    outlinerQ,
+    treeFiltered,
+    treeModels,
+    treeMultipartModels,
+    visibleModelIds,
+    visibleMultipartIds,
+  ]);
 
   const visibleRoots = visibleCollectionIds
     ? tree.filter((n) => visibleCollectionIds.has(n.cat.id))
@@ -409,7 +700,7 @@ export function FilterSidebarContent({
 
   const modelsByCollection = useMemo(() => {
     const grouped = new Map<string, OutlinerModelRead[]>();
-    for (const model of models) {
+    for (const model of treeModels) {
       if (!model.collection) continue;
       const current = grouped.get(model.collection) ?? [];
       current.push(model);
@@ -419,38 +710,61 @@ export function FilterSidebarContent({
       items.sort((a, b) => a.name.localeCompare(b.name));
     }
     return grouped;
-  }, [models]);
+  }, [treeModels]);
+
+  const multipartByCollection = useMemo(() => {
+    const grouped = new Map<string, MultipartModelListItem[]>();
+    for (const multipart of treeMultipartModels) {
+      if (!multipart.collection) continue;
+      const current = grouped.get(multipart.collection) ?? [];
+      current.push(multipart);
+      grouped.set(multipart.collection, current);
+    }
+    for (const items of grouped.values()) {
+      items.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return grouped;
+  }, [treeMultipartModels]);
 
   const rootModels = useMemo(
-    () => models.filter((m) => !m.collection).sort((a, b) => a.name.localeCompare(b.name)),
-    [models],
+    () => treeModels.filter((m) => !m.collection).sort((a, b) => a.name.localeCompare(b.name)),
+    [treeModels],
+  );
+  const rootMultipartModels = useMemo(
+    () =>
+      treeMultipartModels
+        .filter((multipart) => !multipart.collection)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [treeMultipartModels],
   );
 
-  const autoExpandDoneRef = useRef(false);
   const [expanded, setExpanded] = useState<Set<string>>(() => {
-    try {
-      const saved = sessionStorage.getItem("ps-filter-expanded");
-      if (saved) return new Set(JSON.parse(saved));
-    } catch {}
-    return new Set();
+    const initial =
+      readExpandedPaths() ??
+      autoExpandedPaths(collections, modelsByCollection, multipartByCollection);
+    if (selectedCollection) {
+      for (const ancestor of ancestorPaths(selectedCollection)) initial.add(ancestor);
+    }
+    return initial;
   });
-  const [allModelsExpanded, setAllModelsExpanded] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem("ps-filter-all-expanded");
-      if (saved !== null) return JSON.parse(saved) as boolean;
-    } catch {}
-    return true;
-  });
+  const [allModelsExpanded, setAllModelsExpanded] = useState(readAllModelsExpanded);
   const [tagFilter, setTagFilter] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
   const [printerExpanded, setPrinterExpanded] = useState(false);
   const [dragging, setDragging] = useState<DragPayload | null>(null);
 
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
-  );
+  const sensors = useSensors(useSensor(MouseSensor, { activationConstraint: { distance: 6 } }));
 
-  const sortedTags = useMemo(() => [...tags].sort((a, b) => b.model_count - a.model_count), [tags]);
+  const sortedTags = useMemo(
+    () =>
+      [...tags].sort(
+        (a, b) =>
+          b.model_count +
+          (b.multipart_model_count ?? 0) -
+          (a.model_count + (a.multipart_model_count ?? 0)),
+      ),
+    [tags],
+  );
   const filteredTags = useMemo(() => {
     if (!tagFilter.trim()) return sortedTags;
     const q = tagFilter.toLowerCase();
@@ -460,43 +774,27 @@ export function FilterSidebarContent({
   const hiddenCount = filteredTags.length - 10;
 
   useEffect(() => {
-    if (autoExpandDoneRef.current) return;
     try {
-      if (sessionStorage.getItem("ps-filter-expanded")) { autoExpandDoneRef.current = true; return; }
+      sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...expanded]));
     } catch {}
-    if (collections.length === 0) return;
-    autoExpandDoneRef.current = true;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      const parentIds = new Set(collections.map((c) => c.parent_id).filter((id) => id != null));
-      for (const collection of collections) {
-        if (parentIds.has(collection.id) || modelsByCollection.has(collection.path)) {
-          next.add(collection.path);
-        }
-      }
-      return next;
-    });
-  }, [collections, modelsByCollection]);
-
-  useEffect(() => {
-    try { sessionStorage.setItem("ps-filter-expanded", JSON.stringify([...expanded])); } catch {}
   }, [expanded]);
 
   useEffect(() => {
-    try { sessionStorage.setItem("ps-filter-all-expanded", JSON.stringify(allModelsExpanded)); } catch {}
+    try {
+      sessionStorage.setItem(ALL_EXPANDED_KEY, JSON.stringify(allModelsExpanded));
+    } catch {}
   }, [allModelsExpanded]);
 
-  useEffect(() => {
-    if (!selectedCollection) return;
-    const parts = selectedCollection.split("/");
-    const ancestors = new Set<string>();
-    for (let i = 1; i < parts.length; i++) ancestors.add(parts.slice(0, i).join("/"));
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      ancestors.forEach((a) => next.add(a));
-      return next;
-    });
-  }, [selectedCollection]);
+  // Selecting a nested collection reveals it: open its ancestors as the
+  // selection changes, rather than re-syncing from an effect.
+  const [revealedSelection, setRevealedSelection] = useState(selectedCollection);
+  if (revealedSelection !== selectedCollection) {
+    setRevealedSelection(selectedCollection);
+    if (selectedCollection) {
+      const ancestors = ancestorPaths(selectedCollection);
+      setExpanded((prev) => new Set([...prev, ...ancestors]));
+    }
+  }
 
   function toggleTag(slug: string) {
     if (selectedTags.includes(slug)) onTagsChange(selectedTags.filter((t) => t !== slug));
@@ -506,23 +804,24 @@ export function FilterSidebarContent({
   function toggleExpanded(path: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path); else next.add(path);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
       return next;
     });
   }
 
   function handleDragStart(event: DragStartEvent) {
-    setDragging(event.active.data.current as DragPayload);
+    setDragging(activeDragPayload(event));
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setDragging(null);
-    const payload = event.active.data.current as DragPayload | undefined;
-    if (!payload || !event.over) return;
+    const payload = activeDragPayload(event);
+    const target = collectionDropTarget(event);
+    if (!payload || !target) return;
 
-    const targetCollectionPath = event.over.data.current?.collectionPath as string | null | undefined;
-    const targetCollectionId = event.over.data.current?.collectionId as number | null | undefined;
-    if (targetCollectionPath === undefined) return;
+    const targetCollectionPath = target.collectionPath;
+    const targetCollectionId = target.collectionId;
 
     if (payload.type === "model") {
       if (targetCollectionPath === (payload.model.collection ?? null)) return;
@@ -551,242 +850,339 @@ export function FilterSidebarContent({
   }
 
   const statusColor = (s: string) =>
-    s === "printing" ? "bg-primary" :
-    s === "ready" ? "bg-green-500" :
-    s === "paused" ? "bg-amber-500" :
-    s === "error" ? "bg-red-500" :
-    "bg-slate-400";
+    s === "printing"
+      ? "bg-primary"
+      : s === "ready"
+        ? "bg-green-500"
+        : s === "paused"
+          ? "bg-amber-500"
+          : s === "error"
+            ? "bg-red-500"
+            : "bg-slate-400";
 
   const statusLabel = (s: string) =>
-    s === "printing" ? "Printing" :
-    s === "ready" ? "Ready" :
-    s === "paused" ? "Paused" :
-    s === "error" ? "Error" :
-    s === "offline" ? "Offline" :
-    "Unknown";
+    s === "printing"
+      ? "Printing"
+      : s === "ready"
+        ? "Ready"
+        : s === "paused"
+          ? "Paused"
+          : s === "error"
+            ? "Error"
+            : s === "offline"
+              ? "Offline"
+              : "Unknown";
 
   const statusTextColor = (s: string) =>
-    s === "printing" ? "text-primary" :
-    s === "error" ? "text-red-500" :
-    s === "ready" ? "text-green-500" :
-    s === "paused" ? "text-amber-500" :
-    "text-muted-foreground";
+    s === "printing"
+      ? "text-primary"
+      : s === "error"
+        ? "text-red-500"
+        : s === "ready"
+          ? "text-green-500"
+          : s === "paused"
+            ? "text-amber-500"
+            : "text-muted-foreground";
 
   return (
     <Localized>
-    <DndContext
-      sensors={sensors}
-      collisionDetection={pointerWithin}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
-      onDragCancel={() => setDragging(null)}
-    >
-      <div className="flex-1 overflow-auto py-4 px-3 space-y-6">
-        {/* Collections */}
-        <section>
-          <div className="flex items-center justify-between mb-2 pl-2 pr-1">
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-              Collections
+      <DndContext
+        sensors={sensors}
+        collisionDetection={pointerWithin}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={() => setDragging(null)}
+      >
+        <div className="flex-1 overflow-auto py-4 px-3 space-y-6">
+          <section>
+            <h3 className="mb-2 pl-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              {t("libraryView.title")}
             </h3>
-            <button
-              onClick={onCreateCollection}
-              className="p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-              title="Create Collection"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M12 4v16m8-8H4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" />
-              </svg>
-            </button>
-          </div>
-          <div className="overflow-x-auto -mx-3 px-3">
-          <div className="min-w-max space-y-0.5 pr-2">
-            <DroppableAllModels
-              selected={selectedCollection === null}
-              onClick={() => onCollectionChange(null)}
-              isExpanded={allModelsExpanded}
-              onToggleExpand={() => setAllModelsExpanded((v) => !v)}
-              rootModels={rootModels}
-              dragging={dragging}
-              visibleModelIds={visibleModelIds}
-            />
-            <div className="ml-5 border-l border-border pl-4 min-w-0">
-              {visibleRoots.length === 0 && treeFiltered && (visibleModelIds?.size ?? 0) === 0 ? (
-                <p className="py-2 text-3xs text-muted-foreground font-mono">No results.</p>
-              ) : (
-                visibleRoots.map((node) => (
-                  <CollectionTreeRow
-                    key={node.cat.id}
-                    node={node}
-                    selected={selectedCollection}
-                    onSelect={onCollectionChange}
-                    expanded={expanded}
-                    toggle={toggleExpanded}
-                    modelsByCollection={modelsByCollection}
-                    visibleIds={visibleCollectionIds}
-                    visibleModelIds={visibleModelIds}
-                    dragging={dragging}
-                    onDelete={onDeleteCollection}
-                  />
-                ))
-              )}
-            </div>
-          </div>
-          </div>
-        </section>
-
-        {/* Printer */}
-        {canViewPrinters && (
-        <section>
-          <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-            Printer
-          </h3>
-          <div className="space-y-0.5">
-            <button
-              type="button"
-              onClick={() => { onPrinterChange(null); onPrinterPresenceChange(null); }}
-              className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                selectedPrinterId === null && selectedPrinterPresence === null
-                  ? "text-accent-foreground bg-accent"
-                  : "text-foreground hover:bg-muted"
-              }`}
-            >
-              <svg className="h-4 w-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-              </svg>
-              Any location
-            </button>
             <div className="space-y-0.5">
+              {LIBRARY_VIEWS.map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  aria-pressed={libraryView === view}
+                  onClick={() => onLibraryViewChange(view)}
+                  className={`w-full rounded px-2 py-1.5 text-left text-sm font-medium transition-colors ${
+                    libraryView === view
+                      ? "bg-accent text-accent-foreground"
+                      : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {view === "organized"
+                    ? t("libraryView.organized")
+                    : view === "all"
+                      ? t("libraryView.all")
+                      : view === "multipart"
+                        ? t("libraryView.multipart")
+                        : t("libraryView.components")}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* Collections */}
+          <section>
+            <div className="flex items-center justify-between mb-2 pl-2 pr-1">
+              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                Collections
+              </h3>
               <button
-                type="button"
-                onClick={() => {
-                  onPrinterChange(null);
-                  onPrinterPresenceChange("any");
-                  setPrinterExpanded(!printerExpanded);
-                }}
-                className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                  selectedPrinterPresence === "any"
-                    ? "text-accent-foreground bg-accent"
-                    : "text-foreground hover:bg-muted"
-                }`}
+                onClick={onCreateCollection}
+                className="p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
+                title="Create Collection"
               >
-                <ChevronRight className={`h-4 w-4 mr-1 text-muted-foreground transition-transform ${printerExpanded ? "rotate-90" : ""}`} />
-                <svg className="h-4 w-4 mr-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    d="M12 4v16m8-8H4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.5"
+                  />
                 </svg>
-                <span className="font-medium">On a printer</span>
               </button>
-              {printerExpanded && (
-                <div className="ml-4 border-l border-border">
-                  {printers.length === 0 ? (
-                    <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">No printers configured</p>
+            </div>
+            <div className="overflow-x-auto -mx-3 px-3">
+              <div className="min-w-max space-y-0.5 pr-2">
+                <DroppableAllModels
+                  selected={selectedCollection === null}
+                  onClick={() => onCollectionChange(null)}
+                  isExpanded={allModelsExpanded}
+                  onToggleExpand={() => setAllModelsExpanded((v) => !v)}
+                  rootModels={rootModels}
+                  rootMultipartModels={rootMultipartModels}
+                  dragging={dragging}
+                  visibleModelIds={visibleModelIds}
+                  visibleMultipartIds={visibleMultipartIds}
+                />
+                <div className="ml-5 border-l border-border pl-4 min-w-0">
+                  {visibleRoots.length === 0 &&
+                  treeFiltered &&
+                  (visibleModelIds?.size ?? 0) === 0 &&
+                  (visibleMultipartIds?.size ?? 0) === 0 ? (
+                    <p className="py-2 text-3xs text-muted-foreground font-mono">No results.</p>
                   ) : (
-                    printers.map((printer) => (
-                      <button
-                        key={printer.id}
-                        type="button"
-                        onClick={() => { onPrinterChange(printer.id); onPrinterPresenceChange(null); }}
-                        className={`w-full flex items-center justify-between px-2 py-1.5 text-sm transition-colors rounded group pl-4 ${
-                          selectedPrinterId === printer.id
-                            ? "text-accent-foreground bg-accent"
-                            : "text-foreground hover:bg-muted"
-                        }`}
-                      >
-                        <span className="flex items-center">
-                          <span className={`w-1.5 h-1.5 rounded-full ${statusColor(printer.status)} mr-2`} />
-                          {printer.name}
-                        </span>
-                        <span className={`text-3xs font-medium ${statusTextColor(printer.status)}`}>
-                          {statusLabel(printer.status)}
-                        </span>
-                      </button>
+                    visibleRoots.map((node) => (
+                      <CollectionTreeRow
+                        key={node.cat.id}
+                        node={node}
+                        selected={selectedCollection}
+                        onSelect={onCollectionChange}
+                        expanded={expanded}
+                        toggle={toggleExpanded}
+                        modelsByCollection={modelsByCollection}
+                        multipartByCollection={multipartByCollection}
+                        visibleIds={visibleCollectionIds}
+                        visibleModelIds={visibleModelIds}
+                        visibleMultipartIds={visibleMultipartIds}
+                        dragging={dragging}
+                        onDelete={onDeleteCollection}
+                      />
                     ))
                   )}
                 </div>
-              )}
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => { onPrinterChange(null); onPrinterPresenceChange("none"); }}
-              className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
-                selectedPrinterPresence === "none"
-                  ? "text-accent-foreground bg-accent"
-                  : "text-foreground hover:bg-muted"
-              }`}
-            >
-              <Folder className="h-4 w-4 mr-2 text-primary" />
-              Vault only
-            </button>
-          </div>
-        </section>
-        )}
+          </section>
 
-        {/* Tags */}
-        {structuredFilters}
-
-        {/* Tags */}
-        {tags.length > 0 && (
-          <section>
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-              Tags
-            </h3>
-            <div className="relative mb-2">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Filter tags..."
-                value={tagFilter}
-                onChange={(e) => { setTagFilter(e.target.value); setShowAllTags(false); }}
-                className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
-              />
-              {tagFilter && (
+          {/* Printer */}
+          {canViewPrinters && (
+            <section>
+              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+                Printer
+              </h3>
+              <div className="space-y-0.5">
                 <button
                   type="button"
-                  onClick={() => setTagFilter("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    onPrinterChange(null);
+                    onPrinterPresenceChange(null);
+                  }}
+                  className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                    selectedPrinterId === null && selectedPrinterPresence === null
+                      ? "text-accent-foreground bg-accent"
+                      : "text-foreground hover:bg-muted"
+                  }`}
                 >
-                  <X className="h-3 w-3" />
+                  <svg
+                    className="h-4 w-4 mr-2 text-primary"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                  Any location
+                </button>
+                <div className="space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPrinterChange(null);
+                      onPrinterPresenceChange("any");
+                      setPrinterExpanded(!printerExpanded);
+                    }}
+                    className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                      selectedPrinterPresence === "any"
+                        ? "text-accent-foreground bg-accent"
+                        : "text-foreground hover:bg-muted"
+                    }`}
+                  >
+                    <ChevronRight
+                      className={`h-4 w-4 mr-1 text-muted-foreground transition-transform ${printerExpanded ? "rotate-90" : ""}`}
+                    />
+                    <svg
+                      className="h-4 w-4 mr-2 text-primary"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                    <span className="font-medium">On a printer</span>
+                  </button>
+                  {printerExpanded && (
+                    <div className="ml-4 border-l border-border">
+                      {printers.length === 0 ? (
+                        <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
+                          No printers configured
+                        </p>
+                      ) : (
+                        printers.map((printer) => (
+                          <button
+                            key={printer.id}
+                            type="button"
+                            onClick={() => {
+                              onPrinterChange(printer.id);
+                              onPrinterPresenceChange(null);
+                            }}
+                            className={`w-full flex items-center justify-between px-2 py-1.5 text-sm transition-colors rounded group pl-4 ${
+                              selectedPrinterId === printer.id
+                                ? "text-accent-foreground bg-accent"
+                                : "text-foreground hover:bg-muted"
+                            }`}
+                          >
+                            <span className="flex items-center">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${statusColor(printer.status)} mr-2`}
+                              />
+                              {printer.name}
+                            </span>
+                            <span
+                              className={`text-3xs font-medium ${statusTextColor(printer.status)}`}
+                            >
+                              {statusLabel(printer.status)}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPrinterChange(null);
+                    onPrinterPresenceChange("none");
+                  }}
+                  className={`w-full flex items-center px-2 py-1.5 text-sm rounded font-medium group transition-colors ${
+                    selectedPrinterPresence === "none"
+                      ? "text-accent-foreground bg-accent"
+                      : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Folder className="h-4 w-4 mr-2 text-primary" />
+                  Vault only
+                </button>
+              </div>
+            </section>
+          )}
+
+          {/* Tags */}
+          {structuredFilters}
+
+          {/* Tags */}
+          {tags.length > 0 && (
+            <section>
+              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
+                Tags
+              </h3>
+              <div className="relative mb-2">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Filter tags..."
+                  value={tagFilter}
+                  onChange={(e) => {
+                    setTagFilter(e.target.value);
+                    setShowAllTags(false);
+                  }}
+                  className="w-full pl-7 pr-2 py-1.5 text-sm border border-border rounded bg-muted text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring focus:border-primary transition-colors"
+                />
+                {tagFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTagFilter("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+              {filteredTags.length === 0 ? (
+                <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
+                  No matching tags.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {visibleTags.map((t) => {
+                    const active = selectedTags.includes(t.slug);
+                    return (
+                      <button
+                        type="button"
+                        key={t.id}
+                        onClick={() => toggleTag(t.slug)}
+                        className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-2xs tracking-wider uppercase border transition-colors ${
+                          active
+                            ? "border-primary bg-accent text-accent-foreground"
+                            : "border-border text-muted-foreground hover:border-border hover:bg-muted"
+                        }`}
+                      >
+                        {t.name}
+                        <span className="opacity-60">
+                          {t.model_count + (t.multipart_model_count ?? 0)}
+                        </span>
+                        {active && <X className="h-3 w-3 ml-0.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {!tagFilter && hiddenCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllTags(!showAllTags)}
+                  className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
+                >
+                  {showAllTags ? "Show fewer" : `Show all ${filteredTags.length} tags`}
                 </button>
               )}
-            </div>
-            {filteredTags.length === 0 ? (
-              <p className="text-3xs text-muted-foreground font-mono px-1 py-2">No matching tags.</p>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {visibleTags.map((t) => {
-                  const active = selectedTags.includes(t.slug);
-                  return (
-                    <button
-                      type="button"
-                      key={t.id}
-                      onClick={() => toggleTag(t.slug)}
-                      className={`flex items-center gap-1 px-2 py-1 rounded font-mono text-2xs tracking-wider uppercase border transition-colors ${
-                        active
-                          ? "border-primary bg-accent text-accent-foreground"
-                          : "border-border text-muted-foreground hover:border-border hover:bg-muted"
-                      }`}
-                    >
-                      {t.name}
-                      <span className="opacity-60">{t.model_count}</span>
-                      {active && <X className="h-3 w-3 ml-0.5" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {!tagFilter && hiddenCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowAllTags(!showAllTags)}
-                className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
-              >
-                {showAllTags ? "Show fewer" : `Show all ${filteredTags.length} tags`}
-              </button>
-            )}
-          </section>
-        )}
-      </div>
-
-    </DndContext>
+            </section>
+          )}
+        </div>
+      </DndContext>
     </Localized>
   );
 }
@@ -794,6 +1190,7 @@ export function FilterSidebarContent({
 export interface FilterSidebarProps {
   collections: CollectionRead[];
   models?: OutlinerModelRead[];
+  multipartModels?: MultipartModelListItem[];
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;
@@ -812,16 +1209,24 @@ export interface FilterSidebarProps {
   loading?: boolean;
   outlinerFilter?: string;
   structuredFilters?: React.ReactNode;
+  libraryView: LibraryViewMode;
+  onLibraryViewChange: (view: LibraryViewMode) => void;
 }
 
 export function FilterSidebar(props: FilterSidebarProps) {
   const [outlinerFilter, setOutlinerFilter] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    try { return parseInt(localStorage.getItem("ps-sidebar-width") ?? "220", 10); } catch { return 220; }
+    try {
+      return parseInt(localStorage.getItem("ps-sidebar-width") ?? "220", 10);
+    } catch {
+      return 220;
+    }
   });
 
   useEffect(() => {
-    try { localStorage.setItem("ps-sidebar-width", String(sidebarWidth)); } catch {}
+    try {
+      localStorage.setItem("ps-sidebar-width", String(sidebarWidth));
+    } catch {}
   }, [sidebarWidth]);
 
   function handleResizeStart(e: React.MouseEvent) {
@@ -844,36 +1249,41 @@ export function FilterSidebar(props: FilterSidebarProps) {
   }
 
   return (
-    <Localized><aside style={{ width: sidebarWidth }} className="bg-sidebar border-r border-border flex flex-col shrink-0 hidden md:flex relative">
-      <div className="p-2 border-b border-border bg-sidebar">
-        <div className="relative">
-          <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
-            <Search className="h-3.5 w-3.5" />
-          </span>
-          <input
-            className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            placeholder="Filter outliner..."
-            type="text"
-            value={outlinerFilter}
-            onChange={(e) => setOutlinerFilter(e.target.value)}
-          />
-          {outlinerFilter && (
-            <button
-              type="button"
-              onClick={() => setOutlinerFilter("")}
-              className="absolute inset-y-0 right-2 flex items-center text-muted-foreground hover:text-foreground"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          )}
+    <Localized>
+      <aside
+        style={{ width: sidebarWidth }}
+        className="bg-sidebar border-r border-border flex flex-col shrink-0 hidden md:flex relative"
+      >
+        <div className="p-2 border-b border-border bg-sidebar">
+          <div className="relative">
+            <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
+              <Search className="h-3.5 w-3.5" />
+            </span>
+            <input
+              className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="Filter outliner..."
+              type="text"
+              value={outlinerFilter}
+              onChange={(e) => setOutlinerFilter(e.target.value)}
+            />
+            {outlinerFilter && (
+              <button
+                type="button"
+                onClick={() => setOutlinerFilter("")}
+                className="absolute inset-y-0 right-2 flex items-center text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <FilterSidebarContent {...props} outlinerFilter={outlinerFilter} />
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
-      />
-    </aside></Localized>
+        <FilterSidebarContent {...props} outlinerFilter={outlinerFilter} />
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleResizeStart}
+          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/50 transition-colors z-50"
+        />
+      </aside>
+    </Localized>
   );
 }

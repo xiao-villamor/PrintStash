@@ -2,6 +2,7 @@
 
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
 
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 
@@ -30,7 +31,11 @@ const components = {
 export function MarkdownView({ source, className }: { source: string; className?: string }) {
   return (
     <div className={`prose prose-sm dark:prose-invert max-w-none ${className ?? ""}`}>
-      <ReactMarkdown rehypePlugins={[rehypeSanitize]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeSanitize]}
+        components={components}
+      >
         {source}
       </ReactMarkdown>
     </div>

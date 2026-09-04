@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, Never
 from urllib.parse import quote
 
 import httpx
 
+from ..gcode.formats import classify_print_artifact, content_type_for_format
 from .contracts import PrinterClient, SnapshotCallback
 from .models import (
     Capability,
+    PrintArtifactFormat,
     PrinterConfig,
     PrinterSnapshot,
     ProviderCapabilities,
@@ -43,6 +45,9 @@ PRUSALINK_CAPABILITIES = ProviderCapabilities(
         }
     ),
     support_level="beta",
+    accepted_print_formats=frozenset(
+        {PrintArtifactFormat.GCODE_TEXT, PrintArtifactFormat.BGCODE_BINARY}
+    ),
     support_notes=(
         "PrusaLink local FDM support is beta pending broader hardware validation.",
         "Raw G-code controls and measured filament consumption are unavailable.",
@@ -50,6 +55,21 @@ PRUSALINK_CAPABILITIES = ProviderCapabilities(
 )
 
 HttpClientFactory = Callable[..., httpx.AsyncClient]
+
+
+class _ReplayableFileStream(httpx.AsyncByteStream):
+    """Bounded file stream that Digest authentication can replay safely."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        file = await asyncio.to_thread(self.path.open, "rb")
+        try:
+            while chunk := await asyncio.to_thread(file.read, 1024 * 1024):
+                yield chunk
+        finally:
+            await asyncio.to_thread(file.close)
 
 
 class PrusaLinkClient:
@@ -239,9 +259,13 @@ class PrusaLinkClient:
 
     async def list_files(self) -> list[Mapping[str, Any]]:
         body = await self._request("GET", "/api/v1/files/local/")
-        files = body.get(
-            "children", body.get("files", body if isinstance(body, list) else [])
-        )
+        # The list case is tested first because `body.get` is evaluated before
+        # any inline fallback: a bare array would otherwise raise AttributeError
+        # out of the poll loop rather than listing nothing.
+        if isinstance(body, list):
+            files: Any = body
+        else:
+            files = body.get("children", body.get("files", []))
         if not isinstance(files, list):
             return []
         result: list[Mapping[str, Any]] = []
@@ -274,13 +298,18 @@ class PrusaLinkClient:
 
     async def upload(self, local_path: Path, remote_filename: str) -> dict[str, Any]:
         target = self._file_path(remote_filename)
-        content = await asyncio.to_thread(local_path.read_bytes)
+        artifact_format = await asyncio.to_thread(
+            classify_print_artifact,
+            local_path,
+            filename=remote_filename,
+        )
         body = await self._request(
             "PUT",
             f"/api/v1/files/local/{target}",
-            content=content,
+            content=_ReplayableFileStream(local_path),
             headers={
-                "Content-Type": "text/x.gcode",
+                "Content-Type": content_type_for_format(artifact_format),
+                "Content-Length": str(local_path.stat().st_size),
                 "Overwrite": "?1",
                 "Print-After-Upload": "?0",
             },

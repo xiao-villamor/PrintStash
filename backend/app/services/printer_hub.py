@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict
@@ -39,7 +40,7 @@ from app.db.models import (
     PrintJobState,
 )
 from app.db.scopes import live
-from app.db.session import get_session_factory
+from app.db.session import SessionFactory, get_session_factory
 from app.services import filament as filament_svc
 from app.services import (
     gcode_parser,
@@ -54,7 +55,6 @@ from app.services.hashing import sha256_file
 from app.services.printer_provider import (
     PrinterProviderClient,
     ProviderError,
-    get_provider_client,
 )
 from app.services.realtime import InProcessBus, RealtimeBus
 from app.services.runtime_config import auto_mark_known_good_enabled
@@ -145,15 +145,84 @@ def _reported_float(value: Any) -> float | None:
         return None
 
 
+_BAMBU_ID_FIELDS = (
+    "external_task_id",
+    "external_subtask_id",
+    "external_project_id",
+)
+
+
+def _bambu_identity(values: Dict[str, Any] | PrintJob) -> dict[str, str]:
+    """Return non-empty Bambu identity fields without erasing their types."""
+
+    identity: dict[str, str] = {}
+    for field in _BAMBU_ID_FIELDS:
+        value = (
+            values.get(field)
+            if isinstance(values, dict)
+            else getattr(values, field, None)
+        )
+        text = _reported_text(value)
+        if text not in (None, "0"):
+            identity[field] = text
+    return identity
+
+
+def _bambu_identity_matches(
+    incoming: dict[str, str], candidate: dict[str, str]
+) -> bool:
+    """Match only same-typed identities and reject conflicting fields."""
+
+    shared_fields = incoming.keys() & candidate.keys()
+    return bool(shared_fields) and all(
+        incoming[field] == candidate[field] for field in shared_fields
+    )
+
+
+def _bambu_project_task_transition(
+    incoming: dict[str, str],
+    candidate: PrintJob,
+    filename: str,
+    ms_state: str,
+) -> bool:
+    """Allow only an active project-only to task-only filename hand-off."""
+
+    candidate_identity = _bambu_identity(candidate)
+    if (
+        candidate.source != "external"
+        or candidate.remote_filename != filename
+        or candidate.finished_at is not None
+        or candidate.started_at is None
+        or candidate.state not in (PrintJobState.PRINTING, PrintJobState.PAUSED)
+        or ms_state not in ("printing", "paused")
+        or set(candidate_identity) != {"external_project_id"}
+        or set(incoming) != {"external_task_id"}
+    ):
+        return False
+    # Equal serialized values across different typed fields are not evidence
+    # of continuity; they must not bypass the typed matcher.
+    return (
+        candidate_identity["external_project_id"]
+        != incoming["external_task_id"]
+    )
+
+
 class PrinterHub:
     def __init__(
         self,
         bus: RealtimeBus | None = None,
         *,
+        session_factory: SessionFactory | None = None,
         provider_builder: Callable[[Printer], PrinterProviderClient] | None = None,
     ) -> None:
         self.snapshots: Dict[int, Dict[str, Any]] = {}
+        # Runtime composition always supplies both adapters.  The defaults
+        # retain direct construction for extensions and focused tests; make
+        # them required once those callers use the composition root too.
         self.bus: RealtimeBus = bus if bus is not None else InProcessBus()
+        self._session_factory = (
+            session_factory if session_factory is not None else get_session_factory()
+        )
         self._provider_builder = provider_builder
         self.tasks: Dict[int, asyncio.Task] = {}
         self.stop_events: Dict[int, asyncio.Event] = {}
@@ -167,6 +236,10 @@ class PrinterHub:
         self._active_job_cache: Dict[int, tuple[str, int]] = {}
         # printer_id -> (consecutive failures, retry-after monotonic timestamp)
         self._job_sync_breakers: Dict[int, tuple[int, float]] = {}
+        # Status callbacks may arrive concurrently from MQTT/HTTP worker
+        # threads. Serialize the DB reconciliation seam per printer so two
+        # initial callbacks cannot both create external placeholder rows.
+        self._job_sync_db_locks: Dict[int, threading.Lock] = {}
         # printer_id -> (filename, state, progress, monotonic time) for DB write coalescing
         self._last_job_sync_write: Dict[int, tuple[str, str, float, float]] = {}
         self._capture_tasks: Dict[tuple[int, int], asyncio.Task] = {}
@@ -240,7 +313,7 @@ class PrinterHub:
         await self.add_printer(printer_id)
 
     async def start_all(self) -> None:
-        with get_session_factory().session() as session:
+        with self._session_factory.session() as session:
             ids = [
                 p.id
                 for p in session.exec(
@@ -263,17 +336,17 @@ class PrinterHub:
         # Load the printer row (re-load on each reconnect to pick up edits).
         reconnect_delay = 1.0
         while not stop.is_set():
-            with get_session_factory().session() as session:
+            with self._session_factory.session() as session:
                 printer = session.get(Printer, printer_id)
                 if printer is None:
                     logger.info("printer worker[%s] gone; exiting", printer_id)
                     return
                 try:
-                    client = (
-                        self._provider_builder(printer)
-                        if self._provider_builder is not None
-                        else get_provider_client(printer)
-                    )
+                    if self._provider_builder is None:
+                        raise RuntimeError(
+                            "PrinterHub requires a provider builder from the composition root"
+                        )
+                    client = self._provider_builder(printer)
                 except ProviderError as exc:
                     await self._mark_status(
                         printer_id,
@@ -398,9 +471,8 @@ class PrinterHub:
             {"type": "update", "printer_id": printer_id, "data": snap},
         )
 
-    @staticmethod
-    def _spoolman_config() -> tuple[str, str | None] | None:
-        with get_session_factory().session() as session:
+    def _spoolman_config(self) -> tuple[str, str | None] | None:
+        with self._session_factory.session() as session:
             if not runtime_config.spoolman_enabled(session):
                 return None
             config = runtime_config.spoolman_config(session)
@@ -455,13 +527,13 @@ class PrinterHub:
             )
         return normalized
 
-    @staticmethod
     def _sync_material_state_db(
+        self,
         printer_id: int,
         slots: list[dict[str, Any]],
         tools: list[object] | None = None,
     ) -> None:
-        with get_session_factory().session() as session:
+        with self._session_factory.session() as session:
             printer = session.get(Printer, printer_id)
             if printer is None or not printer.provider_material_sync_enabled:
                 return
@@ -605,11 +677,10 @@ class PrinterHub:
         finally:
             end_mutating_operation()
 
-    @staticmethod
     def _mark_status_db(
-        printer_id: int, status: PrinterStatus, error: str | None
+        self, printer_id: int, status: PrinterStatus, error: str | None
     ) -> None:
-        with get_session_factory().session() as session:
+        with self._session_factory.session() as session:
             p = session.get(Printer, printer_id)
             if p is None:
                 return
@@ -704,8 +775,26 @@ class PrinterHub:
         progress: float,
         print_stats: Dict[str, Any],
     ) -> tuple[int, str] | None:
-        with get_session_factory().session() as session:
+        lock = self._job_sync_db_locks.setdefault(printer_id, threading.Lock())
+        with lock:
+            return self._sync_active_job_db_locked(
+                printer_id, ms_state, filename, progress, print_stats
+            )
+
+    def _sync_active_job_db_locked(
+        self,
+        printer_id: int,
+        ms_state: str,
+        filename: str,
+        progress: float,
+        print_stats: Dict[str, Any],
+    ) -> tuple[int, str] | None:
+        with self._session_factory.session() as session:
             job = None
+            printer = session.get(Printer, printer_id)
+            bambu_printer = (
+                printer is not None and printer.provider == PrinterProvider.BAMBU_LAN
+            )
             provider_job_id = next(
                 (
                     text
@@ -719,18 +808,103 @@ class PrinterHub:
                 None,
             )
             cached = self._active_job_cache.get(printer_id)
-            if cached is not None and cached[0] == filename:
-                job = session.get(PrintJob, cached[1])
+            incoming_identity = _bambu_identity(print_stats)
+            if cached is not None:
+                cached_job = session.get(PrintJob, cached[1])
+                # Keep identity continuity ahead of the printer's transient
+                # provider_job_id. Bambu commonly emits project-only and
+                # task-only reports for one run; the same filename is the
+                # bounded transition fallback while a terminal tick still
+                # closes the row normally.
+                if (
+                    cached_job is not None
+                    and cached_job.dedupe_absorbed_at is None
+                    and cached_job.finished_at is None
+                    and (
+                        (
+                            not incoming_identity
+                            and cached_job.remote_filename == filename
+                            and (not bambu_printer or cached_job.source == "vault")
+                        )
+                        or (
+                            incoming_identity
+                            and (
+                                _bambu_identity_matches(
+                                    incoming_identity, _bambu_identity(cached_job)
+                                )
+                                or _bambu_project_task_transition(
+                                    incoming_identity, cached_job, filename, ms_state
+                                )
+                            )
+                        )
+                    )
+                ):
+                    job = cached_job
 
             if job is None:
-                query = select(PrintJob).where(PrintJob.printer_id == printer_id)
-                if provider_job_id:
-                    query = query.where(PrintJob.provider_job_id == provider_job_id)
-                else:
-                    query = query.where(PrintJob.remote_filename == filename)
-                job = session.exec(
-                    query.order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
-                ).first()
+                rows = session.exec(
+                    select(PrintJob)
+                    .where(PrintJob.printer_id == printer_id, live(PrintJob))
+                    .order_by(PrintJob.created_at.desc())  # type: ignore[attr-defined]
+                ).all()
+                # Identity matching is set-based rather than provider_job_id
+                # matching: any task/subtask/project overlap is one job.
+                for candidate in rows:
+                    candidate_identity = _bambu_identity(candidate)
+                    if _bambu_identity_matches(incoming_identity, candidate_identity):
+                        job = candidate
+                        break
+                # A project-only -> task-only transition has no overlapping
+                # value. Match only that active external row by the same
+                # reported filename; filename alone is never an identity.
+                if job is None:
+                    for candidate in rows:
+                        if _bambu_project_task_transition(
+                            incoming_identity, candidate, filename, ms_state
+                        ):
+                            job = candidate
+                            break
+                # Provider-neutral reports (Moonraker, OctoPrint, PrusaLink,
+                # and manual vault dispatch) do not carry a typed Bambu
+                # identity. Reconcile them to the active row for the same
+                # filename so a vault job is updated instead of creating an
+                # external sentinel row. A filename is never allowed to
+                # override a non-empty Bambu identity above.
+                if job is None and not incoming_identity:
+                    for candidate in rows:
+                        if (
+                            candidate.remote_filename == filename
+                            and candidate.finished_at is None
+                            and candidate.dedupe_absorbed_at is None
+                            and (not bambu_printer or candidate.source == "vault")
+                        ):
+                            job = candidate
+                            break
+                # A repeated provider-neutral terminal report arrives after
+                # the active row has already been finished. Select the latest
+                # matching history row so the terminal guard below makes the
+                # update idempotent. Printing/paused reports intentionally do
+                # not use this path and create a fresh reprint row.
+                if (
+                    job is None
+                    and not incoming_identity
+                    and ms_state
+                    in (
+                        "complete",
+                        "cancelled",
+                        "error",
+                        "failed",
+                    )
+                ):
+                    for candidate in rows:
+                        if (
+                            candidate.remote_filename == filename
+                            and candidate.finished_at is not None
+                            and candidate.dedupe_absorbed_at is None
+                            and (not bambu_printer or candidate.source == "vault")
+                        ):
+                            job = candidate
+                            break
 
             # A finished job is history, not the live print — its state never
             # moves again. When the printer starts a *new* run of the same
@@ -747,7 +921,10 @@ class PrinterHub:
                 self._active_job_cache.pop(printer_id, None)
 
             if job is None:
-                # No vault-created job — check if printer is actively printing.
+                # Keep creation and the first observed provider state in one
+                # transaction. Previously a terminal cancellation committed a
+                # default QUEUED row first, so concurrent dashboards briefly
+                # counted a phantom active job before the terminal writeback.
                 if ms_state in (
                     "printing",
                     "paused",
@@ -766,8 +943,7 @@ class PrinterHub:
                         artifact_evidence="metadata_only",
                     )
                     session.add(job)
-                    session.commit()
-                    session.refresh(job)
+                    session.flush()
                     logger.info(
                         "captured external print job %s on printer %s (state=%s)",
                         filename,
@@ -828,7 +1004,17 @@ class PrinterHub:
                 ),
             }
             for field_name, value in reported_fields.items():
-                if value is not None and getattr(job, field_name) != value:
+                if value is None:
+                    continue
+                current = getattr(job, field_name)
+                if field_name in _BAMBU_ID_FIELDS:
+                    current_text = _reported_text(current)
+                    if current_text not in (None, "0") and current_text != value:
+                        # Identity matching above rejects this case. Keep the
+                        # guard here so a future selection path cannot
+                        # overwrite an established typed identity.
+                        continue
+                if current != value:
                     setattr(job, field_name, value)
                     changed = True
             if provider_job_id and job.provider_job_id != provider_job_id:
@@ -851,6 +1037,8 @@ class PrinterHub:
             ):
                 job.artifact_evidence = "capture_pending"
                 job.artifact_capture_error = None
+                job.artifact_capture_error_code = None
+                job.artifact_capture_error_message = None
                 changed = True
                 assert job.id is not None
                 capture = (job.id, capture_path)
@@ -960,7 +1148,10 @@ class PrinterHub:
         max_mb = settings.bambu_external_capture_max_mb
         if max_mb <= 0:
             await asyncio.to_thread(
-                self._mark_capture_failed, job_id, "external_artifact_capture_disabled"
+                self._mark_capture_failed,
+                job_id,
+                "external_artifact_capture_disabled",
+                "External artifact capture is disabled by configuration.",
             )
             return
         try:
@@ -976,23 +1167,27 @@ class PrinterHub:
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - metadata-only is a valid outcome
-            detail = getattr(exc, "code", "artifact_capture_failed")
+            detail = getattr(exc, "action_code", None) or getattr(
+                exc, "code", "artifact_capture_failed"
+            )
+            message = str(exc) or detail
             logger.info(
                 "external artifact capture unavailable for printer=%s job=%s: %s",
                 printer_id,
                 job_id,
                 detail,
             )
-            await asyncio.to_thread(self._mark_capture_failed, job_id, detail)
+            await asyncio.to_thread(self._mark_capture_failed, job_id, detail, message)
 
-    @staticmethod
-    def _persist_external_artifact(job_id: int, staged: Path, filename: str) -> None:
+    def _persist_external_artifact(
+        self, job_id: int, staged: Path, filename: str
+    ) -> None:
         lowered = filename.lower()
         file_type = FileType.THREE_MF if lowered.endswith(".3mf") else FileType.GCODE
         blob_hash = sha256_file(staged)
         meta = gcode_parser.parse(staged) if file_type == FileType.GCODE else {}
         thumb_bytes = thumbnail.extract(staged) if file_type == FileType.GCODE else None
-        with get_session_factory().session() as session:
+        with self._session_factory.session() as session:
             job = session.get(PrintJob, job_id)
             if job is None or job.source != "external":
                 return
@@ -1028,13 +1223,16 @@ class PrinterHub:
                 else "gcode_archived"
             )
             job.artifact_capture_error = None
+            job.artifact_capture_error_code = None
+            job.artifact_capture_error_message = None
             job.updated_at = utcnow()
             session.add(job)
             session.commit()
 
-    @staticmethod
-    def _mark_capture_failed(job_id: int, error: str) -> None:
-        with get_session_factory().session() as session:
+    def _mark_capture_failed(
+        self, job_id: int, error: str, message: str | None = None
+    ) -> None:
+        with self._session_factory.session() as session:
             job = session.get(PrintJob, job_id)
             if job is None or job.artifact_evidence not in (
                 "capture_pending",
@@ -1043,6 +1241,8 @@ class PrinterHub:
                 return
             job.artifact_evidence = "capture_failed"
             job.artifact_capture_error = error[:1024]
+            job.artifact_capture_error_code = error[:128]
+            job.artifact_capture_error_message = (message or error)[:1024]
             job.updated_at = utcnow()
             session.add(job)
             session.commit()

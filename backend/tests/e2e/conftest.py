@@ -33,10 +33,11 @@ from app.core import url_safety
 from app.core.config import _overlay
 from app.db.session import SQLiteSessionFactory, override_session_factory
 from app.services import notification_renderers as renderers
-
-from .fakes.provider_targets import build_provider_app
-from .fakes.recorder import Recorder
-from .fakes.server import RunningServer, start_server
+from app.services.storage_backend import LocalStorageBackend, bind_backend
+from tests._env import use_local_storage
+from tests.fakes.provider_targets import build_provider_app
+from tests.fakes.recorder import Recorder
+from tests.fakes.server import RunningServer, start_server
 
 
 @dataclass
@@ -80,6 +81,11 @@ def e2e_db(tmp_path: Path) -> Iterator[Session]:
     SQLModel.metadata.create_all(engine)
     override_session_factory(SQLiteSessionFactory(engine))
     _overlay["db_url"] = f"sqlite:///{db_file}"
+    # Keep credential encryption stable when setup-driven tests apply the
+    # persisted provider overlay. This is equivalent to a per-worker
+    # VAULT_SECRETS_KEY and prevents one E2E case's generated key from leaking
+    # into another case.
+    _overlay["secrets_key"] = "printstash-e2e-secrets-key"
     # Redirect every storage/data dir into the test's tmp dir so nothing touches
     # the real /data tree (overlay wins over the frozen Settings defaults).
     dir_keys = ("data_dir", "thumb_dir", "staging_dir", "backup_dir")
@@ -87,14 +93,33 @@ def e2e_db(tmp_path: Path) -> Iterator[Session]:
         d = tmp_path / key
         d.mkdir(parents=True, exist_ok=True)
         _overlay[key] = d
+    backup_dir = Path(_overlay["backup_dir"])
+    # The parent autouse fixture binds storage before this E2E fixture applies
+    # its per-test directories. Rebind the adapter so worker threads use the
+    # same (still fresh/un-enrolled) roots as the ASGI app. Direct-storage E2E
+    # flows enroll these roots in ``superuser_headers`` below; setup-driven
+    # flows must see genuinely empty roots here.
+    bind_backend(LocalStorageBackend())
     session = Session(engine)
     try:
         yield session
     finally:
+        from app.services import backup as backup_service
+        from app.services import storage_backend
+
+        # A failed restore may leave the process gate set while its durable
+        # journal remains under this test's private backup directory. Clear
+        # only test-owned evidence after all clients have stopped, so the next
+        # E2E case cannot inherit maintenance state or a bound backend.
+        backup_service._end_restore_maintenance()
+        for journal in backup_dir.glob(".restore-*.journal"):
+            journal.unlink(missing_ok=True)
+        storage_backend._backend = None
         session.close()
         engine.dispose()
         for key in dir_keys:
             _overlay.pop(key, None)
+        _overlay.pop("secrets_key", None)
 
 
 @pytest.fixture
@@ -117,7 +142,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[Fakes]:
 
 
 @pytest_asyncio.fixture
-async def api() -> "httpx.AsyncClient":
+async def api(e2e_db: Session) -> "httpx.AsyncClient":
     """An async client bound to the real app via ASGI (no network for ingress).
 
     The process-wide outbound httpx client is reset around each test: it caches a
@@ -126,7 +151,28 @@ async def api() -> "httpx.AsyncClient":
     "Event loop is closed".
     """
     from app.core.http_client import close_http_client
+    from app.db.session import get_session_factory
     from app.main import app
+    from app.services.printer_hub import PrinterHub
+    from app.services.printer_provider import (
+        build_provider_registry,
+        get_provider_client,
+    )
+    from app.services.realtime import InProcessBus
+    from app.services.task_queue import LocalTaskQueue
+
+    # E2E must initialize its own process-local runtime state instead of
+    # depending on an earlier unit test's app fixture having populated it.
+    registry = build_provider_registry()
+    app.state.printer_provider_registry = registry
+    app.state.printer_hub = PrinterHub(
+        InProcessBus(),
+        session_factory=get_session_factory(),
+        provider_builder=lambda printer: get_provider_client(
+            printer, registry=registry
+        ),
+    )
+    app.state.task_queue = LocalTaskQueue()
 
     await close_http_client()
     transport = httpx.ASGITransport(app=app)
@@ -136,7 +182,7 @@ async def api() -> "httpx.AsyncClient":
 
 
 @pytest.fixture
-def superuser_headers(e2e_db) -> dict[str, str]:
+def superuser_headers(e2e_db, tmp_path: Path) -> dict[str, str]:
     """Seed a superuser and return its bearer header (for admin-only endpoints)."""
     from app.db.models import User
     from app.services.auth import create_access_token, hash_password
@@ -150,5 +196,7 @@ def superuser_headers(e2e_db) -> dict[str, str]:
     e2e_db.add(user)
     e2e_db.commit()
     e2e_db.refresh(user)
+    use_local_storage(tmp_path)
+    bind_backend(LocalStorageBackend())
     token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}

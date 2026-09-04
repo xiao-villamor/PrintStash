@@ -13,7 +13,14 @@ import {
   Wifi,
 } from "lucide-react";
 
-import { batchSetRevisionLabels, downloadAuthenticatedFile, getArtifactOutcomes, getModel } from "@/lib/api";
+import {
+  batchSetRevisionLabels,
+  downloadAuthenticatedFile,
+  getArtifactOutcomes,
+  getModel,
+  replaceFileTags,
+} from "@/lib/api";
+import { useTags } from "@/lib/queries";
 import { formatBytes, formatDuration, timeAgo } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
@@ -33,6 +40,19 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { EntityTagsDialog } from "@/components/entity-tags-dialog";
+
+const NO_OUTCOMES: ArtifactOutcomeRead[] = [];
+
+/** The revision statuses the edit form offers, in menu order; `""` is unmarked. */
+const REVISION_STATUS_CHOICES = ["", "known_good", "needs_test", "failed", "archived"] as const;
+
+type RevisionStatusChoice = (typeof REVISION_STATUS_CHOICES)[number];
+
+/** Read the status `<select>`'s value back as one of the offered choices. */
+function parseRevisionStatusChoice(value: string): RevisionStatusChoice {
+  return REVISION_STATUS_CHOICES.find((choice) => choice === value) ?? "";
+}
 
 export function RevisionsTab({
   modelId,
@@ -41,6 +61,7 @@ export function RevisionsTab({
   printerFilesByFileId,
   onModel,
   onAddRevision,
+  canEdit,
 }: {
   modelId: number;
   gcodeFiles: FileRead[];
@@ -48,8 +69,10 @@ export function RevisionsTab({
   printerFilesByFileId: Map<number, ModelPrinterFileRead[]>;
   onModel: (model: ModelRead) => void;
   onAddRevision: () => void;
+  canEdit: boolean;
 }) {
   const { auth, saving, update, remove } = useRevisionUpdater(modelId, onModel);
+  const { data: availableTags = [] } = useTags();
 
   // Revision edit form — local to this tab.
   const [editingRevisionId, setEditingRevisionId] = useState<number | null>(null);
@@ -63,20 +86,29 @@ export function RevisionsTab({
   const [selectedRevisionIds, setSelectedRevisionIds] = useState<Set<number>>(new Set());
   const [batchLabel, setBatchLabel] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
-  const [outcomes, setOutcomes] = useState<ArtifactOutcomeRead[]>([]);
+  const [fetchedOutcomes, setFetchedOutcomes] = useState<ArtifactOutcomeRead[]>([]);
 
   // Compare selection — local to this tab.
   const [compareLeftId, setCompareLeftId] = useState<number>(allFiles.at(-1)?.id ?? 0);
   const [compareRightId, setCompareRightId] = useState<number>(
     allFiles.at(-2)?.id ?? allFiles.at(-1)?.id ?? 0,
   );
-  const compareLeft = allFiles.find((f) => f.id === compareLeftId) ?? allFiles[allFiles.length - 1] ?? null;
-  const compareRight = allFiles.find((f) => f.id === compareRightId) ?? allFiles[allFiles.length - 2] ?? null;
+  const compareLeft =
+    allFiles.find((f) => f.id === compareLeftId) ?? allFiles[allFiles.length - 1] ?? null;
+  const compareRight =
+    allFiles.find((f) => f.id === compareRightId) ?? allFiles[allFiles.length - 2] ?? null;
+
+  // With nothing selected on both sides there is nothing to compare, so the
+  // empty outcome list is derived here instead of being cleared by the effect.
+  const hasComparePair = compareLeftId !== 0 && compareRightId !== 0;
+  const outcomes = hasComparePair ? fetchedOutcomes : NO_OUTCOMES;
 
   useEffect(() => {
-    if (!compareLeftId || !compareRightId) { setOutcomes([]); return; }
-    getArtifactOutcomes(modelId, [compareLeftId, compareRightId]).then(setOutcomes).catch(() => setOutcomes([]));
-  }, [modelId, compareLeftId, compareRightId]);
+    if (!hasComparePair) return;
+    getArtifactOutcomes(modelId, [compareLeftId, compareRightId])
+      .then(setFetchedOutcomes)
+      .catch(() => setFetchedOutcomes([]));
+  }, [modelId, compareLeftId, compareRightId, hasComparePair]);
 
   function startRevisionEdit(file: FileRead) {
     if (!auth.isAuthenticated) {
@@ -140,279 +172,321 @@ export function RevisionsTab({
     }
   }
 
+  async function saveArtifactTags(file: FileRead, tags: string[]) {
+    try {
+      onModel(await replaceFileTags(modelId, file.id, tags));
+      toast.success(`Tags updated for ${file.original_filename}`);
+    } catch (error) {
+      toast.error(error);
+      throw error;
+    }
+  }
+
   return (
-    <Localized><>
-      <ConfirmModal
-        open={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={confirmDeleteRevision}
-        busy={deleteBusy}
-        title="Delete revision?"
-        description={deleteTarget
-          ? `Rev ${deleteTarget.gcode_revision_number ?? deleteTarget.version} (${deleteTarget.original_filename}) will be moved to trash.`
-          : "This revision will be moved to trash."}
-      />
-      <section>
-        <div className="mb-4 flex items-center justify-between gap-3 border-b border-outline-variant pb-1">
-          <h2 className="text-lg font-semibold text-on-surface">
-            G-code Revisions
-          </h2>
-          <div className="flex items-center gap-2">
-            {gcodeFiles.length > 0 && (
+    <Localized>
+      <>
+        <ConfirmModal
+          open={!!deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={confirmDeleteRevision}
+          busy={deleteBusy}
+          title="Delete revision?"
+          description={
+            deleteTarget
+              ? `Rev ${deleteTarget.gcode_revision_number ?? deleteTarget.version} (${deleteTarget.original_filename}) will be moved to trash.`
+              : "This revision will be moved to trash."
+          }
+        />
+        <section>
+          <div className="mb-4 flex items-center justify-between gap-3 border-b border-outline-variant pb-1">
+            <h2 className="text-lg font-semibold text-on-surface">G-code Revisions</h2>
+            <div className="flex items-center gap-2">
+              {gcodeFiles.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => {
+                    setSelecting((value) => !value);
+                    setSelectedRevisionIds(new Set());
+                  }}
+                  disabled={!auth.isAuthenticated}
+                >
+                  {selecting ? "Cancel selection" : "Edit labels"}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
                 size="xs"
-                onClick={() => {
-                  setSelecting((value) => !value);
-                  setSelectedRevisionIds(new Set());
-                }}
+                onClick={onAddRevision}
                 disabled={!auth.isAuthenticated}
+                title={auth.blockReason ?? "Add G-code revision"}
               >
-                {selecting ? "Cancel selection" : "Edit labels"}
+                <Plus className="h-3.5 w-3.5" /> Add
               </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              onClick={onAddRevision}
-              disabled={!auth.isAuthenticated}
-              title={auth.blockReason ?? "Add G-code revision"}
-            >
-              <Plus className="h-3.5 w-3.5" /> Add
-            </Button>
-          </div>
-        </div>
-        {selecting && (
-          <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-outline-variant bg-surface-container-low p-2">
-            <span className="font-mono text-xs text-on-surface-variant">
-              {selectedRevisionIds.size} selected
-            </span>
-            <Input
-              value={batchLabel}
-              onChange={(event) => setBatchLabel(event.target.value)}
-              maxLength={128}
-              placeholder="Label (blank clears)"
-              className="min-w-48 flex-1"
-            />
-            <Button
-              type="button"
-              size="xs"
-              loading={batchBusy}
-              disabled={selectedRevisionIds.size === 0}
-              onClick={applyBatchLabel}
-            >
-              Apply label
-            </Button>
-          </div>
-        )}
-        <div className="space-y-3">
-          {gcodeFiles.length === 0 && (
-            <p className="font-mono text-xs text-on-surface-variant">
-              No sliced G-code revisions yet.
-            </p>
-          )}
-          {gcodeFiles.map((f) => {
-            const isEditingRevision = editingRevisionId === f.id;
-            const fileMeta = f.metadata;
-            const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
-            return (
-              <div key={f.id} className="p-3 border border-primary/30 bg-primary-fixed/15 rounded space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  {selecting && (
-                    <Checkbox
-                      checked={selectedRevisionIds.has(f.id)}
-                      onChange={(checked) => {
-                        setSelectedRevisionIds((current) => {
-                          const next = new Set(current);
-                          if (checked) next.add(f.id);
-                          else next.delete(f.id);
-                          return next;
-                        });
-                      }}
-                      ariaLabel={`Select revision ${f.gcode_revision_number ?? f.version}`}
-                    />
-                  )}
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                      <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
-                        Rev {f.gcode_revision_number ?? f.version}
-                      </span>
-                      {f.revision_label && (
-                        <span className="border border-outline-variant rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                          {f.revision_label}
-                        </span>
-                      )}
-                      <span className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(f.revision_status)}`}>
-                        {revisionStatusLabel(f.revision_status)}
-                      </span>
-                      {f.is_recommended && (
-                        <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                          <Star className="h-3 w-3 fill-current" /> Recommended
-                        </span>
-                      )}
-                      {uploadedTo.map((row) => (
-                        <span key={`${row.printer_id}-${row.remote_filename}`} className="inline-flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
-                          <Wifi className="h-3 w-3" /> {row.printer_name}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-sm text-on-surface font-medium truncate">
-                      {f.original_filename}
-                    </p>
-                    <p className="font-mono text-2xs text-on-surface-variant">
-                      {formatBytes(f.size_bytes)} · {timeAgo(f.uploaded_at)}
-                      {fileMeta?.layer_height_mm ? ` · ${fileMeta.layer_height_mm}mm` : ""}
-                      {fileMeta?.material_type ? ` · ${fileMeta.material_type}` : ""}
-                      {fileMeta?.estimated_time_s ? ` · ${formatDuration(fileMeta.estimated_time_s)}` : ""}
-                    </p>
-                    {f.revision_notes && !isEditingRevision && (
-                      <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
-                        {f.revision_notes}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-0.5 shrink-0">
-                    <button
-                      onClick={() => startRevisionEdit(f)}
-                      disabled={!auth.isAuthenticated}
-                      title={auth.blockReason ?? "Edit revision"}
-                      className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <SlicerOpenButton
-                      fileId={f.id}
-                      // Binary G-code shares the "gcode" file_type but no slicer
-                      // opens a .bgcode URL, so key off the extension to hide it.
-                      fileType={
-                        f.original_filename.toLowerCase().endsWith(".bgcode")
-                          ? "bgcode"
-                          : f.file_type
-                      }
-                      size="sm"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadAuthenticatedFile(
-                          `/api/v1/files/${f.id}/download`,
-                          f.original_filename,
-                        ).catch((e) => toast.error(e))
-                      }
-                      title="Download"
-                      className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
-                    >
-                      <Download className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => deleteRevision(f)}
-                      disabled={!auth.isAuthenticated || saving === f.id}
-                      title={auth.blockReason ?? "Delete revision"}
-                      className="text-on-surface-variant hover:text-error p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {saving === f.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {isEditingRevision && (
-                  <div className="space-y-2 border-t border-outline-variant pt-3">
-                    <input
-                      value={revisionLabel}
-                      onChange={(e) => setRevisionLabel(e.target.value)}
-                      maxLength={128}
-                      placeholder="Revision label"
-                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                    <select
-                      value={revisionStatus}
-                      onChange={(e) => setRevisionStatus(e.target.value as FileRevisionStatus | "")}
-                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                    >
-                      <option value="">Unmarked</option>
-                      <option value="known_good">Known good</option>
-                      <option value="needs_test">Needs test</option>
-                      <option value="failed">Failed</option>
-                      <option value="archived">Archived</option>
-                    </select>
-                    <textarea
-                      value={revisionNotes}
-                      onChange={(e) => setRevisionNotes(e.target.value)}
-                      rows={2}
-                      placeholder="Notes about print outcome, fit, filament, or what to try next"
-                      className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                    />
-                    <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
-                      <input
-                        type="checkbox"
-                        checked={revisionRecommended}
-                        onChange={(e) => setRevisionRecommended(e.target.checked)}
-                        className="rounded"
-                      />
-                      Mark as recommended G-code for this model
-                    </label>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setEditingRevisionId(null)}
-                        disabled={saving === f.id}
-                        className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => saveRevision(f)}
-                        disabled={saving === f.id}
-                        className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5"
-                      >
-                        {saving === f.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                        {saving === f.id ? "Saving..." : "Save"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {allFiles.length >= 2 && compareLeft && compareRight && (
-        <section>
-          <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
-            <GitCompare className="h-4 w-4" /> Compare Artifacts
-          </h2>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <select
-                value={compareLeft?.id ?? ""}
-                onChange={(e) => setCompareLeftId(Number(e.target.value))}
-                className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                {allFiles.map((f) => (
-                  <option key={f.id} value={f.id}>{f.file_type.toUpperCase()} v{f.version} — {f.original_filename}</option>
-                ))}
-              </select>
-              <select
-                value={compareRight?.id ?? ""}
-                onChange={(e) => setCompareRightId(Number(e.target.value))}
-                className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                {allFiles.map((f) => (
-                  <option key={f.id} value={f.id}>{f.file_type.toUpperCase()} v{f.version} — {f.original_filename}</option>
-                ))}
-              </select>
             </div>
-            <RevisionCompare left={compareLeft} right={compareRight} outcomes={outcomes} />
+          </div>
+          {selecting && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-outline-variant bg-surface-container-low p-2">
+              <span className="font-mono text-xs text-on-surface-variant">
+                {selectedRevisionIds.size} selected
+              </span>
+              <Input
+                value={batchLabel}
+                onChange={(event) => setBatchLabel(event.target.value)}
+                maxLength={128}
+                placeholder="Label (blank clears)"
+                className="min-w-48 flex-1"
+              />
+              <Button
+                type="button"
+                size="xs"
+                loading={batchBusy}
+                disabled={selectedRevisionIds.size === 0}
+                onClick={applyBatchLabel}
+              >
+                Apply label
+              </Button>
+            </div>
+          )}
+          <div className="space-y-3">
+            {gcodeFiles.length === 0 && (
+              <p className="font-mono text-xs text-on-surface-variant">
+                No sliced G-code revisions yet.
+              </p>
+            )}
+            {gcodeFiles.map((f) => {
+              const isEditingRevision = editingRevisionId === f.id;
+              const fileMeta = f.metadata;
+              const uploadedTo = printerFilesByFileId.get(f.id) ?? [];
+              return (
+                <div
+                  key={f.id}
+                  className="p-3 border border-primary/30 bg-primary-fixed/15 rounded space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    {selecting && (
+                      <Checkbox
+                        checked={selectedRevisionIds.has(f.id)}
+                        onChange={(checked) => {
+                          setSelectedRevisionIds((current) => {
+                            const next = new Set(current);
+                            if (checked) next.add(f.id);
+                            else next.delete(f.id);
+                            return next;
+                          });
+                        }}
+                        ariaLabel={`Select revision ${f.gcode_revision_number ?? f.version}`}
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                        <span className="font-mono text-2xs text-primary font-bold uppercase tracking-wider">
+                          Rev {f.gcode_revision_number ?? f.version}
+                        </span>
+                        {f.revision_label && (
+                          <span className="border border-outline-variant rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+                            {f.revision_label}
+                          </span>
+                        )}
+                        <span
+                          className={`border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${revisionStatusClass(f.revision_status)}`}
+                        >
+                          {revisionStatusLabel(f.revision_status)}
+                        </span>
+                        {f.is_recommended && (
+                          <span className="inline-flex items-center gap-1 border border-primary/30 bg-secondary-container text-on-secondary-container rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider">
+                            <Star className="h-3 w-3 fill-current" /> Recommended
+                          </span>
+                        )}
+                        {uploadedTo.map((row) => (
+                          <span
+                            key={`${row.printer_id}-${row.remote_filename}`}
+                            className="inline-flex items-center gap-1 border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider"
+                          >
+                            <Wifi className="h-3 w-3" /> {row.printer_name}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-sm text-on-surface font-medium truncate">
+                        {f.original_filename}
+                      </p>
+                      <p className="font-mono text-2xs text-on-surface-variant">
+                        {formatBytes(f.size_bytes)} · {timeAgo(f.uploaded_at)}
+                        {fileMeta?.layer_height_mm ? ` · ${fileMeta.layer_height_mm}mm` : ""}
+                        {fileMeta?.material_type ? ` · ${fileMeta.material_type}` : ""}
+                        {fileMeta?.estimated_time_s
+                          ? ` · ${formatDuration(fileMeta.estimated_time_s)}`
+                          : ""}
+                      </p>
+                      <div className="mt-1.5">
+                        <EntityTagsDialog
+                          entityLabel={f.original_filename}
+                          tags={f.tags}
+                          availableTags={availableTags}
+                          canEdit={canEdit}
+                          help="Artifact tags make the owning Model discoverable without changing the Model’s direct tags."
+                          onSave={(tags) => saveArtifactTags(f, tags)}
+                        />
+                      </div>
+                      {f.revision_notes && !isEditingRevision && (
+                        <p className="mt-2 text-xs text-on-surface-variant leading-relaxed">
+                          {f.revision_notes}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <button
+                        onClick={() => startRevisionEdit(f)}
+                        disabled={!auth.isAuthenticated}
+                        title={auth.blockReason ?? "Edit revision"}
+                        className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <SlicerOpenButton
+                        fileId={f.id}
+                        // Binary G-code shares the "gcode" file_type but no slicer
+                        // opens a .bgcode URL, so key off the extension to hide it.
+                        fileType={
+                          f.original_filename.toLowerCase().endsWith(".bgcode")
+                            ? "bgcode"
+                            : f.file_type
+                        }
+                        size="sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadAuthenticatedFile(
+                            `/api/v1/files/${f.id}/download`,
+                            f.original_filename,
+                          ).catch((e) => toast.error(e))
+                        }
+                        title="Download"
+                        className="text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
+                      >
+                        <Download className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteRevision(f)}
+                        disabled={!auth.isAuthenticated || saving === f.id}
+                        title={auth.blockReason ?? "Delete revision"}
+                        className="text-on-surface-variant hover:text-error p-2 rounded hover:bg-surface-container-high transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {saving === f.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isEditingRevision && (
+                    <div className="space-y-2 border-t border-outline-variant pt-3">
+                      <input
+                        value={revisionLabel}
+                        onChange={(e) => setRevisionLabel(e.target.value)}
+                        maxLength={128}
+                        placeholder="Revision label"
+                        className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                      <select
+                        value={revisionStatus}
+                        onChange={(e) =>
+                          setRevisionStatus(parseRevisionStatusChoice(e.target.value))
+                        }
+                        className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                      >
+                        {REVISION_STATUS_CHOICES.map((choice) => (
+                          <option key={choice || "unmarked"} value={choice}>
+                            {revisionStatusLabel(choice || null)}
+                          </option>
+                        ))}
+                      </select>
+                      <textarea
+                        value={revisionNotes}
+                        onChange={(e) => setRevisionNotes(e.target.value)}
+                        rows={2}
+                        placeholder="Notes about print outcome, fit, filament, or what to try next"
+                        className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                      />
+                      <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
+                        <input
+                          type="checkbox"
+                          checked={revisionRecommended}
+                          onChange={(e) => setRevisionRecommended(e.target.checked)}
+                          className="rounded"
+                        />
+                        Mark as recommended G-code for this model
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setEditingRevisionId(null)}
+                          disabled={saving === f.id}
+                          className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => saveRevision(f)}
+                          disabled={saving === f.id}
+                          className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5"
+                        >
+                          {saving === f.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Check className="h-4 w-4" />
+                          )}
+                          {saving === f.id ? "Saving..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
-      )}
-    </></Localized>
+
+        {allFiles.length >= 2 && compareLeft && compareRight && (
+          <section>
+            <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant flex items-center gap-2">
+              <GitCompare className="h-4 w-4" /> Compare Artifacts
+            </h2>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={compareLeft?.id ?? ""}
+                  onChange={(e) => setCompareLeftId(Number(e.target.value))}
+                  className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {allFiles.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.file_type.toUpperCase()} v{f.version} — {f.original_filename}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={compareRight?.id ?? ""}
+                  onChange={(e) => setCompareRightId(Number(e.target.value))}
+                  className="bg-surface border border-outline-variant rounded px-2 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {allFiles.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.file_type.toUpperCase()} v{f.version} — {f.original_filename}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <RevisionCompare left={compareLeft} right={compareRight} outcomes={outcomes} />
+            </div>
+          </section>
+        )}
+      </>
+    </Localized>
   );
 }

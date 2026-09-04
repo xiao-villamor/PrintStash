@@ -1,10 +1,4 @@
-import {
-  getJson,
-  sendAction,
-  sendForm,
-  sendJson,
-  type GetJsonOptions,
-} from "@/lib/api/request";
+import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import {
   CollectionCreate,
   CollectionPermissionRead,
@@ -35,11 +29,18 @@ export function renameCollection(id: number, name: string): Promise<CollectionRe
   return sendJson<CollectionRead>(`/api/v1/collections/${id}`, "PATCH", { name });
 }
 
+export function replaceCollectionTags(id: number, tags: string[]): Promise<CollectionRead> {
+  return sendJson<CollectionRead>(`/api/v1/collections/${id}/tags`, "PUT", { tags });
+}
+
 export function getCollectionReadme(id: number): Promise<{ readme: string | null }> {
   return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, { fresh: true });
 }
 
-export function setCollectionReadme(id: number, readme: string | null): Promise<{ readme: string | null }> {
+export function setCollectionReadme(
+  id: number,
+  readme: string | null,
+): Promise<{ readme: string | null }> {
   return sendJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, "PUT", { readme });
 }
 
@@ -50,7 +51,9 @@ export function uploadCollectionImage(id: number, file: File): Promise<{ url: st
 }
 
 export function listCollectionPermissions(id: number): Promise<CollectionPermissionRead[]> {
-  return getJson<CollectionPermissionRead[]>(`/api/v1/collections/${id}/permissions`, { fresh: true });
+  return getJson<CollectionPermissionRead[]>(`/api/v1/collections/${id}/permissions`, {
+    fresh: true,
+  });
 }
 
 export function updateCollectionPermission(

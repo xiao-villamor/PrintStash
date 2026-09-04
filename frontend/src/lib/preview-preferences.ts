@@ -11,31 +11,64 @@ export interface PreviewPreferences {
 export const PREVIEW_PREFERENCES_STORAGE_KEY = "printstash.preview.preferences:v1";
 export const PREVIEW_PREFERENCES_EVENT = "printstash:preview-preferences-changed";
 
+// Declaring the event on WindowEventMap is what lets add/removeEventListener
+// hand the listener a typed CustomEvent instead of a bare Event to assert on.
+declare global {
+  interface WindowEventMap {
+    [PREVIEW_PREFERENCES_EVENT]: CustomEvent<PreviewPreferences>;
+  }
+}
+
 export const DEFAULT_PREVIEW_PREFERENCES: PreviewPreferences = {
   previewQuality: "balanced",
   screenshotScale: 2,
 };
 
-const PREVIEW_PIXEL_RATIOS: Record<PreviewQuality, number> = {
+const PREVIEW_PIXEL_RATIOS = {
   performance: 1,
   balanced: 1.5,
   detail: 2,
-};
+} satisfies Record<PreviewQuality, number>;
 
-function isPreviewQuality(value: unknown): value is PreviewQuality {
+/**
+ * One value `JSON.parse` can hand back from the preferences blob. Whatever an
+ * older build (or a hand-edited devtools session) left in localStorage is JSON
+ * and nothing more, so this is the honest input type for the field validators
+ * below. `undefined` is a member because a stored blob may omit either key.
+ */
+type StoredJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly StoredJsonValue[]
+  | { readonly [key: string]: StoredJsonValue };
+
+/** The unvalidated localStorage blob, before each field is decoded. */
+interface StoredPreviewPreferences {
+  readonly previewQuality?: StoredJsonValue;
+  readonly screenshotScale?: StoredJsonValue;
+}
+
+const isBrowser = (): boolean => "window" in globalThis;
+
+function isPreviewQuality(value: StoredJsonValue): value is PreviewQuality {
   return value === "performance" || value === "balanced" || value === "detail";
 }
 
-function isScreenshotScale(value: unknown): value is ScreenshotScale {
+function isScreenshotScale(value: StoredJsonValue): value is ScreenshotScale {
   return value === 1 || value === 2 || value === 3;
 }
 
 export function readPreviewPreferences(): PreviewPreferences {
-  if (typeof window === "undefined") return DEFAULT_PREVIEW_PREFERENCES;
+  if (!isBrowser()) return DEFAULT_PREVIEW_PREFERENCES;
   try {
-    const stored = JSON.parse(
+    // `JSON.parse` is `any`, so the annotation is the boundary declaration: the
+    // blob is JSON of unknown shape and every field is validated below.
+    const stored: StoredPreviewPreferences = JSON.parse(
       window.localStorage.getItem(PREVIEW_PREFERENCES_STORAGE_KEY) ?? "{}",
-    ) as Partial<PreviewPreferences>;
+    );
     return {
       previewQuality: isPreviewQuality(stored.previewQuality)
         ? stored.previewQuality
@@ -50,11 +83,8 @@ export function readPreviewPreferences(): PreviewPreferences {
 }
 
 export function writePreviewPreferences(preferences: PreviewPreferences): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(
-    PREVIEW_PREFERENCES_STORAGE_KEY,
-    JSON.stringify(preferences),
-  );
+  if (!isBrowser()) return;
+  window.localStorage.setItem(PREVIEW_PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   window.dispatchEvent(
     new CustomEvent<PreviewPreferences>(PREVIEW_PREFERENCES_EVENT, {
       detail: preferences,
@@ -71,10 +101,8 @@ export function usePreviewPreferences(): PreviewPreferences {
 
   useEffect(() => {
     const refresh = () => setPreferences(readPreviewPreferences());
-    const receive = (event: Event) => {
-      setPreferences(
-        (event as CustomEvent<PreviewPreferences>).detail ?? readPreviewPreferences(),
-      );
+    const receive = (event: CustomEvent<PreviewPreferences>) => {
+      setPreferences(event.detail ?? readPreviewPreferences());
     };
     window.addEventListener("storage", refresh);
     window.addEventListener(PREVIEW_PREFERENCES_EVENT, receive);

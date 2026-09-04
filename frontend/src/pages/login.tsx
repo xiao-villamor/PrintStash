@@ -17,6 +17,16 @@ import { getAuthProviders, oidcLoginUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { AuthProvidersRead } from "@/types";
 
+/** What the OIDC redirect back to /login is telling us, read once from the URL. */
+type OidcCallback = "none" | "success" | "failed";
+
+function readOidcCallback(): OidcCallback {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("oidc") === "success") return "success";
+  if (params.has("oidc_error")) return "failed";
+  return "none";
+}
+
 export default function LoginPage() {
   const { login, refresh, user } = useAuth();
   const { t } = useI18n();
@@ -24,29 +34,39 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember_me, setremember_me] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const [providers, setProviders] = useState<AuthProvidersRead | null>(null);
   const [sessionExpired] = useState(consumeSessionExpired);
+  // The redirect outcome is fixed by the URL we mounted on, so it is read once
+  // rather than re-derived (router.replace below rewrites the query string).
+  const [oidcCallback] = useState(readOidcCallback);
+  const [ssoFailed, setSsoFailed] = useState(oidcCallback === "failed");
+  // A "?oidc=success" landing is already mid-exchange: the session refresh below
+  // starts on mount, so the form is busy from the very first paint.
+  const [busy, setBusy] = useState(oidcCallback === "success");
+
+  // Kept out of state so the message follows the locale toggle on this page.
+  const error = formError ?? (ssoFailed ? t("auth.ssoFailed") : null);
 
   useEffect(() => {
     let alive = true;
-    void getAuthProviders().then((value) => {
-      if (alive) setProviders(value);
-    }).catch(() => undefined);
+    void getAuthProviders()
+      .then((value) => {
+        if (alive) setProviders(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("oidc") === "success") {
-      setBusy(true);
-      void refresh()
-        .then(() => router.replace("/"))
-        .catch(() => setError(t("auth.ssoFailed")))
-        .finally(() => setBusy(false));
-    } else if (params.has("oidc_error")) {
-      setError(t("auth.ssoFailed"));
-    }
-    return () => { alive = false; };
-  }, [refresh, router, t]);
+  useEffect(() => {
+    if (oidcCallback !== "success") return;
+    void refresh()
+      .then(() => router.replace("/"))
+      .catch(() => setSsoFailed(true))
+      .finally(() => setBusy(false));
+  }, [oidcCallback, refresh, router]);
 
   if (user) {
     return <Navigate to="/" replace />;
@@ -54,16 +74,17 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setFormError(null);
+    setSsoFailed(false);
     setBusy(true);
     try {
       await login(username, password, remember_me);
       router.replace("/");
     } catch (err: any) {
       if (err.message?.includes("401")) {
-        setError(t("auth.invalid"));
+        setFormError(t("auth.invalid"));
       } else {
-        setError(err.message || t("auth.failed"));
+        setFormError(err.message || t("auth.failed"));
       }
     } finally {
       setBusy(false);
@@ -150,11 +171,7 @@ export default function LoginPage() {
               </div>
 
               <div className="flex items-center gap-2.5">
-                <Checkbox
-                  checked={remember_me}
-                  onChange={setremember_me}
-                  ariaLabel="Remember me"
-                />
+                <Checkbox checked={remember_me} onChange={setremember_me} ariaLabel="Remember me" />
                 <span className="text-sm text-on-surface-variant">{t("auth.remember")}</span>
               </div>
 

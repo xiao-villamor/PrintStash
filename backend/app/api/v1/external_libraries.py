@@ -19,11 +19,16 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.core.http import get_or_404
 from app.core.security import require_superuser
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
+    Collection,
     ExternalLibrary,
     ExternalLibraryCollectionMode,
+    ExternalLibraryTombstone,
     ExternalLibraryWatchMode,
+    LibrarySourceKind,
+    StorageConnection,
+    StorageConnectionPurpose,
     User,
 )
 from app.db.session import SessionFactory, get_session, get_session_factory
@@ -50,12 +55,19 @@ class LibraryRead(BaseModel):
     id: int
     name: str
     root_path: str
+    source_kind: LibrarySourceKind
+    connection_id: Optional[int]
+    source_prefix: str
+    writeback_enabled: bool
     enabled: bool
     scan_interval_minutes: int
     scan_schedule: str
     watch_mode: ExternalLibraryWatchMode
     fs_kind: Optional[str]
     watch_active: bool
+    binding_state: str
+    binding_reason: Optional[str]
+    root_enrollable: bool
     collection_mode: ExternalLibraryCollectionMode
     target_collection_id: Optional[int]
     last_scanned_at: Optional[str]
@@ -67,7 +79,10 @@ class LibraryCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=128)
-    root_path: str = Field(min_length=1, max_length=1024)
+    root_path: str = Field(default="", max_length=1024)
+    source_kind: LibrarySourceKind = LibrarySourceKind.MOUNTED
+    connection_id: Optional[int] = None
+    source_prefix: str = Field(default="", max_length=1024)
     enabled: bool = True
     # Empty string = manual only. Otherwise a cron expression.
     scan_schedule: str = Field(default="0 * * * *", max_length=128)
@@ -93,6 +108,16 @@ class LibraryUpdate(BaseModel):
 class LibraryPathScan(BaseModel):
     model_config = ConfigDict(extra="forbid")
     path: str = Field(default="", max_length=1024)
+
+
+class LibraryRootEnrollment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_root_path: str = Field(min_length=1, max_length=1024)
+
+
+class LibraryRediscover(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_key: str = Field(min_length=1, max_length=2048)
 
 
 def _validate_root_path(
@@ -153,20 +178,38 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
             summary = json.loads(lib.last_scan_summary)
         except (ValueError, TypeError):
             summary = None
-    watch_active = lib.fs_kind is not None and external_library.should_watch(
-        lib,
-        lib.fs_kind,  # type: ignore[arg-type]
+    if lib.source_kind == LibrarySourceKind.MOUNTED:
+        binding_state, binding_reason = external_library.root_binding_state(lib)
+    else:
+        binding_state = "bound" if lib.connection_id is not None else "missing"
+        binding_reason = None if lib.connection_id is not None else "connection_missing"
+    watch_active = (
+        binding_state == "bound"
+        and lib.fs_kind is not None
+        and external_library.should_watch(
+            lib,
+            lib.fs_kind,  # type: ignore[arg-type]
+        )
     )
     return LibraryRead(
         id=lib.id,  # type: ignore[arg-type]
         name=lib.name,
         root_path=lib.root_path,
+        source_kind=lib.source_kind,
+        connection_id=lib.connection_id,
+        source_prefix=lib.source_prefix,
+        writeback_enabled=lib.writeback_enabled,
         enabled=lib.enabled,
         scan_interval_minutes=lib.scan_interval_minutes,
         scan_schedule=lib.scan_schedule,
         watch_mode=lib.watch_mode,
         fs_kind=lib.fs_kind,
         watch_active=watch_active,
+        binding_state=binding_state,
+        binding_reason=binding_reason,
+        root_enrollable=lib.source_kind == LibrarySourceKind.MOUNTED
+        and binding_state in {"unbound", "missing"}
+        and Path(lib.root_path).expanduser().resolve(strict=False).is_dir(),
         collection_mode=lib.collection_mode,
         target_collection_id=lib.target_collection_id,
         last_scanned_at=lib.last_scanned_at.isoformat()
@@ -187,6 +230,35 @@ def list_libraries(session: Session = Depends(get_session)) -> list[LibraryRead]
     return [_to_read(lib) for lib in libs]
 
 
+def _require_target_collection(session: Session, collection_id: int | None) -> None:
+    """Refuse a target collection that does not exist, before writing the row.
+
+    `external_libraries.target_collection_id` is a foreign key, so an unknown id is a
+    500 on a fresh installation and a dangling reference on one upgraded from an
+    older release, which is missing the constraint. Neither is an answer to a bad
+    request: 404 is.
+    """
+    if collection_id is None:
+        return
+    if session.get(Collection, collection_id) is None:
+        raise HTTPException(status_code=404, detail="collection_not_found")
+
+
+def _require_source_connection(
+    session: Session, kind: LibrarySourceKind, connection_id: int | None
+) -> StorageConnection:
+    if connection_id is None:
+        raise HTTPException(status_code=400, detail="storage_connection_required")
+    connection = session.get(StorageConnection, connection_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="storage_connection_not_found")
+    if connection.kind != kind or not connection.enabled:
+        raise HTTPException(status_code=409, detail="storage_connection_incompatible")
+    if not connection.purpose.allows(StorageConnectionPurpose.LIBRARY):
+        raise HTTPException(status_code=409, detail="storage_connection_incompatible")
+    return connection
+
+
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
@@ -199,22 +271,54 @@ def create_library(
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ) -> LibraryRead:
-    _validate_root_path(body.root_path, session)
     _validate_schedule(body.scan_schedule)
+    _require_target_collection(session, body.target_collection_id)
+    if body.source_kind == LibrarySourceKind.MOUNTED:
+        if not body.root_path:
+            raise HTTPException(status_code=400, detail="root_path_required")
+        canonical_root = str(Path(body.root_path).expanduser().resolve(strict=False))
+        _validate_root_path(canonical_root, session)
+        connection_id = None
+        source_prefix = ""
+        watch_mode = body.watch_mode
+    else:
+        _require_source_connection(session, body.source_kind, body.connection_id)
+        canonical_root = (
+            f"source://{body.connection_id}/{body.source_prefix.strip('/')}"
+        )
+        connection_id = body.connection_id
+        source_prefix = body.source_prefix.strip("/")
+        watch_mode = ExternalLibraryWatchMode.OFF
     lib = ExternalLibrary(
         name=body.name.strip(),
-        root_path=body.root_path,
+        root_path=canonical_root,
+        source_kind=body.source_kind,
+        connection_id=connection_id,
+        source_prefix=source_prefix,
+        writeback_enabled=False,
         enabled=body.enabled,
         scan_schedule=body.scan_schedule,
-        watch_mode=body.watch_mode,
+        watch_mode=watch_mode,
         # Detect up front so watch_active is meaningful before the first scan.
-        fs_kind=external_library.detect_fs_kind(body.root_path),
+        fs_kind=(
+            external_library.detect_fs_kind(canonical_root)
+            if body.source_kind == LibrarySourceKind.MOUNTED
+            else "network"
+        ),
         collection_mode=body.collection_mode,
         target_collection_id=body.target_collection_id,
     )
-    session.add(lib)
-    session.commit()
-    session.refresh(lib)
+    if body.source_kind == LibrarySourceKind.MOUNTED:
+        try:
+            # Creation is itself an explicit enrollment: the authenticated caller
+            # supplied the exact existing directory, so bind it before returning.
+            external_library.enroll_external_root(session, lib)
+        except external_library.ExternalRootBindingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        session.add(lib)
+        session.commit()
+        session.refresh(lib)
     _schedule_watcher_refresh(request, background_tasks)
     return _to_read(lib)
 
@@ -232,10 +336,14 @@ def update_library(
     session: Session = Depends(get_session),
 ) -> LibraryRead:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
-    if body.root_path is not None and body.root_path != lib.root_path:
-        _validate_root_path(body.root_path, session, exclude_library_id=lib.id)
-        lib.root_path = body.root_path
-        lib.fs_kind = external_library.detect_fs_kind(body.root_path)
+    if body.root_path is not None:
+        canonical_root = str(Path(body.root_path).expanduser().resolve(strict=False))
+        if canonical_root != lib.root_path:
+            _validate_root_path(canonical_root, session, exclude_library_id=lib.id)
+            lib.root_path = canonical_root
+            # A root-path change must require a fresh, explicit enrollment.
+            lib.root_identity = None
+            lib.fs_kind = external_library.detect_fs_kind(canonical_root)
     if body.name is not None:
         lib.name = body.name.strip()
     if body.enabled is not None:
@@ -248,11 +356,40 @@ def update_library(
     if body.collection_mode is not None:
         lib.collection_mode = body.collection_mode
     if body.target_collection_id is not None:
+        _require_target_collection(session, body.target_collection_id)
         lib.target_collection_id = body.target_collection_id
     lib.updated_at = utcnow()
     session.add(lib)
     session.commit()
     session.refresh(lib)
+    _schedule_watcher_refresh(request, background_tasks)
+    return _to_read(lib)
+
+
+@router.post(
+    "/{library_id}/root/enroll",
+    dependencies=[Depends(require_superuser), Depends(require_feature)],
+    summary="Explicitly enroll or re-enroll an external root",
+)
+def enroll_root(
+    library_id: int,
+    body: LibraryRootEnrollment,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+) -> LibraryRead:
+    lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    if lib.source_kind != LibrarySourceKind.MOUNTED:
+        raise HTTPException(
+            status_code=409, detail="remote_library_has_no_mounted_root"
+        )
+    canonical = str(Path(body.confirm_root_path).expanduser().resolve(strict=False))
+    if canonical != lib.root_path:
+        raise HTTPException(status_code=400, detail="root_path_confirmation_mismatch")
+    try:
+        external_library.enroll_external_root(session, lib)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _schedule_watcher_refresh(request, background_tasks)
     return _to_read(lib)
 
@@ -296,10 +433,19 @@ def scan_now(
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     library = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    if library.source_kind == LibrarySourceKind.MOUNTED:
+        try:
+            external_library.assert_root_binding(library)
+        except external_library.ExternalRootBindingError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     if (
         library.scan_claim_token
         and library.scan_claim_expires_at
-        and library.scan_claim_expires_at > utcnow()
+        # SQLite hands a DateTime column back naive; ``utcnow()`` is aware.
+        # Comparing them directly raised TypeError, which became a 500 on the
+        # common case this branch exists to serve: a second scan request while
+        # one is still running.
+        and ensure_utc(library.scan_claim_expires_at) > utcnow()
         and library.scan_job_id
     ):
         return IngestResponse(
@@ -333,6 +479,12 @@ def scan_path(
     session_factory: SessionFactory = Depends(get_session_factory),
 ) -> IngestResponse:
     lib = get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    if lib.source_kind != LibrarySourceKind.MOUNTED:
+        raise HTTPException(status_code=400, detail="remote_path_scan_unsupported")
+    try:
+        external_library.assert_root_binding(lib)
+    except external_library.ExternalRootBindingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     root = Path(lib.root_path).resolve()
     candidate = (root / body.path).resolve()
     if candidate != root and root not in candidate.parents:
@@ -348,3 +500,29 @@ def scan_path(
         session_factory=session_factory,
     )
     return IngestResponse(job_id=job_id, state="pending", message="folder scan queued")
+
+
+@router.post(
+    "/{library_id}/rediscover",
+    dependencies=[Depends(require_superuser), Depends(require_feature)],
+    summary="Allow one intentionally removed source key to be indexed again",
+)
+def rediscover_source(
+    library_id: int,
+    body: LibraryRediscover,
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    get_or_404(session, ExternalLibrary, library_id, "library_not_found")
+    row = session.exec(
+        select(ExternalLibraryTombstone).where(
+            ExternalLibraryTombstone.library_id == library_id,
+            ExternalLibraryTombstone.source_key == body.source_key.strip("/"),
+            ExternalLibraryTombstone.cleared_at == None,  # noqa: E711
+        )
+    ).first()
+    if row is None:
+        return {"cleared": False}
+    row.cleared_at = utcnow()
+    session.add(row)
+    session.commit()
+    return {"cleared": True}

@@ -10,6 +10,7 @@ SQLModel/SQLAlchemy's column descriptors confuse static type checkers. They
 are correct at runtime.
 """
 
+import secrets
 from datetime import datetime
 from enum import Enum
 from typing import List, Optional
@@ -19,8 +20,10 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    ForeignKey,
     Index,
     Integer,
+    String,
     Text,
     UniqueConstraint,
     text,
@@ -30,6 +33,31 @@ from sqlmodel import Field, Relationship, SQLModel
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
+
+# Deterministic constraint names, applied to every constraint declared below that does
+# not name itself.
+#
+# This is not cosmetic. SQLite cannot `ALTER` a constraint, so Alembic changes one by
+# rebuilding the table — and to rebuild it, it has to `DROP` the old constraint *by
+# name*. An anonymous constraint therefore cannot be altered on SQLite at all:
+# `batch_alter_table` fails with `ValueError: Constraint must have a name`. The
+# convention is what makes a schema migratable on the database this product ships
+# with by default.
+#
+# It also makes the two supported schemas comparable. `create_all` and the migration
+# chain otherwise generate different names for the same constraint, and
+# `tests/integration/db/migrations/test_models_versus_chain.py` cannot tell that
+# apart from a real divergence.
+#
+# `%(column_0_name)s` rather than `%(column_0_label)s`: the label form includes the
+# table name twice for a single-column constraint.
+SQLModel.metadata.naming_convention = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
 
 
 class FileType(str, Enum):
@@ -103,6 +131,17 @@ class VaultAuditRunState(str, Enum):
     FAILED = "failed"
 
 
+class GcRunState(str, Enum):
+    """Durable phases of a destructive garbage-collection decision."""
+
+    PREVIEW = "preview"
+    QUARANTINED = "quarantined"
+    FINALIZING = "finalizing"
+    COMPLETED = "completed"
+    ABORTED = "aborted"
+    BLOCKED = "blocked"
+
+
 class VaultAuditSeverity(str, Enum):
     INFO = "info"
     WARNING = "warning"
@@ -130,6 +169,40 @@ class InboxItemState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     DISMISSED = "dismissed"
+
+
+class InboxItemCompletion(str, Enum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+
+
+class InboxItemResultState(str, Enum):
+    IMPORTED = "imported"
+    DEDUPLICATED = "deduplicated"
+    FAILED = "failed"
+
+
+class CaptureUploadSlotState(str, Enum):
+    PENDING = "pending"
+    UPLOADED = "uploaded"
+
+
+class StorageObjectState(str, Enum):
+    PENDING = "pending"
+    COMMITTED = "committed"
+    BLOCKED = "blocked"
+
+
+class ThumbnailGenerationState(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class CaptureProvider(str, Enum):
+    MYMINIFACTORY = "myminifactory"
+    CULTS = "cults"
 
 
 class RoutingStrategy(str, Enum):
@@ -359,7 +432,15 @@ class File(SQLModel, table=True):
     external_library_id: Optional[int] = Field(
         default=None, foreign_key="external_libraries.id", index=True
     )
+    # Remote libraries keep a provider-relative immutable key here. ``path``
+    # remains the stable display/resolution URI and is never interpreted as a
+    # local pathname by ArtifactContent.
+    source_key: Optional[str] = Field(default=None, max_length=2048, index=True)
     source_mtime: Optional[float] = None
+    # Last time discovery read and hashed the source bytes. Metadata-only scans
+    # remain cheap, while a rotating weekly sweep still catches content changes
+    # on appliances that preserve both size and mtime.
+    source_verified_at: Optional[datetime] = Field(default=None, index=True)
     ingestion_key: Optional[str] = Field(
         default=None, max_length=64, unique=True, index=True
     )
@@ -378,6 +459,75 @@ class File(SQLModel, table=True):
         back_populates="file",
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
     )
+
+
+class ThumbnailGeneration(SQLModel, table=True):
+    """Durable identity and lease for one thumbnail source/recipe."""
+
+    __tablename__ = "thumbnail_generations"
+    __table_args__ = (
+        UniqueConstraint(
+            "file_id",
+            "source_sha256",
+            "recipe_fingerprint",
+            name="uq_thumbnail_generation_recipe",
+        ),
+        Index("ix_thumbnail_generation_state_lease", "state", "lease_expires_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    file_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    source_sha256: str = Field(max_length=64)
+    recipe_fingerprint: str = Field(max_length=64)
+    state: ThumbnailGenerationState = Field(
+        default=ThumbnailGenerationState.PENDING,
+        sa_column=Column(String(16), nullable=False, index=True),
+    )
+    storage_key: Optional[str] = Field(default=None, max_length=2048)
+    output_sha256: Optional[str] = Field(default=None, max_length=64)
+    output_size_bytes: Optional[int] = Field(default=None, sa_type=BigInteger)
+    output_etag: Optional[str] = Field(default=None, max_length=256)
+    width: Optional[int] = None
+    height: Optional[int] = None
+    strategy: Optional[str] = Field(default=None, max_length=32)
+    complete: bool = Field(default=False)
+    failure_reason: Optional[str] = Field(default=None, max_length=64)
+    attempts: int = Field(default=0)
+    lease_token: Optional[str] = Field(default=None, max_length=64, index=True)
+    lease_expires_at: Optional[datetime] = Field(default=None, index=True)
+    duration_ms: Optional[int] = None
+    peak_rss_bytes: Optional[int] = Field(default=None, sa_type=BigInteger)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ThumbnailRenderSlot(SQLModel, table=True):
+    """Database-backed render permit shared by every application instance."""
+
+    __tablename__ = "thumbnail_render_slots"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    slot_number: int = Field(unique=True, index=True)
+    generation_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("thumbnail_generations.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    lease_token: Optional[str] = Field(default=None, max_length=64, index=True)
+    lease_expires_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +605,145 @@ class ModelTagLink(SQLModel, table=True):
         default=None, foreign_key="models.id", primary_key=True
     )
     tag_id: Optional[int] = Field(default=None, foreign_key="tags.id", primary_key=True)
+
+
+class MultipartModelTagLink(SQLModel, table=True):
+    """Association table for MultipartModel <-> Tag."""
+
+    __tablename__ = "multipart_model_tags"
+
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            primary_key=True,
+        )
+    )
+    tag_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("tags.id", ondelete="CASCADE"),
+            primary_key=True,
+            index=True,
+        )
+    )
+
+
+class CollectionTagLink(SQLModel, table=True):
+    """Association table for Collection <-> Tag."""
+
+    __tablename__ = "collection_tags"
+
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", primary_key=True
+    )
+    tag_id: Optional[int] = Field(
+        default=None, foreign_key="tags.id", primary_key=True, index=True
+    )
+
+
+class FileTagLink(SQLModel, table=True):
+    """Association table for Artifact <-> Tag."""
+
+    __tablename__ = "file_tags"
+
+    file_id: Optional[int] = Field(
+        default=None, foreign_key="files.id", primary_key=True
+    )
+    tag_id: Optional[int] = Field(
+        default=None, foreign_key="tags.id", primary_key=True, index=True
+    )
+
+
+class PartGroup(SQLModel, table=True):
+    """One replaceable physical role within a Model."""
+
+    __tablename__ = "part_groups"
+    __table_args__ = (
+        UniqueConstraint("model_id", "name_key", name="uq_part_groups_model_name_key"),
+        UniqueConstraint(
+            "model_id", "sort_order", name="uq_part_groups_model_sort_order"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class PartOption(SQLModel, table=True):
+    """One complete printable Model choice within a Part Group.
+
+    ``file_id`` remains nullable for the short-lived artifact-based contract so
+    databases upgraded through 0.13.0 keep their data. New writes use
+    ``model_id``: the member Model retains its own mesh, preview and revisions.
+    """
+
+    __tablename__ = "part_options"
+    __table_args__ = (
+        UniqueConstraint(
+            "part_group_id", "name_key", name="uq_part_options_group_name_key"
+        ),
+        UniqueConstraint(
+            "part_group_id", "sort_order", name="uq_part_options_group_sort_order"
+        ),
+        UniqueConstraint("file_id", name="uq_part_options_file_id"),
+        UniqueConstraint("model_id", name="uq_part_options_model_id"),
+        CheckConstraint(
+            "(file_id IS NULL) != (model_id IS NULL)",
+            name="part_option_exactly_one_target",
+        ),
+        Index(
+            "uq_part_options_one_default",
+            "part_group_id",
+            unique=True,
+            sqlite_where=text("is_default = 1"),
+            postgresql_where=text("is_default IS TRUE"),
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    part_group_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("part_groups.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    file_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    is_default: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ModelStar(SQLModel, table=True):
@@ -542,6 +831,401 @@ class Model(SQLModel, table=True):
     )
 
 
+class MultipartModel(SQLModel, table=True):
+    """A named composition of printable Models.
+
+    This is deliberately separate from ``Model``: composing models never moves
+    or owns their files and revisions. The organised library may group member
+    cards under this entity, while their identity and direct routes remain
+    intact. A model may be used by many multipart models.
+    """
+
+    __tablename__ = "multipart_models"
+    __table_args__ = (UniqueConstraint("slug", name="uq_multipart_models_slug"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=255, index=True)
+    slug: str = Field(max_length=255, index=True)
+    description: Optional[str] = Field(default=None, sa_column=Column(Text))
+    collection_id: Optional[int] = Field(
+        default=None, foreign_key="collections.id", index=True
+    )
+    cover_model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    cover_image_url: Optional[str] = Field(default=None, max_length=2083)
+    cover_filename: Optional[str] = Field(default=None, max_length=255)
+    cover_content_type: Optional[str] = Field(default=None, max_length=64)
+    cover_size_bytes: Optional[int] = Field(default=None, ge=0)
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class MultipartModelStar(SQLModel, table=True):
+    """Per-user favorite marker for a multipart set."""
+
+    __tablename__ = "multipart_model_stars"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "multipart_model_id",
+            name="uq_multipart_model_stars_user_model",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
+    multipart_model_id: int = Field(
+        foreign_key="multipart_models.id", index=True, ondelete="CASCADE"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartPart(SQLModel, table=True):
+    """A named physical part in a ``MultipartModel``."""
+
+    __tablename__ = "multipart_parts"
+    __table_args__ = (
+        UniqueConstraint(
+            "multipart_model_id", "name_key", name="uq_multipart_parts_model_name_key"
+        ),
+        UniqueConstraint(
+            "multipart_model_id",
+            "sort_order",
+            name="uq_multipart_parts_model_sort_order",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    name_key: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartModelChoice(SQLModel, table=True):
+    """A Model selected as one possible choice for a multipart part.
+
+    ``source_file_id`` and ``label`` retain the identity of choices imported
+    from the pre-0.13 nested part-option tables.  A legacy composition may
+    contain more than one file from the same Model, so the source file is
+    deliberately metadata rather than another uniqueness key.
+    """
+
+    __tablename__ = "multipart_model_choices"
+    __table_args__ = (
+        UniqueConstraint(
+            "multipart_part_id",
+            "sort_order",
+            name="uq_multipart_choices_part_sort_order",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    multipart_model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    multipart_part_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_parts.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    # Do not cascade Model deletion into the aggregate.  Purge detaches this
+    # row explicitly and removes an empty part; normal DB deletes are guarded by
+    # the FK so a caller cannot silently lose composition data.
+    model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id"),
+            nullable=False,
+            index=True,
+        )
+    )
+    source_file_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    label: Optional[str] = Field(default=None, max_length=128)
+    sort_order: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class ModelProvenanceSource(SQLModel, table=True):
+    """One captured remote source, owned by a single Model."""
+
+    __tablename__ = "model_provenance_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "model_id", "identity_key", name="uq_provenance_source_identity"
+        ),
+        Index("ix_provenance_source_provider_item", "provider", "source_item_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    model_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    provider: str = Field(max_length=64, index=True)
+    source_item_id: Optional[str] = Field(default=None, max_length=255)
+    canonical_url: str = Field(max_length=2048)
+    identity_key: str = Field(max_length=64, index=True)
+    source_revision: Optional[str] = Field(default=None, max_length=255)
+    tags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    first_captured_at: datetime = Field(default_factory=utcnow)
+    last_checked_at: datetime = Field(default_factory=utcnow, index=True)
+    created_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class ModelSourceCover(SQLModel, table=True):
+    """One private, normalized representative image for a provenance source."""
+
+    __tablename__ = "model_source_covers"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provenance_source_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_provenance_sources.id", ondelete="CASCADE"),
+            nullable=False,
+            unique=True,
+            index=True,
+        )
+    )
+    storage_key: str = Field(max_length=2048, unique=True)
+    content_type: str = Field(default="image/webp", max_length=64)
+    size_bytes: int
+    created_by: Optional[int] = Field(default=None, foreign_key="users.id", index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class ModelProvenanceField(SQLModel, table=True):
+    """Captured and explicitly-overridden value for one allowlisted field."""
+
+    __tablename__ = "model_provenance_fields"
+    __table_args__ = (
+        UniqueConstraint(
+            "provenance_source_id", "field_name", name="uq_provenance_field_name"
+        ),
+        CheckConstraint(
+            "captured_origin IN ('confirmed', 'inferred')",
+            name="ck_provenance_field_origin",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provenance_source_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_provenance_sources.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    field_name: str = Field(max_length=64)
+    captured_value_json: str = Field(sa_column=Column(Text, nullable=False))
+    captured_origin: str = Field(max_length=16)
+    user_value_json: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    user_override_set: bool = Field(default=False)
+    user_updated_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+    captured_at: Optional[datetime] = Field(default=None)
+    user_updated_at: Optional[datetime] = Field(default=None)
+
+
+class ProvenanceCapture(SQLModel, table=True):
+    """Append-only normalized snapshot history for a provenance source."""
+
+    __tablename__ = "provenance_captures"
+    __table_args__ = (
+        UniqueConstraint(
+            "provenance_source_id",
+            "snapshot_sha256",
+            name="uq_provenance_capture_snapshot",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    provenance_source_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_provenance_sources.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    inbox_item_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("inbox_items.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    captured_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+        ),
+    )
+    adapter_version: str = Field(max_length=64)
+    source_revision: Optional[str] = Field(default=None, max_length=255)
+    snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
+    snapshot_sha256: str = Field(max_length=64, index=True)
+    captured_at: datetime = Field(default_factory=utcnow)
+    checked_at: datetime = Field(default_factory=utcnow)
+
+
+class ArtifactProvenanceLink(SQLModel, table=True):
+    """A source-file identity attached to one Artifact; it never owns bytes."""
+
+    __tablename__ = "artifact_provenance_links"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    file_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    provenance_source_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_provenance_sources.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    capture_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("provenance_captures.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    source_file_id: Optional[str] = Field(default=None, max_length=255)
+    source_filename: str = Field(max_length=512)
+    container_entry_path: Optional[str] = Field(default=None, max_length=1024)
+    source_revision: Optional[str] = Field(default=None, max_length=255)
+    blob_sha256: str = Field(max_length=64, index=True)
+    import_key: str = Field(max_length=64, unique=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class InboxItemResult(SQLModel, table=True):
+    __tablename__ = "inbox_item_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "inbox_item_id",
+            "source_selection_id",
+            "result_key",
+            name="uq_inbox_result_key",
+        ),
+        CheckConstraint(
+            "state IN ('imported', 'deduplicated', 'failed')",
+            name="ck_inbox_result_state",
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    inbox_item_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("inbox_items.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    source_selection_id: str = Field(max_length=512)
+    result_key: str = Field(max_length=64)
+    original_filename: str = Field(max_length=512)
+    state: InboxItemResultState = Field(
+        sa_column=Column(String(16), nullable=False, index=True)
+    )
+    model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("models.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    file_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("files.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    provenance_source_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_provenance_sources.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    error_code: Optional[str] = Field(default=None, max_length=128)
+    retryable: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class DocumentKind(str, Enum):
     MARKDOWN = "markdown"  # editable in-app, content in ``body``
     PDF = "pdf"  # binary blob under document_file_key
@@ -560,6 +1244,15 @@ class Document(SQLModel, table=True):
     kind: DocumentKind = Field(index=True)
     collection_id: Optional[int] = Field(
         default=None, foreign_key="collections.id", index=True
+    )
+    multipart_model_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("multipart_models.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
     body: Optional[str] = Field(default=None, sa_column=Column(Text))  # markdown
@@ -811,6 +1504,103 @@ class ApiKey(SQLModel, table=True):
     revoked_at: Optional[datetime] = Field(default=None, index=True)
 
 
+class ProviderConnection(SQLModel, table=True):
+    """One encrypted external-provider credential set owned by a user."""
+
+    __tablename__ = "provider_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "provider", name="uq_provider_connection_user_provider"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    provider: CaptureProvider = Field(
+        sa_column=Column(String(32), nullable=False, index=True)
+    )
+    access_token: Optional[str] = Field(
+        default=None, sa_column=Column(EncryptedText(), nullable=True)
+    )
+    refresh_token: Optional[str] = Field(
+        default=None, sa_column=Column(EncryptedText(), nullable=True)
+    )
+    credential_secret: Optional[str] = Field(
+        default=None, sa_column=Column(EncryptedText(), nullable=True)
+    )
+    token_expires_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ProviderOAuthState(SQLModel, table=True):
+    __tablename__ = "provider_oauth_states"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    provider: CaptureProvider = Field(sa_column=Column(String(32), nullable=False))
+    state_hash: str = Field(max_length=64, unique=True, index=True)
+    redirect_uri: str = Field(max_length=2048)
+    expires_at: datetime = Field(index=True)
+    used_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class BrowserPairingCode(SQLModel, table=True):
+    __tablename__ = "browser_pairing_codes"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    code_hash: str = Field(max_length=64, unique=True, index=True)
+    expires_at: datetime = Field(index=True)
+    used_at: Optional[datetime] = Field(default=None, index=True)
+    attempts: int = Field(default=0)
+    created_at: datetime = Field(default_factory=utcnow)
+
+
+class BrowserDevice(SQLModel, table=True):
+    __tablename__ = "browser_devices"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_browser_device_user_name"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    name: str = Field(max_length=128)
+    credential_hash: str = Field(max_length=64, unique=True, index=True)
+    created_at: datetime = Field(default_factory=utcnow)
+    last_used_at: Optional[datetime] = Field(default=None)
+    revoked_at: Optional[datetime] = Field(default=None, index=True)
+
+
 class SystemConfig(SQLModel, table=True):
     """Singleton row (id=1) holding runtime-configurable settings.
 
@@ -828,12 +1618,31 @@ class SystemConfig(SQLModel, table=True):
 
     id: Optional[int] = Field(default=1, primary_key=True)
 
+    # Random installation identity used to bind managed filesystem roots to
+    # this database. It is generated once and never derived from a path.
+    storage_identity: Optional[str] = Field(default=None, max_length=64, index=True)
+
     # Local storage paths (overridden at runtime)
     data_dir: Optional[str] = Field(default=None, max_length=1024)
     thumb_dir: Optional[str] = Field(default=None, max_length=1024)
 
     # Storage backend: "local" or "s3"
     storage_backend: Optional[str] = Field(default=None, max_length=64)
+
+    # Compatibility namespace for legacy S3 storage.  v0.12 installations did
+    # not persist this value and always used the literal ``vault-data`` root;
+    # the upgrade migration backfills that value so an env change cannot point
+    # existing keys at a different prefix.  Typed providers keep their root in
+    # ``storage_provider_config_json`` instead.
+    s3_root: Optional[str] = Field(default=None, max_length=1024)
+
+    # Typed provider configuration. Non-secret and secret JSON are split so
+    # sanitized reads never need to deserialize plaintext credentials.
+    storage_provider: Optional[str] = Field(default=None, max_length=64)
+    storage_provider_config_json: Optional[str] = Field(default=None)
+    storage_provider_secret_json: Optional[str] = Field(
+        default=None, sa_column=Column(EncryptedText(), nullable=True)
+    )
 
     # Generated on first boot when no VAULT_JWT_SECRET is supplied, so an install
     # never signs tokens with the public default. Stays None when the operator
@@ -871,6 +1680,23 @@ class SystemConfig(SQLModel, table=True):
 
     # Backup
     backup_retention_days: Optional[int] = Field(default=None)
+    automatic_backups_enabled: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="0"),
+    )
+    automatic_backup_time_utc: str = Field(
+        default="02:00",
+        sa_column=Column(String(5), nullable=False, server_default="02:00"),
+    )
+    automatic_backup_last_attempt_at: Optional[datetime] = None
+    manual_local_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
+    automatic_local_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
     trash_retention_days: Optional[int] = Field(default=None)
 
     # Backup S3 destination (separate from vault S3 — allows local vault + cloud backups)
@@ -949,17 +1775,33 @@ class SystemConfig(SQLModel, table=True):
 
 
 class OwnedStorageObject(SQLModel, table=True):
-    """Object-level proof recorded only after a create-only storage write.
+    """Intent and proof for one key PrintStash means to own.
 
-    Legacy rows intentionally have no entry. Their bytes are therefore never
-    eligible for automated deletion: database presence, naming, and directory
-    placement are claims, not proof that this installation created an object.
+    ``PENDING`` is committed before storage publication. The transition to
+    ``COMMITTED`` shares the domain transaction that makes the object live.
     """
 
     __tablename__ = "owned_storage_objects"
     __table_args__ = (
         UniqueConstraint(
-            "backend", "namespace", "key", name="uq_owned_storage_locator"
+            "backend",
+            "provider_ref",
+            "namespace",
+            "key",
+            name="uq_owned_storage_provider_locator",
+        ),
+        # Historical rows have no provider identity.  Keep those rows
+        # collision-safe as well: SQLite/Postgres both allow multiple NULLs in
+        # a normal UNIQUE constraint, so the partial index is the legacy
+        # equivalent while new rows use the provider-aware constraint above.
+        Index(
+            "uq_owned_storage_legacy_locator",
+            "backend",
+            "namespace",
+            "key",
+            unique=True,
+            sqlite_where=text("provider_ref IS NULL"),
+            postgresql_where=text("provider_ref IS NULL"),
         ),
     )
 
@@ -967,9 +1809,29 @@ class OwnedStorageObject(SQLModel, table=True):
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024, index=True)
     key: str = Field(max_length=2048)
+    # Credential-free identity of the provider destination.  This is a stable
+    # digest of the normalized endpoint/region/bucket (or local namespace),
+    # never of access credentials.  It lets recovery distinguish a receipt
+    # written against an old target from one written against the current
+    # target even when a bucket/key happens to be reused.
+    provider_ref: Optional[str] = Field(default=None, max_length=64, index=True)
     object_kind: str = Field(max_length=64, index=True)
-    token: str = Field(max_length=64)
-    size_bytes: int
+    state: StorageObjectState = Field(
+        default=StorageObjectState.PENDING,
+        sa_column=Column(
+            SAEnum(
+                StorageObjectState,
+                values_callable=lambda members: [member.value for member in members],
+                native_enum=False,
+                length=16,
+            ),
+            nullable=False,
+            index=True,
+        ),
+    )
+    token: Optional[str] = Field(default=None, max_length=64)
+    size_bytes: Optional[int] = None
+    sha256: Optional[str] = Field(default=None, max_length=64, index=True)
     etag: Optional[str] = Field(default=None, max_length=255)
     version_id: Optional[str] = Field(default=None, max_length=1024)
     device: Optional[int] = Field(
@@ -981,7 +1843,9 @@ class OwnedStorageObject(SQLModel, table=True):
     ctime_ns: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
-    created_at: datetime = Field(default_factory=utcnow)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    committed_at: Optional[datetime] = Field(default=None, index=True)
+    last_error: Optional[str] = Field(default=None, max_length=255)
 
 
 class StorageDeleteIntent(SQLModel, table=True):
@@ -991,10 +1855,21 @@ class StorageDeleteIntent(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint(
             "backend",
+            "provider_ref",
             "namespace",
             "key",
             "token",
-            name="uq_storage_delete_intent_receipt",
+            name="uq_storage_delete_intent_provider_receipt",
+        ),
+        Index(
+            "uq_storage_delete_intent_legacy_receipt",
+            "backend",
+            "namespace",
+            "key",
+            "token",
+            unique=True,
+            sqlite_where=text("provider_ref IS NULL"),
+            postgresql_where=text("provider_ref IS NULL"),
         ),
     )
 
@@ -1002,9 +1877,16 @@ class StorageDeleteIntent(SQLModel, table=True):
     backend: str = Field(max_length=32, index=True)
     namespace: str = Field(max_length=1024)
     key: str = Field(max_length=2048)
+    # Credential-free identity of the configured destination. NULL is retained
+    # for old outbox rows, but recovery must block those rows rather than
+    # guessing which provider now owns their key.
+    provider_ref: Optional[str] = Field(default=None, max_length=64, index=True)
     object_kind: str = Field(max_length=64, index=True)
     token: str = Field(max_length=64)
     size_bytes: int
+    # Content evidence is revalidated immediately before a Guarded/manual
+    # delete, preventing a replacement at the same key from being removed.
+    sha256: Optional[str] = Field(default=None, max_length=64, index=True)
     etag: Optional[str] = Field(default=None, max_length=255)
     version_id: Optional[str] = Field(default=None, max_length=1024)
     device: Optional[int] = Field(
@@ -1016,6 +1898,16 @@ class StorageDeleteIntent(SQLModel, table=True):
     ctime_ns: Optional[int] = Field(
         default=None, sa_column=Column(BigInteger, nullable=True)
     )
+    # The authorization decision is durable: a retry after process death must
+    # not reinterpret a one-shot guarded confirmation as a verified delete (or
+    # vice versa).
+    authorization_mode: str = Field(default="verified", max_length=16, index=True)
+    authorized_actor_id: Optional[int] = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
+    authorized_at: datetime = Field(default_factory=utcnow, index=True)
+    quarantine_key: Optional[str] = Field(default=None, max_length=2048)
+    quarantine_state: str = Field(default="none", max_length=16)
     resource_kind: Optional[str] = Field(default=None, max_length=64, index=True)
     resource_id: Optional[str] = Field(default=None, max_length=64, index=True)
     status: str = Field(default="pending", max_length=16, index=True)
@@ -1025,6 +1917,94 @@ class StorageDeleteIntent(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow)
     completed_at: Optional[datetime] = None
+
+
+class RestoreMarker(SQLModel, table=True):
+    """Durable point-of-no-return marker carried by a restored database."""
+
+    __tablename__ = "restore_markers"
+    __table_args__ = (
+        UniqueConstraint("backup_id", name="uq_restore_marker_backup"),
+        UniqueConstraint("operation_nonce", name="uq_restore_marker_nonce"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    backup_id: str = Field(max_length=255, index=True)
+    operation_nonce: str = Field(
+        default_factory=lambda: secrets.token_hex(32), max_length=64, index=True
+    )
+    archive_sha256: str = Field(default="", max_length=64, index=True)
+    state: str = Field(default="database_active", max_length=32, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class GcRun(SQLModel, table=True):
+    """Immutable candidate plan plus its explicit destructive authorization."""
+
+    __tablename__ = "gc_runs"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # A nullable unique lease enforced by the database. Every active state owns
+    # slot 1; terminal states release it. This prevents two app processes from
+    # authorizing overlapping destructive plans.
+    active_slot: Optional[int] = Field(default=1, unique=True, index=True)
+    state: GcRunState = Field(
+        default=GcRunState.PREVIEW,
+        sa_column=Column(
+            SAEnum(
+                GcRunState,
+                values_callable=lambda members: [member.value for member in members],
+                native_enum=False,
+                length=16,
+            ),
+            nullable=False,
+            index=True,
+        ),
+    )
+    digest: str = Field(max_length=64, index=True)
+    retention_days: int
+    cutoff_at: datetime = Field(index=True)
+    resource_count: int = 0
+    candidate_pool_count: int = 0
+    key_count: int = 0
+    size_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    scheduled: bool = False
+    requested_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    approved_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    approved_at: Optional[datetime] = Field(default=None, index=True)
+    quarantine_until: Optional[datetime] = Field(default=None, index=True)
+    backup_id: Optional[str] = Field(default=None, max_length=255)
+    backup_source_ref: Optional[str] = Field(default=None, max_length=64)
+    backup_provider_ref: Optional[str] = Field(default=None, max_length=64)
+    backup_archive_sha256: Optional[str] = Field(default=None, max_length=64)
+    backup_verified_at: Optional[datetime] = None
+    active_provider_ref: Optional[str] = Field(default=None, max_length=64)
+    restore_generation: str = Field(default="", max_length=64)
+    last_error: Optional[str] = Field(default=None, max_length=255)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
+
+
+class GcItem(SQLModel, table=True):
+    """One exact catalog resource selected by a GC plan."""
+
+    __tablename__ = "gc_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "resource_kind", "resource_id", name="uq_gc_item_resource"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="gc_runs.id", index=True, ondelete="CASCADE")
+    resource_kind: str = Field(max_length=32, index=True)
+    resource_id: int = Field(index=True)
+    deleted_at_snapshot: datetime
+    key_count: int = 0
+    size_bytes: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class ExternalLibraryCollectionMode(str, Enum):
@@ -1062,14 +2042,68 @@ class ExternalLibraryWatchMode(str, Enum):
     OFF = "off"
 
 
-class ExternalLibrary(SQLModel, table=True):
-    """A user-managed external folder (typically on a NAS) mirrored into the vault.
+class LibrarySourceKind(str, Enum):
+    MOUNTED = "mounted"
+    S3 = "s3"
+    WEBDAV = "webdav"
+    SFTP = "sftp"
+    GDRIVE = "gdrive"
 
-    The folder is the source of truth: PrintStash indexes files where they sit
-    (``File.is_external=true``, ``File.path`` = absolute on-disk path), stores only
-    the generated thumbnail + metadata, and streams originals on demand. A scan
-    reconciles the index with the folder; web uploads/revisions write back into the
-    folder so it stays complete. PrintStash never overwrites or deletes existing bytes.
+
+class StorageConnectionPurpose(str, Enum):
+    """Product workflows allowed to reuse one remote-storage connection."""
+
+    LIBRARY = "library"
+    BACKUP = "backup"
+    BOTH = "both"
+
+    def allows(self, required: "StorageConnectionPurpose") -> bool:
+        """Return whether this profile may serve the requested workflow."""
+        return self in {required, StorageConnectionPurpose.BOTH}
+
+
+class StorageConnection(SQLModel, table=True):
+    """Reusable encrypted credentials for one bounded remote location."""
+
+    __tablename__ = "storage_connections"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(max_length=128, unique=True, index=True)
+    kind: LibrarySourceKind = Field(index=True)
+    purpose: StorageConnectionPurpose = Field(
+        default=StorageConnectionPurpose.LIBRARY,
+        sa_column=Column(
+            SAEnum(StorageConnectionPurpose, native_enum=False, length=16),
+            nullable=False,
+            index=True,
+            server_default=StorageConnectionPurpose.LIBRARY.name,
+        ),
+    )
+    config_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    secret_json: str = Field(
+        default="{}", sa_column=Column(EncryptedText(), nullable=False)
+    )
+    enabled: bool = Field(default=True, index=True)
+    manual_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
+    automatic_backup_enabled: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default="1"),
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExternalLibrary(SQLModel, table=True):
+    """A user-managed mounted or remote source indexed into the catalog.
+
+    The source is authoritative. PrintStash stores generated thumbnails and
+    metadata, then reads originals through ArtifactContent. Mounted sources may
+    allow create-only write-back. S3, WebDAV, SFTP, and Google Drive sources are
+    read-only.
+    Trash and garbage collection never delete source bytes.
     """
 
     __tablename__ = "external_libraries"
@@ -1077,6 +2111,20 @@ class ExternalLibrary(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(max_length=128)
     root_path: str = Field(max_length=1024)
+    source_kind: LibrarySourceKind = Field(
+        default=LibrarySourceKind.MOUNTED, index=True
+    )
+    connection_id: Optional[int] = Field(
+        default=None, foreign_key="storage_connections.id", index=True
+    )
+    source_prefix: str = Field(default="", max_length=1024)
+    # Remote sources are indexed read-only. An explicit future capability can
+    # opt in only after provider-specific atomic publication is proven.
+    writeback_enabled: bool = Field(default=False)
+    # Random, durable identity for the exact external root.  Legacy rows are
+    # intentionally NULL and remain read-only until an administrator explicitly
+    # enrolls the mounted directory.
+    root_identity: Optional[str] = Field(default=None, max_length=64, index=True)
     enabled: bool = Field(default=True, index=True)
     # Legacy fixed-interval scheduling. Retained for back-compat / migration
     # source; ``scan_schedule`` (cron) is now the source of truth.
@@ -1108,6 +2156,53 @@ class ExternalLibrary(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ExternalLibraryTombstone(SQLModel, table=True):
+    """Suppress automatic re-import after a source-backed Artifact is trashed."""
+
+    __tablename__ = "external_library_tombstones"
+    __table_args__ = (
+        UniqueConstraint(
+            "library_id", "source_key", name="uq_external_tombstone_source_key"
+        ),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    library_id: int = Field(
+        foreign_key="external_libraries.id", index=True, ondelete="CASCADE"
+    )
+    source_key: str = Field(max_length=2048)
+    sha256: Optional[str] = Field(default=None, max_length=64)
+    reason: str = Field(default="removed", max_length=32)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    cleared_at: Optional[datetime] = Field(default=None, index=True)
+
+
+class ExternalLibraryCheckpoint(SQLModel, table=True):
+    """Restart-safe cursor and complete-epoch evidence for bounded scans."""
+
+    __tablename__ = "external_library_checkpoints"
+    __table_args__ = (
+        UniqueConstraint("library_id", name="uq_external_library_checkpoint"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    library_id: int = Field(
+        foreign_key="external_libraries.id", index=True, ondelete="CASCADE"
+    )
+    epoch: str = Field(max_length=64, index=True)
+    cursor: Optional[str] = Field(default=None, max_length=2048)
+    complete: bool = Field(default=False, index=True)
+    observed_keys_json: str = Field(
+        default="[]", sa_column=Column(Text, nullable=False)
+    )
+    metadata_ops: int = 0
+    bytes_read: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
+    backoff_until: Optional[datetime] = Field(default=None, index=True)
+    started_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    completed_at: Optional[datetime] = None
 
 
 class PrintBatch(SQLModel, table=True):
@@ -1241,6 +2336,17 @@ class PrintJob(SQLModel, table=True):
     external_nozzle_diameter: Optional[float] = None
     artifact_evidence: str = Field(default="vault", max_length=32, index=True)
     artifact_capture_error: Optional[str] = Field(default=None, max_length=1024)
+    # Stable, actionable capture outcome. ``artifact_capture_error`` remains
+    # as the legacy short detail for existing clients; these fields separate a
+    # machine-readable code from an operator-facing message.
+    artifact_capture_error_code: Optional[str] = Field(default=None, max_length=128)
+    artifact_capture_error_message: Optional[str] = Field(default=None, max_length=1024)
+
+    # Rows absorbed by the Bambu identity repair remain for audit/rollback and
+    # are excluded by the live() scope. The survivor is intentionally the
+    # earliest row in the identity group.
+    dedupe_absorbed_at: Optional[datetime] = Field(default=None, index=True)
+    dedupe_survivor_id: Optional[int] = Field(default=None, index=True)
 
     # Measured outcome, captured from Moonraker when the print finishes.
     # filament in mm (raw from print_stats) and grams (derived when a matching
@@ -1348,14 +2454,56 @@ class StagingLease(SQLModel, table=True):
     """Exact durable ownership record for one staged ingestion object."""
 
     __tablename__ = "staging_leases"
+    __table_args__ = (
+        CheckConstraint(
+            "(background_job_id IS NOT NULL AND inbox_item_id IS NULL AND model_source_cover_id IS NULL AND capture_upload_slot_id IS NULL) OR "
+            "(background_job_id IS NULL AND inbox_item_id IS NOT NULL AND model_source_cover_id IS NULL AND capture_upload_slot_id IS NULL) OR "
+            "(background_job_id IS NULL AND inbox_item_id IS NULL AND model_source_cover_id IS NOT NULL AND capture_upload_slot_id IS NULL) OR "
+            "(background_job_id IS NULL AND inbox_item_id IS NULL AND model_source_cover_id IS NULL AND capture_upload_slot_id IS NOT NULL)",
+            name="ck_staging_leases_exactly_one_owner",
+        ),
+    )
 
     id: str = Field(primary_key=True, max_length=64)
     path: str = Field(unique=True, max_length=2048)
     owner_user_id: Optional[int] = Field(
         default=None, foreign_key="users.id", index=True
     )
-    background_job_id: str = Field(
-        foreign_key="background_jobs.id", unique=True, index=True
+    background_job_id: Optional[str] = Field(
+        default=None, foreign_key="background_jobs.id", index=True
+    )
+    inbox_item_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("inbox_items.id", ondelete="CASCADE"),
+            nullable=True,
+            unique=True,
+            index=True,
+        ),
+    )
+    model_source_cover_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("model_source_covers.id", ondelete="CASCADE"),
+            nullable=True,
+            unique=True,
+            index=True,
+        ),
+    )
+    capture_upload_slot_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(
+            String(64),
+            ForeignKey("capture_upload_slots.id", ondelete="CASCADE"),
+            nullable=True,
+            unique=True,
+            index=True,
+        ),
+    )
+    capture_upload_slot_origin_id: Optional[str] = Field(
+        default=None, max_length=64, index=True
     )
     size_bytes: int
     sha256: str = Field(max_length=64, index=True)
@@ -1397,7 +2545,9 @@ class VaultAuditFinding(SQLModel, table=True):
     __tablename__ = "vault_audit_findings"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    run_id: int = Field(foreign_key="vault_audit_runs.id", index=True)
+    run_id: int = Field(
+        foreign_key="vault_audit_runs.id", index=True, ondelete="CASCADE"
+    )
     code: str = Field(max_length=64, index=True)
     severity: VaultAuditSeverity = Field(index=True)
     resource_type: str = Field(max_length=64, index=True)
@@ -1433,7 +2583,13 @@ class InboxItem(SQLModel, table=True):
         default="[]", sa_column=Column(Text, nullable=False)
     )
     background_job_id: Optional[str] = Field(
-        default=None, foreign_key="background_jobs.id", index=True
+        default=None,
+        sa_column=Column(
+            String(64),
+            ForeignKey("background_jobs.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     resulting_model_id: Optional[int] = Field(
         default=None, foreign_key="models.id", index=True
@@ -1444,6 +2600,36 @@ class InboxItem(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow, index=True)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
     completed_at: Optional[datetime] = None
+    completion: Optional[InboxItemCompletion] = Field(
+        default=None, sa_column=Column(String(16), nullable=True)
+    )
+
+
+class CaptureUploadSlot(SQLModel, table=True):
+    """Declared browser capture object and its durable staging receipt."""
+
+    __tablename__ = "capture_upload_slots"
+
+    id: str = Field(primary_key=True, max_length=64)
+    inbox_item_id: int = Field(
+        sa_column=Column(
+            Integer, ForeignKey("inbox_items.id", ondelete="CASCADE"), nullable=False
+        ),
+    )
+    role: str = Field(max_length=16, index=True)
+    source_file_id: Optional[str] = Field(default=None, max_length=255)
+    filename: str = Field(max_length=512)
+    media_type: str = Field(max_length=128)
+    size_bytes: int
+    sha256: str = Field(max_length=64, index=True)
+    state: CaptureUploadSlotState = Field(
+        default=CaptureUploadSlotState.PENDING, index=True
+    )
+    storage_key: Optional[str] = Field(default=None, max_length=2048, unique=True)
+    receipt_json: Optional[str] = Field(default=None, sa_column=Column(Text))
+    uploaded_at: Optional[datetime] = Field(default=None, index=True)
+    created_at: datetime = Field(default_factory=utcnow, index=True)
+    updated_at: datetime = Field(default_factory=utcnow, index=True)
 
 
 class PrinterFile(SQLModel, table=True):

@@ -1,4 +1,10 @@
-import { test as base, expect, request as pwRequest, type Browser, type Page } from "@playwright/test";
+import {
+  test as base,
+  expect,
+  request as pwRequest,
+  type Browser,
+  type Page,
+} from "@playwright/test";
 
 // Talks straight to the real backend to seed the first admin (once) and mint a
 // real JWT, then installs it as the same HttpOnly cookie used by the app.
@@ -46,15 +52,14 @@ async function ensureAuth(): Promise<{ token: string; user: string }> {
 export const test = base.extend({
   page: async ({ page }, use) => {
     const { token, user } = await ensureAuth();
-    await page.context().addCookies([
-      { name: "printstash_session", value: token, url: API, httpOnly: true, sameSite: "Strict" },
-    ]);
-    await page.addInitScript(
-      (u) => {
-        localStorage.setItem("printstash.user", u);
-      },
-      user,
-    );
+    await page
+      .context()
+      .addCookies([
+        { name: "printstash_session", value: token, url: API, httpOnly: true, sameSite: "Strict" },
+      ]);
+    await page.addInitScript((u) => {
+      localStorage.setItem("printstash.user", u);
+    }, user);
     await use(page);
   },
 });
@@ -97,13 +102,13 @@ export async function authedContext(
     },
   ]);
   const page = await context.newPage();
-  await page.addInitScript(
-    (u) => {
-      localStorage.setItem("printstash.user", u);
-    },
-    bundle.user,
-  );
+  await page.addInitScript((u) => {
+    localStorage.setItem("printstash.user", u);
+  }, bundle.user);
   return { context, page };
 }
 
 export { expect };
+// Specs import `test`, `expect` and `Page` from here rather than from
+// `@playwright/test`, so this module has to re-export the type too.
+export type { Page };
