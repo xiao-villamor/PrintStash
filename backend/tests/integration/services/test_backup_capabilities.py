@@ -64,7 +64,7 @@ class TestBackupOperations:
         assert result["physical_delete"]["allowed"] is allowed
         assert result["automatic_retention"]["allowed"] is allowed
         assert not result["catalog_purge"]["allowed"]
-        assert result["gc_witness"]["reason"] == "storage_gc_witness_unsupported"
+        assert result["gc_witness"]["reason"] == "storage_independent_backup_required"
 
     @pytest.mark.parametrize(
         "missing", ["row", "token", "digest", "destination", "committed"]
@@ -128,13 +128,14 @@ class TestBackupOperations:
 
         assert result["physical_delete"]["allowed"] is allowed
 
-    def test_independent_native_backup_still_requires_gc_reverification(
-        self, db_session, monkeypatch
+    @pytest.mark.parametrize("location", ["s3", "opendal:s3"])
+    def test_independent_backup_still_requires_gc_reverification(
+        self, db_session, monkeypatch, location
     ):
         monkeypatch.setattr(
             "app.services.gc_planner._source_identity_evidence", lambda _: ({}, {})
         )
-        result = backup_capabilities.backup_operations(_meta("s3"))
+        result = backup_capabilities.backup_operations(_meta(location))
         assert result["gc_witness"] == {
             "allowed": False,
             "reason": "storage_gc_verification_required",

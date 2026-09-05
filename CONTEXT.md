@@ -119,6 +119,8 @@ restore generation, target identity and failure-domain evidence, backup and quar
 The exact archive id, source reference, provider identity and digest of a fully
 verified, application-compatible S3 backup created in the previous 24 hours,
 with current evidence of a failure domain independent of active Vault storage.
+Native S3 and OpenDAL S3 replicas can supply the witness; the source is resolved
+against current configuration and committed ownership before full verification.
 
 ### Storage
 

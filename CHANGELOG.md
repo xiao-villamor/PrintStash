@@ -5,6 +5,7 @@
 ### Fixed
 
 - Backup deletion refuses destinations without an exact owned-object deletion operation, including manually confirmed requests. Unsupported retention keeps replicas and ownership evidence intact without repeated provider-error warnings. Mutable S3 null versions use conditional ETags.
+- Verified OpenDAL S3 backup replicas can now witness GC when current target and failure-domain evidence proves independence. Approval and finalization remain bound to the exact owned archive and quarantine deadline.
 
 - SFTP backup profiles can probe, list, verify and restore remote-only archives.
   Manifest reads stream through bounded buffers and close their remote handles
