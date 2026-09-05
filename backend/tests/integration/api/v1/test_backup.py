@@ -15,9 +15,11 @@ restore actually recovers live in `integration/services/backup/test_core.py`.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import BackgroundTasks, HTTPException
@@ -26,6 +28,10 @@ from fastapi.testclient import TestClient
 import app.services.backup as backup
 import app.services.storage_backend as storage_backend
 from app.api.v1 import backup as backup_api
+from app.db.models import OwnedStorageObject
+from app.services.backup_destination import RemoteBackupDestination
+from app.services.storage_backend import StorageObjectInfo
+from tests.factories import build_owned_storage_object
 from tests.integration._backup_harness import (
     BackupEnv,
     backup_admin_headers,
@@ -789,6 +795,84 @@ class TestVerifyBackup:
 
 
 class TestDeleteBackup:
+    @pytest.mark.parametrize("replacement", [False, True])
+    def test_manual_confirmation_cannot_delete_an_unversioned_replica(
+        self,
+        client: TestClient,
+        backup_env: BackupEnv,
+        admin_headers,
+        monkeypatch,
+        tmp_path: Path,
+        replacement: bool,
+    ) -> None:
+        remote_bytes = tmp_path / "remote-archive"
+        original = b"backup1"
+        remote_bytes.write_bytes(b"backup2" if replacement else original)
+        key = "sftp/root/printstash-backups/archive.tar.gz"
+
+        class UnversionedStorage:
+            backend_name = "backup-opendal-sftp"
+            source_namespace = "sftp/root"
+            operator_capabilities = SimpleNamespace(delete_with_version=False)
+
+            def object_info(self, requested):
+                assert requested == key
+                return StorageObjectInfo(size=remote_bytes.stat().st_size)
+
+            def delete_owned_unversioned(self, requested, **_kwargs):
+                assert requested == key
+                remote_bytes.unlink()
+
+        destination = RemoteBackupDestination(
+            1, "SFTP backup", "sftp", UnversionedStorage(), "provider"
+        )  # type: ignore[arg-type]
+        with backup_env.new_session() as session:
+            row = build_owned_storage_object(
+                session,
+                backend="backup-opendal-sftp",
+                namespace="sftp/root",
+                key=key,
+                object_kind="backup",
+                provider_ref="provider",
+                sha256=hashlib.sha256(original).hexdigest(),
+                size_bytes=len(original),
+            )
+            row_id, token = row.id, row.token
+        meta = backup.BackupMeta(
+            id="archive",
+            created_at="2026-01-01T00:00:00+00:00",
+            size_bytes=len(original),
+            storage_backend="local",
+            file_count=0,
+            app_version="0.13.0",
+            path=key,
+            location="opendal:sftp",
+            provider_ref="provider",
+            namespace="sftp/root",
+            source_ref="exact-source",
+        )
+        monkeypatch.setattr(backup, "get_backup", lambda *_a, **_k: meta)
+        monkeypatch.setattr(backup, "destination_for_ownership", lambda _: destination)
+
+        response = client.delete(
+            "/api/v1/backups/archive",
+            headers=admin_headers,
+            params={
+                "source_ref": "exact-source",
+                "confirm_storage_risk": "true",
+                "allow_unversioned": "true",
+            },
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "backup_exact_delete_unsupported"
+        assert remote_bytes.read_bytes() == (b"backup2" if replacement else original)
+        with backup_env.new_session() as session:
+            retained = session.get(OwnedStorageObject, row_id)
+            assert retained is not None and retained.token == token
+            assert retained.provider_ref == "provider"
+            assert retained.sha256 == hashlib.sha256(original).hexdigest()
+
     def test_reports_the_deletion(
         self, client: TestClient, admin_headers: dict[str, str], a_backup
     ) -> None:
@@ -872,7 +956,7 @@ class TestDeleteBackup:
         assert response.status_code == 200, response.text
         assert observed == {
             "source_ref": "exact-source",
-            "allow_unversioned": True,
+            "allow_unversioned": False,
         }
 
     def test_maps_source_identity_conflict_to_http_conflict(

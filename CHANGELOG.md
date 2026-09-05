@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Backup deletion refuses destinations without an exact owned-object deletion operation, including manually confirmed requests. Unsupported retention keeps replicas and ownership evidence intact without repeated provider-error warnings. Mutable S3 null versions use conditional ETags.
+
 - SFTP backup profiles can probe, list, verify and restore remote-only archives.
   Manifest reads stream through bounded buffers and close their remote handles
   on early exit; failed downloads remove their temporary bytes.

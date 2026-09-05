@@ -1846,6 +1846,7 @@ class TestBackupStorageHelpers:
         [
             ("version-7", '"etag-7"', {"VersionId": "version-7"}),
             (None, '"etag-7"', {"IfMatch": '"etag-7"'}),
+            ("null", '"etag-7"', {"IfMatch": '"etag-7"'}),
         ],
     )
     def test_remote_operations_use_exact_version_or_conditional_etag(
@@ -1869,6 +1870,28 @@ class TestBackupStorageHelpers:
             "Key": row.key,
             **expected,
         }
+
+    @pytest.mark.parametrize("version_id", [None, "null"])
+    def test_captured_mutable_s3_identity_uses_conditional_etag(
+        self, version_id: str | None
+    ) -> None:
+        response = {"VersionId": version_id, "ETag": '"original"'}
+        assert backup._s3_identity_kwargs(
+            bucket="bucket-a", key="archive.tar.gz", response=response
+        ) == {"Bucket": "bucket-a", "Key": "archive.tar.gz", "IfMatch": '"original"'}
+
+    @pytest.mark.parametrize("version_id", [None, "null"])
+    def test_captured_mutable_s3_identity_without_etag_is_rejected(
+        self, version_id: str | None
+    ) -> None:
+        with pytest.raises(
+            backup.BackupOwnershipError, match="remote_identity_unavailable"
+        ):
+            backup._s3_identity_kwargs(
+                bucket="bucket-a",
+                key="archive.tar.gz",
+                response={"VersionId": version_id},
+            )
 
     def test_remote_operation_without_stable_identity_fails_closed(self) -> None:
         row = backup.OwnedStorageObject(

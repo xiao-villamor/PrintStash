@@ -399,37 +399,38 @@ class TestOpenDALStorageBackend:
         assert operator.objects["thumbs/45.webp"] == b""
         assert receipt.size == 0
 
-    def test_explicitly_deletes_an_unversioned_owned_object(self) -> None:
+    @pytest.mark.parametrize("version", ["", "null"])
+    def test_mutable_version_cannot_delete_a_replacement(self, version: str) -> None:
         operator = _MemoryOperator()
-        backend = storage_opendal.OpenDALStorageBackend(
-            _spec(TransportKind.GDRIVE), operator=operator
-        )
-        key = backend.thumbnail_key(43)
-        operator.objects["thumbs/43.webp"] = b"owned"
-
-        backend.delete_owned_unversioned(
-            key,
-            expected_size=5,
-            expected_etag="etag:thumbs/43.webp",
-        )
-
-        assert not backend.exists(key)
-
-    def test_refuses_to_delete_a_changed_unversioned_object(self) -> None:
-        operator = _MemoryOperator()
-        backend = storage_opendal.OpenDALStorageBackend(
-            _spec(TransportKind.GDRIVE), operator=operator
-        )
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
         key = backend.thumbnail_key(44)
         operator.objects["thumbs/44.webp"] = b"replacement"
 
-        with pytest.raises(StorageConfigurationError, match="identity_changed"):
-            backend.delete_owned_unversioned(
-                key,
-                expected_size=5,
-                expected_etag="old-etag",
-            )
+        with pytest.raises(
+            StorageConfigurationError, match="conditional_delete_unavailable"
+        ):
+            backend.delete_versioned(key, version)
 
+        assert backend.read_bytes(key) == b"replacement"
+
+    def test_delete_targets_only_the_owned_immutable_version(self) -> None:
+        class VersionedOperator(_MemoryOperator):
+            calls = []
+
+            def capability(self):
+                return SimpleNamespace(delete_with_version=True)
+
+            def delete(self, key, *, version):
+                self.calls.append((key, version))
+
+        operator = VersionedOperator()
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+        key = backend.thumbnail_key(44)
+        operator.objects["thumbs/44.webp"] = b"replacement"
+
+        backend.delete_versioned(key, "owned-version")
+
+        assert operator.calls == [("thumbs/44.webp", "owned-version")]
         assert backend.read_bytes(key) == b"replacement"
 
     def test_uses_a_stream_writer_when_the_operator_exposes_one(self) -> None:

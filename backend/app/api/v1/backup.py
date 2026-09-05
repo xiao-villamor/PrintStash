@@ -419,14 +419,15 @@ def download_backup(
 def delete_backup(backup_id: str, source_ref: str | None = None) -> dict:
     try:
         deleted = (
-            backup.delete_backup(backup_id, allow_unversioned=True)
+            backup.delete_backup(backup_id)
             if source_ref is None
             else backup.delete_backup(
                 backup_id,
                 source_ref=source_ref,
-                allow_unversioned=True,
             )
         )
+    except backup.BackupDeleteUnsupportedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except backup.BackupOwnershipError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

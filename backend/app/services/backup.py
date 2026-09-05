@@ -103,6 +103,13 @@ class BackupOwnershipError(RuntimeError):
     """A backup target lacks current operation-level ownership proof."""
 
 
+class BackupDeleteUnsupportedError(BackupOwnershipError):
+    """The destination has no safe deletion operation for this owned copy."""
+
+    def __init__(self) -> None:
+        super().__init__("backup_exact_delete_unsupported")
+
+
 class _BackupConfigUnstableError(RuntimeError):
     """Settings changed during a target snapshot; retry the next operation."""
 
@@ -612,7 +619,7 @@ def _s3_object_kwargs(
     unconditional delete after a check-then-delete race.
     """
     kwargs: dict[str, str] = {"Bucket": bucket, "Key": key}
-    if row.version_id:
+    if row.version_id and row.version_id != "null":
         kwargs["VersionId"] = row.version_id
     elif row.etag:
         kwargs["IfMatch"] = row.etag
@@ -653,7 +660,7 @@ def _s3_identity_kwargs(*, bucket: str, key: str, response: dict) -> dict[str, s
     """Build a conditional locator from a just-captured S3 identity."""
     version_id = response.get("VersionId")
     etag = response.get("ETag")
-    if version_id:
+    if version_id and version_id != "null":
         return {"Bucket": bucket, "Key": key, "VersionId": str(version_id)}
     if etag:
         return {"Bucket": bucket, "Key": key, "IfMatch": str(etag)}
@@ -2639,11 +2646,7 @@ def _require_backup_archive_owned(
                 try:
                     if backend.creation_matches(receipt):
                         return row
-                    if (
-                        row.sha256 is None
-                        or row.device is None
-                        or row.inode is None
-                    ):
+                    if row.sha256 is None or row.device is None or row.inode is None:
                         continue
                     refreshed = backend.adopt_existing(
                         row.key,
@@ -3119,7 +3122,6 @@ def delete_backup(
     backup_id: str,
     *,
     source_ref: str | None = None,
-    allow_unversioned: bool = False,
 ) -> bool:
     """Delete exactly the source authorized by ``source_ref``."""
     meta = get_backup(backup_id, source_ref=source_ref)
@@ -3141,10 +3143,10 @@ def delete_backup(
         elif meta.location.startswith("opendal:"):
             owned = _require_backup_archive_owned(meta)
             destination = destination_for_ownership(owned)
-            if destination is None or not destination.delete_owned(
-                owned, allow_unversioned=allow_unversioned
-            ):
-                raise BackupOwnershipError("backup_remote_delete_unverified")
+            if destination is None:
+                raise BackupOwnershipError("backup_storage_ownership_unverified")
+            if not destination.delete_owned(owned):
+                raise BackupDeleteUnsupportedError()
             session.delete(owned)
             deleted = True
         else:
@@ -5114,6 +5116,10 @@ def purge_old_backups(retain_days: int | None = None) -> int:
             if created < cutoff:
                 if delete_backup(meta.id, source_ref=meta.source_ref):
                     removed += 1
+        except BackupDeleteUnsupportedError:
+            # Unsupported retention is a stable capability result shown with
+            # the source. It is not a recurring provider failure.
+            continue
         except Exception as exc:
             # Retention is best effort per exact source.  A stale credential,
             # provider outage, or ownership conflict must never make us probe
