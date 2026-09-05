@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- A minimal, standalone Compose file for local deployment, with optional settings
+  and customization examples in a separate deployment guide.
+
 ### Fixed
 
 - Backup deletion refuses destinations without an exact owned-object deletion operation, including manually confirmed requests. Unsupported retention keeps replicas and ownership evidence intact without repeated provider-error warnings. Mutable S3 null versions use conditional ETags.
