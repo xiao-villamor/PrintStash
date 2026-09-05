@@ -372,7 +372,9 @@ class TestRetryIntegrity:
 
 @pytest.mark.s3
 class TestRetryOtherDestinations:
-    @pytest.mark.parametrize("failed_kind", ["local", "native"])
+    @pytest.mark.parametrize(
+        "failed_kind", ["local", "native", "native_without_reservation"]
+    )
     def test_remote_survivor_repairs_the_original_destination(
         self, backup_env, monkeypatch, failed_kind
     ):
@@ -423,6 +425,14 @@ class TestRetryOtherDestinations:
                 )
             ).one()
             result_id, key = result.id, result.key
+            if failed_kind == "native_without_reservation":
+                from app.db.models import OwnedStorageObject
+
+                row = session.exec(
+                    select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+                ).one()
+                session.delete(row)
+                session.commit()
         if failed_kind == "local":
             monkeypatch.setattr(backup_replication, "publish_file", original)
         else:
@@ -485,4 +495,181 @@ class TestRetryTargetEvidence:
             ).model_dump_json(),
         )
         with pytest.raises(RetryRefused, match="backup_retry_target_unverified"):
+            binding_for(result)
+
+
+@pytest.mark.s3
+class TestNativeSurvivor:
+    def test_native_survivor_repairs_a_failed_local_copy(self, backup_env, monkeypatch):
+        from pathlib import Path
+
+        from app.core.config import _overlay
+        from app.db.models import StorageConnection
+        from app.services import backup_replication, backup_runs
+        from tests.containers import S3_ACCESS_KEY, S3_SECRET_KEY, s3_endpoint
+
+        client, bucket = _retry_target(backup_env)
+        with backup_env.new_session() as session:
+            for profile in session.exec(select(StorageConnection)).all():
+                profile.enabled = False
+                session.add(profile)
+            session.commit()
+        for key, value in {
+            "backup_s3_bucket": bucket,
+            "backup_s3_endpoint_url": s3_endpoint(),
+            "backup_s3_region": "us-east-1",
+            "backup_s3_access_key": S3_ACCESS_KEY,
+            "backup_s3_secret_key": S3_SECRET_KEY,
+        }.items():
+            monkeypatch.setitem(_overlay, key, value)
+        original = backup_replication.publish_file
+
+        def unavailable(*args, **kwargs):
+            raise OSError("local unavailable")
+
+        monkeypatch.setattr(backup_replication, "publish_file", unavailable)
+        meta = backup.create_backup()
+        assert meta.location == "s3"
+        assert meta.outcome == "partial"
+        local = next(row for row in meta.destination_results if row["kind"] == "local")
+        monkeypatch.setattr(backup_replication, "publish_file", original)
+        result = backup_runs.retry_destination(local["id"])
+        assert result["outcome"] == "completed"
+        assert Path(result["key"]).is_file()
+        assert backup.verify_backup(meta.id, source_ref=result["source_ref"]).valid
+
+
+class TestLiveSurvivorBoundaries:
+    @pytest.fixture
+    def survivor(self, backup_env):
+        from app.db.models import BackupDestinationResult, BackupRun
+
+        meta = backup.create_backup()
+        with backup_env.new_session() as session:
+            run = session.get(BackupRun, meta.run_id)
+            result = session.exec(
+                select(BackupDestinationResult).where(
+                    BackupDestinationResult.run_id == run.id
+                )
+            ).one()
+            return BackupRun.model_validate(
+                run.model_dump()
+            ), BackupDestinationResult.model_validate(result.model_dump())
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("namespace", "wrong"),
+            ("provider_ref", "wrong"),
+            ("key", "other"),
+            ("sha256", "b" * 64),
+            ("size_bytes", 0),
+        ],
+    )
+    def test_mismatched_ownership_cannot_supply_retry_bytes(
+        self, backup_env, survivor, field, value
+    ):
+        from app.db.models import OwnedStorageObject
+        from app.services.backup_replica_retry import RetryRefused, owned_for
+
+        run, result = survivor
+        with backup_env.new_session() as session:
+            owned = session.get(OwnedStorageObject, result.ownership_id)
+            setattr(owned, field, value)
+            session.add(owned)
+            session.commit()
+        with pytest.raises(RetryRefused, match="backup_retry_source_unverified"):
+            owned_for(result, run)
+
+    @pytest.mark.parametrize(
+        "change", ["replaced_inode", "during_read", "incompatible"]
+    )
+    def test_changed_live_local_copy_is_rejected(
+        self, backup_env, survivor, monkeypatch, change
+    ):
+        import os
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from app.services import backup_replica_retry
+
+        run, result = survivor
+        path = Path(result.key)
+        if change == "replaced_inode":
+            replacement = path.with_suffix(".replacement")
+            replacement.write_bytes(path.read_bytes())
+            replacement.replace(path)
+        elif change == "during_read":
+            original = backup_replica_retry._copy_exact
+
+            def changing(reader, destination, selected_run):
+                original(reader, destination, selected_run)
+                stat = path.stat()
+                os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1000000))
+
+            monkeypatch.setattr(backup_replica_retry, "_copy_exact", changing)
+        else:
+            monkeypatch.setattr(
+                backup,
+                "verify_backup",
+                lambda *args, **kwargs: SimpleNamespace(
+                    valid=True, app_compatible=False
+                ),
+            )
+        with pytest.raises(backup_replica_retry.RetryRefused):
+            with backup_replica_retry.verified_survivor(result, run):
+                pytest.fail("changed source was yielded")
+        from app.services import backup_runs
+
+        assert backup_runs.run_detail(run.id)["destinations"][0]["verified_at"] is None
+
+
+class TestUnavailableRetryBindings:
+    @pytest.mark.parametrize(
+        "change,reason",
+        [
+            ("missing_evidence", "backup_retry_target_unverified"),
+            ("local_directory", "backup_retry_target_changed"),
+            ("native_removed", "backup_retry_target_unavailable"),
+            ("profile_deleted", "backup_retry_target_unavailable"),
+            ("profile_disabled", "backup_retry_target_unavailable"),
+            ("profile_invalid", "backup_retry_target_unavailable"),
+        ],
+    )
+    def test_saved_target_cannot_be_resolved_unsafely(
+        self, backup_env, monkeypatch, change, reason
+    ):
+        from app.core.config import _overlay
+        from app.db.models import BackupDestinationResult
+        from app.services.backup_replica_retry import RetryRefused, binding_for
+
+        meta = backup.create_backup()
+        with backup_env.new_session() as session:
+            row = session.exec(
+                select(BackupDestinationResult).where(
+                    BackupDestinationResult.run_id == meta.run_id
+                )
+            ).one()
+            result = BackupDestinationResult.model_validate(row.model_dump())
+            if change.startswith("profile_"):
+                profile = build_storage_connection(session)
+                result.kind, result.connection_id = "connection", profile.id
+                if change == "profile_deleted":
+                    session.delete(profile)
+                else:
+                    if change == "profile_disabled":
+                        profile.enabled = False
+                    else:
+                        profile.config_json = "{}"
+                    session.add(profile)
+                session.commit()
+        if change == "missing_evidence":
+            result.target_identity_json = None
+        elif change == "local_directory":
+            monkeypatch.setitem(
+                _overlay, "backup_dir", str(backup_env.backup_dir / "other")
+            )
+        elif change == "native_removed":
+            result.kind = "s3"
+        with pytest.raises(RetryRefused, match=reason):
             binding_for(result)

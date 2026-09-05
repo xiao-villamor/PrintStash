@@ -1,3 +1,4 @@
+/* Backup history preserves successful copies and retries only the exact failed result. */
 import "@testing-library/jest-dom/vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -50,7 +51,7 @@ describe("Backup run history", () => {
     expect(within(run).getAllByRole("button", { name: "Retry this destination" })).toHaveLength(1);
   });
 
-  it("retries only the failed destination and refreshes verified status", async () => {
+  it("refreshes verified status after retrying the exact failed destination", async () => {
     let run = partialRun();
     const published = vi.fn<() => void>();
     renderApp(<BackupRunHistory refreshKey={0} onPublished={published} />, {
