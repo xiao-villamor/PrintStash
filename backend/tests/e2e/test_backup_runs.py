@@ -5,8 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e.test_backup import _setup_and_login
-from tests.e2e.test_e2e_webdav_storage import webdav_endpoint as webdav_endpoint
+from tests.e2e._backup_helpers import setup_and_login
 
 
 class TestReplicaRunRecovery:
@@ -15,7 +14,7 @@ class TestReplicaRunRecovery:
     async def test_partial_run_retries_the_same_archive_through_the_api(
         self, api, tmp_path, webdav_endpoint
     ):
-        headers = await _setup_and_login(api, tmp_path)
+        headers = await setup_and_login(api, tmp_path)
         obstruction = tmp_path / "webdav" / "replicas"
         obstruction.write_bytes(b"prevent creating the backup directory")
         connection = await api.post(

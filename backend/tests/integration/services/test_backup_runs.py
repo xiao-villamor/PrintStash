@@ -39,6 +39,18 @@ class TestDurableBackupRuns:
             assert success.ownership_id is not None
             assert success.verified_at is None
 
+    def test_configured_path_spelling_remains_listable(self, backup_env, monkeypatch):
+        from app.core.config import _overlay
+
+        configured = backup_env.backup_dir / ".." / backup_env.backup_dir.name
+        monkeypatch.setitem(_overlay, "backup_dir", configured)
+        meta = backup.create_backup()
+        assert meta.source_ref in {
+            row.source_ref for row in backup.list_backup_sources()
+        }
+        assert meta.path.startswith(str(configured))
+        assert backup.verify_backup(meta.id, source_ref=meta.source_ref).valid
+
     def test_all_failed_response_retains_the_durable_run(self, backup_env, monkeypatch):
         from app.db.models import BackupRun, SystemConfig
 

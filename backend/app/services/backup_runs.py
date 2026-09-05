@@ -56,7 +56,7 @@ def begin_run(
     run_id = uuid.uuid4().hex
     keep_local = local_destination_enabled(trigger)
     s3_configuration = _stable_backup_s3_config()
-    local_directory = str(Path(settings.backup_dir).resolve())
+    local_directory = str(settings.backup_dir)
     local_id = s3_id = None
     connections = []
     with get_session_factory().scoped_session() as session:
@@ -97,7 +97,9 @@ def begin_run(
                     run_id=run_id,
                     kind="local",
                     name="Local backup",
-                    configuration_json=json.dumps({"directory": local_directory}),
+                    configuration_json=json.dumps(
+                        {"directory": str(Path(local_directory).resolve())}
+                    ),
                 )
             )
         if s3_configuration[0]:
