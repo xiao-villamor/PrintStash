@@ -1337,3 +1337,33 @@ class TestAdoptRemoteBackup:
         )
 
         assert response.status_code == 403, response.text
+
+
+class TestBackupRunAdministration:
+    def test_create_exposes_durable_destination_results(
+        self, client, backup_env, admin_headers
+    ):
+        response = client.post("/api/v1/backups", headers=admin_headers)
+        assert response.status_code == 202
+        created = response.json()
+        assert created["outcome"] == "completed"
+        result = created["destination_results"][0]
+        assert result["outcome"] == "completed"
+        assert result["verified_at"] is None
+        run = client.get(
+            f"/api/v1/backups/runs/{created['run_id']}", headers=admin_headers
+        )
+        assert run.status_code == 200
+        assert run.json()["backup_id"] == created["backup_id"]
+        assert run.json()["destinations"][0]["ownership_id"] is not None
+        listing = client.get("/api/v1/backups/runs", headers=admin_headers)
+        assert listing.status_code == 200
+        assert [row["id"] for row in listing.json()] == [created["run_id"]]
+
+    @pytest.mark.parametrize(
+        "path", ["/api/v1/backups/runs", "/api/v1/backups/runs/unknown"]
+    )
+    def test_non_admin_cannot_read_execution_records(self, client, backup_env, path):
+        headers = user_headers_in_env(backup_env)
+        response = client.get(path, headers=headers)
+        assert response.status_code == 403
