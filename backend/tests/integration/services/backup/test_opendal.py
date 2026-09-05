@@ -15,6 +15,7 @@ import pytest
 
 from app.services import backup
 from app.services.backup_destination import BackupTrigger, RemoteBackupDestination
+from app.services.remote_io import RemoteEntry
 from app.services.storage_backend import CreationReceipt, StorageObjectInfo
 from tests.integration._backup_harness import BackupEnv
 
@@ -29,8 +30,14 @@ class _RemoteBackend:
         self.key = key
         self.payload = payload
 
-    def list_prefix(self, _prefix: str) -> list[str]:
-        return [self.key]
+    @contextmanager
+    def iter_directory(self, relative: str):
+        yield iter(
+            [RemoteEntry(self.source_relative_key(self.key), len(self.payload), False)]
+        )
+
+    def source_relative_key(self, key: str) -> str:
+        return key.removeprefix(self.source_namespace + "/")
 
     def source_key(self, relative: str) -> str:
         return f"{self.source_namespace}/{relative.strip('/')}"
@@ -46,9 +53,35 @@ class _RemoteBackend:
         yield self.payload[100:]
 
     @contextmanager
-    def open_reader(self, key: str):
+    def open_reader(self, key: str, *, expected=None):
         assert key == self.key
-        yield io.BytesIO(self.payload)
+        with io.BytesIO(self.payload) as reader:
+            yield reader
+
+
+class _PublishingBackend(_RemoteBackend):
+    def __init__(self, writes):
+        super().__init__("", b"")
+        self.writes = writes
+
+    def namespace_for(self, key):
+        assert key.startswith(self.source_namespace + "/")
+        return self.source_namespace
+
+    def exists(self, key):
+        return key == self.key
+
+    def publish_replica(self, source, key):
+        self.key, self.payload = key, source.read()
+        self.writes.append((key, self.payload))
+        return CreationReceipt(
+            key=key,
+            size=len(self.payload),
+            token="created",
+            backend=self.backend_name,
+            namespace=self.source_namespace,
+            etag="remote-etag",
+        )
 
 
 def _remote_destination(key: str, payload: bytes) -> RemoteBackupDestination:
@@ -69,35 +102,12 @@ class TestOpenDalBackupReplication:
     ) -> None:
         writes: list[tuple[str, bytes]] = []
 
-        class Backend:
-            backend_name = "backup-opendal-gdrive"
-            provider_id = "gdrive"
-            transport = "gdrive"
-
-            def namespace_for(self, key: str) -> str:
-                assert key.startswith("gdrive/PrintStash/")
-                return "gdrive/PrintStash"
-
-            def create_stream(self, source, key: str) -> CreationReceipt:
-                payload = source.read()
-                writes.append((key, payload))
-                return CreationReceipt(
-                    key=key,
-                    size=len(payload),
-                    token="created",
-                    backend=self.backend_name,
-                    namespace="gdrive/PrintStash",
-                    etag="gdrive-etag",
-                )
-
-        destination = SimpleNamespace(
+        destination = RemoteBackupDestination(
+            connection_id=7,
             name="Drive copies",
             provider="gdrive",
             provider_ref="drive-profile-ref",
-            location="opendal:gdrive",
-            namespace="gdrive/PrintStash",
-            backend=Backend(),
-            key=lambda archive_name: f"gdrive/PrintStash/{archive_name}",
+            backend=_PublishingBackend(writes),
         )
         triggers: list[BackupTrigger] = []
 
@@ -126,6 +136,9 @@ class TestOpenDalBackupReplication:
             provider_ref="offline-profile-ref",
             backend=SimpleNamespace(),
             key=lambda archive_name: archive_name,
+            publish_file=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("endpoint unavailable")
+            ),
         )
         monkeypatch.setattr(
             backup, "configured_destinations", lambda _trigger: [failing]
@@ -142,35 +155,12 @@ class TestOpenDalBackupReplication:
     ) -> None:
         writes: list[tuple[str, bytes]] = []
 
-        class Backend:
-            backend_name = "backup-opendal-gdrive"
-            provider_id = "gdrive"
-            transport = "gdrive"
-
-            def namespace_for(self, key: str) -> str:
-                assert key.startswith("gdrive/PrintStash/")
-                return "gdrive/PrintStash"
-
-            def create_stream(self, source, key: str) -> CreationReceipt:
-                payload = source.read()
-                writes.append((key, payload))
-                return CreationReceipt(
-                    key=key,
-                    size=len(payload),
-                    token="created",
-                    backend=self.backend_name,
-                    namespace="gdrive/PrintStash",
-                    etag="gdrive-etag",
-                )
-
-        destination = SimpleNamespace(
-            name="Remote only",
+        destination = RemoteBackupDestination(
+            connection_id=7,
+            name="Drive copies",
             provider="gdrive",
             provider_ref="drive-profile-ref",
-            location="opendal:gdrive",
-            namespace="gdrive/PrintStash",
-            backend=Backend(),
-            key=lambda archive_name: f"gdrive/PrintStash/{archive_name}",
+            backend=_PublishingBackend(writes),
         )
         monkeypatch.setattr(
             backup, "local_destination_enabled", lambda _trigger: False, raising=False
@@ -211,6 +201,9 @@ class TestOpenDalBackupReplication:
             provider_ref="offline-profile-ref",
             backend=SimpleNamespace(),
             key=lambda archive_name: archive_name,
+            publish_file=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                OSError("endpoint unavailable")
+            ),
         )
         monkeypatch.setattr(
             backup, "local_destination_enabled", lambda _trigger: False, raising=False

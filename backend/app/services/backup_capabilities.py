@@ -40,11 +40,7 @@ def backup_operations(meta: BackupMeta) -> dict[str, dict]:
                     destination is not None
                     and row.version_id
                     and row.version_id != "null"
-                    and getattr(
-                        destination.backend.operator_capabilities,
-                        "delete_with_version",
-                        False,
-                    )
+                    and destination.backend.exact_deletion is not None
                 )
     gc_reason = "storage_gc_witness_unsupported"
     if meta.location in {"s3", "opendal:s3"}:

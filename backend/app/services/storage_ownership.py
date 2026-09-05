@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.db.models import OwnedStorageObject, StorageObjectState
+from app.services.remote_io import RemoteIO
 from app.services.storage_backend import (
     CreationReceipt,
     StorageBackend,
@@ -54,12 +55,12 @@ class OrphanSweepResult:
     pending: int = 0
 
 
-def _backend_name(backend: StorageBackend) -> str:
+def _backend_name(backend: StorageBackend | RemoteIO) -> str:
     value = getattr(backend, "backend_name", None)
     return value if isinstance(value, str) and value else "unknown"
 
 
-def _namespace_for(backend: StorageBackend, key: str) -> str:
+def _namespace_for(backend: StorageBackend | RemoteIO, key: str) -> str:
     namespace_for = getattr(backend, "namespace_for", None)
     value = (
         namespace_for(key)
@@ -73,7 +74,7 @@ def _namespace_for(backend: StorageBackend, key: str) -> str:
 
 def _locator_rows(
     session: Session,
-    backend: StorageBackend,
+    backend: StorageBackend | RemoteIO,
     key: str,
     *,
     states: tuple[StorageObjectState, ...] | None = None,
@@ -145,7 +146,7 @@ def _normalized_endpoint(value: object) -> str:
 
 
 def provider_ref_for_backend(
-    backend: StorageBackend, *, namespace: str | None = None
+    backend: StorageBackend | RemoteIO, *, namespace: str | None = None
 ) -> str:
     """Return a stable, credential-free provider destination identity.
 
@@ -285,7 +286,7 @@ def _require_publication_before_sqlite_dml(session: Session) -> None:
 
 def reserve_creation(
     session: Session,
-    backend: StorageBackend,
+    backend: StorageBackend | RemoteIO,
     key: str,
     *,
     object_kind: str,

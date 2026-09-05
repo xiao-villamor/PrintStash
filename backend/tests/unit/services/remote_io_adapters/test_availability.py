@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from app.services import storage_opendal
+from app.services import remote_io_adapters as storage_opendal
 from app.services.storage_providers import TransportKind
 
 

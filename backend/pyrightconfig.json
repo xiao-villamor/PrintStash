@@ -9,7 +9,9 @@
     "app/services/realtime.py",
     "app/services/storage_backend.py",
     "app/services/storage_utils.py",
-    "app/services/task_queue.py"
+    "app/services/task_queue.py",
+    "app/services/remote_io.py",
+    "app/services/remote_io_adapters.py"
   ],
   "pythonVersion": "3.11",
   "venvPath": ".",

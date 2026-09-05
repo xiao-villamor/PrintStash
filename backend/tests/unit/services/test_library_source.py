@@ -10,7 +10,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from botocore.exceptions import ClientError
 
 from app.db.models import (
     ExternalLibrary,
@@ -21,75 +20,19 @@ from app.db.models import (
 from app.services import library_source
 from app.services.library_source import (
     LibrarySourceError,
-    OpenDalLibrarySource,
-    S3LibrarySource,
+    RemoteLibrarySource,
     SourceEntry,
 )
+from app.services.remote_io import RemoteEntry as SourceDirectoryEntry
 from app.services.storage_backend import StorageConfigurationError, StorageObjectInfo
-from app.services.storage_opendal import SourceDirectoryEntry
 from tests.factories import detached_file
 
 
-class _PagedClient:
-    def __init__(self) -> None:
-        self.requests: list[dict[str, object]] = []
-
-    def list_objects_v2(self, **request):
-        self.requests.append(request)
-        if request.get("ContinuationToken") == "next-page":
-            return {
-                "Contents": [{"Key": "models/b.gcode", "Size": 2}],
-                "IsTruncated": False,
-            }
-        return {
-            "Contents": [
-                {"Key": "models/a.stl", "Size": 1},
-                {"Key": "models/folder/", "Size": 0},
-            ],
-            "IsTruncated": True,
-            "NextContinuationToken": "next-page",
-        }
-
-
-class _ChangingClient:
-    def get_object(self, **_request):
-        return {
-            "Body": io.BytesIO(b"original"),
-            "ContentLength": 8,
-            "ETag": '"etag-before"',
-            "VersionId": "version-before",
-        }
-
-    def head_object(self, **request):
-        assert request["VersionId"] == "version-before"
-        return {
-            "ContentLength": 8,
-            "ETag": '"etag-after"',
-            "VersionId": "version-before",
-        }
-
-
-class _DeniedClient:
-    def get_object(self, **_request):
-        raise ClientError(
-            {"Error": {"Code": "AccessDenied", "Message": "denied"}},
-            "GetObject",
-        )
-
-
-class _RootedClient:
-    def __init__(self) -> None:
-        self.list_request = None
-
-    def list_objects_v2(self, **request):
-        self.list_request = request
-        return {
-            "Contents": [{"Key": "library-root/models/a.stl", "Size": 1}],
-            "IsTruncated": False,
-        }
-
-
 class _DirectoryBackend:
+    @contextmanager
+    def iter_directory(self, relative):
+        yield iter(self.list_source_directory(relative, max_entries=10_000))
+
     def list_source_directory(self, relative: str, *, max_entries: int):
         assert max_entries == 10_000
         return {
@@ -104,40 +47,16 @@ class _DirectoryBackend:
         }[relative]
 
 
-class _StableClient:
-    def __init__(self, payload: bytes = b"stable") -> None:
-        self.payload = payload
-        self.closed = False
-
-    def get_object(self, **_request):
-        body = io.BytesIO(self.payload)
-        original_close = body.close
-
-        def close() -> None:
-            self.closed = True
-            original_close()
-
-        body.close = close  # type: ignore[method-assign]
-        return {"Body": body, "ETag": '"stable"', "VersionId": "v1"}
-
-    def head_object(self, **request):
-        assert request["VersionId"] == "v1"
-        return {
-            "ContentLength": len(self.payload),
-            "ETag": '"stable"',
-            "VersionId": "v1",
-        }
-
-
-class _MissingClient:
-    def get_object(self, **_request):
-        raise ClientError(
-            {"Error": {"Code": "NoSuchKey", "Message": "missing"}},
-            "GetObject",
-        )
-
-
 class _StableDirectoryBackend:
+    @contextmanager
+    def open_reader(self, key, *, expected=None):
+        from app.services.remote_io_adapters import _ChunkReader
+
+        with io.BufferedReader(
+            _ChunkReader(self.stream_chunks(key, expected=expected))
+        ) as reader:
+            yield reader
+
     def __init__(self, *, changed: bool = False, missing: bool = False) -> None:
         self.changed = changed
         self.missing = missing
@@ -157,179 +76,7 @@ class _StableDirectoryBackend:
         yield b"abc"
 
 
-class TestS3LibrarySourceAdapter:
-    def test_constructor_builds_a_sigv4_client_with_explicit_addressing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        captured: dict[str, object] = {}
-
-        def client(**kwargs):
-            captured.update(kwargs)
-            return object()
-
-        monkeypatch.setattr("boto3.client", client)
-
-        source = S3LibrarySource(
-            {
-                "bucket": "library",
-                "region": "us-east-1",
-                "endpoint_url": "https://minio.example.test",
-                "addressing_style": "path",
-                "access_key": "access",
-                "secret_key": "secret",
-            }
-        )
-
-        assert source.client is not None
-        assert captured["service_name"] == "s3"
-        assert captured["endpoint_url"] == "https://minio.example.test"
-        assert captured["aws_access_key_id"] == "access"
-
-    def test_provider_cursor_survives_prefixed_pagination(self) -> None:
-        client = _PagedClient()
-        source = S3LibrarySource({"bucket": "library"}, client=client)
-
-        first = source.list_page("models", cursor=None, limit=1000)
-        second = source.list_page("models", cursor=first.next_cursor, limit=1000)
-
-        assert [entry.key for entry in first.entries] == ["models/a.stl"]
-        assert first.complete is False
-        assert second.complete is True
-        assert [entry.key for entry in second.entries] == ["models/b.gcode"]
-        assert client.requests == [
-            {"Bucket": "library", "Prefix": "models", "MaxKeys": 1000},
-            {
-                "Bucket": "library",
-                "Prefix": "models",
-                "MaxKeys": 1000,
-                "ContinuationToken": "next-page",
-            },
-        ]
-
-    def test_materialization_rejects_an_object_that_changes_mid_read(self) -> None:
-        source = S3LibrarySource({"bucket": "library"}, client=_ChangingClient())
-
-        with pytest.raises(LibrarySourceError, match="library_source_changed"):
-            with source.materialize("models/a.stl"):
-                pass
-
-    def test_access_denied_is_not_misreported_as_a_missing_object(self) -> None:
-        source = S3LibrarySource({"bucket": "library"}, client=_DeniedClient())
-
-        with pytest.raises(LibrarySourceError, match="library_source_read_failed"):
-            with source.materialize("models/private.stl"):
-                pass
-
-    def test_connection_root_is_applied_without_leaking_into_logical_keys(self) -> None:
-        client = _RootedClient()
-        source = S3LibrarySource(
-            {"bucket": "library", "root": "library-root"}, client=client
-        )
-
-        page = source.list_page("models", cursor=None, limit=1000)
-
-        assert client.list_request["Prefix"] == "library-root/models"
-        assert [entry.key for entry in page.entries] == ["models/a.stl"]
-
-    def test_invalid_s3_adapter_inputs_are_rejected(self) -> None:
-        source = S3LibrarySource({"bucket": "library", "root": "root"}, client=object())
-
-        with pytest.raises(LibrarySourceError, match="library_source_key_invalid"):
-            source._provider_key("../escape.stl")  # noqa: SLF001
-        with pytest.raises(LibrarySourceError, match="library_source_key_outside_root"):
-            source._logical_key("another/a.stl")  # noqa: SLF001
-        with pytest.raises(ValueError, match="positive"):
-            source.list_page("", cursor=None, limit=0)
-
-        class MissingCursor:
-            def list_objects_v2(self, **_request):
-                return {"Contents": [], "IsTruncated": True}
-
-        with pytest.raises(LibrarySourceError, match="library_source_cursor_missing"):
-            S3LibrarySource({"bucket": "library"}, client=MissingCursor()).list_page(
-                "", cursor=None, limit=1
-            )
-
-    def test_list_provider_failure_is_normalized(self) -> None:
-        class FailedList:
-            def list_objects_v2(self, **_request):
-                raise ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "denied"}},
-                    "ListObjectsV2",
-                )
-
-        with pytest.raises(LibrarySourceError, match="library_source_list_failed"):
-            S3LibrarySource({"bucket": "library"}, client=FailedList()).list_page(
-                "", cursor=None, limit=1
-            )
-
-    def test_stable_versioned_object_materializes_then_is_removed(self) -> None:
-        client = _StableClient()
-        source = S3LibrarySource({"bucket": "library"}, client=client)
-
-        with source.materialize("models/a.stl") as content:
-            path = content.path
-            assert path.read_bytes() == b"stable"
-            materialized = path
-
-        assert not materialized.exists()
-        assert client.closed is True
-
-    def test_download_bandwidth_limit_paces_large_reads(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr(library_source.time, "monotonic", lambda: 0.0)
-        monkeypatch.setattr(library_source.time, "sleep", sleeps.append)
-        source = S3LibrarySource(
-            {"bucket": "library"},
-            client=_StableClient(b"paced"),
-            max_bytes_per_second=2,
-        )
-
-        with source.materialize("paced.stl") as content:
-            path = content.path
-            assert path.read_bytes() == b"paced"
-
-        assert sleeps == [2.5]
-
-    def test_head_failure_is_treated_as_an_unstable_read(self) -> None:
-        class FailedHead(_StableClient):
-            def head_object(self, **_request):
-                raise ClientError(
-                    {"Error": {"Code": "AccessDenied", "Message": "denied"}},
-                    "HeadObject",
-                )
-
-        with pytest.raises(LibrarySourceError, match="library_source_changed"):
-            with S3LibrarySource(
-                {"bucket": "library"}, client=FailedHead()
-            ).materialize("a.stl"):
-                pass
-
-    def test_missing_or_invalid_object_body_fails_closed(self) -> None:
-        with pytest.raises(LibrarySourceError, match="library_source_missing"):
-            with S3LibrarySource(
-                {"bucket": "library"}, client=_MissingClient()
-            ).materialize("missing.stl"):
-                pass
-
-        class InvalidBody:
-            def get_object(self, **_request):
-                return {"Body": object()}
-
-        with pytest.raises(LibrarySourceError, match="library_source_read_failed"):
-            with S3LibrarySource(
-                {"bucket": "library"}, client=InvalidBody()
-            ).materialize("invalid.stl"):
-                pass
-
-    def test_constructor_requires_a_bucket(self) -> None:
-        with pytest.raises(LibrarySourceError, match="storage_connection_invalid"):
-            S3LibrarySource({}, client=object())
-
-
-class TestOpenDalLibrarySourceAdapter:
+class TestRemoteLibrarySourceAdapter:
     @pytest.mark.parametrize(
         "after",
         [
@@ -350,7 +97,7 @@ class TestOpenDalLibrarySourceAdapter:
         observations = iter([StorageObjectInfo(size=3, etag="before"), after])
         monkeypatch.setattr(backend, "object_info", lambda _key: next(observations))
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
-        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+        source = RemoteLibrarySource(backend)  # type: ignore[arg-type]
 
         with pytest.raises(LibrarySourceError, match="library_source_changed"):
             with source.materialize("models/a.stl"):
@@ -371,9 +118,11 @@ class TestOpenDalLibrarySourceAdapter:
 
         monkeypatch.setattr(backend, "stream_chunks", broken_stream)
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
-        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+        source = RemoteLibrarySource(backend)  # type: ignore[arg-type]
 
-        with pytest.raises(OSError, match="remote read failed"):
+        with pytest.raises(
+            StorageConfigurationError, match="remote_storage_read_failed"
+        ):
             with source.materialize("models/a.stl"):
                 pytest.fail("failed remote content was exposed to indexing")
 
@@ -391,9 +140,11 @@ class TestOpenDalLibrarySourceAdapter:
         payload: bytes,
     ) -> None:
         backend = _StableDirectoryBackend()
-        monkeypatch.setattr(backend, "stream_chunks", lambda _key, **_kwargs: iter([payload]))
+        monkeypatch.setattr(
+            backend, "stream_chunks", lambda _key, **_kwargs: iter([payload])
+        )
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
-        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+        source = RemoteLibrarySource(backend)  # type: ignore[arg-type]
 
         with pytest.raises(LibrarySourceError, match="library_source_size_mismatch"):
             with source.materialize("models/a.stl"):
@@ -414,7 +165,7 @@ class TestOpenDalLibrarySourceAdapter:
 
         monkeypatch.setattr(backend, "stream_chunks", oversized_stream)
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
-        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+        source = RemoteLibrarySource(backend)  # type: ignore[arg-type]
 
         with pytest.raises(LibrarySourceError, match="library_source_size_mismatch"):
             with source.materialize("models/a.stl"):
@@ -426,13 +177,17 @@ class TestOpenDalLibrarySourceAdapter:
         modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
         class MetadataBackend:
+            @contextmanager
+            def iter_directory(self, relative):
+                yield iter(self.list_source_directory(relative))
+
             def list_source_directory(self, *_args, **_kwargs):
                 return [
                     SourceDirectoryEntry("known.stl", 3, False, modified, "tag", "v1"),
                     SourceDirectoryEntry("unknown.stl", 4, False),
                 ]
 
-        page = OpenDalLibrarySource(MetadataBackend()).list_page(  # type: ignore[arg-type]
+        page = RemoteLibrarySource(MetadataBackend()).list_page(  # type: ignore[arg-type]
             "", cursor=None, limit=1000
         )
 
@@ -464,7 +219,7 @@ class TestOpenDalLibrarySourceAdapter:
             def stream_chunks(self, *_args, **_kwargs):
                 pytest.fail("stale discovery must not start a download")
 
-        source = OpenDalLibrarySource(NeverDownload())  # type: ignore[arg-type]
+        source = RemoteLibrarySource(NeverDownload())  # type: ignore[arg-type]
         with pytest.raises(LibrarySourceError, match="library_source_changed"):
             with source.materialize("models/a.stl", expected=SourceEntry(**values)):
                 pytest.fail("stale discovery yielded content")
@@ -495,7 +250,7 @@ class TestOpenDalLibrarySourceAdapter:
                 return StorageObjectInfo(**values)
 
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
-        source = OpenDalLibrarySource(ChangingBackend())  # type: ignore[arg-type]
+        source = RemoteLibrarySource(ChangingBackend())  # type: ignore[arg-type]
         with pytest.raises(LibrarySourceError, match="library_source_changed"):
             with source.materialize("models/a.stl"):
                 pytest.fail("unstable read yielded content")
@@ -515,7 +270,7 @@ class TestOpenDalLibrarySourceAdapter:
                 assert expected == info
                 yield b"abc"
 
-        source = OpenDalLibrarySource(ObservedBackend())  # type: ignore[arg-type]
+        source = RemoteLibrarySource(ObservedBackend())  # type: ignore[arg-type]
         with source.materialize(
             "models/a.stl", expected=SourceEntry("models/a.stl", 3)
         ) as content:
@@ -525,7 +280,7 @@ class TestOpenDalLibrarySourceAdapter:
             )
 
     def test_depth_first_cursor_pages_without_a_recursive_full_listing(self) -> None:
-        source = OpenDalLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
+        source = RemoteLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
 
         first = source.list_page("", cursor=None, limit=1)
         second = source.list_page("", cursor=first.next_cursor, limit=1)
@@ -542,7 +297,7 @@ class TestOpenDalLibrarySourceAdapter:
         assert final.entries == ()
 
     def test_invalid_opendal_inputs_are_rejected(self) -> None:
-        source = OpenDalLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
+        source = RemoteLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="positive"):
             source.list_page("", cursor=None, limit=0)
         with pytest.raises(LibrarySourceError, match="library_source_cursor_invalid"):
@@ -550,11 +305,12 @@ class TestOpenDalLibrarySourceAdapter:
         assert source.list_page("", cursor="[]", limit=1).complete is True
 
         class FailedBackend:
-            def list_source_directory(self, *_args, **_kwargs):
+            @contextmanager
+            def iter_directory(self, *_args, **_kwargs):
                 raise StorageConfigurationError("provider_unavailable")
 
         with pytest.raises(LibrarySourceError, match="provider_unavailable"):
-            OpenDalLibrarySource(FailedBackend()).list_page(  # type: ignore[arg-type]
+            RemoteLibrarySource(FailedBackend()).list_page(  # type: ignore[arg-type]
                 "", cursor=None, limit=1
             )
 
@@ -564,7 +320,7 @@ class TestOpenDalLibrarySourceAdapter:
         sleeps: list[float] = []
         monkeypatch.setattr(library_source.time, "monotonic", lambda: 0.0)
         monkeypatch.setattr(library_source.time, "sleep", sleeps.append)
-        source = OpenDalLibrarySource(  # type: ignore[arg-type]
+        source = RemoteLibrarySource(  # type: ignore[arg-type]
             _DirectoryBackend(), max_metadata_ops_per_second=4
         )
 
@@ -575,7 +331,7 @@ class TestOpenDalLibrarySourceAdapter:
 
     def test_stable_materialization_cleans_the_temporary_copy(self) -> None:
         backend = _StableDirectoryBackend()
-        source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
+        source = RemoteLibrarySource(backend)  # type: ignore[arg-type]
 
         with source.materialize("models/a.stl") as content:
             path = content.path
@@ -586,7 +342,7 @@ class TestOpenDalLibrarySourceAdapter:
 
     def test_materialization_rejects_missing_or_changed_content(self) -> None:
         with pytest.raises(LibrarySourceError, match="library_source_missing"):
-            with OpenDalLibrarySource(  # type: ignore[arg-type]
+            with RemoteLibrarySource(  # type: ignore[arg-type]
                 _StableDirectoryBackend(missing=True)
             ).materialize("missing.stl"):
                 pass
@@ -604,7 +360,7 @@ class TestOpenDalLibrarySourceAdapter:
                 )
 
         with pytest.raises(LibrarySourceError, match="library_source_changed"):
-            with OpenDalLibrarySource(ChangedBackend()).materialize(  # type: ignore[arg-type]
+            with RemoteLibrarySource(ChangedBackend()).materialize(  # type: ignore[arg-type]
                 "changed.stl"
             ):
                 pass
@@ -696,7 +452,7 @@ class TestConnectionResolution:
         captured: list[object] = []
         monkeypatch.setattr(
             library_source,
-            "OpenDALStorageBackend",
+            "remote_io_for",
             lambda spec: captured.append(spec) or SimpleNamespace(),
         )
 
@@ -704,7 +460,7 @@ class TestConnectionResolution:
             self._connection(kind, config, secrets), scan_limits=True
         )
 
-        assert isinstance(source, OpenDalLibrarySource)
+        assert isinstance(source, RemoteLibrarySource)
         assert source.max_metadata_ops_per_second == 4
         assert source.max_bytes_per_second == 8 * 1024 * 1024
         assert len(captured) == 1
@@ -715,7 +471,7 @@ class TestConnectionResolution:
         captured: list[object] = []
         monkeypatch.setattr(
             library_source,
-            "OpenDALStorageBackend",
+            "remote_io_for",
             lambda spec: captured.append(spec) or SimpleNamespace(),
         )
 
@@ -728,7 +484,7 @@ class TestConnectionResolution:
             scan_limits=True,
         )
 
-        assert isinstance(source, OpenDalLibrarySource)
+        assert isinstance(source, RemoteLibrarySource)
         assert source.max_bytes_per_second == 8 * 1024 * 1024
         assert len(captured) == 1
 
@@ -754,13 +510,13 @@ class TestConnectionResolution:
         connection.purpose = StorageConnectionPurpose.BOTH
         monkeypatch.setattr(
             library_source,
-            "OpenDALStorageBackend",
+            "remote_io_for",
             lambda _spec: SimpleNamespace(),
         )
 
         source = library_source.source_from_connection(connection)
 
-        assert isinstance(source, OpenDalLibrarySource)
+        assert isinstance(source, RemoteLibrarySource)
 
     def test_source_guards_precede_any_remote_read(self) -> None:
         mounted = ExternalLibrary(
@@ -893,9 +649,6 @@ class TestConnectionResolution:
 
 class TestSourceHelpers:
     def test_source_helpers_normalize_or_reject_values(self) -> None:
-        assert library_source._json_object('{"answer": 42}') == {"answer": 42}  # noqa: SLF001
-        with pytest.raises(LibrarySourceError, match="storage_connection_invalid"):
-            library_source._json_object("{")  # noqa: SLF001
         with pytest.raises(LibrarySourceError, match="library_source_key_invalid"):
             library_source._safe_key("")  # noqa: SLF001
 
@@ -933,3 +686,86 @@ class _TypedSessionFactory:
                 return rows.get((model, identifier))
 
         yield Session()
+
+
+class TestProductionS3Source:
+    def _source(self, monkeypatch, *, failure=None):
+        from app.services import remote_io_adapters
+
+        calls = []
+
+        class Operator:
+            def capability(self):
+                return SimpleNamespace(read_with_version=True)
+
+            def exists(self, key):
+                return True
+
+            def stat(self, key):
+                if failure == "metadata":
+                    raise OSError("example-secret")
+                return SimpleNamespace(content_length=3, etag="etag", version="v1")
+
+            def open(self, key, mode, **options):
+                calls.append((key, options))
+                if failure == "read":
+                    raise OSError("example-secret")
+                return io.BytesIO(b"abc")
+
+            def list(self, directory):
+                if failure == "list":
+                    raise OSError("example-secret")
+                yield SimpleNamespace(
+                    path="models/a.stl", metadata=self.stat("models/a.stl")
+                )
+
+        monkeypatch.setattr(remote_io_adapters, "_operator_for", lambda _: Operator())
+        connection = StorageConnection(
+            id=7,
+            name="S3 source",
+            kind=LibrarySourceKind.S3,
+            config_json=json.dumps({"bucket": "library", "root": "library-root"}),
+            secret_json=json.dumps({"access_key": "access", "secret_key": "secret"}),
+        )
+        return library_source.source_from_connection(connection), calls
+
+    def test_production_factory_materializes_prefixed_versioned_content(
+        self, monkeypatch
+    ):
+        source, calls = self._source(monkeypatch)
+        page = source.list_page("models", cursor=None, limit=1000)
+        assert page.entries == (
+            SourceEntry("models/a.stl", 3, etag="etag", version_id="v1"),
+        )
+        with source.materialize(
+            page.entries[0].key, expected=page.entries[0]
+        ) as content:
+            assert content.path.read_bytes() == b"abc"
+            path = content.path
+        assert not path.exists()
+        assert calls == [("models/a.stl", {"version": "v1"})]
+
+    @pytest.mark.parametrize("operation", ["list", "read", "metadata"])
+    def test_production_transport_errors_do_not_expose_credentials(
+        self, monkeypatch, operation
+    ):
+        source, _ = self._source(monkeypatch, failure=operation)
+        with pytest.raises(
+            (StorageConfigurationError, LibrarySourceError),
+            match=f"remote_storage_{operation}_failed",
+        ) as failure:
+            if operation == "list":
+                source.list_page("models", cursor=None, limit=1000)
+            else:
+                with source.materialize("models/a.stl"):
+                    pytest.fail("failed remote read was published")
+        assert "example-secret" not in str(failure.value)
+
+    def test_read_bandwidth_limit_survives_transport_extraction(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(library_source.time, "monotonic", lambda: 0.0)
+        monkeypatch.setattr(library_source.time, "sleep", sleeps.append)
+        source = RemoteLibrarySource(_StableDirectoryBackend(), max_bytes_per_second=2)
+        with source.materialize("paced.stl") as content:
+            assert content.path.read_bytes() == b"abc"
+        assert sleeps == [1.5]

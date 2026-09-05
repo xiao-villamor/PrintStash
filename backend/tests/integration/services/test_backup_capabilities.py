@@ -53,9 +53,7 @@ class TestBackupOperations:
             backup_capabilities,
             "destination_for_ownership",
             lambda _: SimpleNamespace(
-                backend=SimpleNamespace(
-                    operator_capabilities=SimpleNamespace(delete_with_version=supported)
-                )
+                backend=SimpleNamespace(exact_deletion=object() if supported else None)
             ),
         )
 

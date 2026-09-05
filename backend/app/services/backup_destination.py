@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -20,12 +20,17 @@ from app.db.models import (
     SystemConfig,
 )
 from app.db.session import get_session_factory
-from app.services.storage_backend import StorageConfigurationError
+from app.services.remote_io import RemoteIO
+from app.services.remote_io_adapters import remote_io_for
+from app.services.storage_backend import (
+    CreationReceipt,
+    StorageConfigurationError,
+    StorageObjectInfo,
+)
 from app.services.storage_connections import (
     StorageConnectionConfigError,
     load_connection_config,
 )
-from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_ownership import provider_ref_for_backend
 from app.services.storage_providers import resolve_transport
 
@@ -59,7 +64,7 @@ class RemoteBackupDestination:
     connection_id: int
     name: str
     provider: str
-    backend: OpenDALStorageBackend
+    backend: RemoteIO
     provider_ref: str
 
     @property
@@ -78,7 +83,7 @@ class RemoteBackupDestination:
             self.backend.check()
         except Exception as exc:
             raise BackupDestinationError("storage_connection_probe_failed") from exc
-        capabilities = self.backend.operator_capabilities
+        capabilities = self.backend.operations
         return {
             "ok": True,
             "provider": self.provider,
@@ -89,12 +94,8 @@ class RemoteBackupDestination:
             },
             "read": bool(getattr(capabilities, "read", False)),
             "write": bool(getattr(capabilities, "write", False)),
-            "conditional_create": bool(
-                getattr(capabilities, "write_with_if_not_exists", False)
-            ),
-            "versioned_delete": bool(
-                getattr(capabilities, "delete_with_version", False)
-            ),
+            "conditional_create": bool(capabilities.conditional_create),
+            "versioned_delete": bool(capabilities.versioned_delete),
         }
 
     def require_owned(self, row: OwnedStorageObject) -> None:
@@ -121,7 +122,12 @@ class RemoteBackupDestination:
     @contextmanager
     def open_owned(self, row: OwnedStorageObject) -> Iterator[BinaryIO]:
         self.require_owned(row)
-        with self.backend.open_reader(row.key) as reader:
+        with self.backend.open_reader(
+            row.key,
+            expected=StorageObjectInfo(
+                size=row.size_bytes or 0, etag=row.etag, version_id=row.version_id
+            ),
+        ) as reader:
             yield reader
         self.require_owned(row)
 
@@ -134,12 +140,17 @@ class RemoteBackupDestination:
         try:
             with destination.open("xb") as output:
                 created = True
-                for chunk in self.backend.stream_chunks(row.key):
-                    written += len(chunk)
-                    if written > row.size_bytes:
-                        raise BackupDestinationError("backup_download_digest_mismatch")
-                    output.write(chunk)
-                    digest.update(chunk)
+                with self.open_owned(row) as reader:
+                    while chunk := reader.read(
+                        min(1024 * 1024, row.size_bytes - written + 1)
+                    ):
+                        written += len(chunk)
+                        if written > row.size_bytes:
+                            raise BackupDestinationError(
+                                "backup_download_digest_mismatch"
+                            )
+                        output.write(chunk)
+                        digest.update(chunk)
             self.require_owned(row)
             if written != row.size_bytes or digest.hexdigest() != row.sha256:
                 raise BackupDestinationError("backup_download_digest_mismatch")
@@ -152,6 +163,44 @@ class RemoteBackupDestination:
                 raise
             raise BackupDestinationError("backup_remote_read_failed") from exc
 
+    def publish_file(
+        self, session, key: str, source: Path, *, sha256: str
+    ) -> CreationReceipt:
+        """Reserve and commit a replica without borrowing managed creation authority."""
+        from app.services.storage_ownership import (
+            _require_publication_before_sqlite_dml,
+            complete_publication,
+            fail_publication,
+            reserve_creation,
+        )
+
+        _require_publication_before_sqlite_dml(session)
+        reservation_id = reserve_creation(
+            session,
+            self.backend,
+            key,
+            object_kind="backup",
+            expected_size=source.stat().st_size,
+            sha256=sha256,
+            provider_ref=self.provider_ref,
+        )
+        try:
+            with source.open("rb") as reader:
+                receipt = self.backend.publish_replica(reader, key)
+        except Exception as exc:
+            fail_publication(session, reservation_id, exc)
+            raise
+        receipt = replace(receipt, provider_ref=self.provider_ref)
+        complete_publication(
+            session,
+            reservation_id,
+            receipt,
+            object_kind="backup",
+            sha256=sha256,
+            provider_ref=self.provider_ref,
+        )
+        return receipt
+
     def delete_owned(self, row: OwnedStorageObject) -> bool:
         """Delete only through an immutable version identity.
 
@@ -161,9 +210,12 @@ class RemoteBackupDestination:
         """
         if not row.version_id or row.version_id == "null":
             return False
+        extension = self.backend.exact_deletion
+        if extension is None:
+            return False
         self.require_owned(row)
         try:
-            self.backend.delete_versioned(row.key, row.version_id)
+            extension.delete_versioned(row.key, row.version_id)
         except StorageConfigurationError:
             return False
         return True
@@ -178,7 +230,7 @@ def destination_from_connection(
         raise BackupDestinationError("storage_connection_not_backup")
     try:
         parsed = load_connection_config(connection)
-        backend = OpenDALStorageBackend(resolve_transport(parsed))
+        backend = remote_io_for(resolve_transport(parsed))
     except StorageConfigurationError as exc:
         if str(exc) == "gdrive_transport_unavailable":
             raise BackupDestinationError(str(exc)) from exc

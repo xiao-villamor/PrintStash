@@ -46,10 +46,21 @@ class _Backend:
         yield self.payload[3:]
 
     @contextmanager
-    def open_reader(self, _key: str):
-        from io import BytesIO
+    def open_reader(self, _key: str, *, expected=None):
+        from io import BufferedReader
 
-        yield BytesIO(self.payload)
+        from app.services.remote_io_adapters import _ChunkReader
+
+        with BufferedReader(_ChunkReader(self.stream_chunks(_key))) as reader:
+            yield reader
+
+    @property
+    def operations(self):
+        from app.services.remote_io import RemoteCapabilities
+
+        return RemoteCapabilities(False, False, False, False, False, False)
+
+    exact_deletion = None
 
     @property
     def operator_capabilities(self):
@@ -276,7 +287,7 @@ class TestDestinationFromConnection:
     ) -> None:
         monkeypatch.setattr(
             backup_destination,
-            "OpenDALStorageBackend",
+            "remote_io_for",
             lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
         )
         monkeypatch.setattr(
@@ -306,7 +317,7 @@ class TestDestinationFromConnection:
     def test_accepts_a_shared_connection(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             backup_destination,
-            "OpenDALStorageBackend",
+            "remote_io_for",
             lambda _spec: SimpleNamespace(source_namespace="gdrive/PrintStash"),
         )
         monkeypatch.setattr(

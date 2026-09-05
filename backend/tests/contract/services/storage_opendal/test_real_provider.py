@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.library_source import OpenDalLibrarySource
+from app.services.library_source import RemoteLibrarySource
 from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,
@@ -84,7 +84,7 @@ class TestOpenDALStorageBackend:
             backend.move(key, "contract-sftp/nested/moved.stl")
 
 
-class TestOpenDalLibrarySource:
+class TestRemoteLibrarySource:
     @pytest.mark.critical
     @pytest.mark.parametrize("provider", ["nextcloud", "sftp"])
     def test_real_provider_content_is_materializable(self, provider: str) -> None:
@@ -123,7 +123,7 @@ class TestOpenDalLibrarySource:
         key = f"source-contract-{provider}/models/part.gcode"
         payload = b"G1 X20 Y20\n"
         backend.create_bytes(payload, key)
-        source = OpenDalLibrarySource(backend)
+        source = RemoteLibrarySource(backend)
 
         page = source.list_page("models", cursor=None, limit=1000)
 

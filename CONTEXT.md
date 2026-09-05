@@ -187,6 +187,16 @@ thumbnails and metadata are stored by the Vault. Opt-in and OFF by default
 (`SystemConfig.external_libraries_enabled`). Owned by
 `services/external_library`. The UI calls these **Library sources**.
 
+**Remote I/O**:
+The typed `RemoteIO` interface serves remote Library sources and backup replicas.
+OpenDAL and AsyncSSH adapters own metadata, context-managed streaming readers,
+incremental directory iterators, and replica publication. A replica receipt
+records publication observations; it does not promise atomic managed creation.
+Create-only publication and immutable-version deletion are separate capability
+extensions. SFTP prevents competing creation but can expose a partial winning
+upload; Google Drive does not provide managed create-only publication. Native
+Local and S3 Vault backends keep the `StorageBackend` interface.
+
 **Storage connection**:
 A reusable remote-location profile. Non-secret configuration is stored separately
 from encrypted credentials, and API reads never return secret values. A
