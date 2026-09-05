@@ -15,7 +15,7 @@ export default defineConfig({
   testDir: "./tests/e2e-real",
   // Storage-provider setup owns a separate throwaway backend and WebDAV
   // server; including it here would point it at this already-configured app.
-  testIgnore: ["storage/**/*.spec.ts", "critical/**/*.spec.ts"],
+  testIgnore: ["storage/**/*.spec.ts", "critical/**/*.spec.ts", "onboarding/**/*.spec.ts"],
   // Generous: some specs upload a file and wait on real async ingestion.
   timeout: 120_000,
   expect: { timeout: 15_000 },
@@ -38,7 +38,7 @@ export default defineConfig({
       timeout: 240_000,
       env: {
         PLAYWRIGHT_REAL_API_PORT: String(apiPort),
-        VAULT_SETUP_TOKEN: "playwright-setup-token-123",
+        VAULT_SETUP_MODE: "trusted_network",
       },
     },
     {

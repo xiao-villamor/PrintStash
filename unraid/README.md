@@ -127,9 +127,9 @@ path:
 3. Adjust volume paths to `/mnt/user/appdata/printstash/...` if you like. You do
    not need to set `VAULT_JWT_SECRET`; the API generates and persists one on first
    boot.
-4. Compose up, then read the first-run setup token out of the API log
-   (`docker logs printstash-api | grep "setup token"`) and open
-   `http://<server-ip>:3000`.
+4. Compose up on a trusted network, open `http://<server-ip>:3000`, and create
+   your local administrator account in the browser. The first person to finish
+   registration becomes the administrator.
 
 ---
 
@@ -145,7 +145,7 @@ tiers and environment-only setup caveats:
 | Variable | Container | Required | Notes |
 |----------|-----------|----------|-------|
 | `VAULT_JWT_SECRET` | API | – | Signs auth tokens. Generated and persisted on first boot if you leave it alone; set it (`openssl rand -hex 32`) only to own the value. Do not add it as an empty template variable, which is read as a deliberate choice and skips the generated secret. |
-| `VAULT_SETUP_TOKEN` | API | – | First-run credential for the setup wizard. Unset means the API logs a random one per process while the vault is unconfigured; set it for a token that survives a container restart. |
+| `VAULT_SETUP_MODE` | API | `disabled` | Set `trusted_network` for initial browser registration on a trusted network. Local Compose enables it. Existing accounts permanently close registration. |
 | `VAULT_MAX_UPLOAD_MB` | API | – | Max upload size in MB (default `512`). |
 | `NGINX_CLIENT_MAX_BODY_SIZE` | Frontend | – | Keep in sync with the above, e.g. `512m`. |
 | `VAULT_BACKUP_RETENTION_DAYS` | API | – | `0` keeps backups forever. |

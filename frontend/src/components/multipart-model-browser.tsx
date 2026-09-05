@@ -948,6 +948,7 @@ function PartEditorRow({
   part,
   index,
   onName,
+  onQuantity,
   onRemoveModel,
   onRemovePart,
   onOpenPicker,
@@ -958,6 +959,7 @@ function PartEditorRow({
   part: MultipartPartRead;
   index: number;
   onName: (name: string) => void;
+  onQuantity: (quantity: number) => void;
   onRemoveModel: (choiceId: number | undefined, modelId: number) => void;
   onRemovePart: () => void;
   onOpenPicker: () => void;
@@ -991,6 +993,16 @@ function PartEditorRow({
             className="mt-1"
           />
         </div>
+        <label className="col-start-2 space-y-1 text-xs text-muted-foreground">
+          {t("build.quantity")}
+          <Input
+            type="number"
+            min={1}
+            max={10000}
+            value={part.quantity}
+            onChange={(event) => onQuantity(Number(event.target.value))}
+          />
+        </label>
         <div className="col-start-2 flex items-center gap-1 sm:col-start-3 sm:row-start-1">
           <Button
             type="button"
@@ -1152,6 +1164,7 @@ export function MultipartModelDetailPage() {
           ...base.parts,
           {
             id: -Date.now(),
+            quantity: 1,
             name: t("multipart.partNumber", { number: String(base.parts.length + 1) }),
             sort_order: base.parts.length,
             models: [candidate],
@@ -1283,6 +1296,7 @@ export function MultipartModelDetailPage() {
         cover_image_url: model.cover_image_url,
         parts: model.parts.map((part) => ({
           name: part.name.trim(),
+          quantity: part.quantity,
           choices: part.models.map((member) => {
             return { model_id: member.id, choice_id: member.choice_id ?? undefined };
           }),
@@ -1421,9 +1435,14 @@ export function MultipartModelDetailPage() {
             </Button>
           </div>
         ) : canEdit ? (
-          <Button type="button" size="sm" onClick={beginEditing}>
-            <Pencil className="h-4 w-4" /> {t("multipart.edit")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link className="text-sm text-primary underline" href={`/builds?multipart=${model.id}`}>
+              {t("build.create")}
+            </Link>
+            <Button type="button" size="sm" onClick={beginEditing}>
+              <Pencil className="h-4 w-4" /> {t("multipart.edit")}
+            </Button>
+          </div>
         ) : undefined}
       </header>
       {isEditing ? (
@@ -1462,6 +1481,9 @@ export function MultipartModelDetailPage() {
                   part={part}
                   index={index}
                   onName={(name) => updatePart(index, (current) => ({ ...current, name }))}
+                  onQuantity={(quantity) =>
+                    updatePart(index, (current) => ({ ...current, quantity }))
+                  }
                   onMoveUp={() => movePart(index, -1)}
                   onMoveDown={() => movePart(index, 1)}
                   canMoveDown={index < model.parts.length - 1}

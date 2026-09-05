@@ -13,10 +13,12 @@ manufacturing platform.
   Vault G-code, explicit send-to-print, and pause/resume/cancel controls.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
-- Multipart Models currently reference existing Models as named pieces and
-  alternatives. They do not encode quantities, compatibility rules between
-  pieces, or selectable G-code revisions. Models and their files remain in the
-  main Models view; deleting a Multipart Model removes only the grouping.
+- Multipart Models reference existing Models as named pieces and alternatives.
+  `Unreleased` adds quantities and [manufacturing builds](multipart-builds.md)
+  with selected Revisions and confirmed physical output. Compatibility rules
+  between pieces, mixed-piece plates and automatic physical reprints remain
+  outside this workflow. Models and their files remain in the main Models view;
+  deleting a Multipart Model removes only the grouping.
   Members that are trashed or inaccessible remain visible as unavailable in the
   grouping until they are restored or replaced.
 - PrusaLink local FDM support is beta. Digest and legacy API-key authentication,

@@ -255,9 +255,11 @@ async function pollScanJob(
 
 export function ExternalLibrariesPanel({
   canEdit,
+  initialRootPath = "",
   api = VAULT_API,
 }: {
   canEdit: boolean;
+  initialRootPath?: string;
   api?: ExternalLibrariesApi;
 }) {
   const [enabled, setEnabled] = useState(false);
@@ -272,7 +274,7 @@ export function ExternalLibrariesPanel({
 
   // Add-library draft.
   const [name, setName] = useState("");
-  const [rootPath, setRootPath] = useState("");
+  const [rootPath, setRootPath] = useState(initialRootPath);
   const [sourceKind, setSourceKind] = useState<LibrarySourceKind>("mounted");
   const [connectionId, setConnectionId] = useState<number | "">("");
   const [sourcePrefix, setSourcePrefix] = useState("");

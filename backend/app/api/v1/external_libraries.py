@@ -1,7 +1,8 @@
 """External library (NAS folder mirroring) management — superuser only.
 
-Every endpoint is gated by the ``external_libraries_enabled`` opt-in switch; when
-it is off the whole router responds 404 ``feature_disabled``.
+Source operations are gated by the ``external_libraries_enabled`` opt-in switch; when
+it is off source operations respond 404 ``feature_disabled``. Mount discovery
+is an authenticated read available before opting in.
 """
 
 from __future__ import annotations
@@ -218,6 +219,23 @@ def _to_read(lib: ExternalLibrary) -> LibraryRead:
         last_scan_status=lib.last_scan_status.value if lib.last_scan_status else None,
         last_scan_summary=summary,
     )
+
+
+@router.get(
+    "/locations", response_model=list[str], dependencies=[Depends(require_superuser)]
+)
+def discover_locations(session: Session = Depends(get_session)) -> list[str]:
+    """Show usable mounted folders before the explicit Library sources opt-in."""
+    from app.services.library_locations import mounted_directories
+
+    locations = []
+    for path in mounted_directories():
+        try:
+            _validate_root_path(str(path), session)
+        except HTTPException:
+            continue
+        locations.append(str(path))
+    return locations
 
 
 @router.get(

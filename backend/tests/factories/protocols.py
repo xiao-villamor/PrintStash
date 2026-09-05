@@ -39,8 +39,13 @@ from app.db.models import (
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
+    MultipartBuild,
+    MultipartBuildAttempt,
+    MultipartBuildConfirmation,
+    MultipartBuildPart,
     MultipartModel,
     MultipartModelStar,
+    MultipartPart,
     OwnedStorageObject,
     Printer,
     PrinterFile,
@@ -368,3 +373,33 @@ __all__ = [
     "TagFile",
     "UserHeaders",
 ]
+
+
+class MakeMultipartPart(Protocol):
+    def __call__(
+        self, composition: MultipartModel, name: str = "Leg", **overrides: Any
+    ) -> MultipartPart: ...
+
+
+class MakeMultipartBuild(Protocol):
+    def __call__(
+        self, composition: MultipartModel, **overrides: Any
+    ) -> MultipartBuild: ...
+
+
+class MakeMultipartBuildPart(Protocol):
+    def __call__(
+        self, build: MultipartBuild, model: Model, **overrides: Any
+    ) -> MultipartBuildPart: ...
+
+
+class MakeMultipartBuildAttempt(Protocol):
+    def __call__(
+        self, part: MultipartBuildPart, job: PrintJob, **overrides: Any
+    ) -> MultipartBuildAttempt: ...
+
+
+class MakeMultipartBuildConfirmation(Protocol):
+    def __call__(
+        self, attempt: MultipartBuildAttempt, **overrides: Any
+    ) -> MultipartBuildConfirmation: ...

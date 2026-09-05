@@ -150,6 +150,8 @@ export type {
 
 export type {
   SetupStatus,
+  SetupStorageRequest,
+  SetupStorageCheck,
   SetupRequest,
   SetupResponse,
   VaultConfigRead,

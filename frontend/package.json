@@ -22,7 +22,7 @@
     "coverage": "pnpm test:coverage && pnpm --filter @printstash/domain test:coverage && pnpm --filter @printstash/ui test:coverage && node scripts/coverage-gate.mjs",
     "test:e2e": "playwright test",
     "test:e2e:bundle": "PLAYWRIGHT_BUNDLED_DEV=1 playwright test",
-    "test:e2e:real": "playwright test --config=playwright.real.config.ts",
+    "test:e2e:real": "playwright test --config=playwright.real.config.ts && playwright test --config=playwright.onboarding.config.ts && PLAYWRIGHT_ONBOARDING_LOST_RESPONSE=1 playwright test --config=playwright.onboarding.config.ts",
     "test:e2e:critical": "playwright test --config=playwright.real.config.ts --grep @critical && playwright test --config=playwright.storage.config.ts --grep @critical && playwright test --config=playwright.critical-backup.config.ts --grep @critical",
     "test:e2e:storage": "playwright test --config=playwright.storage.config.ts",
     "test:perf": "playwright test --config=playwright.performance.config.ts",

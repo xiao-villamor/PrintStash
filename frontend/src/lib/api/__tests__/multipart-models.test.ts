@@ -72,6 +72,7 @@ describe("multipart model wire contract", () => {
       parts: [
         {
           name: "Base",
+          quantity: 1,
           choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }],
         },
       ],
@@ -83,7 +84,9 @@ describe("multipart model wire contract", () => {
       collection_id: 3,
       cover_model_id: 8,
       cover_image_url: "https://images.example.test/desk.webp",
-      parts: [{ name: "Base", choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }] }],
+      parts: [
+        { name: "Base", quantity: 1, choices: [{ model_id: 7 }, { model_id: 8, choice_id: 33 }] },
+      ],
     });
   });
 

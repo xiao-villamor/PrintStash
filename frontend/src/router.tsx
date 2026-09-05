@@ -30,9 +30,11 @@ function lazyImport<T extends { default: React.ComponentType }>(factory: () => P
 
 const HomePage = lazyImport(() => import("@/pages/home"));
 const ModelDetailPage = lazyImport(() => import("@/pages/model-detail"));
+const MultipartBuildsPage = lazyImport(() => import("@/pages/multipart-builds"));
 const MultipartModelDetailPage = lazyImport(() => import("@/pages/multipart-model-detail"));
 const DocumentDetailPage = lazyImport(() => import("@/pages/document-detail"));
 const LoginPage = lazyImport(() => import("@/pages/login"));
+const GettingStartedPage = lazyImport(() => import("@/pages/getting-started"));
 const SetupPage = lazyImport(() => import("@/pages/setup"));
 const ProfilesPage = lazyImport(() => import("@/pages/profiles"));
 const StatisticsPage = lazyImport(() => import("@/pages/statistics"));
@@ -83,6 +85,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "builds/:id?",
+        element: (
+          <RouteChunk>
+            <MultipartBuildsPage />
+          </RouteChunk>
+        ),
+      },
+      {
         path: "multipart-models/:id",
         element: (
           <RouteChunk>
@@ -103,6 +113,14 @@ export const router = createBrowserRouter([
         element: (
           <RouteChunk>
             <LoginPage />
+          </RouteChunk>
+        ),
+      },
+      {
+        path: "getting-started",
+        element: (
+          <RouteChunk>
+            <GettingStartedPage />
           </RouteChunk>
         ),
       },

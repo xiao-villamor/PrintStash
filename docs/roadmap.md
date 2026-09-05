@@ -8,10 +8,12 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Release candidate: 0.13.0, storage safety and capture provenance
+## Published: 0.13.0, storage safety and capture provenance
 
-The latest tagged release remains 0.12.1. Version 0.13.0 is merged to `main` and
-has passed CI; its release tag and images are still pending. The app is useful
+[Version 0.13.0 is published](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0),
+including full and lite API images and a frontend image for amd64 and arm64.
+Changes merged afterward remain under [Unreleased](../CHANGELOG.md#unreleased)
+until their own release is published. The app is useful
 for local-first 3D print library workflows and installs through Docker Compose.
 SQLite plus local filesystem storage remain the default path. Postgres,
 S3/R2-compatible storage, cloud backups, and provider adapters are optional.

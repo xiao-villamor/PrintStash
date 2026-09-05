@@ -40,14 +40,14 @@ usable for local libraries and Moonraker/Klipper workflows, with Docker Compose
 as the primary install path. SQLite plus local disk is the default; Postgres and
 S3/R2-compatible storage are optional.
 
-PrintStash 0.13.0 is merged to `main` and has passed CI. The release tag and
-images are still pending. It adds runtime-probed storage safety tiers, reusable
+PrintStash [0.13.0 is published](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0),
+with full and lite API images and a frontend image for amd64 and arm64. It adds runtime-probed storage safety tiers, reusable
 remote storage connections, paired-browser marketplace capture with Model
 Source provenance, richer Bambu LAN history evidence, Multipart Models, and
 safer 3MF/STL preview handling. Read the
 [0.13.0 changelog](./CHANGELOG.md#0130) and
-[upgrade notes](./UPGRADE.md#0130-notes) before testing an upgrade. Keep 0.12.1
-in service until the 0.13.0 tag and images are published.
+[upgrade notes](./UPGRADE.md#0130-notes) before upgrading. Changes on `main`
+after that release are listed under [Unreleased](./CHANGELOG.md#unreleased).
 
 Hardware reports, parser fixtures, install notes, docs fixes, and UX feedback
 are welcome in
@@ -234,14 +234,12 @@ docker compose up -d
 ```
 
 Open **[http://localhost:3000](http://localhost:3000)** (or
-`http://<server-ip>:3000` from another machine). Get the first-login setup token:
-
-```bash
-docker compose logs api | grep "setup token"
-```
-
-Paste it into the setup wizard to create your admin account. There is no default
-username or password. Restarting the API before setup generates a new token.
+`http://<server-ip>:3000` from another machine) on a trusted network. Create your
+local administrator account, check where uploads will be stored, then upload
+models or connect an existing folder. There is no default username or password
+and no credential to retrieve from a console in the Unreleased source build.
+Version 0.13.0 images retain the previous setup wizard until the next minor release. The first person to complete setup
+becomes the administrator; restrict access to the installation until then.
 
 The simple deployment uses the full prebuilt images, SQLite, and persistent
 Docker volumes. No `.env`, build step, PostgreSQL, or S3 service is needed.

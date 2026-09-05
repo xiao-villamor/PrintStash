@@ -4,6 +4,7 @@ import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import {
   Box,
+  Layers,
   SlidersHorizontal,
   LogIn,
   LogOut,
@@ -32,6 +33,7 @@ type NavItem = {
 
 const mainItems: NavItem[] = [
   { href: "/", labelKey: "nav.vault", icon: Box },
+  { href: "/builds", labelKey: "build.title", icon: Layers },
   { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
   { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
 ];

@@ -14,6 +14,7 @@ services:
     image: ghcr.io/xiao-villamor/printstash-api:${PRINTSTASH_VERSION:-latest}
     restart: unless-stopped
     environment:
+      VAULT_SETUP_MODE: trusted_network
       VAULT_RESTART_ENABLED: "true"
     volumes:
       - printstash_data:/data/files

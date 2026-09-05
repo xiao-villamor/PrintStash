@@ -257,3 +257,136 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     ...override,
   };
 }
+
+/** A local model detail with no revisions until a test selects one explicitly. */
+export function aModel(
+  override?: Partial<import("@/types").ModelRead>,
+): import("@/types").ModelRead {
+  return {
+    id: 1,
+    name: "Leg",
+    slug: "leg",
+    hash: "a".repeat(64),
+    collection: null,
+    collection_id: null,
+    description: null,
+    source_url: null,
+    effective_role: "admin",
+    tags: [],
+    thumbnail_url: null,
+    created_at: FROZEN_NOW,
+    updated_at: FROZEN_NOW,
+    files: [],
+    starred: false,
+    ...override,
+  };
+}
+
+export function aRevision(
+  override?: Partial<import("@/types").FileRead>,
+): import("@/types").FileRead {
+  return {
+    id: 1,
+    model_id: 1,
+    original_filename: "leg.gcode",
+    file_type: "gcode",
+    version: 1,
+    size_bytes: 128,
+    sha256: "a".repeat(64),
+    revision_status: null,
+    revision_notes: null,
+    is_recommended: false,
+    uploaded_at: FROZEN_NOW,
+    metadata: null,
+    tags: [],
+    ...override,
+  };
+}
+
+export function aBuildAttempt(
+  override?: Partial<import("@/types/multipart-builds").MultipartBuildAttempt>,
+): import("@/types/multipart-builds").MultipartBuildAttempt {
+  return {
+    id: 1,
+    job_id: 1,
+    historical_job_id: 1,
+    revision_id: 1,
+    planned_units: 4,
+    valid_units: null,
+    suggested_valid_units: 0,
+    state: "failed",
+    version: 0,
+    ...override,
+  };
+}
+
+export function aBuildPart(
+  override?: Partial<import("@/types/multipart-builds").MultipartBuildPart>,
+): import("@/types/multipart-builds").MultipartBuildPart {
+  return {
+    id: 1,
+    name: "Leg",
+    quantity: 4,
+    required_units: 4,
+    valid_units: 0,
+    missing_units: 4,
+    active_units: 0,
+    unreviewed_units: 0,
+    unreserved_units: 4,
+    selected_model_id: 1,
+    selected_choice_id: 1,
+    revision_id: 1,
+    queueable: true,
+    choices: [{ choice_id: 1, model_id: 1, name: "Leg", available: true }],
+    attempts: [],
+    ...override,
+  };
+}
+
+export function aBuild(
+  override?: Partial<import("@/types/multipart-builds").MultipartBuild>,
+): import("@/types/multipart-builds").MultipartBuild {
+  return {
+    id: 1,
+    name: "Kitchen table",
+    composition_name: "Table",
+    multipart_model_id: 1,
+    object_quantity: 1,
+    version: 0,
+    effective_role: "admin",
+    archived_at: null,
+    created_at: FROZEN_NOW,
+    completed: false,
+    parts: [aBuildPart()],
+    ...override,
+  };
+}
+
+export function aMultipartModel(
+  override?: Partial<import("@/types/multipart-models").MultipartModelRead>,
+): import("@/types/multipart-models").MultipartModelRead {
+  return {
+    id: 7,
+    name: "Table",
+    slug: "table",
+    description: null,
+    collection: null,
+    collection_id: null,
+    part_count: 1,
+    model_count: 1,
+    guide_count: 0,
+    cover_model_id: null,
+    cover_image_url: null,
+    cover_image_uploaded: false,
+    cover_thumbnail_url: null,
+    member_model_ids: [1],
+    tags: [],
+    starred: false,
+    effective_role: "admin",
+    updated_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    parts: [],
+    guides: [],
+    ...override,
+  };
+}

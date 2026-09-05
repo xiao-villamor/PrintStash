@@ -24,7 +24,7 @@ export default defineConfig({
       env: {
         PLAYWRIGHT_STORAGE_API_PORT: String(apiPort),
         PLAYWRIGHT_STORAGE_WEBDAV_PORT: String(webdavPort),
-        VAULT_SETUP_TOKEN: "playwright-critical-backup-token",
+        VAULT_SETUP_MODE: "trusted_network",
       },
     },
     {

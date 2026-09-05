@@ -26,7 +26,6 @@ from app.db.models import File, PrintJobState
 from app.db.session import SQLiteSessionFactory, override_session_factory
 from app.schemas.provenance import CaptureManifestV2
 from app.services import provenance, storage_backend
-from app.services.setup_token import current_setup_token
 from tests.factories import print_job_config
 from tests.paths import FIXTURES_DIR
 
@@ -36,10 +35,12 @@ FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
 async def _setup_instance(
     api, tmp_path: Path, *, name: str, username: str
 ) -> dict[str, str]:
+    preparation = await api.post("/api/v1/setup/session")
+    assert preparation.status_code == 200, preparation.text
+    api.headers["X-PrintStash-Setup-CSRF"] = preparation.json()["csrf"]
     r = await api.post(
         "/api/v1/setup",
         json={
-            "setup_token": current_setup_token(),
             "username": username,
             "password": "Password123",
             "storage_backend": "local",

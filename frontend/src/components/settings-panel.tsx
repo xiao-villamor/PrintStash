@@ -1556,6 +1556,11 @@ export function SettingsPanel() {
   return (
     <Localized>
       <div className="w-full space-y-6">
+        {user?.is_superuser && (
+          <Button variant="outline" onClick={() => router.push("/getting-started")}>
+            {t("setup.resume")}
+          </Button>
+        )}
         <ConfirmModal
           open={restartConfirmOpen}
           onClose={() => {

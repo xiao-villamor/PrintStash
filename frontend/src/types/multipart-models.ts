@@ -44,6 +44,7 @@ export interface MultipartModelListItem {
 }
 
 export interface MultipartPartRead {
+  quantity: number;
   id: number;
   name: string;
   sort_order: number;
@@ -75,6 +76,7 @@ export interface MultipartPartsWrite {
   cover_image_url: string | null;
   parts: Array<{
     name: string;
+    quantity: number;
     choices: Array<{ model_id: number; choice_id?: number }>;
   }>;
 }

@@ -457,11 +457,9 @@ jobs:
         shell: bash
         run: |
           capture_root="$(mktemp -d "${RUNNER_TEMP}/printstash-capture.XXXXXX")"
-          setup_token="$(openssl rand -hex 32)"
           echo "PRINTSTASH_EXTENSION_CAPTURE_BASE_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
-          echo "PRINTSTASH_EXTENSION_CAPTURE_SETUP_TOKEN=$setup_token" >> "$GITHUB_ENV"
           echo "PRINTSTASH_EXTENSION_CAPTURE_ROOT=$capture_root" >> "$GITHUB_ENV"
-          VAULT_SETUP_TOKEN="$setup_token" \
+          VAULT_SETUP_MODE=trusted_network \
           VAULT_DB_URL="sqlite:///${capture_root}/printstash.sqlite" \
           VAULT_DATA_DIR="$capture_root/files" \
           VAULT_THUMB_DIR="$capture_root/thumbs" \

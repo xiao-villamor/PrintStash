@@ -41,8 +41,13 @@ from tests.factories.protocols import (
     MakeFile,
     MakeInboxItem,
     MakeModel,
+    MakeMultipartBuild,
+    MakeMultipartBuildAttempt,
+    MakeMultipartBuildConfirmation,
+    MakeMultipartBuildPart,
     MakeMultipartModel,
     MakeMultipartModelStar,
+    MakeMultipartPart,
     MakeOwnedStorageObject,
     MakePrinter,
     MakePrinterFile,
@@ -435,3 +440,35 @@ __all__ = [
     "tag_file",
     "user_headers",
 ]
+
+
+@pytest.fixture
+def make_multipart_part(db_session: Session) -> MakeMultipartPart:
+    """Session-bound manufacturing history builder."""
+    return _bound(factories.build_multipart_part, db_session)
+
+
+@pytest.fixture
+def make_multipart_build(db_session: Session) -> MakeMultipartBuild:
+    """Session-bound manufacturing history builder."""
+    return _bound(factories.build_multipart_build, db_session)
+
+
+@pytest.fixture
+def make_multipart_build_part(db_session: Session) -> MakeMultipartBuildPart:
+    """Session-bound manufacturing history builder."""
+    return _bound(factories.build_multipart_build_part, db_session)
+
+
+@pytest.fixture
+def make_multipart_build_attempt(db_session: Session) -> MakeMultipartBuildAttempt:
+    """Session-bound manufacturing history builder."""
+    return _bound(factories.build_multipart_build_attempt, db_session)
+
+
+@pytest.fixture
+def make_multipart_build_confirmation(
+    db_session: Session,
+) -> MakeMultipartBuildConfirmation:
+    """Session-bound manufacturing history builder."""
+    return _bound(factories.build_multipart_build_confirmation, db_session)

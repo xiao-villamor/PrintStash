@@ -16,7 +16,6 @@ import pytest
 from botocore.config import Config as BotoConfig
 
 from app.core.config import settings
-from app.services.setup_token import current_setup_token
 from app.services.storage_backend import init_backend
 from app.services.storage_opendal import OpenDALStorageBackend
 from app.services.storage_providers import SFTPProviderConfig, resolve_transport
@@ -100,7 +99,6 @@ class TestRemoteBackup:
         setup = await api.post(
             "/api/v1/setup",
             json={
-                "setup_token": current_setup_token(),
                 "username": "owner",
                 "password": "Password123",
                 "storage_backend": "local",

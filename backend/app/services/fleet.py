@@ -21,6 +21,7 @@ from app.db.models import (
     MaterialSlotState,
     MaterialSource,
     Metadata,
+    MultipartBuildAttempt,
     OperatorGateState,
     PrintBatch,
     Printer,
@@ -561,6 +562,8 @@ def create_batch(
     session: Session,
     payload: BatchCreate,
     current_user: User,
+    *,
+    commit: bool = True,
 ) -> tuple[PrintBatch, list[PrintJob]]:
     if payload.quantity > settings.fleet_batch_max_quantity:
         raise FleetError("batch_quantity_exceeds_limit")
@@ -655,7 +658,10 @@ def create_batch(
             snapshot.active_counts[printer_id] = (
                 snapshot.active_counts.get(printer_id, 0) + 1
             )
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     session.refresh(batch)
     for job in jobs:
         session.refresh(job)
@@ -877,6 +883,15 @@ def retry_queue_job(session: Session, job_id: int, current_user: User) -> PrintJ
     job = session.get(PrintJob, job_id)
     if job is None or job.deleted_at is not None:
         raise FleetError("queue_job_not_found")
+    if (
+        session.exec(
+            select(MultipartBuildAttempt.id).where(
+                MultipartBuildAttempt.job_id == job_id
+            )
+        ).first()
+        is not None
+    ):
+        raise FleetError("build_reprint_requires_new_job")
     if job.state != PrintJobState.FAILED or not job.retryable:
         raise FleetError("queue_job_not_retryable")
     requested_printer_id = (

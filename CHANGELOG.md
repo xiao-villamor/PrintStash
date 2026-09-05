@@ -21,11 +21,22 @@
   Publication, verification and retry history are reported separately in Settings
   and operational health.
 
+- Multipart builds snapshot part quantities and selected Revisions for a concrete
+  manufacturing run. Linked print jobs reserve units; explicit usable-output
+  confirmations track missing pieces and retain previous physical attempts.
+  Builds can be duplicated with fresh results or archived with their history.
+
 - Remote Library discovery streams large directories into a durable inventory.
   Completed pages resume without rereading the directory, interrupted discovery
   cannot remove linked Artifacts, and transport deadlines bound stalled requests.
   Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
   benchmarks cover 1,000, 10,000 and 100,000 entries.
+
+- Browser-based first-owner registration on explicitly enabled trusted networks,
+  with a guided account, storage-check and first-model flow. Local Compose no
+  longer requires a setup credential from API logs. Database serialization
+  prevents competing API processes from creating multiple initial administrators;
+  authenticated recovery preserves an account when storage preparation is pending.
 
 - A minimal, standalone Compose file for local deployment, with optional settings
   and customization examples in a separate deployment guide.
@@ -71,6 +82,8 @@
   indexing, so a truncated first read cannot create an Artifact from partial bytes.
 
 ## 0.13.0
+
+[Published September 4, 2026](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0).
 
 **Back up before upgrading. This release includes additive database migrations
 and storage configuration/safety changes. Existing S3-compatible buckets must
