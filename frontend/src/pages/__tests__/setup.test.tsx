@@ -234,6 +234,29 @@ beforeEach(() => {
 });
 
 describe("SetupPage", () => {
+  it.each([
+    ["unavailable", "Requires the full image"],
+    ["unknown", "Choose an available storage provider."],
+  ])("refuses a storage check for an %s provider", async (kind, message) => {
+    vi.mocked(deps.getSetupStatus).mockResolvedValue({
+      ...status,
+      current_storage_provider: kind === "unknown" ? "removed-provider" : "s3",
+      current_storage_backend: "s3",
+    });
+    vi.mocked(deps.getStorageProviders).mockResolvedValue(
+      providers.map((provider) =>
+        provider.id === "s3"
+          ? { ...provider, available: false, selectable: false, disabled_reason: message }
+          : provider,
+      ),
+    );
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(deps.checkSetupStorage).not.toHaveBeenCalled();
+    expect(deps.completeSetup).not.toHaveBeenCalled();
+  });
+
   it("focuses the first invalid account field", async () => {
     renderSetup();
     await screen.findByLabelText("Username");

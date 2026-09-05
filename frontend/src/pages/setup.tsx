@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { storeLogin } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { SetupFrame } from "@/components/setup-frame";
+import { providerFormError } from "@/lib/storage-provider-form";
 import { formatBytes } from "@/lib/format";
 import type { SetupStatus, SetupStorageCheck, StorageProvider } from "@/types";
 
@@ -145,6 +146,15 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
     };
   }
   async function checkStorage() {
+    const provider = providers.find((item) => item.id === providerId);
+    const invalid = !provider?.selectable
+      ? (provider?.disabled_reason ?? t("setup.providerUnavailable"))
+      : providerFormError(provider, values);
+    if (invalid) {
+      setCheck(null);
+      setError(invalid);
+      return;
+    }
     setOperation("check");
     setError("");
     setCheck(null);

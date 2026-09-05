@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 const messages = {
   en: {
+    "setup.providerUnavailable": "Choose an available storage provider.",
     "setup.modelsReady": "Models in your library: {count}",
     "setup.previews": "Previews",
     "setup.remoteFailure":
@@ -650,6 +651,7 @@ const messages = {
     "multipart.notFoundError": "This multipart model or collection no longer exists.",
   },
   es: {
+    "setup.providerUnavailable": "Elige un proveedor de almacenamiento disponible.",
     "setup.modelsReady": "Modelos en tu biblioteca: {count}",
     "setup.previews": "Vistas previas",
     "setup.remoteFailure":
