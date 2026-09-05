@@ -45,15 +45,17 @@ class ArtifactHandle:
     def _verified_remote_copy(self) -> Path:
         try:
             source, key = source_for_file(self.file)
-            with source.materialize(key) as materialized:
+            with source.materialize(key) as content:
+                materialized = content.path
                 fd, raw_temp = tempfile.mkstemp(suffix=materialized.suffix)
                 temp = Path(raw_temp)
                 digest = hashlib.sha256()
                 copied = 0
                 try:
-                    with materialized.open("rb") as incoming, os.fdopen(
-                        fd, "wb"
-                    ) as output:
+                    with (
+                        materialized.open("rb") as incoming,
+                        os.fdopen(fd, "wb") as output,
+                    ):
                         while chunk := incoming.read(_CHUNK_SIZE):
                             output.write(chunk)
                             digest.update(chunk)

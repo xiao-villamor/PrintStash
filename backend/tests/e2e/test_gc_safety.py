@@ -11,7 +11,7 @@ from sqlmodel import select
 from app.core.config import settings
 from app.db.models import File
 from app.services import artifact_content, external_library
-from app.services.library_source import SourceEntry, SourcePage
+from app.services.library_source import SourceContent, SourceEntry, SourcePage
 from tests.paths import FIXTURES_DIR
 
 
@@ -36,9 +36,9 @@ class _RemoteSource:
         )
 
     @contextmanager
-    def materialize(self, key: str):
+    def materialize(self, key: str, *, expected=None):
         assert key == "models/sample.gcode"
-        yield self.path
+        yield SourceContent(self.path, SourceEntry(key, self.path.stat().st_size))
 
 
 class TestAdminGc:

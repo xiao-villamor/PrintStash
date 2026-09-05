@@ -437,6 +437,12 @@ class File(SQLModel, table=True):
     # local pathname by ArtifactContent.
     source_key: Optional[str] = Field(default=None, max_length=2048, index=True)
     source_mtime: Optional[float] = None
+    source_etag: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    source_version_id: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     # Last time discovery read and hashed the source bytes. Metadata-only scans
     # remain cheap, while a rotating weekly sweep still catches content changes
     # on appliances that preserve both size and mtime.

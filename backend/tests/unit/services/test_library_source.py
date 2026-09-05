@@ -23,6 +23,7 @@ from app.services.library_source import (
     LibrarySourceError,
     OpenDalLibrarySource,
     S3LibrarySource,
+    SourceEntry,
 )
 from app.services.storage_backend import StorageConfigurationError, StorageObjectInfo
 from app.services.storage_opendal import SourceDirectoryEntry
@@ -152,7 +153,7 @@ class _StableDirectoryBackend:
             return StorageObjectInfo(size=3, etag="after")
         return StorageObjectInfo(size=3, etag="before")
 
-    def stream_chunks(self, _key: str):
+    def stream_chunks(self, _key: str, *, expected=None):
         yield b"abc"
 
 
@@ -266,7 +267,8 @@ class TestS3LibrarySourceAdapter:
         client = _StableClient()
         source = S3LibrarySource({"bucket": "library"}, client=client)
 
-        with source.materialize("models/a.stl") as path:
+        with source.materialize("models/a.stl") as content:
+            path = content.path
             assert path.read_bytes() == b"stable"
             materialized = path
 
@@ -285,7 +287,8 @@ class TestS3LibrarySourceAdapter:
             max_bytes_per_second=2,
         )
 
-        with source.materialize("paced.stl") as path:
+        with source.materialize("paced.stl") as content:
+            path = content.path
             assert path.read_bytes() == b"paced"
 
         assert sleeps == [2.5]
@@ -405,7 +408,7 @@ class TestOpenDalLibrarySourceAdapter:
     ) -> None:
         backend = _StableDirectoryBackend()
 
-        def oversized_stream(_key: str):
+        def oversized_stream(_key: str, **_kwargs):
             yield b"abcd"
             pytest.fail("continued reading an oversized source")
 
@@ -418,6 +421,107 @@ class TestOpenDalLibrarySourceAdapter:
                 pytest.fail("an oversized source was exposed to indexing")
 
         assert list(tmp_path.iterdir()) == []
+    def test_listing_preserves_all_markers_and_unknown_timestamps(self) -> None:
+        modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+        class MetadataBackend:
+            def list_source_directory(self, *_args, **_kwargs):
+                return [
+                    SourceDirectoryEntry("known.stl", 3, False, modified, "tag", "v1"),
+                    SourceDirectoryEntry("unknown.stl", 4, False),
+                ]
+
+        page = OpenDalLibrarySource(MetadataBackend()).list_page(  # type: ignore[arg-type]
+            "", cursor=None, limit=1000
+        )
+
+        assert page.entries == (
+            SourceEntry("known.stl", 3, modified, "tag", "v1"),
+            SourceEntry("unknown.stl", 4),
+        )
+
+    @pytest.mark.parametrize(
+        "marker", ["key", "size", "modified_at", "etag", "version_id"]
+    )
+    def test_listing_drift_prevents_any_download(self, marker: str) -> None:
+        values = {
+            "key": "models/a.stl",
+            "size": 3,
+            "modified_at": None,
+            "etag": None,
+            "version_id": None,
+        }
+        values[marker] = {
+            "key": "models/b.stl",
+            "size": 4,
+            "modified_at": datetime(2026, 9, 1, tzinfo=timezone.utc),
+            "etag": "old",
+            "version_id": "old",
+        }[marker]
+
+        class NeverDownload(_StableDirectoryBackend):
+            def stream_chunks(self, *_args, **_kwargs):
+                pytest.fail("stale discovery must not start a download")
+
+        source = OpenDalLibrarySource(NeverDownload())  # type: ignore[arg-type]
+        with pytest.raises(LibrarySourceError, match="library_source_changed"):
+            with source.materialize("models/a.stl", expected=SourceEntry(**values)):
+                pytest.fail("stale discovery yielded content")
+
+    @pytest.mark.parametrize(
+        "drift", ["missing", "size", "modified_at", "etag", "version_id"]
+    )
+    def test_read_drift_removes_the_temporary_copy(
+        self, drift: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+        class ChangingBackend(_StableDirectoryBackend):
+            calls = 0
+
+            def object_info(self, _key):
+                self.calls += 1
+                if self.calls == 2 and drift == "missing":
+                    return None
+                values = dict(size=3, modified_at=modified, etag="tag", version_id="v1")
+                if self.calls == 2:
+                    values[drift] = {
+                        "size": 4,
+                        "modified_at": None,
+                        "etag": "other",
+                        "version_id": "v2",
+                    }[drift]
+                return StorageObjectInfo(**values)
+
+        monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
+        source = OpenDalLibrarySource(ChangingBackend())  # type: ignore[arg-type]
+        with pytest.raises(LibrarySourceError, match="library_source_changed"):
+            with source.materialize("models/a.stl"):
+                pytest.fail("unstable read yielded content")
+        assert list(tmp_path.iterdir()) == []
+
+    def test_materialized_content_carries_verified_metadata(self) -> None:
+        modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        info = StorageObjectInfo(
+            size=3, modified_at=modified, etag="tag", version_id="v1"
+        )
+
+        class ObservedBackend(_StableDirectoryBackend):
+            def object_info(self, _key):
+                return info
+
+            def stream_chunks(self, _key, *, expected):
+                assert expected == info
+                yield b"abc"
+
+        source = OpenDalLibrarySource(ObservedBackend())  # type: ignore[arg-type]
+        with source.materialize(
+            "models/a.stl", expected=SourceEntry("models/a.stl", 3)
+        ) as content:
+            assert content.path.read_bytes() == b"abc"
+            assert content.entry == SourceEntry(
+                "models/a.stl", 3, modified, "tag", "v1"
+            )
 
     def test_depth_first_cursor_pages_without_a_recursive_full_listing(self) -> None:
         source = OpenDalLibrarySource(_DirectoryBackend())  # type: ignore[arg-type]
@@ -472,7 +576,8 @@ class TestOpenDalLibrarySourceAdapter:
         backend = _StableDirectoryBackend()
         source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
 
-        with source.materialize("models/a.stl") as path:
+        with source.materialize("models/a.stl") as content:
+            path = content.path
             assert path.read_bytes() == b"abc"
             materialized = path
 
@@ -793,7 +898,7 @@ class TestSourceHelpers:
         with pytest.raises(LibrarySourceError, match="library_source_key_invalid"):
             library_source._safe_key("")  # noqa: SLF001
 
-        assert library_source.timestamp(None) == 0.0
+        assert library_source.timestamp(None) is None
         naive = datetime(2026, 1, 1)
         aware = naive.replace(tzinfo=timezone.utc)
         assert library_source.timestamp(naive) == library_source.timestamp(aware)

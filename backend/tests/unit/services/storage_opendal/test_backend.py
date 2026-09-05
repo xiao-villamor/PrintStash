@@ -9,6 +9,7 @@ without requiring a remote service.
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ from app.services import storage_opendal
 from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,
+    StorageObjectInfo,
 )
 from app.services.storage_providers import TransportKind, TransportSpec
 
@@ -177,6 +179,88 @@ class _CheckFailureOperator(_MemoryOperator):
 
 
 class TestOpenDALStorageBackend:
+    @pytest.mark.parametrize(
+        ("capabilities", "version", "etag", "expected_options"),
+        [
+            (
+                {"read_with_version": True, "read_with_if_match": True},
+                "v1",
+                "tag",
+                {"version": "v1"},
+            ),
+            (
+                {"read_with_version": True, "read_with_if_match": True},
+                "null",
+                "tag",
+                {"if_match": "tag"},
+            ),
+            ({"read_with_if_match": True}, "v1", "tag", {"if_match": "tag"}),
+            ({"read_with_if_unmodified_since": True}, None, None, "mtime"),
+            ({}, "v1", "tag", {}),
+        ],
+    )
+    def test_stream_pins_the_strongest_supported_read_condition(
+        self, capabilities, version, etag, expected_options
+    ) -> None:
+        modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+        class ConditionalReader(_MemoryOperator):
+            received_options = None
+
+            def capability(self):
+                return SimpleNamespace(**capabilities)
+
+            def open(self, key, mode, **options):
+                self.received_options = options
+                return super().open(key, mode)
+
+        operator = ConditionalReader()
+        operator.objects["models/a.stl"] = b"original"
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+        info = StorageObjectInfo(
+            size=8, modified_at=modified, etag=etag, version_id=version
+        )
+
+        assert (
+            b"".join(backend.stream_chunks("vault/data/models/a.stl", expected=info))
+            == b"original"
+        )
+        assert operator.received_options == (
+            {"if_unmodified_since": modified}
+            if expected_options == "mtime"
+            else expected_options
+        )
+
+    def test_directory_and_stat_retain_transport_metadata(self) -> None:
+        modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
+        metadata = SimpleNamespace(
+            content_length=3,
+            last_modified=modified,
+            etag="tag",
+            version="v1",
+            is_dir=False,
+        )
+
+        class MetadataOperator(_MemoryOperator):
+            def list(self, _prefix):
+                return [SimpleNamespace(path="models/a.stl", metadata=metadata)]
+
+            def stat(self, _key):
+                return metadata
+
+        operator = MetadataOperator()
+        operator.objects["models/a.stl"] = b"abc"
+        backend = storage_opendal.OpenDALStorageBackend(_spec(), operator=operator)
+
+        assert backend.list_source_directory("models", max_entries=1000) == [
+            storage_opendal.SourceDirectoryEntry(
+                "models/a.stl", 3, False, modified, "tag", "v1"
+            )
+        ]
+        assert backend.object_info("vault/data/models/a.stl") == StorageObjectInfo(
+            size=3, modified_at=modified, etag="tag", version_id="v1"
+        )
+
     def test_rejects_a_non_remote_transport(self) -> None:
         with pytest.raises(StorageConfigurationError, match="unsupported remote"):
             storage_opendal.OpenDALStorageBackend(

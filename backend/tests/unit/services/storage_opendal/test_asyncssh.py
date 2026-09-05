@@ -119,6 +119,21 @@ def _async_operator() -> storage_opendal._AsyncSSHSFTPOperator:
 
 
 class TestAsyncSSHSFTPOperator:
+    @pytest.mark.parametrize(
+        "mtime,nanoseconds", [(None, None), (0, None), (10, 500_000_000)]
+    )
+    def test_preserves_nullable_sftp_modification_time(
+        self, mtime, nanoseconds
+    ) -> None:
+        observed = storage_opendal._sftp_modified_at(  # noqa: SLF001
+            SimpleNamespace(mtime=mtime, mtime_ns=nanoseconds)
+        )
+        if mtime is None:
+            assert observed is None
+        else:
+            assert observed is not None
+            assert observed.timestamp() == mtime + (nanoseconds or 0) / 1_000_000_000
+
     def test_rejects_missing_asyncssh(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(sys.modules, "asyncssh", None)
 

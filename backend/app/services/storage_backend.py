@@ -13,6 +13,7 @@ import uuid
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -161,6 +162,7 @@ class StorageObjectInfo:
     size: int
     etag: str | None = None
     version_id: str | None = None
+    modified_at: datetime | None = None
 
 
 class StorageCollisionError(FileExistsError):
