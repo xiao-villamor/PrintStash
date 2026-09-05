@@ -361,3 +361,32 @@ export function aBuild(
     ...override,
   };
 }
+
+export function aMultipartModel(
+  override?: Partial<import("@/types/multipart-models").MultipartModelRead>,
+): import("@/types/multipart-models").MultipartModelRead {
+  return {
+    id: 7,
+    name: "Table",
+    slug: "table",
+    description: null,
+    collection: null,
+    collection_id: null,
+    part_count: 1,
+    model_count: 1,
+    guide_count: 0,
+    cover_model_id: null,
+    cover_image_url: null,
+    cover_image_uploaded: false,
+    cover_thumbnail_url: null,
+    member_model_ids: [1],
+    tags: [],
+    starred: false,
+    effective_role: "admin",
+    updated_at: "2026-01-01T00:00:00Z",
+    created_at: "2026-01-01T00:00:00Z",
+    parts: [],
+    guides: [],
+    ...override,
+  };
+}

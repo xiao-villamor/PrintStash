@@ -1,9 +1,17 @@
 /* Manufacturing controls show confirmed output, preserve failed attempts, and reject stale edits. */
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MultipartBuildsPage from "@/pages/multipart-builds";
-import { aBuild, aBuildPart, aBuildAttempt, aModel, aRevision } from "@/test-support/factories";
+import {
+  aBuild,
+  aBuildPart,
+  aBuildAttempt,
+  aModel,
+  aRevision,
+  aMultipartModel,
+  aPrinter,
+} from "@/test-support/factories";
 import { adminSession, json, renderApp, type RouteTable } from "@/test-support/render";
 import type { MultipartBuild } from "@/types/multipart-builds";
 
@@ -283,5 +291,157 @@ describe("Multipart manufacturing", () => {
     await waitFor(() =>
       expect(app.requests().some((request) => request.url.includes("archived=true"))).toBe(true),
     );
+  });
+});
+
+describe("Manufacturing discovery", () => {
+  function renderList(extra: RouteTable = {}, at = "/builds?multipart=7") {
+    return renderApp(<MultipartBuildsPage />, {
+      at,
+      routePath: "/builds/:id?",
+      auth: adminSession(),
+      routes: {
+        "GET /api/v1/multipart-builds": json([]),
+        "GET /api/v1/multipart-models/7": json(aMultipartModel()),
+        "GET /api/v1/multipart-builds/2": json(aBuild({ id: 2, name: "Second table" })),
+        "GET /api/v1/printers": json([]),
+        "GET /api/v1/models/1": json(aModel({ files: [aRevision()] })),
+        ...extra,
+      },
+    });
+  }
+  it("creates a named manufacturing run with the requested object count", async () => {
+    const app = renderList({ "POST /api/v1/multipart-builds": json(aBuild({ id: 2 })) });
+    const user = userEvent.setup();
+    const name = await screen.findByDisplayValue("Table");
+    await user.clear(name);
+    await user.type(name, "Second table");
+    fireEvent.change(screen.getByLabelText("Number of objects"), { target: { value: "2" } });
+    await user.click(screen.getByRole("button", { name: "Create build" }));
+    expect(await screen.findByRole("heading", { name: "Second table" })).toBeVisible();
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body ?? "{}")).toEqual({
+      name: "Second table",
+      object_quantity: 2,
+      multipart_model_id: 7,
+    });
+  });
+  it("retains the creation draft after the API refuses it", async () => {
+    renderList({ "POST /api/v1/multipart-builds": json({ detail: "permission_denied" }, 403) });
+    const user = userEvent.setup();
+    await screen.findByDisplayValue("Table");
+    await user.click(screen.getByRole("button", { name: "Create build" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
+    expect(screen.getByLabelText("Build name")).toHaveValue("Table");
+  });
+  it("explains an inaccessible composition", async () => {
+    renderList({ "GET /api/v1/multipart-models/7": json({ detail: "permission_denied" }, 403) });
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
+  });
+  it("reports failure when refreshing the history list", async () => {
+    const app = renderList({}, "/builds");
+    await screen.findByText(/No builds here yet/);
+    app.route({ "GET /api/v1/multipart-builds": json({ detail: "unreachable" }, 503) });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be completed");
+  });
+  it("pages through history without dropping the archive filter", async () => {
+    const app = renderList(
+      {
+        "GET /api/v1/multipart-builds": json(
+          Array.from({ length: 50 }, (_, id) =>
+            aBuild({ id: id + 1, name: `Table ${id + 1}`, completed: id === 0 }),
+          ),
+        ),
+      },
+      "/builds",
+    );
+    const user = userEvent.setup();
+    expect(await screen.findByRole("link", { name: "Table 1" })).toHaveAttribute(
+      "href",
+      "/builds/1",
+    );
+    expect(screen.getByText(/All required pieces confirmed/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(app.requests().at(-1)?.url).toContain("offset=50"));
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    await waitFor(() => expect(app.requests().at(-1)?.url).toContain("offset=0"));
+  });
+  it("reports the initial list failure", async () => {
+    renderList({ "GET /api/v1/multipart-builds": json({ detail: "unreachable" }, 503) }, "/builds");
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be completed");
+  });
+  it("reports the initial detail failure", async () => {
+    renderBuild(aBuild(), {
+      "GET /api/v1/multipart-builds/1": json({ detail: "permission_denied" }, 403),
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
+  });
+  it("refuses to expose revisions when their Model is inaccessible", async () => {
+    renderBuild(aBuild(), { "GET /api/v1/models/1": json({ detail: "permission_denied" }, 403) });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select an available G-code Revision",
+    );
+    expect(screen.getByLabelText("Revision for the next jobs")).toBeDisabled();
+  });
+  it("queues a manual printer with an explicit job count", async () => {
+    const app = renderBuild(aBuild(), {
+      "GET /api/v1/printers": json([aPrinter({ id: 5, name: "Workshop" })]),
+      "POST /api/v1/multipart-builds/1/parts/1/queue": json(aBuild({ version: 1 })),
+    });
+    const user = userEvent.setup();
+    await screen.findByRole("option", { name: "Workshop" });
+    await user.selectOptions(screen.getByLabelText("Printer"), "5");
+    fireEvent.change(screen.getByLabelText("Print jobs to queue"), { target: { value: "2" } });
+    await user.click(screen.getByRole("button", { name: "Queue pieces" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body ?? "{}")).toMatchObject({
+      job_count: 2,
+      routing: { strategy: "manual", printer_id: 5 },
+    });
+  });
+});
+
+describe("Manufacturing access", () => {
+  it.each([true, false])("keeps the page private before authentication (loading=%s)", (loading) => {
+    const app = renderApp(<MultipartBuildsPage />, {
+      at: "/builds/1",
+      routePath: "/builds/:id",
+      auth: adminSession({ user: null, loading }),
+    });
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(app.requests()).toEqual([]);
+  });
+  it("shows missing historical choices without enabling printing", async () => {
+    renderBuild(
+      aBuild({
+        parts: [
+          aBuildPart({
+            selected_model_id: null,
+            selected_choice_id: null,
+            revision_id: null,
+            queueable: false,
+            choices: [{ choice_id: null, model_id: 99, name: null, available: false }],
+          }),
+        ],
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Queue pieces" })).toBeDisabled();
+    expect(screen.getByLabelText("Revision for the next jobs")).toHaveValue("");
+  });
+  it("keeps history readable when printer discovery fails", async () => {
+    renderBuild(aBuild(), { "GET /api/v1/printers": json({ detail: "permission_denied" }, 403) });
+    expect(await screen.findByRole("alert")).toHaveTextContent("You do not have permission");
+    expect(screen.getByText("4 missing")).toBeVisible();
+  });
+  it("opens a duplicate with its own result history", async () => {
+    renderBuild(aBuild(), {
+      "POST /api/v1/multipart-builds/1/duplicate": json(aBuild({ id: 2 })),
+      "GET /api/v1/multipart-builds/2": json(aBuild({ id: 2, name: "Fresh copy", parts: [] })),
+    });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Name for the new build"), "Fresh copy");
+    await user.click(screen.getByRole("button", { name: "Duplicate build" }));
+    expect(await screen.findByRole("heading", { name: "Fresh copy" })).toBeVisible();
+    expect(screen.queryByRole("form", { name: "Job #1" })).not.toBeInTheDocument();
   });
 });
