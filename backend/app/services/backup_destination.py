@@ -152,26 +152,16 @@ class RemoteBackupDestination:
                 raise
             raise BackupDestinationError("backup_remote_read_failed") from exc
 
-    def delete_owned(
-        self, row: OwnedStorageObject, *, allow_unversioned: bool = False
-    ) -> bool:
+    def delete_owned(self, row: OwnedStorageObject) -> bool:
         """Delete only through an immutable version identity.
 
         Consumer-cloud and WebDAV transports deliberately return ``False``;
         their path-only delete can race a replacement and is therefore never
         used by automatic retention.
         """
+        if not row.version_id or row.version_id == "null":
+            return False
         self.require_owned(row)
-        if not row.version_id:
-            if not allow_unversioned:
-                return False
-            assert row.size_bytes is not None
-            self.backend.delete_owned_unversioned(
-                row.key,
-                expected_size=row.size_bytes,
-                expected_etag=row.etag,
-            )
-            return True
         try:
             self.backend.delete_versioned(row.key, row.version_id)
         except StorageConfigurationError:

@@ -420,29 +420,13 @@ class OpenDALStorageBackend(StorageBackend):
         return self._operator.open(self._relative(key), "rb")
 
     def delete_versioned(self, key: str, version_id: str) -> None:
-        if not getattr(self.operator_capabilities, "delete_with_version", False):
+        if (
+            not version_id
+            or version_id == "null"
+            or not getattr(self.operator_capabilities, "delete_with_version", False)
+        ):
             raise StorageConfigurationError("conditional_delete_unavailable")
         self._operator.delete(self._relative(key), version=version_id)
-
-    def delete_owned_unversioned(
-        self,
-        key: str,
-        *,
-        expected_size: int,
-        expected_etag: str | None,
-    ) -> None:
-        """Delete one explicitly confirmed object after a last identity check."""
-        relative = self._relative(key)
-        info = self.object_info(key)
-        if (
-            info is None
-            or info.size != expected_size
-            or (expected_etag is not None and info.etag != expected_etag)
-        ):
-            raise StorageConfigurationError("remote_object_identity_changed")
-        self._operator.delete(relative)
-        if self._operator.exists(relative):
-            raise StorageConfigurationError("remote_object_delete_failed")
 
     def stream_chunks(
         self,

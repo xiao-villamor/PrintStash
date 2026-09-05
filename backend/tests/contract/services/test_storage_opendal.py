@@ -7,6 +7,7 @@ protocol servers rather than mocks.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import socket
@@ -20,7 +21,13 @@ import asyncssh
 import opendal
 import pytest
 
-from app.db.models import LibrarySourceKind, StorageConnection, StorageConnectionPurpose
+from app.db.models import (
+    LibrarySourceKind,
+    OwnedStorageObject,
+    StorageConnection,
+    StorageConnectionPurpose,
+    StorageObjectState,
+)
 from app.services.backup_destination import (
     BackupDestinationError,
     destination_from_connection,
@@ -285,6 +292,79 @@ class _RenameFailure:
 
 
 class TestOpenDALStorageBackend:
+    @pytest.mark.parametrize("provider", ["sftp", "webdav"])
+    @pytest.mark.parametrize("replacement", [False, True])
+    def test_unversioned_replica_deletion_preserves_real_server_bytes(
+        self, request, tmp_path: Path, provider: str, replacement: bool
+    ) -> None:
+        if provider == "sftp":
+            port, known_hosts = request.getfixturevalue("sftp_password_endpoint")
+            config = {
+                "provider": "sftp",
+                "host": "127.0.0.1",
+                "port": port,
+                "username": "printstash",
+                "host_key": str(known_hosts),
+                "root": "vault-data",
+            }
+            secrets = {"password": "contract-secret"}
+            remote_file = (
+                tmp_path
+                / "password-server/vault-data/printstash-backups/archive.tar.gz"
+            )
+        else:
+            endpoint = request.getfixturevalue("webdav_endpoint")
+            config = {
+                "provider": "webdav",
+                "endpoint_url": endpoint,
+                "username": "webdav-user",
+                "root": "vault-data",
+            }
+            secrets = {"password": "webdav-password"}
+            remote_file = (
+                tmp_path / "storage/vault-data/printstash-backups/archive.tar.gz"
+            )
+        profile = StorageConnection(
+            id=7,
+            name="Archive",
+            kind=LibrarySourceKind(provider),
+            purpose=StorageConnectionPurpose.BACKUP,
+            config_json=json.dumps(config),
+            secret_json=json.dumps(secrets),
+        )
+        destination = destination_from_connection(profile)
+        if provider == "sftp":
+            destination.backend.provision_root()
+        key = destination.key("archive.tar.gz")
+        payload = b"original-archive"
+        receipt = destination.backend.create_bytes(payload, key)
+        info = destination.backend.object_info(key)
+        assert info is not None
+        row = OwnedStorageObject(
+            backend=destination.backend.backend_name,
+            namespace=destination.namespace,
+            key=key,
+            provider_ref=destination.provider_ref,
+            token=receipt.token,
+            object_kind="backup",
+            state=StorageObjectState.COMMITTED,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            etag=info.etag,
+            version_id=info.version_id,
+        )
+        expected = b"replaced-archive" if replacement else payload
+        assert len(expected) == len(payload)
+        if replacement:
+            remote_file.write_bytes(expected)
+
+        assert destination.delete_owned(row) is False
+
+        assert remote_file.read_bytes() == expected
+        assert destination.backend.read_bytes(key) == expected
+        assert row.token == receipt.token
+        assert row.state == StorageObjectState.COMMITTED
+
     @pytest.mark.parametrize("password", ["contract-secret", "incorrect-secret"])
     def test_sftp_backup_probe_uses_the_production_factory(
         self, sftp_password_endpoint, password: str

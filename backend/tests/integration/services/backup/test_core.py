@@ -1977,7 +1977,7 @@ class TestDeleteBackup:
         )
 
         with pytest.raises(
-            backup.BackupOwnershipError, match="backup_remote_delete_unverified"
+            backup.BackupDeleteUnsupportedError, match="backup_exact_delete_unsupported"
         ):
             backup.delete_backup(meta.id)
 
@@ -4865,6 +4865,37 @@ class TestRestoreDatabase:
 
 
 class TestPurgeOldBackups:
+    def test_retention_treats_unsupported_deletion_as_steady_state(
+        self, backup_env: BackupEnv, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        sources = [
+            backup.BackupMeta(
+                id=identity,
+                created_at="2020-01-01T00:00:00+00:00",
+                size_bytes=1,
+                storage_backend="local",
+                file_count=0,
+                app_version="0.13.0",
+                path=identity,
+                source_ref=identity,
+            )
+            for identity in ("unsupported", "deletable")
+        ]
+        attempted = []
+
+        def delete(identity, *, source_ref):
+            attempted.append(source_ref)
+            if identity == "unsupported":
+                raise backup.BackupDeleteUnsupportedError()
+            return True
+
+        monkeypatch.setattr(backup, "list_backup_sources", lambda: sources)
+        monkeypatch.setattr(backup, "delete_backup", delete)
+        assert backup.purge_old_backups(30) == 1
+        assert backup.purge_old_backups(30) == 1
+        assert attempted == ["unsupported", "deletable", "unsupported", "deletable"]
+        assert "could not be removed" not in caplog.text
+
     def test_purge_old_backups_noop_when_retention_non_positive(
         self, backup_env: BackupEnv
     ):

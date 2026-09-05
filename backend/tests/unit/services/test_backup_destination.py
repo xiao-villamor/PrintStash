@@ -174,6 +174,21 @@ class TestDownloadOwned:
 
 
 class TestDeleteOwned:
+    def test_null_version_is_not_an_immutable_delete_identity(self) -> None:
+        row = _row()
+        row.version_id = "null"
+
+        class MutableVersionBackend(_Backend):
+            def delete_versioned(self, key, version):
+                assert version == "null"
+                self.deleted_keys.append(key)
+
+        backend = MutableVersionBackend()
+        backend.info = StorageObjectInfo(size=7, etag="etag", version_id="null")
+
+        assert _destination(backend).delete_owned(row) is False
+        assert backend.deleted_keys == []
+
     def test_retention_refuses_an_unversioned_backup(self) -> None:
         row = _row()
         backend = _Backend()
@@ -189,14 +204,12 @@ class TestDeleteOwned:
 
         assert _destination(backend).delete_owned(row) is False
 
-    def test_explicitly_deletes_an_owned_unversioned_backup(self) -> None:
-        row = _row()
-        backend = _Backend()
+    def test_unversioned_deletion_does_not_contact_the_provider(self) -> None:
+        class UnreachableBackend(_Backend):
+            def object_info(self, _key):
+                pytest.fail("unsupported deletion must not issue metadata requests")
 
-        deleted = _destination(backend).delete_owned(row, allow_unversioned=True)
-
-        assert deleted is True
-        assert backend.deleted_keys == [row.key]
+        assert _destination(UnreachableBackend()).delete_owned(_row()) is False
 
 
 class TestProbe:
