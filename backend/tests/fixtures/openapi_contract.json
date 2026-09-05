@@ -432,6 +432,83 @@
         "title": "BatchCreate",
         "type": "object"
       },
+      "BatchRouting": {
+        "additionalProperties": false,
+        "properties": {
+          "compatibility_policy": {
+            "$ref": "#/components/schemas/CompatibilityPolicy",
+            "default": "safe"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/JobPriority",
+            "default": "normal"
+          },
+          "spool_filament_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Filament Id"
+          },
+          "spool_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Id"
+          },
+          "spool_name": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spool Name"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/RoutingStrategy",
+            "default": "least_busy"
+          },
+          "target_group": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Group"
+          }
+        },
+        "title": "BatchRouting",
+        "type": "object"
+      },
       "Body_add_gcode_revision_api_v1_models__model_id__gcode_revisions_post": {
         "properties": {
           "file": {
@@ -965,6 +1042,507 @@
           "expires_at"
         ],
         "title": "BrowserPairingCreateRead",
+        "type": "object"
+      },
+      "BuildArchive": {
+        "additionalProperties": false,
+        "properties": {
+          "archived": {
+            "default": true,
+            "title": "Archived",
+            "type": "boolean"
+          },
+          "version": {
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BuildArchive",
+        "type": "object"
+      },
+      "BuildAttemptRead": {
+        "properties": {
+          "historical_job_id": {
+            "title": "Historical Job Id",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "planned_units": {
+            "title": "Planned Units",
+            "type": "integer"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "suggested_valid_units": {
+            "title": "Suggested Valid Units",
+            "type": "integer"
+          },
+          "valid_units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Units"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "job_id",
+          "historical_job_id",
+          "revision_id",
+          "planned_units",
+          "valid_units",
+          "suggested_valid_units",
+          "state",
+          "version"
+        ],
+        "title": "BuildAttemptRead",
+        "type": "object"
+      },
+      "BuildChoiceRead": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "choice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "model_id": {
+            "title": "Model Id",
+            "type": "integer"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "choice_id",
+          "model_id",
+          "available"
+        ],
+        "title": "BuildChoiceRead",
+        "type": "object"
+      },
+      "BuildConfirm": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          },
+          "valid_units": {
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Valid Units",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "idempotency_key",
+          "valid_units"
+        ],
+        "title": "BuildConfirm",
+        "type": "object"
+      },
+      "BuildCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "multipart_model_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Multipart Model Id",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "object_quantity": {
+            "default": 1,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Object Quantity",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "multipart_model_id",
+          "name"
+        ],
+        "title": "BuildCreate",
+        "type": "object"
+      },
+      "BuildDuplicate": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "BuildDuplicate",
+        "type": "object"
+      },
+      "BuildPartRead": {
+        "properties": {
+          "active_units": {
+            "title": "Active Units",
+            "type": "integer"
+          },
+          "attempts": {
+            "items": {
+              "$ref": "#/components/schemas/BuildAttemptRead"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/BuildChoiceRead"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "missing_units": {
+            "title": "Missing Units",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "queueable": {
+            "title": "Queueable",
+            "type": "boolean"
+          },
+          "required_units": {
+            "title": "Required Units",
+            "type": "integer"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "selected_choice_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Choice Id"
+          },
+          "selected_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Model Id"
+          },
+          "unreserved_units": {
+            "title": "Unreserved Units",
+            "type": "integer"
+          },
+          "unreviewed_units": {
+            "title": "Unreviewed Units",
+            "type": "integer"
+          },
+          "valid_units": {
+            "title": "Valid Units",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "quantity",
+          "required_units",
+          "valid_units",
+          "missing_units",
+          "active_units",
+          "unreviewed_units",
+          "unreserved_units",
+          "selected_model_id",
+          "selected_choice_id",
+          "revision_id",
+          "queueable",
+          "choices",
+          "attempts"
+        ],
+        "title": "BuildPartRead",
+        "type": "object"
+      },
+      "BuildQueue": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_excess": {
+            "default": false,
+            "title": "Confirm Excess",
+            "type": "boolean"
+          },
+          "job_count": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Count"
+          },
+          "routing": {
+            "$ref": "#/components/schemas/BatchRouting"
+          },
+          "units_per_job": {
+            "default": 1,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Units Per Job",
+            "type": "integer"
+          },
+          "version": {
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BuildQueue",
+        "type": "object"
+      },
+      "BuildRead": {
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "composition_name": {
+            "title": "Composition Name",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CollectionRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "multipart_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multipart Model Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "object_quantity": {
+            "title": "Object Quantity",
+            "type": "integer"
+          },
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/BuildPartRead"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "effective_role",
+          "id",
+          "name",
+          "multipart_model_id",
+          "composition_name",
+          "object_quantity",
+          "version",
+          "archived_at",
+          "created_at",
+          "completed",
+          "parts"
+        ],
+        "title": "BuildRead",
+        "type": "object"
+      },
+      "BuildSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "choice_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          },
+          "version": {
+            "minimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "BuildSelection",
         "type": "object"
       },
       "CaptureFieldDraft": {
@@ -7291,6 +7869,11 @@
             "title": "Name",
             "type": "string"
           },
+          "quantity": {
+            "default": 1,
+            "title": "Quantity",
+            "type": "integer"
+          },
           "sort_order": {
             "title": "Sort Order",
             "type": "integer"
@@ -7344,6 +7927,13 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "quantity": {
+            "default": 1,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
           }
         },
         "required": [
@@ -24753,6 +25343,500 @@
         "summary": "Star Model",
         "tags": [
           "models"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds": {
+      "get": {
+        "operationId": "list_builds_api_v1_multipart_builds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "multipart_model_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Multipart Model Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BuildRead"
+                  },
+                  "title": "Response List Builds Api V1 Multipart Builds Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List Builds",
+        "tags": [
+          "multipart-builds"
+        ]
+      },
+      "post": {
+        "operationId": "create_build_api_v1_multipart_builds_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Create Build",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}": {
+      "get": {
+        "operationId": "get_build_api_v1_multipart_builds__build_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Build",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}/archive": {
+      "patch": {
+        "operationId": "archive_build_api_v1_multipart_builds__build_id__archive_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildArchive"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Archive Build",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}/attempts/{attempt_id}/confirm": {
+      "post": {
+        "operationId": "confirm_result_api_v1_multipart_builds__build_id__attempts__attempt_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Confirm Result",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}/duplicate": {
+      "post": {
+        "operationId": "duplicate_build_api_v1_multipart_builds__build_id__duplicate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildDuplicate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Duplicate Build",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}/parts/{part_id}": {
+      "patch": {
+        "operationId": "select_revision_api_v1_multipart_builds__build_id__parts__part_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "part_id",
+            "required": true,
+            "schema": {
+              "title": "Part Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Select Revision",
+        "tags": [
+          "multipart-builds"
+        ]
+      }
+    },
+    "/api/v1/multipart-builds/{build_id}/parts/{part_id}/queue": {
+      "post": {
+        "operationId": "enqueue_part_api_v1_multipart_builds__build_id__parts__part_id__queue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "part_id",
+            "required": true,
+            "schema": {
+              "title": "Part Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildQueue"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Enqueue Part",
+        "tags": [
+          "multipart-builds"
         ]
       }
     },

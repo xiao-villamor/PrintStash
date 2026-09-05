@@ -15,6 +15,11 @@
   Publication, verification and retry history are reported separately in Settings
   and operational health.
 
+- Multipart builds snapshot part quantities and selected Revisions for a concrete
+  manufacturing run. Linked print jobs reserve units; explicit usable-output
+  confirmations track missing pieces and retain previous physical attempts.
+  Builds can be duplicated with fresh results or archived with their history.
+
 - Remote Library discovery streams large directories into a durable inventory.
   Completed pages resume without rereading the directory, interrupted discovery
   cannot remove linked Artifacts, and transport deadlines bound stalled requests.

@@ -423,3 +423,19 @@ class TestFirstOwnerConcurrency:
         assert sorted(code for code, _ in results) == [201, 409], results
         with Session(postgres_engine) as session:
             assert len(session.exec(select(User).where(User.is_superuser)).all()) == 1
+
+
+class TestManufacturingPostgres:
+    def test_conflicting_results_have_one_winner(self, postgres_engine):
+        from tests.fakes.manufacturing import race_confirmations, seed_confirmation_race
+
+        ids = seed_confirmation_race(postgres_engine)
+        outcomes = race_confirmations(postgres_engine, *ids, False)
+        assert sorted(code for code, _ in outcomes) == [200, 409]
+        assert (200, 1) in outcomes
+
+    def test_duplicate_results_count_once(self, postgres_engine):
+        from tests.fakes.manufacturing import race_confirmations, seed_confirmation_race
+
+        ids = seed_confirmation_race(postgres_engine)
+        assert race_confirmations(postgres_engine, *ids, True) == [(200, 1), (200, 1)]

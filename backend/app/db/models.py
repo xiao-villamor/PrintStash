@@ -919,6 +919,9 @@ class MultipartPart(SQLModel, table=True):
             index=True,
         )
     )
+    quantity: int = Field(
+        default=1, sa_column=Column(Integer, nullable=False, server_default="1")
+    )
     name: str = Field(max_length=128)
     name_key: str = Field(max_length=128)
     sort_order: int = Field(default=0)
@@ -2943,3 +2946,90 @@ class BackupRetryAttempt(SQLModel, table=True):
     error_code: Optional[str] = Field(default=None, max_length=128)
     created_at: datetime = Field(default_factory=utcnow)
     finished_at: Optional[datetime] = None
+
+
+class MultipartBuild(SQLModel, table=True):
+    """A frozen set of manufacturing requirements, independent of its composition."""
+
+    __tablename__ = "multipart_builds"
+    id: int | None = Field(default=None, primary_key=True)
+    multipart_model_id: int | None = Field(
+        default=None, foreign_key="multipart_models.id", ondelete="SET NULL"
+    )
+    composition_name: str = Field(max_length=255)
+    # Historical permission boundary: deleting the collection must never turn
+    # private manufacturing history into an uncollected, globally readable row.
+    collection_id: int | None = Field(default=None, index=True)
+    name: str = Field(max_length=255)
+    object_quantity: int = Field(default=1)
+    version: int = Field(default=0)
+    archived_at: datetime | None = Field(default=None)
+    created_by: int | None = Field(
+        default=None, foreign_key="users.id", ondelete="SET NULL"
+    )
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartBuildPart(SQLModel, table=True):
+    __tablename__ = "multipart_build_parts"
+    id: int | None = Field(default=None, primary_key=True)
+    build_id: int = Field(
+        foreign_key="multipart_builds.id", ondelete="CASCADE", index=True
+    )
+    name: str = Field(max_length=128)
+    sort_order: int = Field(default=0)
+    quantity: int
+    required_units: int
+    # Choice IDs and Model IDs are historical values, not cascading ownership.
+    choices_json: str = Field(sa_column=Column(Text, nullable=False))
+    selected_model_id: int | None = Field(default=None)
+    selected_choice_id: int | None = Field(default=None)
+    revision_id: int | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartBuildAttempt(SQLModel, table=True):
+    __tablename__ = "multipart_build_attempts"
+    __table_args__ = (
+        UniqueConstraint("job_id", name="uq_multipart_build_attempt_job"),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    part_id: int = Field(
+        foreign_key="multipart_build_parts.id", ondelete="CASCADE", index=True
+    )
+    job_id: int | None = Field(
+        default=None, foreign_key="print_jobs.id", ondelete="SET NULL"
+    )
+    historical_job_id: int
+    model_id: int
+    revision_id: int
+    planned_units: int
+    valid_units: int | None = Field(default=None)
+    version: int = Field(default=0)
+    confirmed_by: int | None = Field(
+        default=None, foreign_key="users.id", ondelete="SET NULL"
+    )
+    confirmed_at: datetime | None = Field(default=None)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MultipartBuildConfirmation(SQLModel, table=True):
+    """Durable idempotency receipts survive subsequent result corrections."""
+
+    __tablename__ = "multipart_build_confirmations"
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id", "idempotency_key", name="uq_build_confirmation_key"
+        ),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    attempt_id: int = Field(
+        foreign_key="multipart_build_attempts.id", ondelete="CASCADE", index=True
+    )
+    idempotency_key: str = Field(max_length=128)
+    requested_version: int
+    valid_units: int
+    created_at: datetime = Field(default_factory=utcnow)

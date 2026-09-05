@@ -41,11 +41,9 @@ class QueueJobUpdate(BaseModel):
     compatibility_policy: Optional[CompatibilityPolicy] = None
 
 
-class BatchCreate(BaseModel):
+class BatchRouting(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    file_id: int = Field(gt=0)
-    quantity: int = Field(gt=0)
     strategy: RoutingStrategy = RoutingStrategy.LEAST_BUSY
     printer_id: Optional[int] = Field(default=None, gt=0)
     target_group: Optional[str] = Field(default=None, max_length=128)
@@ -56,12 +54,17 @@ class BatchCreate(BaseModel):
     spool_filament_id: Optional[int] = None
 
     @model_validator(mode="after")
-    def validate_target(self) -> "BatchCreate":
+    def validate_target(self) -> "BatchRouting":
         if self.strategy == RoutingStrategy.MANUAL and self.printer_id is None:
             raise ValueError("printer_id_required")
         if self.strategy != RoutingStrategy.MANUAL and self.spool_id is not None:
             raise ValueError("automatic_batch_spool_not_allowed")
         return self
+
+
+class BatchCreate(BatchRouting):
+    file_id: int = Field(gt=0)
+    quantity: int = Field(gt=0)
 
 
 class PrintBatchRead(BaseModel):

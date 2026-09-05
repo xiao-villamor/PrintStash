@@ -64,6 +64,7 @@ class MultipartMemberRead(BaseModel):
 
 
 class MultipartPartRead(BaseModel):
+    quantity: int = 1
     id: int
     name: str
     sort_order: int
@@ -77,6 +78,7 @@ class MultipartModelRead(MultipartModelListItem):
 
 
 class MultipartPartWrite(BaseModel):
+    quantity: int = Field(default=1, ge=1, le=10_000)
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=128)
