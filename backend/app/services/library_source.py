@@ -42,6 +42,30 @@ class SourceEntry:
 
 
 @dataclass(frozen=True)
+class SourceContent:
+    """Temporary bytes and the metadata verified for that exact read."""
+
+    path: Path
+    entry: SourceEntry
+
+
+def _require_observation(expected: SourceEntry | None, actual: SourceEntry) -> None:
+    if expected is not None and (
+        expected.key != actual.key
+        or expected.size != actual.size
+        or (
+            expected.modified_at is not None
+            and timestamp(expected.modified_at) != timestamp(actual.modified_at)
+        )
+        or (expected.etag is not None and expected.etag != actual.etag)
+        or (
+            expected.version_id is not None and expected.version_id != actual.version_id
+        )
+    ):
+        raise LibrarySourceError("library_source_changed")
+
+
+@dataclass(frozen=True)
 class SourcePage:
     entries: tuple[SourceEntry, ...]
     next_cursor: str | None
@@ -57,7 +81,9 @@ class LibrarySource(Protocol):
     ) -> SourcePage: ...
 
     @contextmanager
-    def materialize(self, key: str) -> Iterator[Path]: ...
+    def materialize(
+        self, key: str, *, expected: SourceEntry | None = None
+    ) -> Iterator[SourceContent]: ...
 
 
 def _safe_key(value: str) -> str:
@@ -163,7 +189,9 @@ class S3LibrarySource:
         return SourcePage(entries, next_cursor, complete, metadata_ops=1)
 
     @contextmanager
-    def materialize(self, key: str) -> Iterator[Path]:
+    def materialize(
+        self, key: str, *, expected: SourceEntry | None = None
+    ) -> Iterator[SourceContent]:
         from botocore.exceptions import BotoCoreError, ClientError
 
         safe_key = _safe_key(key)
@@ -218,7 +246,15 @@ class S3LibrarySource:
                 or (version_id and current.get("VersionId") != version_id)
             ):
                 raise LibrarySourceError("library_source_changed")
-            yield path
+            observation = SourceEntry(
+                key=safe_key,
+                size=written,
+                modified_at=current.get("LastModified"),
+                etag=current.get("ETag"),
+                version_id=current.get("VersionId"),
+            )
+            _require_observation(expected, observation)
+            yield SourceContent(path, observation)
         finally:
             if hasattr(body, "close"):
                 body.close()
@@ -296,7 +332,15 @@ class OpenDalLibrarySource:
             if child.is_dir:
                 stack.append({"directory": child.key, "after": ""})
                 continue
-            entries_list.append(SourceEntry(key=child.key, size=child.size))
+            entries_list.append(
+                SourceEntry(
+                    key=child.key,
+                    size=child.size,
+                    modified_at=child.modified_at,
+                    etag=child.etag,
+                    version_id=child.version_id,
+                )
+            )
         complete = not stack
         next_cursor = None if complete else json.dumps(stack, separators=(",", ":"))
         if next_cursor is not None and len(next_cursor) > 2048:
@@ -309,19 +353,25 @@ class OpenDalLibrarySource:
         )
 
     @contextmanager
-    def materialize(self, key: str) -> Iterator[Path]:
+    def materialize(
+        self, key: str, *, expected: SourceEntry | None = None
+    ) -> Iterator[SourceContent]:
         safe_key = _safe_key(key)
         provider_key = self.backend.source_key(safe_key)
         before = self.backend.object_info(provider_key)
         if before is None:
             raise LibrarySourceError("library_source_missing")
+        observation = SourceEntry(
+            safe_key, before.size, before.modified_at, before.etag, before.version_id
+        )
+        _require_observation(expected, observation)
         fd, raw = tempfile.mkstemp(suffix=Path(safe_key).suffix)
         path = Path(raw)
         written = 0
         started = time.monotonic()
         try:
             with open(fd, "wb", closefd=True) as output:
-                for chunk in self.backend.stream_chunks(provider_key):
+                for chunk in self.backend.stream_chunks(provider_key, expected=before):
                     written += len(chunk)
                     if written > before.size:
                         raise LibrarySourceError("library_source_size_mismatch")
@@ -339,9 +389,10 @@ class OpenDalLibrarySource:
                 or after.size != before.size
                 or after.etag != before.etag
                 or after.version_id != before.version_id
+                or timestamp(after.modified_at) != timestamp(before.modified_at)
             ):
                 raise LibrarySourceError("library_source_changed")
-            yield path
+            yield SourceContent(path, observation)
         finally:
             path.unlink(missing_ok=True)
 
@@ -401,9 +452,9 @@ def source_for_file(file: File) -> tuple[LibrarySource, str]:
         return source_from_connection(connection), file.source_key
 
 
-def timestamp(value: datetime | None) -> float:
+def timestamp(value: datetime | None) -> float | None:
     if value is None:
-        return 0.0
+        return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.timestamp()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from app.db.models import (
     LibrarySourceKind,
 )
 from app.services import external_library, trash
-from app.services.library_source import SourceEntry, SourcePage
+from app.services.library_source import SourceContent, SourceEntry, SourcePage
 from tests.factories import build_file, build_model
 from tests.paths import FIXTURES_DIR
 
@@ -35,10 +35,12 @@ class _Source:
         return self.page
 
     @contextmanager
-    def materialize(self, _key: str):
+    def materialize(self, _key: str, *, expected=None):
         assert self.path is not None
         self.materialize_count += 1
-        yield self.path
+        yield SourceContent(
+            self.path, next(entry for entry in self.page.entries if entry.key == _key)
+        )
 
 
 def _remote_library(session: Session, name: str) -> ExternalLibrary:
@@ -69,6 +71,133 @@ def _indexed(session: Session, library: ExternalLibrary, key: str) -> File:
 
 
 class TestRemoteScanSafety:
+    @pytest.mark.parametrize("marker", ["etag", "version", "none"])
+    def test_next_scan_detects_equal_size_replacements(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        marker: str,
+    ) -> None:
+        library = _remote_library(db_session, f"remote-next-scan-{marker}")
+        key = "models/changed.gcode"
+        before, after = b"G1 X1\n", b"G1 X2\n"
+        source_path = tmp_path / "changed.gcode"
+        source_path.write_bytes(after)
+        existing = _indexed(db_session, library, key)
+        existing.sha256 = hashlib.sha256(before).hexdigest()
+        existing.size_bytes = len(before)
+        existing.source_mtime = 0.0
+        existing.source_verified_at = utcnow()
+        db_session.add(existing)
+        db_session.commit()
+        entry = SourceEntry(
+            key,
+            len(after),
+            modified_at=None
+            if marker == "none"
+            else datetime.fromtimestamp(0, timezone.utc),
+            etag="changed-etag" if marker == "etag" else None,
+            version_id="changed-version" if marker == "version" else None,
+        )
+        source = _Source(SourcePage((entry,), None, True, metadata_ops=1), source_path)
+        monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)
+
+        result = external_library.scan_remote_library(library.id)
+
+        db_session.refresh(existing)
+        assert result.get("error") is None, result
+        assert result["updated"] == 1, result
+        assert existing.sha256 == hashlib.sha256(after).hexdigest()
+        assert source.materialize_count == 1
+        assert existing.source_mtime == external_library.source_timestamp(
+            entry.modified_at
+        )
+        assert existing.source_etag == entry.etag
+        assert existing.source_version_id == entry.version_id
+
+    @pytest.mark.parametrize(
+        "marker", ["mtime", "etag", "version", "none", "null-version"]
+    )
+    def test_only_usable_unchanged_markers_skip_the_next_scan(
+        self,
+        db_session: Session,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        marker: str,
+    ) -> None:
+        library = _remote_library(db_session, f"remote-marker-{marker}")
+        key = "models/stable.gcode"
+        path = tmp_path / "stable.gcode"
+        path.write_bytes(b"G1 X1\n")
+        entry = SourceEntry(
+            key,
+            path.stat().st_size,
+            modified_at=datetime(2026, 9, 1, tzinfo=timezone.utc)
+            if marker == "mtime"
+            else None,
+            etag="tag" if marker == "etag" else None,
+            version_id="v1"
+            if marker == "version"
+            else "null"
+            if marker == "null-version"
+            else None,
+        )
+        source = _Source(SourcePage((entry,), None, True, metadata_ops=1), path)
+        monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)
+
+        first = external_library.scan_remote_library(library.id)
+        second = external_library.scan_remote_library(library.id)
+
+        assert first["added"] == 1
+        assert second["complete"] is True
+        assert source.materialize_count == (
+            2 if marker in {"none", "null-version"} else 1
+        )
+        row = db_session.exec(
+            select(File).where(File.external_library_id == library.id)
+        ).one()
+        assert row.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+        assert row.source_mtime == external_library.source_timestamp(entry.modified_at)
+        assert row.source_etag == entry.etag
+        assert row.source_version_id == entry.version_id
+
+    def test_indexing_persists_read_evidence_missing_from_listing(
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        library = _remote_library(db_session, "remote-read-evidence")
+        path = tmp_path / "part.gcode"
+        path.write_bytes(b"G1 X1\n")
+        listing = SourceEntry("models/part.gcode", path.stat().st_size)
+        observed = SourceEntry(
+            listing.key,
+            listing.size,
+            datetime(2026, 9, 1, tzinfo=timezone.utc),
+            "tag",
+            "v1",
+        )
+
+        class ObservedSource(_Source):
+            @contextmanager
+            def materialize(self, _key, *, expected):
+                assert expected == listing
+                yield SourceContent(path, observed)
+
+        source = ObservedSource(
+            SourcePage((listing,), None, True, metadata_ops=1), path
+        )
+        monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)
+
+        result = external_library.scan_remote_library(library.id)
+
+        row = db_session.exec(
+            select(File).where(File.external_library_id == library.id)
+        ).one()
+        assert result["added"] == 1
+        assert row.source_mtime == observed.modified_at.timestamp()
+        assert row.source_etag == "tag"
+        assert row.source_version_id == "v1"
+
     def test_missing_or_mounted_library_is_never_scanned_as_remote(
         self, db_session: Session
     ) -> None:
@@ -232,7 +361,9 @@ class TestRemoteScanSafety:
             lambda job_id, **values: updates.append((job_id, values)),
         )
 
-        result = external_library.scan_remote_library(library.id, job_id="completed-job")
+        result = external_library.scan_remote_library(
+            library.id, job_id="completed-job"
+        )
 
         assert result["complete"] is True
         assert updates[-1][0] == "completed-job"
@@ -323,7 +454,18 @@ class TestRemoteScanSafety:
         db_session.add(existing)
         db_session.commit()
         source = _Source(
-            SourcePage((SourceEntry(key, len(after)),), None, True, metadata_ops=1),
+            SourcePage(
+                (
+                    SourceEntry(
+                        key,
+                        len(after),
+                        modified_at=datetime.fromtimestamp(0, timezone.utc),
+                    ),
+                ),
+                None,
+                True,
+                metadata_ops=1,
+            ),
             source_path,
         )
         monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)

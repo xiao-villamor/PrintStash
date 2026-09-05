@@ -8,6 +8,10 @@
   Manifest reads stream through bounded buffers and close their remote handles
   on early exit; failed downloads remove their temporary bytes.
 
+- Remote Library scans preserve ETags, versions and unknown modification times.
+  Equal-size changes trigger the next scan; sources without change markers are
+  hashed on every scan. Reads use supported version or conditional constraints
+  and reject metadata drift before indexing.
 - The full container image includes the S3 transport used by remote Library
   sources and backup connections. Image checks now exercise remote-only S3
   recovery on both supported architectures.

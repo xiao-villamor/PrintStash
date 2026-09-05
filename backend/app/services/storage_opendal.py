@@ -11,6 +11,7 @@ import tempfile
 import uuid
 from contextlib import ExitStack
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BufferedReader, RawIOBase
 from itertools import islice
 from pathlib import Path
@@ -401,6 +402,7 @@ class OpenDALStorageBackend(StorageBackend):
             size=int(metadata.content_length),
             etag=getattr(metadata, "etag", None),
             version_id=getattr(metadata, "version", None),
+            modified_at=getattr(metadata, "last_modified", None),
         )
 
     def read_bytes(self, key: str) -> bytes:
@@ -442,11 +444,32 @@ class OpenDALStorageBackend(StorageBackend):
         if self._operator.exists(relative):
             raise StorageConfigurationError("remote_object_delete_failed")
 
-    def stream_chunks(self, key: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    def stream_chunks(
+        self,
+        key: str,
+        chunk_size: int = 1024 * 1024,
+        *,
+        expected: StorageObjectInfo | None = None,
+    ) -> Iterator[bytes]:
         if hasattr(self._operator, "stream_chunks"):
             yield from self._operator.stream_chunks(self._relative(key), chunk_size)
             return
-        with self._operator.open(self._relative(key), "rb") as reader:
+        options: dict[str, object] = {}
+        if expected is not None:
+            capabilities = self._operator.capability()
+            if (
+                expected.version_id
+                and expected.version_id != "null"
+                and getattr(capabilities, "read_with_version", False)
+            ):
+                options["version"] = expected.version_id
+            elif expected.etag and getattr(capabilities, "read_with_if_match", False):
+                options["if_match"] = expected.etag
+            elif expected.modified_at is not None and getattr(
+                capabilities, "read_with_if_unmodified_since", False
+            ):
+                options["if_unmodified_since"] = expected.modified_at
+        with self._operator.open(self._relative(key), "rb", **options) as reader:
             while chunk := reader.read(chunk_size):
                 yield bytes(chunk)
 
@@ -644,6 +667,9 @@ class OpenDALStorageBackend(StorageBackend):
                     key=path,
                     size=int(getattr(metadata, "content_length", 0) or 0),
                     is_dir=bool(getattr(metadata, "is_dir", False)),
+                    modified_at=getattr(metadata, "last_modified", None),
+                    etag=getattr(metadata, "etag", None) or None,
+                    version_id=getattr(metadata, "version", None) or None,
                 )
             )
         return entries
@@ -795,6 +821,7 @@ def _operator_for(spec: TransportSpec):
 class _AsyncSSHMetadata:
     content_length: int
     etag: None = None
+    last_modified: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -859,6 +886,17 @@ class SourceDirectoryEntry:
     key: str
     size: int
     is_dir: bool
+    modified_at: datetime | None = None
+    etag: str | None = None
+    version_id: str | None = None
+
+
+def _sftp_modified_at(attrs) -> datetime | None:
+    mtime = getattr(attrs, "mtime", None)
+    if mtime is None:
+        return None
+    seconds = mtime + (getattr(attrs, "mtime_ns", None) or 0) / 1_000_000_000
+    return datetime.fromtimestamp(seconds, timezone.utc)
 
 
 class _AsyncSSHSFTPOperator:
@@ -1048,11 +1086,14 @@ class _AsyncSSHSFTPOperator:
         self._run(operation)
 
     def stat(self, relative: str) -> _AsyncSSHMetadata:
-        async def operation(client) -> int:
+        async def operation(client) -> _AsyncSSHMetadata:
             attrs = await client.stat(self._path(relative))
-            return int(attrs.size or 0)
+            return _AsyncSSHMetadata(
+                content_length=int(attrs.size or 0),
+                last_modified=_sftp_modified_at(attrs),
+            )
 
-        return _AsyncSSHMetadata(content_length=int(self._run(operation)))
+        return self._run(operation)
 
     def read(self, relative: str) -> bytes:
         async def operation(client) -> bytes:
@@ -1150,6 +1191,7 @@ class _AsyncSSHSFTPOperator:
                         metadata=SimpleNamespace(
                             is_dir=is_dir,
                             content_length=int(entry.attrs.size or 0),
+                            last_modified=_sftp_modified_at(entry.attrs),
                         ),
                     )
                 )

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from app.services import artifact_content
+from app.services.library_source import SourceContent, SourceEntry
 from tests.factories import detached_file
 
 
@@ -32,9 +33,12 @@ class TestRemoteArtifactContent:
 
         class Source:
             @contextmanager
-            def materialize(self, key: str):
+            def materialize(self, key: str, *, expected=None):
                 assert key == "models/source.stl"
-                yield source_path
+                yield SourceContent(
+                    source_path,
+                    SourceEntry(source_path.name, source_path.stat().st_size),
+                )
 
         monkeypatch.setattr(
             artifact_content,
@@ -70,8 +74,11 @@ class TestRemoteArtifactContent:
 
         class Source:
             @contextmanager
-            def materialize(self, _key: str):
-                yield source_path
+            def materialize(self, _key: str, *, expected=None):
+                yield SourceContent(
+                    source_path,
+                    SourceEntry(source_path.name, source_path.stat().st_size),
+                )
 
         monkeypatch.setattr(
             artifact_content,
@@ -186,9 +193,7 @@ class TestManagedArtifactContent:
             with handle.materialize():
                 pass
 
-    def test_empty_managed_object_preserves_empty_content(
-        self, tmp_path: Path
-    ) -> None:
+    def test_empty_managed_object_preserves_empty_content(self, tmp_path: Path) -> None:
         path = tmp_path / "empty.stl"
         path.write_bytes(b"")
         row = detached_file(
@@ -228,6 +233,7 @@ class TestManagedArtifactContent:
         monkeypatch.setattr(artifact_content, "get_backend", lambda: backend)
 
         assert artifact_content.presigned_download_url(external, "external.stl") is None
-        assert artifact_content.presigned_download_url(
-            managed, "managed.stl"
-        ) == "https://download.example.test/signed"
+        assert (
+            artifact_content.presigned_download_url(managed, "managed.stl")
+            == "https://download.example.test/signed"
+        )

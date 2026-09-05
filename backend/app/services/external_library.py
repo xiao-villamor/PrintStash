@@ -518,7 +518,9 @@ def _process_external_file(
         return strategy.process(read_path)
     from app.services import mesh_processing
 
-    return mesh_processing.analyze_mesh(read_path, file_type=file_type.value, output_format="WEBP")
+    return mesh_processing.analyze_mesh(
+        read_path, file_type=file_type.value, output_format="WEBP"
+    )
 
 
 def _walk(root: Path) -> dict[str, tuple[int, float]]:
@@ -735,9 +737,7 @@ def _index_external_file(
             Path(library.root_path).expanduser().resolve(strict=False)
         ).as_posix()
     except ValueError as exc:
-        raise ExternalRootBindingError(
-            "mismatch", "path_outside_library_root"
-        ) from exc
+        raise ExternalRootBindingError("mismatch", "path_outside_library_root") from exc
     row.source_verified_at = utcnow()
     session.add(row)
     session.commit()
@@ -749,7 +749,7 @@ def _reindex_changed(
     file_row: File,
     source_path: Path,
     size: int,
-    mtime: float,
+    mtime: float | None,
 ) -> bool:
     """Refresh an indexed file whose on-disk size/mtime changed.
 
@@ -868,7 +868,9 @@ def _remote_collection_path(library: ExternalLibrary, key: str) -> str | None:
     if library.collection_mode != ExternalLibraryCollectionMode.MIRROR:
         return None
     prefix = library.source_prefix.strip("/")
-    relative = key[len(prefix) :].lstrip("/") if prefix and key.startswith(prefix) else key
+    relative = (
+        key[len(prefix) :].lstrip("/") if prefix and key.startswith(prefix) else key
+    )
     parent = Path(relative).parent.as_posix()
     return None if parent in {"", "."} else parent
 
@@ -881,7 +883,8 @@ def _index_remote_file(
 ) -> None:
     source_name = Path(entry.key)
     file_type = SUFFIX_TO_FILE_TYPE[source_name.suffix.lower()]
-    with source.materialize(entry.key) as read_path:
+    with source.materialize(entry.key, expected=entry) as content:
+        read_path = content.path
         blob_hash = sha256_file(read_path)
         strategy = _strategy_for(file_type)
         meta, thumb_bytes = _process_external_file(strategy, file_type, read_path)
@@ -916,9 +919,11 @@ def _index_remote_file(
             dest_key_override=_remote_uri(library, entry.key),
             is_external=True,
             external_library_id=library.id,
-            source_mtime=source_timestamp(entry.modified_at),
+            source_mtime=source_timestamp(content.entry.modified_at),
         )
         row.source_key = entry.key
+        row.source_etag = content.entry.etag
+        row.source_version_id = content.entry.version_id
         row.source_verified_at = utcnow()
         session.add(row)
         session.commit()
@@ -931,19 +936,25 @@ def _reindex_remote_file(
     source: LibrarySource,
     entry: SourceEntry,
 ) -> bool:
-    with source.materialize(entry.key) as read_path:
+    with source.materialize(entry.key, expected=entry) as content:
+        read_path = content.path
         display_path = Path(file_row.path)
         current = dict(_PINNED_READ_PATHS.get() or {})
         current[str(display_path)] = read_path
         token = _PINNED_READ_PATHS.set(current)
         try:
-            return _reindex_changed(
+            changed = _reindex_changed(
                 session,
                 file_row,
                 display_path,
-                entry.size,
-                source_timestamp(entry.modified_at),
+                content.entry.size,
+                source_timestamp(content.entry.modified_at),
             )
+            file_row.source_etag = content.entry.etag
+            file_row.source_version_id = content.entry.version_id
+            session.add(file_row)
+            session.commit()
+            return changed
         finally:
             _PINNED_READ_PATHS.reset(token)
 
@@ -951,6 +962,29 @@ def _reindex_remote_file(
 def _source_hash_due(file_row: File, now: datetime) -> bool:
     verified_at = file_row.source_verified_at
     return verified_at is None or ensure_utc(verified_at) <= now - _SOURCE_HASH_MAX_AGE
+
+
+def _remote_markers_unchanged(file_row: File, entry: SourceEntry) -> bool:
+    if file_row.size_bytes != entry.size:
+        return False
+    usable = False
+    mtime = source_timestamp(entry.modified_at)
+    if mtime is not None:
+        usable = True
+        if (
+            file_row.source_mtime is None
+            or abs(file_row.source_mtime - mtime) > _MTIME_TOLERANCE_S
+        ):
+            return False
+    if entry.etag:
+        usable = True
+        if entry.etag != file_row.source_etag:
+            return False
+    if entry.version_id and entry.version_id != "null":
+        usable = True
+        if entry.version_id != file_row.source_version_id:
+            return False
+    return usable
 
 
 def _remote_checkpoint(
@@ -994,9 +1028,10 @@ def scan_remote_library(
             if library.source_kind == LibrarySourceKind.MOUNTED:
                 raise ValueError("library_source_is_mounted")
             checkpoint = _remote_checkpoint(session, library)
-            if checkpoint.backoff_until and ensure_utc(
+            if (
                 checkpoint.backoff_until
-            ) > utcnow():
+                and ensure_utc(checkpoint.backoff_until) > utcnow()
+            ):
                 return {
                     **summary.as_dict(),
                     "backoff_until": checkpoint.backoff_until.isoformat(),
@@ -1056,16 +1091,12 @@ def scan_remote_library(
                         summary.skipped += 1
                         continue
                     existing = by_key.get(entry.key)
-                    mtime = source_timestamp(entry.modified_at)
                     if existing is None:
                         _index_remote_file(session, library, source, entry)
                         summary.added += 1
-                    elif (
-                        existing.size_bytes == entry.size
-                        and existing.source_mtime is not None
-                        and abs(existing.source_mtime - mtime) <= _MTIME_TOLERANCE_S
-                        and not _source_hash_due(existing, observation_time)
-                    ):
+                    elif _remote_markers_unchanged(
+                        existing, entry
+                    ) and not _source_hash_due(existing, observation_time):
                         summary.skipped += 1
                     elif _reindex_remote_file(session, existing, source, entry):
                         summary.updated += 1

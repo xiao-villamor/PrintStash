@@ -128,5 +128,6 @@ class TestOpenDalLibrarySource:
         page = source.list_page("models", cursor=None, limit=1000)
 
         assert [entry.key for entry in page.entries] == ["models/part.gcode"]
-        with source.materialize("models/part.gcode") as local_path:
+        with source.materialize("models/part.gcode") as content:
+            local_path = content.path
             assert local_path.read_bytes() == payload

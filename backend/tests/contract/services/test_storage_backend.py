@@ -145,8 +145,8 @@ class TestS3LibrarySource:
 
         assert [entry.key for entry in page.entries] == [key]
         assert page.complete is True
-        with source.materialize(key) as local_path:
-            assert local_path.read_bytes() == payload
+        with source.materialize(key) as content:
+            assert content.path.read_bytes() == payload
 
 
 class TestWriteStream:
