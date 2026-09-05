@@ -157,7 +157,13 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
     const extruding = values.E !== undefined && ne > ce + 0.0001;
     ce = ne;
     const nz = next[2];
-    if (nz > position[2] && nz > 0.01) {
+    // Travel lifts and unretraction do not create printable layers. Start a
+    // layer only when this command deposits material along a physical move.
+    if (
+      extruding &&
+      (op === "G2" || op === "G3" || next.some((value, index) => value !== position[index])) &&
+      (currentZ < 0 || Math.abs(nz - currentZ) > 0.001)
+    ) {
       if (currentZ >= 0)
         layerRanges.push({
           z: currentZ,
@@ -166,7 +172,7 @@ export function parseGcode(text: string, segmentLimit = 1_000_000): ToolpathData
         });
       currentZ = nz;
       layerVertStart = extrudeSegs.length / 3;
-    } else if (currentZ < 0 && nz >= 0) currentZ = nz;
+    }
     if (op === "G2" || op === "G3") {
       const center: Point = [position[0], position[1], position[2]];
       (["I", "J", "K"] as const).forEach((axis, index) => {

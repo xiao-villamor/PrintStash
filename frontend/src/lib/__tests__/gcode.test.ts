@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { parseGcode } from "../gcode";
 
 describe("Toolpath geometry", () => {
+  it("includes a full-circle extrusion in its printable layer", () => {
+    const result = parseGcode("G1 X10 Z.2\nG2 I-10 J0 E1");
+    expect(result.layerRanges).toHaveLength(1);
+    expect(result.layerRanges[0].z).toBe(0.2);
+    expect(result.layerRanges[0].vertexCount).toBe(result.extrudePositions.length / 3);
+    expect(result.layerRanges[0].vertexCount).toBeGreaterThan(4);
+  });
+  it("ignores travel lifts when defining printable layers", () => {
+    const result = parseGcode(
+      "G1 Z5\nG1 Z.2\nG1 X10 E1\nG1 Z1\nG1 X20\nG1 Z.2\nG1 X30 E2\nG1 Z.4\nG1 X40 E3",
+    );
+    expect(result.layerRanges.map((layer) => layer.z)).toEqual([0.2, 0.4]);
+    expect(result.layerRanges.map((layer) => layer.vertexCount)).toEqual([4, 2]);
+    expect(result.cumulativeVertices.at(-1)).toBe(result.extrudePositions.length / 3);
+  });
   it("keeps physical coordinates continuous after G92", () => {
     const result = parseGcode("G1 X10 Z.2\nG1 X20 E1\nG92 X0 E0\nG1 X10 E1");
     expect(result.bounds.sizeX).toBe(20);

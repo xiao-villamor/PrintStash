@@ -1,7 +1,8 @@
 # BGCODE toolpath preview
 
 The GCode view can inspect PrusaSlicer BGCODE v1 files directly, including layers
-and travel moves. PrintStash validates and converts a temporary copy with official
+and travel moves. Layer selection follows deposited moves; travel lifts do not
+create empty layers. PrintStash validates and converts a temporary copy with official
 [libbgcode](https://github.com/prusa3d/libbgcode/tree/d4da9073616d70a43c151e8c1d7fbff879d2e08a).
 The stored Artifact, metadata, thumbnail, original download and bytes uploaded to
 PrusaLink remain unchanged. PrusaLink remains beta.

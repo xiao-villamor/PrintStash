@@ -11,7 +11,8 @@
 
 - BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
   and lite API images on amd64/arm64. Conversion and browser parsing have explicit
-  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Originals
+  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
+  no longer create empty layers. Originals
   remain unchanged for downloads and PrusaLink.
 
 - Backup run history records every selected destination, including invalid
