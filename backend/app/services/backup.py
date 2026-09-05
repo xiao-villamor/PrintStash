@@ -370,6 +370,15 @@ class _BackupS3Target:
     bucket: str
     signature: str
     provider_ref: str = ""
+    endpoint: str | None = None
+
+    @property
+    def storage_target(self):
+        from app.services.storage_identity import s3_target
+
+        if self.endpoint is None:
+            return None
+        return s3_target(endpoint=self.endpoint, bucket=self.bucket)
 
 
 _backup_s3: Any = None  # compatibility seam used by existing tests
@@ -516,6 +525,7 @@ def _get_backup_s3() -> Any:
                 bucket=bucket,
                 signature=signature,
                 provider_ref=_backup_provider_ref(config),
+                endpoint=endpoint,
             )
             logger.info("backup: S3 client initialised for configured target")
             return _backup_s3
@@ -549,6 +559,7 @@ def _get_backup_s3_target() -> _BackupS3Target | None:
             config[0],
             _backup_s3_signature(config),
             _backup_provider_ref(config),
+            config[1],
         )
 
 
@@ -1112,7 +1123,7 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
         except Exception:
             logger.warning("backup %s: S3 upload failed", backup_id, exc_info=True)
 
-    # Purpose-scoped connections are independent replicas. A failed remote
+    # Purpose-scoped connections are separate replicas. A failed remote
     # destination never invalidates the already committed local archive, and a
     # failure at one provider does not prevent the remaining replicas.
     for destination in remote_destinations:

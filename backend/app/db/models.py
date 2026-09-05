@@ -1939,6 +1939,19 @@ class RestoreMarker(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utcnow)
 
 
+class StorageFailureDomainDeclaration(SQLModel, table=True):
+    """Administrator attestation bound to one versioned target identity."""
+
+    __tablename__ = "storage_failure_domain_declarations"
+
+    target_ref: str = Field(primary_key=True, max_length=64)
+    target_identity: str = Field(sa_column=Column(Text, nullable=False))
+    failure_domain: str = Field(max_length=128)
+    revision: str = Field(max_length=32)
+    declared_by: Optional[int] = Field(default=None, foreign_key="users.id")
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
 class GcRun(SQLModel, table=True):
     """Immutable candidate plan plus its explicit destructive authorization."""
 
@@ -1980,6 +1993,12 @@ class GcRun(SQLModel, table=True):
     backup_archive_sha256: Optional[str] = Field(default=None, max_length=64)
     backup_verified_at: Optional[datetime] = None
     active_provider_ref: Optional[str] = Field(default=None, max_length=64)
+    active_identity_evidence: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    backup_identity_evidence: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     restore_generation: str = Field(default="", max_length=64)
     last_error: Optional[str] = Field(default=None, max_length=255)
     created_at: datetime = Field(default_factory=utcnow, index=True)

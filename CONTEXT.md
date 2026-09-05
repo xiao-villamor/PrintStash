@@ -103,7 +103,7 @@ _Avoid_: deleted (ambiguous with hard delete)
 soft-delete → restore or expiry → GC preview → explicit approval → quarantine →
 revalidated hard delete. `services/trash` owns individual transitions and
 `services/gc_planner` owns automatic expiry. Automatic GC never approves its
-own plan. It requires a recent, verified backup on an independent S3 provider,
+own plan. It requires a recent, verified S3 backup in an independent failure domain,
 an unchanged candidate digest, Verified active storage, and a completed
 quarantine interval. PrintStash never walks configured storage and deletes
 files merely because no database row claims them; failed writes clean up only
@@ -113,14 +113,26 @@ their exact destinations at the write site.
 A durable, bounded and immutable preview of expired catalog rows and their
 explicitly owned storage keys. At most one plan is active. Approval binds its
 exact digest to a backup witness; finalization rechecks the candidate rows,
-restore generation, provider identity, backup and quarantine deadline.
+restore generation, target identity and failure-domain evidence, backup and quarantine deadline.
 
 **Backup witness**:
 The exact archive id, source reference, provider identity and digest of a fully
-verified, application-compatible S3 backup created in the previous 24 hours on
-a provider different from active Vault storage.
+verified, application-compatible S3 backup created in the previous 24 hours,
+with current evidence of a failure domain independent of active Vault storage.
 
 ### Storage
+
+**Storage target identity**:
+The versioned identity of the service and container holding bytes, distinct
+from an object's locator, ownership receipt, or connection profile.
+
+**Storage failure domain**:
+A group of storage targets whose failure may lose both active bytes and their
+backup. Different roles, credentials, prefixes, or profiles do not establish independence.
+
+**Failure-domain declaration**:
+An administrator's attestation of a custom target's failure domain, bound to
+that target's identity. It cannot override evidence that two targets share storage.
 
 **Storage capability tier**:
 The runtime-probed safety guarantee of the active storage backend: Verified,

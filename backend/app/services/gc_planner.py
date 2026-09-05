@@ -36,6 +36,7 @@ from app.db.models import (
 from app.db.scopes import trashed
 from app.db.session import get_session_factory
 from app.services.storage_backend import StorageTier, get_backend
+from app.services.storage_identity import independent_evidence
 from app.services.storage_ownership import provider_ref_for_backend
 
 _DOCUMENT_IMAGE_RE = re.compile(
@@ -61,6 +62,8 @@ class BackupWitness:
     provider_ref: str
     archive_sha256: str
     verified_at: datetime
+    active_identity_evidence: dict | None = None
+    backup_identity_evidence: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -340,8 +343,13 @@ def find_backup_witness() -> BackupWitness | None:
             or not meta.archive_sha256
         ):
             continue
+        evidence = _source_identity_evidence(meta)
+        if evidence is None:
+            continue
         verification = backup.verify_backup(meta.id, source_ref=meta.source_ref)
         if not verification.valid or not verification.app_compatible:
+            continue
+        if _source_identity_evidence(meta) != evidence:
             continue
         return BackupWitness(
             backup_id=meta.id,
@@ -349,8 +357,27 @@ def find_backup_witness() -> BackupWitness | None:
             provider_ref=meta.provider_ref,
             archive_sha256=meta.archive_sha256,
             verified_at=now,
+            active_identity_evidence=evidence[0],
+            backup_identity_evidence=evidence[1],
         )
     return None
+
+
+def _source_identity_evidence(meta) -> tuple[dict, dict] | None:
+    from app.services import backup
+
+    target = backup._get_backup_s3_target()
+    if (
+        target is None
+        or meta.location != "s3"
+        or target.provider_ref != meta.provider_ref
+    ):
+        return None
+    return independent_evidence(get_backend().storage_target, target.storage_target)
+
+
+def _serialize_evidence(evidence: dict) -> str:
+    return json.dumps(evidence, sort_keys=True, separators=(",", ":"))
 
 
 def _items(session: Session, run_id: int) -> list[GcItem]:
@@ -401,8 +428,18 @@ def approve_plan(session: Session, run_id: int, digest: str, actor_id: int) -> G
     if get_backend().capabilities.tier is not StorageTier.VERIFIED:
         raise GcSafetyError("gc_verified_storage_required")
     witness = find_backup_witness()
-    if witness is None:
+    if (
+        witness is None
+        or witness.active_identity_evidence is None
+        or witness.backup_identity_evidence is None
+    ):
         raise GcSafetyError("gc_backup_required")
+    # Verification may take long enough for another request to restore a
+    # candidate. Re-read committed rows instead of the session identity map.
+    session.expire_all()
+    _revalidate_plan(session, run)
+    if get_backend().capabilities.tier is not StorageTier.VERIFIED:
+        raise GcSafetyError("gc_verified_storage_required")
     now = utcnow()
     run.state = GcRunState.QUARANTINED
     run.approved_by = actor_id
@@ -413,6 +450,8 @@ def approve_plan(session: Session, run_id: int, digest: str, actor_id: int) -> G
     run.backup_provider_ref = witness.provider_ref
     run.backup_archive_sha256 = witness.archive_sha256
     run.backup_verified_at = witness.verified_at
+    run.active_identity_evidence = _serialize_evidence(witness.active_identity_evidence)
+    run.backup_identity_evidence = _serialize_evidence(witness.backup_identity_evidence)
     run.updated_at = now
     session.add(run)
     session.commit()
@@ -428,6 +467,8 @@ def _reverify_backup(run: GcRun) -> None:
         or not run.backup_source_ref
         or not run.backup_provider_ref
         or not run.backup_archive_sha256
+        or not run.active_identity_evidence
+        or not run.backup_identity_evidence
         or run.backup_provider_ref == _active_provider_ref()
     ):
         raise GcSafetyError("gc_backup_witness_invalid")
@@ -446,9 +487,20 @@ def _reverify_backup(run: GcRun) -> None:
     )
     if source is None:
         raise GcSafetyError("gc_backup_witness_missing")
+    _require_unchanged_identity(run, source)
     verification = backup.verify_backup(run.backup_id, source_ref=run.backup_source_ref)
     if not verification.valid or not verification.app_compatible:
         raise GcSafetyError("gc_backup_witness_invalid")
+    _require_unchanged_identity(run, source)
+
+
+def _require_unchanged_identity(run: GcRun, source) -> None:
+    evidence = _source_identity_evidence(source)
+    if evidence is None or (
+        _serialize_evidence(evidence[0]) != run.active_identity_evidence
+        or _serialize_evidence(evidence[1]) != run.backup_identity_evidence
+    ):
+        raise GcSafetyError("gc_identity_evidence_changed")
 
 
 def finalize_plan(session: Session, run_id: int) -> GcRun:
@@ -472,7 +524,13 @@ def finalize_plan(session: Session, run_id: int) -> GcRun:
         raise GcSafetyError("gc_quarantine_active")
     try:
         items = _revalidate_plan(session, run)
+        if get_backend().capabilities.tier is not StorageTier.VERIFIED:
+            raise GcSafetyError("gc_verified_storage_required")
         _reverify_backup(run)
+        session.expire_all()
+        items = _revalidate_plan(session, run)
+        if get_backend().capabilities.tier is not StorageTier.VERIFIED:
+            raise GcSafetyError("gc_verified_storage_required")
         run.state = GcRunState.FINALIZING
         run.updated_at = utcnow()
         session.add(run)

@@ -27,6 +27,7 @@ from app.services.storage_backend import (
     StorageConfigurationError,
     StorageObjectInfo,
 )
+from app.services.storage_identity import StorageTargetIdentity, target_for_transport
 from app.services.storage_providers import TransportKind, TransportSpec
 
 
@@ -70,6 +71,10 @@ def _is_not_found(exc: Exception) -> bool:
 
 class OpenDALStorageBackend(StorageBackend):
     """Synchronous adapter for explicitly supported remote transports."""
+
+    @property
+    def storage_target(self) -> StorageTargetIdentity | None:
+        return target_for_transport(self._spec.kind.value, self._spec.options)
 
     backend_name = "opendal"
 

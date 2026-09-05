@@ -245,7 +245,28 @@ same release has been exercised on the named public service or appliance.
 | OpenSSH SFTP | Managed, read-only source and backup destination | Real OpenSSH contract through the production adapter; remote-only API backup probe, listing, verification and byte-matching restore | Containerized contract service | Protocol-contract validated |
 | NAS SFTP | Managed, read-only source and backup destination | OpenSSH protocol contract | No model/firmware matrix | Beta protocol compatibility; pinned host key required |
 | Google Drive | Read-only source and backup destination | OpenDAL configuration, discovery, hash-verified restore and fail-closed retention tests | No live Google account validation | Beta; automatic remote retention and Vault-GC witness are disabled |
+
 | Unraid, Synology DSM, TrueNAS SCALE, OpenMediaVault, QNAP QTS/QuTS, CasaOS/ZimaOS, Proxmox VE | Mounted source or host for a remote profile | The interface contracts above | No complete appliance validation rows | Installation recipes, not certification |
+
+GC approval requires a recently verified, compatible backup with current evidence
+of a failure domain independent of the Vault. Storage locator hashes and profile
+names do not prove independence. Recognized S3 endpoints conservatively group
+targets by provider; separate buckets, regions, or accounts at that provider do
+not establish an independent failure domain. The existing native S3 backup
+destination remains the supported witness path.
+
+For custom endpoints, administrators can inspect `GET /api/v1/storage/targets`
+and declare a domain with `PUT /api/v1/storage/targets/{target_ref}/failure-domain`
+and a body such as `{"failure_domain":"off-site-nas"}`. Use the same domain name
+for targets sharing hardware, a site, or another dependency whose failure could
+lose both copies. Missing declarations leave custom targets ineligible. A
+declaration is bound to the returned target identity and cannot override known
+shared storage. Delete that declaration through the same path to withdraw it.
+
+Changing a target or its declaration invalidates previously approved GC evidence.
+Approved plans created before this evidence was recorded need a new preview and
+approval. Historical backups remain listable and recoverable; upgrading does not
+backfill independence claims or change ownership and archive locators.
 
 The [Library Sources guide](./library-sources.md) gives platform recipes and a
 disposable-data validation checklist. First-party platform citations are
