@@ -277,20 +277,6 @@ def _sftp_spec(port: int, private_key: Path, known_hosts: Path) -> TransportSpec
     )
 
 
-class _RenameFailure:
-    _printstash_test_double = True
-
-    def __init__(self) -> None:
-        self.inner = opendal.Operator("memory")
-
-    def __getattr__(self, name: str):
-        return getattr(self.inner, name)
-
-    def rename(self, source: str, destination: str) -> None:
-        del source, destination
-        raise OSError("rename failed")
-
-
 class TestOpenDALStorageBackend:
     @pytest.mark.parametrize("provider", ["sftp", "webdav"])
     @pytest.mark.parametrize("replacement", [False, True])
@@ -334,10 +320,10 @@ class TestOpenDALStorageBackend:
         )
         destination = destination_from_connection(profile)
         if provider == "sftp":
-            destination.backend.provision_root()
+            (tmp_path / "password-server/vault-data").mkdir(parents=True, exist_ok=True)
         key = destination.key("archive.tar.gz")
         payload = b"original-archive"
-        receipt = destination.backend.create_bytes(payload, key)
+        receipt = destination.backend.publish_replica(BytesIO(payload), key)
         info = destination.backend.object_info(key)
         assert info is not None
         row = OwnedStorageObject(
@@ -361,13 +347,14 @@ class TestOpenDALStorageBackend:
         assert destination.delete_owned(row) is False
 
         assert remote_file.read_bytes() == expected
-        assert destination.backend.read_bytes(key) == expected
+        with destination.backend.open_reader(key) as reader:
+            assert reader.read() == expected
         assert row.token == receipt.token
         assert row.state == StorageObjectState.COMMITTED
 
     @pytest.mark.parametrize("password", ["contract-secret", "incorrect-secret"])
     def test_sftp_backup_probe_uses_the_production_factory(
-        self, sftp_password_endpoint, password: str
+        self, sftp_password_endpoint, tmp_path: Path, password: str
     ) -> None:
         port, known_hosts = sftp_password_endpoint
         profile = StorageConnection(
@@ -387,7 +374,7 @@ class TestOpenDALStorageBackend:
             ),
             secret_json=json.dumps({"password": "contract-secret"}),
         )
-        destination_from_connection(profile).backend.provision_root()
+        (tmp_path / "password-server/vault-data").mkdir(parents=True, exist_ok=True)
         profile.secret_json = json.dumps({"password": password})
         destination = destination_from_connection(profile)
 
@@ -644,16 +631,25 @@ class TestOpenDALStorageBackend:
         )
         assert backend.read_bytes(key) == payload
 
-    def test_failed_remote_publication_removes_temporary_key(self) -> None:
-        operator = _RenameFailure()
-        backend = OpenDALStorageBackend(_spec(), operator=operator)
+    def test_failed_remote_publication_removes_temporary_key(
+        self, webdav_endpoint: str, monkeypatch
+    ) -> None:
+        import httpx
+
+        request = httpx.request
+
+        def refuse_move(method, url, **kwargs):
+            if method == "MOVE":
+                return httpx.Response(503)
+            return request(method, url, **kwargs)
+
+        monkeypatch.setattr(httpx, "request", refuse_move)
+        backend = OpenDALStorageBackend(_spec(webdav_endpoint))
         key = backend.thumbnail_key(1)
-
-        with pytest.raises(OSError, match="rename failed"):
+        with pytest.raises(StorageConfigurationError, match="webdav_move_failed:503"):
             backend.create_bytes(b"thumbnail", key)
-
         assert not backend.exists(key)
-        assert list(operator.inner.scan(".printstash-tmp")) == []
+        assert list(backend.walk_keys()) == []
 
     def test_remote_verified_mutations_fail_closed(self, webdav_endpoint: str) -> None:
         backend = OpenDALStorageBackend(_spec(webdav_endpoint))
