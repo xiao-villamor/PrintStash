@@ -14,6 +14,9 @@ are documented in
 
 ## Clean Install
 
+The checks below establish release readiness. After publication, also complete
+the [publication check](#publication-check) before announcing availability.
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
@@ -27,6 +30,23 @@ Expected:
 - health components include database, storage, backup, and printer providers
 - Docker containers, networks, volumes, and default SQLite path use PrintStash
   naming for new installs
+
+## Publication Check
+
+- Confirm that the GitHub release is published, not a draft, and points to the
+  intended version tag. A local tag or a green branch build is not publication.
+- Inspect the versioned GHCR manifests for `printstash-api`,
+  `printstash-api-lite`, and `printstash-frontend`. All three must contain
+  `linux/amd64` and `linux/arm64`; do not use `latest` as the evidence for a
+  specific release.
+- Check the published image revision against the tag's commit and retain the
+  successful publication workflow URL in the release validation notes.
+- Read the README project status, roadmap opening, changelog, and upgrade notes
+  together. Remove pending-tag/image or release-candidate wording for the
+  published version. Keep later work under `Unreleased` and preserve backup
+  instructions.
+- If any artifact remains unavailable, describe exactly what is pending rather
+  than announcing the entire release as installable.
 
 ## Upgrade From Existing SQLite Volume
 
