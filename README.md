@@ -224,127 +224,36 @@ Storage and migration guides:
 > set your own `VAULT_JWT_SECRET`.
 > See [Security](#security).
 
-Requirements: Docker and Docker Compose. Prebuilt images are published for
-`linux/amd64` and `linux/arm64` (Raspberry Pi 4/5, ARM NAS, Apple-silicon VMs).
-The full image supports STEP/STP preview and thumbnail generation on both
-architectures.
-
-A modest host is enough. As a starting point:
-
-| Resource | Minimum | Comfortable |
-| --- | --- | --- |
-| RAM | 1 GB | 2 GB+ |
-| CPU | 1 core | 2+ cores |
-| Disk | ~1 GB for images | + room for your library |
-
-SQLite + local disk is the default; thumbnailing large meshes is the most
-memory-hungry step, so give it 2 GB if you upload big STLs. Storage grows with
-your library — the files themselves dominate, the database stays small.
-
-The default `docker-compose.yml` pulls prebuilt images from GHCR — no build step.
+Install Docker with the Compose plugin, then download the
+[**simple Compose file**](./docker-compose.simple.yml) and start PrintStash:
 
 ```bash
-git clone https://github.com/xiao-villamor/PrintStash.git
-cd PrintStash
-
+mkdir -p printstash && cd printstash
+curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.simple.yml -o docker-compose.yml
 docker compose up -d
 ```
 
-There is nothing to edit before that first start. Every variable in the Compose
-file has a working default, so `.env` is optional; copy `.env.example` to `.env`
-when you actually want to change something. In particular you do **not** need to
-invent a JWT secret: the placeholder in the Compose file is public, so the API
-refuses to sign with it and instead generates a real secret on first boot and
-stores it in its own database (see 0.8.4 in the [changelog](CHANGELOG.md)). Set
-`VAULT_JWT_SECRET` yourself only when you want to own that value.
-
-If you only want to run it, the Compose file is the single file you need:
-
-```bash
-mkdir printstash && cd printstash
-curl -O https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml
-docker compose up -d
-```
-
-For the smallest SQLite/local-files deployment, use
-`docker-compose.light.yml`. Its API image omits browser automation and STEP
-tessellation but keeps STL/OBJ/3MF thumbnail generation:
-
-```bash
-docker compose -f docker-compose.light.yml up -d
-```
-
-### Bind-mounted data directories
-
-The API image starts with the unprivileged `10001:10001` identity. If you
-replace the named volumes with host bind mounts, set `PUID` and `PGID` to the
-numeric owner that should access those directories; the entrypoint repairs
-ownership before running migrations and the server:
-
-```bash
-PUID=1000 PGID=1000 docker compose up -d
-```
-
-Both values must be positive numeric Linux IDs. The default `10001:10001` is
-used when they are omitted. Changing either value on a later restart safely
-re-keys ownership of the mounted data directories.
-
-For a hardened production setup (API kept internal, frontend bound to localhost
-behind your own TLS reverse proxy), use the production compose instead. That file
-declares `VAULT_JWT_SECRET` as required and refuses to start without it, on the
-grounds that a deliberately exposed host should not run on a secret nobody chose:
-
-```bash
-echo "VAULT_JWT_SECRET=$(openssl rand -hex 32)" >> .env
-docker compose -f docker-compose.prod.yml up -d
-```
-
-To build the images from source instead of pulling (contributors), layer the
-build overlay: `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
-
-**Pin a version** for reproducible deploys. The compose files read
-`PRINTSTASH_VERSION` (the image tag); set it in `.env` and bump it to upgrade:
-
-```bash
-echo "PRINTSTASH_VERSION=0.12.1" >> .env   # pin the current release; omit to track latest
-```
-
-By default the compose files track `latest`. Pin `PRINTSTASH_VERSION` when you
-want deliberate upgrades. See [Upgrading](https://www.printstash.org/docs/guides/upgrading/).
-
-Open:
-
-| Service | URL |
-| --- | --- |
-| Web UI | http://localhost:3000 |
-| Health check | http://localhost:3000/api/v1/health |
-
-The `api` service only exposes port 8000 on the internal Compose network, so it
-is not reachable from the host. The frontend's nginx proxies `/api/v1` to it, which
-is why the health check answers on port 3000. The Swagger and ReDoc pages are not
-proxied, so seeing them means publishing the port yourself from a
-`docker-compose.override.yml`:
-
-```yaml
-services:
-  api:
-    ports:
-      - "127.0.0.1:8000:8000"
-```
-
-On first launch the web UI creates the first admin account, gated by a **setup
-token**, because the endpoint that creates the very first account cannot require a
-login. With `VAULT_SETUP_TOKEN` unset, the API generates one per process and logs
-it while the vault is unconfigured:
+Open **[http://localhost:3000](http://localhost:3000)** (or
+`http://<server-ip>:3000` from another machine). Get the first-login setup token:
 
 ```bash
 docker compose logs api | grep "setup token"
 ```
 
-Paste that into the wizard at `http://localhost:3000/setup`. The token is
-per process, so restarting the `api` container before you finish invalidates it;
-set `VAULT_SETUP_TOKEN` in `.env` if you want a stable one. There is no default
-username or password.
+Paste it into the setup wizard to create your admin account. There is no default
+username or password. Restarting the API before setup generates a new token.
+
+The simple deployment uses the full prebuilt images, SQLite, and persistent
+Docker volumes. No `.env`, build step, PostgreSQL, or S3 service is needed.
+Images support `linux/amd64` and `linux/arm64`. Start with 1 GB RAM; 2 GB or
+more helps with large meshes.
+
+**From a Git checkout**, use `docker compose -f docker-compose.simple.yml up -d`
+and include `-f docker-compose.simple.yml` in subsequent Compose commands.
+
+For ports, version pinning, host folders, upload limits, SSO, HTTPS, updates,
+and the purpose of the other Compose files, see
+[**Deployment and optional settings**](./docs/deployment.md).
 
 ## Screenshots
 
