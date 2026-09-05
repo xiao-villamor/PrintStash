@@ -95,6 +95,41 @@ def _remote_destination(key: str, payload: bytes) -> RemoteBackupDestination:
 
 
 class TestOpenDalBackupReplication:
+    def test_failed_replica_publication_keeps_its_durable_reservation(
+        self, backup_env, db_session, tmp_path
+    ):
+        from sqlmodel import select
+
+        from app.db.models import OwnedStorageObject, StorageObjectState
+
+        class Offline(_PublishingBackend):
+            def publish_replica(self, source, key):
+                raise OSError("offline example-secret")
+
+        destination = RemoteBackupDestination(
+            connection_id=7,
+            name="Offline",
+            provider="gdrive",
+            provider_ref="offline-ref",
+            backend=Offline([]),
+        )
+        path = tmp_path / "archive.tar.gz"
+        path.write_bytes(b"archive")
+        digest = hashlib.sha256(b"archive").hexdigest()
+        key = destination.key("archive.tar.gz")
+        with pytest.raises(OSError):
+            destination.publish_file(db_session, key, path, sha256=digest)
+        db_session.rollback()
+        row = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == key)
+        ).one()
+        assert row.state == StorageObjectState.PENDING
+        assert row.sha256 == digest
+        assert row.size_bytes == 7
+        assert row.provider_ref == "offline-ref"
+        assert row.last_error == "OSError"
+        assert path.read_bytes() == b"archive"
+
     def test_create_replicates_the_local_backup_to_each_destination(
         self,
         backup_env: BackupEnv,

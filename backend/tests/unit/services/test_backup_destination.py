@@ -105,6 +105,14 @@ def _row(payload: bytes = b"archive") -> OwnedStorageObject:
 
 
 class TestDownloadOwned:
+    def test_equal_length_corruption_never_yields_a_download(self, tmp_path):
+        path = tmp_path / "corrupt.tar.gz"
+        with pytest.raises(
+            BackupDestinationError, match="backup_download_digest_mismatch"
+        ):
+            _destination(_Backend(b"changed")).download_owned(_row(), path)
+        assert not path.exists()
+
     def test_normalizes_remote_metadata_failures(self, tmp_path: Path) -> None:
         class FailingBackend(_Backend):
             def object_info(self, _key: str):
@@ -185,6 +193,25 @@ class TestDownloadOwned:
 
 
 class TestDeleteOwned:
+    @pytest.mark.parametrize("supported", [True, False])
+    def test_immutable_deletion_uses_only_the_explicit_extension(self, supported):
+        row = _row()
+        row.version_id = "immutable-v1"
+        backend = _Backend()
+        backend.info = StorageObjectInfo(size=7, etag="etag", version_id="immutable-v1")
+        calls = []
+
+        def delete_versioned(key, version):
+            calls.append((key, version))
+            if not supported:
+                raise StorageConfigurationError("conditional_delete_unavailable")
+
+        backend.exact_deletion = SimpleNamespace(delete_versioned=delete_versioned)
+        assert _destination(backend).delete_owned(row) is supported
+        assert calls == [(row.key, "immutable-v1")]
+        assert backend.payload == b"archive"
+        assert row.token == "token"
+
     def test_null_version_is_not_an_immutable_delete_identity(self) -> None:
         row = _row()
         row.version_id = "null"

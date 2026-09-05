@@ -150,6 +150,47 @@ class TestCascade:
 
 
 class TestPruneExpired:
+    @pytest.mark.parametrize("path_state", ["present", "missing", "unreadable"])
+    def test_legacy_lease_without_identity_never_authorizes_unlink(
+        self, db_session, tmp_path, monkeypatch, make_inbox_item, make_user, path_state
+    ):
+        user = make_user("legacy-staging-owner")
+        inbox = make_inbox_item(user)
+        path = tmp_path / "legacy-stage.gcode"
+        path.write_bytes(b"retained")
+        lease = staging_leases.create_review_lease(
+            db_session,
+            inbox_item_id=inbox.id,
+            owner_user_id=user.id,
+            path=path,
+            size_bytes=8,
+            sha256="a" * 64,
+        )
+        lease.device = None
+        lease.inode = None
+        lease.expires_at = utcnow() - timedelta(seconds=1)
+        db_session.commit()
+        lease_id = lease.id
+        if path_state == "missing":
+            path.unlink()
+        elif path_state == "unreadable":
+            real_lstat = Path.lstat
+
+            def inaccessible(candidate, *args, **kwargs):
+                if candidate == path:
+                    raise PermissionError("denied")
+                return real_lstat(candidate, *args, **kwargs)
+
+            monkeypatch.setattr(Path, "lstat", inaccessible)
+        assert staging_leases.prune_expired(db_session) == (
+            (1, 0) if path_state == "missing" else (0, 0)
+        )
+        assert (db_session.get(StagingLease, lease_id) is None) is (
+            path_state == "missing"
+        )
+        if path_state != "missing":
+            assert path.read_bytes() == b"retained"
+
     def test_prune_expired_unlinks_exact_file(
         self, db_session: Session, tmp_path: Path
     ) -> None:
