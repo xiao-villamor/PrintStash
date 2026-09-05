@@ -10,16 +10,16 @@ PrintStash probes the configured storage at startup. Support maturity and storag
 
 | Provider | Category | Support | Expected tier | Configuration fields |
 | --- | --- | --- | --- | --- |
-| [This machine](#local) | This machine | Stable | Verified | `data_dir`, `thumb_dir`, `root` |
-| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Stable | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `account_id` |
-| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Wasabi](#wasabi) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret) |
-| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Beta | Guarded | `bucket`, `region`, `addressing_style`, `root`, `access_key` (secret), `secret_key` (secret), `endpoint_url` |
-| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [WebDAV](#webdav) | Nextcloud and WebDAV | Beta | Guarded | `endpoint_url`, `username`, `password` (secret), `root` |
-| [SFTP](#sftp) | NAS over SFTP | Beta | Guarded | `host`, `host_key`, `port`, `username`, `password` (secret), `private_key_path`, `passphrase` (secret), `root` |
-| [Google Drive](#gdrive) | Consumer cloud storage | Beta | Unguarded | `client_id`, `client_secret` (secret), `refresh_token` (secret), `root` |
+| [This machine](#local) | This machine | Stable | Verified | `root`, `data_dir`, `thumb_dir` |
+| [Amazon S3 or compatible](#s3) | S3-compatible object storage | Stable | Guarded | `root`, `bucket`, `region`, `addressing_style`, `endpoint_url`, `access_key` (secret), `secret_key` (secret) |
+| [Cloudflare R2](#cloudflare_r2) | S3-compatible object storage | Beta | Guarded | `root`, `bucket`, `region`, `addressing_style`, `account_id`, `access_key` (secret), `secret_key` (secret) |
+| [Backblaze B2](#backblaze_b2) | S3-compatible object storage | Beta | Guarded | `root`, `bucket`, `region`, `addressing_style`, `access_key` (secret), `secret_key` (secret) |
+| [Wasabi](#wasabi) | S3-compatible object storage | Beta | Guarded | `root`, `bucket`, `region`, `addressing_style`, `access_key` (secret), `secret_key` (secret) |
+| [Self-hosted S3](#s3_self_hosted) | S3-compatible object storage | Beta | Guarded | `root`, `bucket`, `region`, `addressing_style`, `endpoint_url`, `access_key` (secret), `secret_key` (secret) |
+| [Nextcloud](#nextcloud) | Nextcloud and WebDAV | Beta | Guarded | `root`, `endpoint_url`, `username`, `password` (secret) |
+| [WebDAV](#webdav) | Nextcloud and WebDAV | Beta | Guarded | `root`, `endpoint_url`, `username`, `password` (secret) |
+| [SFTP](#sftp) | NAS over SFTP | Beta | Guarded | `root`, `host`, `port`, `username`, `host_key`, `password` (secret), `private_key_path`, `passphrase` (secret) |
+| [Google Drive](#gdrive) | Consumer cloud storage | Beta | Unguarded | `root`, `client_id`, `client_secret` (secret), `refresh_token` (secret) |
 
 ## Safety tiers
 
@@ -92,7 +92,7 @@ Expected tier: **Guarded**. Confirmed catalog removal retains stored bytes; exac
 
 NAS storage over SSH File Transfer Protocol.
 
-Expected tier: **Guarded**. Publish uses SSH exclusive create (`x` mode); `host_key` is required and purge is manual and confirmed only.
+Expected tier: **Guarded**. Publish uses SSH exclusive create (`x` mode); `host_key` is required and confirmed catalog purge retains stored bytes.
 
 ## gdrive
 

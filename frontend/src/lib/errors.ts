@@ -85,6 +85,8 @@ export function parseApiError(cause: unknown): ApiError {
 const ERROR_MESSAGES = {
   // Auth
   invalid_api_key_or_token: "Authentication failed. Sign in again.",
+  storage_connection_target_in_use:
+    "This target is used by Library sources or backups. Keep its location and account unchanged.",
   invalid_credentials: "Invalid username or password.",
   not_authenticated: "You must sign in to perform this action.",
   invalid_or_expired_token: "Your session has expired. Please sign in again.",

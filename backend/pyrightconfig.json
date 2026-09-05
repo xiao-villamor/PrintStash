@@ -18,7 +18,9 @@
     "app/services/backup_runs.py",
     "app/services/backup_replication.py",
     "app/services/backup_replica_retry.py",
-    "app/services/backup_catalogue.py"
+    "app/services/backup_catalogue.py",
+    "app/services/storage_providers.py",
+    "app/services/storage_connections.py"
   ],
   "pythonVersion": "3.11",
   "venvPath": ".",

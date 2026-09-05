@@ -1,14 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  CheckCircle2,
-  Cloud,
-  Loader2,
-  PauseCircle,
-  PlayCircle,
-  Plus,
-  ShieldAlert,
-  Trash2,
-} from "lucide-react";
+import { CheckCircle2, Cloud, Loader2, PauseCircle, PlayCircle, Plus, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +14,13 @@ import {
   probeStorageConnection,
   updateStorageConnection,
 } from "@/lib/api";
+import { StorageProviderFields } from "@/components/storage-provider-fields";
+import {
+  providerDefaults,
+  providerFields,
+  providerFormError,
+  splitProviderValues,
+} from "@/lib/storage-provider-form";
 import type { StorageConnectionCreate } from "@/lib/api/storage-connections";
 import { toast } from "@/lib/toast";
 import { useOptionalI18n } from "@/lib/i18n";
@@ -33,6 +31,7 @@ import type {
   StorageConnection,
   StorageConnectionPurpose,
   StorageProvider,
+  StorageProviderConfigValues,
 } from "@/types";
 
 type RemoteKind = Exclude<LibrarySourceKind, "mounted">;
@@ -67,23 +66,14 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | "create" | null>(null);
   const [name, setName] = useState("");
-  const [kind, setKind] = useState<RemoteKind>("s3");
+  const [providerId, setProviderId] = useState("s3");
   const [purpose, setPurpose] = useState<StorageConnectionPurpose>("both");
-  const [root, setRoot] = useState("PrintStash");
-  const [endpoint, setEndpoint] = useState("");
-  const [bucket, setBucket] = useState("");
-  const [region, setRegion] = useState("us-east-1");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [port, setPort] = useState(22);
-  const [hostKey, setHostKey] = useState("");
-  const [privateKeyPath, setPrivateKeyPath] = useState("");
-  const [passphrase, setPassphrase] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
-  const [refreshToken, setRefreshToken] = useState("");
-  const [accessKey, setAccessKey] = useState("");
-  const [secretKey, setSecretKey] = useState("");
+  const [values, setValues] = useState<StorageProviderConfigValues>({
+    root: "PrintStash",
+    region: "auto",
+    addressing_style: "auto",
+  });
+  const [editing, setEditing] = useState<StorageConnection | null>(null);
   const [removeTarget, setRemoveTarget] = useState<StorageConnection | null>(null);
 
   useEffect(() => {
@@ -108,100 +98,76 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     };
   }, []);
 
-  function availability(remoteKind: RemoteKind) {
-    const uses = providers.find((provider) => provider.id === remoteKind)?.uses;
+  const selected = providers.find((provider) => provider.id === providerId);
+  const use = purpose === "backup" ? "backup" : "library";
+  const storedSecrets = editing?.secret_fields_set ?? [];
+  function availability(id: string) {
+    const uses = providers.find((provider) => provider.id === id)?.uses;
     if (!uses) return undefined;
     if (purpose === "both") return !uses.library.available ? uses.library : uses.backup;
     return uses[purpose];
   }
-
-  const selectedAvailability = availability(kind);
-
-  function requestBody(): StorageConnectionCreate {
-    const common = { name: name.trim(), kind, purpose };
-    if (kind === "s3") {
-      return {
-        ...common,
-        configuration: {
-          provider: endpoint.trim() ? "s3_self_hosted" : "s3",
-          bucket: bucket.trim(),
-          endpoint_url: endpoint.trim(),
-          region: region.trim(),
-          addressing_style: endpoint.trim() ? "path" : "auto",
-          root: root.trim(),
-        },
-        secrets: { access_key: accessKey, secret_key: secretKey },
-      };
-    }
-    if (kind === "webdav") {
-      return {
-        ...common,
-        configuration: {
-          provider: "webdav",
-          endpoint_url: endpoint.trim(),
-          username: username.trim(),
-          root: root.trim(),
-        },
-        secrets: { password },
-      };
-    }
-    if (kind === "gdrive") {
-      return {
-        ...common,
-        configuration: { client_id: clientId.trim(), root: root.trim() },
-        secrets: { client_secret: clientSecret, refresh_token: refreshToken },
-      };
-    }
-    return {
-      ...common,
-      configuration: {
-        host: endpoint.trim(),
-        port,
-        username: username.trim(),
-        host_key: hostKey.trim(),
-        private_key_path: privateKeyPath.trim(),
-        root: root.trim(),
-      },
-      secrets: { password, passphrase },
-    };
-  }
-
-  function clearSecrets() {
-    setPassword("");
-    setPassphrase("");
-    setClientSecret("");
-    setRefreshToken("");
-    setAccessKey("");
-    setSecretKey("");
-  }
-
-  function canCreateConnection(): boolean {
-    if (!name.trim() || !root.trim()) return false;
-    if (kind === "s3") {
-      return Boolean(bucket.trim() && accessKey.trim() && secretKey.trim());
-    }
-    if (kind === "webdav") {
-      return Boolean(endpoint.trim() && username.trim() && password.trim());
-    }
-    if (kind === "gdrive") {
-      return Boolean(clientId.trim() && clientSecret.trim() && refreshToken.trim());
-    }
+  const selectedAvailability = availability(providerId);
+  function canCreateConnection() {
     return Boolean(
-      endpoint.trim() &&
-      username.trim() &&
-      hostKey.trim() &&
-      (password.trim() || privateKeyPath.trim()),
+      name.trim() && selected && !providerFormError(selected, values, use, storedSecrets),
     );
   }
-
+  function changeValue(field: string, value: string | number) {
+    setValues((current) => {
+      const next = { ...current, [field]: value };
+      if (
+        editing &&
+        value === "" &&
+        selected &&
+        providerFields(selected, use).some((entry) => entry.name === field && entry.secret)
+      )
+        delete next[field];
+      return next;
+    });
+  }
+  function edit(connection: StorageConnection) {
+    setEditing(connection);
+    setName(connection.name);
+    setPurpose(connection.purpose);
+    setProviderId(String(connection.configuration.provider ?? connection.kind));
+    const editableValues: StorageProviderConfigValues = {};
+    for (const [field, value] of Object.entries(connection.configuration)) {
+      if (value !== null) editableValues[field] = String(value);
+    }
+    setValues(editableValues);
+  }
+  function resetForm() {
+    setEditing(null);
+    setName("");
+    setValues(selected ? providerDefaults(selected, use) : {});
+  }
   async function addConnection() {
-    if (!canCreateConnection()) return;
+    if (!canCreateConnection() || !selected) return;
+    const transport = selected.transport ?? selected.id;
+    if (!isRemoteKind(transport)) return;
     setBusy("create");
     try {
-      const created = await createStorageConnection(requestBody());
-      setConnections((current) => [...current, created]);
-      setName("");
-      clearSecrets();
+      const body: StorageConnectionCreate = {
+        name: name.trim(),
+        kind: transport,
+        purpose,
+        ...splitProviderValues(selected, values, use),
+      };
+      const created = editing
+        ? await updateStorageConnection(editing.id, {
+            name: body.name,
+            purpose,
+            configuration: body.configuration,
+            secrets: body.secrets,
+          })
+        : await createStorageConnection(body);
+      setConnections((current) =>
+        editing
+          ? current.map((row) => (row.id === created.id ? created : row))
+          : [...current, created],
+      );
+      resetForm();
       toast.success("Remote storage connection saved.");
     } catch (error) {
       toast.error(error);
@@ -367,6 +333,15 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                         type="button"
                         variant="outline"
                         size="sm"
+                        disabled={disabled || busy !== null || catalogueFailed}
+                        onClick={() => edit(connection)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
                         disabled={disabled || busy !== null || !connection.enabled}
                         onClick={() => void probe(connection)}
                       >
@@ -405,7 +380,9 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
 
         <div className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
           <div>
-            <h3 className="text-sm font-semibold text-foreground">Add remote connection</h3>
+            <h3 className="text-sm font-semibold text-foreground">
+              {editing ? `Edit ${editing.name}` : "Add remote connection"}
+            </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
               Choose the remote location and its allowed uses. You can change the uses later while
               nothing depends on them.
@@ -426,24 +403,27 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               Provider
               <select
                 className={SELECT}
-                value={kind}
-                disabled={disabled}
+                value={providerId}
+                disabled={disabled || editing !== null}
                 onChange={(event) => {
-                  if (isRemoteKind(event.target.value)) setKind(event.target.value);
+                  const provider = providers.find((entry) => entry.id === event.target.value);
+                  if (provider) {
+                    setProviderId(provider.id);
+                    setValues(providerDefaults(provider, use));
+                  }
                 }}
               >
-                <option value="s3" disabled={availability("s3")?.available === false}>
-                  S3 / compatible
-                </option>
-                <option value="webdav" disabled={availability("webdav")?.available === false}>
-                  WebDAV / Nextcloud
-                </option>
-                <option value="sftp" disabled={availability("sftp")?.available === false}>
-                  SFTP
-                </option>
-                <option value="gdrive" disabled={availability("gdrive")?.available === false}>
-                  Google Drive (beta)
-                </option>
+                {providers
+                  .filter((provider) => provider.id !== "local")
+                  .map((provider) => (
+                    <option
+                      key={provider.id}
+                      value={provider.id}
+                      disabled={availability(provider.id)?.available === false}
+                    >
+                      {provider.label}
+                    </option>
+                  ))}
               </select>
             </label>
             <label className={FIELD_LABEL}>
@@ -463,206 +443,44 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 ))}
               </select>
             </label>
-            <label className={FIELD_LABEL}>
-              Base folder
-              <Input
-                value={root}
-                disabled={disabled}
-                onChange={(event) => setRoot(event.target.value)}
-              />
-            </label>
-
-            {kind === "s3" && (
-              <>
-                <label className={FIELD_LABEL}>
-                  Bucket
-                  <Input
-                    value={bucket}
-                    disabled={disabled}
-                    onChange={(event) => setBucket(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Endpoint URL
-                  <Input
-                    value={endpoint}
-                    disabled={disabled}
-                    placeholder="Blank for AWS S3"
-                    onChange={(event) => setEndpoint(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Region
-                  <Input
-                    value={region}
-                    disabled={disabled}
-                    onChange={(event) => setRegion(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Access key
-                  <Input
-                    value={accessKey}
-                    disabled={disabled}
-                    autoComplete="off"
-                    onChange={(event) => setAccessKey(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Secret key
-                  <Input
-                    type="password"
-                    value={secretKey}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setSecretKey(event.target.value)}
-                  />
-                </label>
-              </>
-            )}
-            {kind === "webdav" && (
-              <>
-                <label className={FIELD_LABEL}>
-                  WebDAV endpoint
-                  <Input
-                    value={endpoint}
-                    disabled={disabled}
-                    onChange={(event) => setEndpoint(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Username
-                  <Input
-                    value={username}
-                    disabled={disabled}
-                    onChange={(event) => setUsername(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Password
-                  <Input
-                    type="password"
-                    value={password}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setPassword(event.target.value)}
-                  />
-                </label>
-              </>
-            )}
-            {kind === "sftp" && (
-              <>
-                <label className={FIELD_LABEL}>
-                  SFTP host
-                  <Input
-                    value={endpoint}
-                    disabled={disabled}
-                    onChange={(event) => setEndpoint(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Port
-                  <Input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={port}
-                    disabled={disabled}
-                    onChange={(event) => setPort(Number(event.target.value))}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Username
-                  <Input
-                    value={username}
-                    disabled={disabled}
-                    onChange={(event) => setUsername(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Password
-                  <Input
-                    type="password"
-                    value={password}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setPassword(event.target.value)}
-                  />
-                </label>
-                <label className={`${FIELD_LABEL} sm:col-span-2`}>
-                  Pinned host key
-                  <Input
-                    value={hostKey}
-                    disabled={disabled}
-                    onChange={(event) => setHostKey(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Mounted private key path
-                  <Input
-                    value={privateKeyPath}
-                    disabled={disabled}
-                    placeholder="Use this or a password"
-                    onChange={(event) => setPrivateKeyPath(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  Private key passphrase
-                  <Input
-                    type="password"
-                    value={passphrase}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setPassphrase(event.target.value)}
-                  />
-                </label>
-              </>
-            )}
-            {kind === "gdrive" && (
-              <>
-                <label className={FIELD_LABEL}>
-                  OAuth client ID
-                  <Input
-                    value={clientId}
-                    disabled={disabled}
-                    onChange={(event) => setClientId(event.target.value)}
-                  />
-                </label>
-                <label className={FIELD_LABEL}>
-                  OAuth client secret
-                  <Input
-                    type="password"
-                    value={clientSecret}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setClientSecret(event.target.value)}
-                  />
-                </label>
-                <label className={`${FIELD_LABEL} sm:col-span-2`}>
-                  Offline refresh token
-                  <Input
-                    type="password"
-                    value={refreshToken}
-                    disabled={disabled}
-                    autoComplete="new-password"
-                    onChange={(event) => setRefreshToken(event.target.value)}
-                  />
-                </label>
-                <div className="flex gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-xs text-muted-foreground sm:col-span-2">
-                  <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
-                  Google Drive backups are hash-verified on restore, but automatic retention does
-                  not delete them and they never authorize Vault GC.
-                </div>
-              </>
-            )}
           </div>
+          {selected && (
+            <StorageProviderFields
+              provider={selected}
+              values={values}
+              onChange={changeValue}
+              use={use}
+              disabled={disabled || busy !== null}
+              storedSecrets={storedSecrets}
+              editing={editing !== null}
+              onClear={(field) => setValues((current) => ({ ...current, [field]: "" }))}
+            />
+          )}
+          {selected && (
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {selected.consequences.map((text) => (
+                <li key={text}>{text}</li>
+              ))}
+            </ul>
+          )}
+          {editing && (
+            <p className="text-xs text-muted-foreground">
+              Leave stored credentials blank to keep them. Target changes are blocked while Library
+              sources or backups depend on this connection.
+            </p>
+          )}
           {purpose === "both" && (
             <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
               Shared connections keep one base folder. Library source paths must stay separate from
               the reserved printstash-backups folder.
             </p>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            {editing && (
+              <Button type="button" variant="outline" disabled={busy !== null} onClick={resetForm}>
+                Cancel editing
+              </Button>
+            )}
             {catalogueFailed && (
               <p className="mr-auto text-xs text-muted-foreground">
                 {i18n?.t("storage.operationUnavailable") ??
@@ -691,7 +509,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               ) : (
                 <Plus className="h-4 w-4" aria-hidden />
               )}
-              Save connection
+              {editing ? "Save changes" : "Save connection"}
             </Button>
           </div>
         </div>

@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { RemoteStorageConnections } from "@/components/remote-storage-connections";
+import { storageProviderCatalogue } from "@/test-support/storage-provider-catalogue";
 import { aStorageConnection } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
@@ -20,7 +21,7 @@ describe("RemoteStorageConnections", () => {
         "GET /api/v1/storage-connections": json([]),
         "GET /api/v1/storage/providers": json([
           {
-            id: "s3",
+            ...storageProviderCatalogue.find((provider) => provider.id === "s3"),
             uses: {
               vault: { available: true },
               library: { available: false, reason: "storage_service_not_compiled" },
@@ -33,7 +34,7 @@ describe("RemoteStorageConnections", () => {
     expect(
       await screen.findByText("This API image does not include the required storage service."),
     ).toBeVisible();
-    expect(screen.getByRole("option", { name: "S3 / compatible" })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "Amazon S3 or compatible" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Save connection" })).toBeDisabled();
     expect(view.requestsWithMethod("POST")).toHaveLength(0);
   });
@@ -52,7 +53,7 @@ describe("RemoteStorageConnections", () => {
   it("lists each remote profile with its current uses", async () => {
     renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([
           aStorageConnection(),
           aStorageConnection({ id: 2, name: "Archive only", purpose: "backup" }),
@@ -76,7 +77,7 @@ describe("RemoteStorageConnections", () => {
     });
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([]),
         "POST /api/v1/storage-connections": json(created, 201),
       },
@@ -87,7 +88,7 @@ describe("RemoteStorageConnections", () => {
     await user.selectOptions(screen.getByLabelText("Provider"), "gdrive");
     await user.type(screen.getByLabelText("OAuth client ID"), "google-client");
     await user.type(screen.getByLabelText("OAuth client secret"), "google-secret");
-    await user.type(screen.getByLabelText("Offline refresh token"), "google-refresh");
+    await user.type(screen.getByLabelText("Refresh token"), "google-refresh");
     await user.click(screen.getByRole("button", { name: "Save connection" }));
 
     await waitFor(() => expect(view.requestsWithMethod("POST")).toHaveLength(1));
@@ -95,7 +96,7 @@ describe("RemoteStorageConnections", () => {
       name: "Family Drive",
       kind: "gdrive",
       purpose: "both",
-      configuration: { client_id: "google-client", root: "PrintStash" },
+      configuration: { provider: "gdrive", client_id: "google-client", root: "PrintStash" },
       secrets: { client_secret: "google-secret", refresh_token: "google-refresh" },
     });
     expect(await screen.findByText("Family Drive")).toBeVisible();
@@ -106,7 +107,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
         "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ purpose: "library" })),
       },
@@ -126,7 +127,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([aStorageConnection()]),
         "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ enabled: false })),
       },
@@ -144,7 +145,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([
           aStorageConnection({ kind: "gdrive", name: "Recovery Drive" }),
         ]),
@@ -168,7 +169,7 @@ describe("RemoteStorageConnections", () => {
   it("keeps save unavailable until the profile has a name", async () => {
     renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([]),
       },
     });
@@ -180,7 +181,7 @@ describe("RemoteStorageConnections", () => {
     const user = userEvent.setup();
     renderApp(<RemoteStorageConnections />, {
       routes: {
-        "GET /api/v1/storage/providers": json([]),
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
         "GET /api/v1/storage-connections": json([]),
       },
     });
@@ -190,5 +191,66 @@ describe("RemoteStorageConnections", () => {
     await user.type(screen.getByLabelText("Bucket"), "models");
 
     expect(save).toBeDisabled();
+  });
+  it("preserves omitted credentials when editing a connection", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": json(aStorageConnection({ name: "Renamed" })),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Secret key")).toHaveValue("");
+    await user.clear(screen.getByLabelText("Connection name"));
+    await user.type(screen.getByLabelText("Connection name"), "Renamed");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(view.requestsWithMethod("PATCH")).toHaveLength(1));
+    expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body).secrets).toEqual({});
+    expect(await screen.findByText("Renamed")).toBeVisible();
+  });
+
+  it("submits only the explicitly replaced credential", async () => {
+    const user = userEvent.setup();
+    const view = renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": json(aStorageConnection()),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    await user.type(screen.getByLabelText("Secret key"), "replacement");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(view.requestsWithMethod("PATCH")).toHaveLength(1));
+    expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body).secrets).toEqual({
+      secret_key: "replacement",
+    });
+    expect(screen.queryByDisplayValue("replacement")).not.toBeInTheDocument();
+  });
+
+  it("keeps edits visible when a dependent target change is refused", async () => {
+    const user = userEvent.setup();
+    renderApp(<RemoteStorageConnections />, {
+      routes: {
+        "GET /api/v1/storage/providers": json(storageProviderCatalogue),
+        "GET /api/v1/storage-connections": json([aStorageConnection()]),
+        "PATCH /api/v1/storage-connections/1": json(
+          { detail: "storage_connection_target_in_use" },
+          409,
+        ),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("Bucket"));
+    await user.type(screen.getByLabelText("Bucket"), "different-bucket");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+    expect(screen.getByLabelText("Bucket")).toHaveValue("different-bucket");
+    await user.click(screen.getByRole("button", { name: "Cancel editing" }));
+    expect(
+      screen.queryByRole("heading", { name: "Edit Workshop storage" }),
+    ).not.toBeInTheDocument();
   });
 });

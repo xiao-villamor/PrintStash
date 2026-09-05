@@ -199,6 +199,7 @@ export interface StorageProviderField {
   required: boolean;
   secret: boolean;
   default?: string | number | null;
+  options?: string[];
 }
 
 export interface StorageProvider {
@@ -216,6 +217,9 @@ export interface StorageProvider {
   support_level?: "stable" | "beta" | string;
   disabled_reason?: string | null;
   fields: StorageProviderField[];
+  fields_by_use?: Record<string, StorageProviderField[]>;
+  transport?: string;
+  requirements?: Array<{ kind: string; fields: string[]; value?: string; message: string }>;
   uses?: Record<string, StorageUseAvailability>;
 }
 

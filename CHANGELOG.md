@@ -4,6 +4,11 @@
 
 ### Added
 
+- Vault, Library and backup connection forms use one typed provider catalogue.
+  S3 and Nextcloud presets resolve consistently across uses. Connection editing
+  preserves omitted credentials, supports explicit replacement and prevents
+  changing a target while linked sources or owned backups depend on it.
+
 - Backup run history records every selected destination, including invalid
   connections and partial failures. Administrators can retry an exact failed
   replica from a verified surviving archive; successful copies remain available.

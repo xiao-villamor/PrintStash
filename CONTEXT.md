@@ -209,7 +209,11 @@ publication; it never creates a replacement archive.
 A reusable remote-location profile. Non-secret configuration is stored separately
 from encrypted credentials, and API reads never return secret values. A
 connection may be enabled for Library sources, off-site backup replicas, or both;
-one connection can serve more than one Library source.
+one connection can serve more than one Library source. Vault, Library and backup
+forms derive fields and secret boundaries from the same typed provider catalogue.
+Credential edits preserve omitted values. An endpoint/account/namespace change
+cannot redirect a connection while linked sources, owned objects or saved backup
+results still depend on its target.
 
 **Linked file**:
 An Artifact with `File.is_external = true`: its bytes live on a library source,

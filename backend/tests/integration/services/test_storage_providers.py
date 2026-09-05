@@ -353,3 +353,88 @@ class TestStorageProviders:
         assert changed.password == ""
         assert changed.private_key_path == "/run/keys/id_ed25519"
         assert changed.passphrase == "new-passphrase"
+
+
+class TestSharedFieldMetadata:
+    def test_catalogue_fields_keep_typed_secret_requirements(self):
+        from app.services.storage_providers import (
+            provider_catalogue,
+            provider_secret_fields,
+        )
+
+        for provider in provider_catalogue():
+            for use, fields in provider.fields_by_use.items():
+                names = {field.name for field in fields if field.secret}
+                assert names == provider_secret_fields(provider.id), (provider.id, use)
+                assert all(
+                    field.input_type == "password" for field in fields if field.secret
+                )
+
+    def test_remote_uses_share_preset_configuration_fields(self):
+        from app.services.storage_providers import provider_catalogue
+
+        for provider in provider_catalogue():
+            assert provider.fields_by_use["library"] == provider.fields_by_use["backup"]
+            assert {field.name for field in provider.fields} == {
+                field.name for field in provider.fields_by_use["library"]
+            }
+
+    def test_sftp_declares_alternative_authentication(self):
+        from app.services.storage_providers import provider_catalogue
+
+        provider = next(row for row in provider_catalogue() if row.id == "sftp")
+        assert {
+            "kind": "exactly_one",
+            "fields": ["password", "private_key_path"],
+            "message": "Use either a password or a private key path.",
+        } in provider.requirements
+
+    @pytest.mark.parametrize(
+        "provider,values",
+        [
+            ("cloudflare_r2", {"account_id": "account", "bucket": "models"}),
+            ("backblaze_b2", {"region": "us-west-004", "bucket": "models"}),
+            ("wasabi", {"region": "us-east-1", "bucket": "models"}),
+            (
+                "s3_self_hosted",
+                {"endpoint_url": "https://s3.example.test", "bucket": "models"},
+            ),
+            (
+                "nextcloud",
+                {"endpoint_url": "https://cloud.example.test", "username": "owner"},
+            ),
+        ],
+    )
+    def test_connection_presets_resolve_like_vault_presets(self, provider, values):
+        from app.db.models import LibrarySourceKind
+        from app.services.storage_connections import parse_connection_config
+        from app.services.storage_providers import (
+            parse_provider_config,
+            resolve_transport,
+        )
+
+        remote_kind = (
+            LibrarySourceKind.WEBDAV
+            if provider == "nextcloud"
+            else LibrarySourceKind.S3
+        )
+        secrets = (
+            {"password": "password"}
+            if provider == "nextcloud"
+            else {"access_key": "access", "secret_key": "secret"}
+        )
+        public = {"provider": provider, "root": "same-prefix", **values}
+        vault = resolve_transport(parse_provider_config({**public, **secrets}))
+        connection = resolve_transport(
+            parse_connection_config(remote_kind, public, secrets)
+        )
+        assert connection == vault
+
+
+class TestProviderRegionDefaults:
+    def test_ordinary_s3_forms_offer_an_explicit_signing_region(self):
+        from app.services.storage_providers import provider_fields
+
+        for use in ("vault", "library", "backup"):
+            fields = {field.name: field for field in provider_fields("s3", use=use)}
+            assert fields["region"].default == "us-east-1"

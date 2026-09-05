@@ -224,6 +224,42 @@ beforeEach(() => {
 });
 
 describe("SetupPage", () => {
+  it.each([
+    ["unavailable", "Requires the full image"],
+    ["unknown", "Choose an available provider."],
+  ])("refuses completion for an %s configured provider", async (kind, message) => {
+    vi.mocked(deps.getSetupStatus).mockResolvedValue({
+      ...status,
+      current_storage_provider: kind === "unknown" ? "removed-provider" : "s3",
+      current_storage_backend: "s3",
+    });
+    vi.mocked(deps.getStorageProviders).mockResolvedValue(
+      providers.map((provider) =>
+        provider.id === "s3"
+          ? { ...provider, available: false, selectable: false, disabled_reason: message }
+          : provider,
+      ),
+    );
+    const user = userEvent.setup();
+    renderSetup();
+    await screen.findByRole("heading", { name: "Welcome to PrintStash" });
+    for (const [label, value] of [
+      ["Setup token", "operator-setup-token-123"],
+      ["Username", "admin"],
+      ["Password", "Password123"],
+      ["Confirm password", "Password123"],
+    ]) {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    }
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    await user.click(screen.getByRole("button", { name: "Complete setup" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(deps.completeSetup).not.toHaveBeenCalled();
+    expect(deps.storeLogin).not.toHaveBeenCalled();
+  });
+
   it("validates account fields inline before advancing", async () => {
     const user = userEvent.setup();
     renderSetup();

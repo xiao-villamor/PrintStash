@@ -27,7 +27,7 @@ test.describe("remote-only backup recovery", () => {
       .locator("select")
       .selectOption("backup");
     await page.getByLabel("Base folder").fill(`backup-data-${Date.now()}`);
-    await page.getByLabel("WebDAV endpoint").fill(`http://127.0.0.1:${webdavPort}`);
+    await page.getByLabel("Server URL").fill(`http://127.0.0.1:${webdavPort}`);
     await page.getByLabel("Username").fill("backup-user");
     await page.getByLabel("Password").fill("backup-password");
     await page.getByRole("button", { name: "Save connection" }).click();
@@ -166,6 +166,115 @@ test.describe("partial backup recovery", () => {
       ).toBe(meta.archive_sha256);
     } finally {
       await rm(obstruction, { force: true, recursive: true });
+    }
+  });
+});
+
+test.describe("shared provider connection forms", () => {
+  test("@critical edits a Nextcloud connection while preserving its linked target", async ({
+    page,
+  }) => {
+    const { mkdir, rm } = await import("node:fs/promises");
+    const { dirname, resolve } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const status = await (await page.request.get("/api/v1/setup/status")).json();
+    if (!status.configured) {
+      const setup = await page.request.post("/api/v1/setup", {
+        data: {
+          setup_token: "playwright-critical-backup-token",
+          username: "backup-admin",
+          password: "playwright-password",
+          storage_backend: "local",
+          data_dir: status.current_data_dir ?? status.default_data_dir,
+          thumb_dir: status.current_thumb_dir ?? status.default_thumb_dir,
+        },
+      });
+      expect(setup.status(), await setup.text()).toBe(201);
+    }
+    await page.goto("/login");
+    await page.getByLabel("Username").fill("backup-admin");
+    await page.getByLabel("Password", { exact: true }).fill("playwright-password");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/$/);
+    const name = `Nextcloud forms ${Date.now()}`;
+    const root = `form-${Date.now()}`;
+    const endpoint = `http://127.0.0.1:${webdavPort}`;
+    const accountRoot = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "../.storage-data/webdav/remote.php/dav/files/preset-user",
+      root,
+    );
+    await mkdir(accountRoot, { recursive: true });
+    try {
+      await page.goto("/settings?section=storage");
+      await page.getByRole("button", { name: "Nextcloud and WebDAV", exact: true }).click();
+      await page.getByRole("button", { name: /^Nextcloud Remote storage/ }).click();
+      await page.getByLabel("Server URL").fill(endpoint);
+      await page.getByLabel("Username", { exact: true }).fill("preset-user");
+      await page.getByLabel("Root", { exact: true }).fill(root);
+      const vaultEndpoint = await page.getByLabel("Server URL").inputValue();
+      const vaultAccount = await page.getByLabel("Username", { exact: true }).inputValue();
+      await page.goto("/settings?section=remote-storage");
+      await page.getByLabel("Provider").selectOption("nextcloud");
+      await page.getByLabel("Connection name").fill(name);
+      await page.getByLabel("Server URL").fill(vaultEndpoint);
+      await page.getByLabel("Username", { exact: true }).fill(vaultAccount);
+      await page.getByLabel("Password", { exact: true }).fill("original-password");
+      await page.getByLabel("Base folder").fill(root);
+      const creation = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/storage-connections") &&
+          response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Save connection", exact: true }).click();
+      const saved = await creation;
+      expect(saved.status()).toBe(201);
+      const connection = await saved.json();
+      expect(connection.configuration.provider).toBe("nextcloud");
+      expect(connection.configuration.endpoint_url).toBe(vaultEndpoint);
+      const row = page.getByRole("listitem").filter({ hasText: name });
+      const probing = page.waitForResponse((response) =>
+        response.url().endsWith(`/storage-connections/${connection.id}/probe`),
+      );
+      await row.getByRole("button", { name: "Test", exact: true }).click();
+      expect((await probing).status()).toBe(200);
+      expect(
+        (
+          await page.request.put("/api/v1/config", { data: { external_libraries_enabled: true } })
+        ).ok(),
+      ).toBeTruthy();
+      const linked = await page.request.post("/api/v1/libraries", {
+        data: { name, source_kind: "webdav", connection_id: connection.id },
+      });
+      expect(linked.status()).toBe(201);
+      const library = await linked.json();
+      await row.getByRole("button", { name: "Edit", exact: true }).click();
+      await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+      await page.getByLabel("Connection name").fill(`${name} renamed`);
+      const editing = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/storage-connections/${connection.id}`) &&
+          response.request().method() === "PATCH",
+      );
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      const edited = await editing;
+      expect(edited.status()).toBe(200);
+      expect(edited.request().postDataJSON().secrets).toEqual({});
+      await row.getByRole("button", { name: "Edit", exact: true }).click();
+      await page.getByLabel("Base folder").fill(`${root}-different`);
+      const rejected = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/storage-connections/${connection.id}`) &&
+          response.request().method() === "PATCH",
+      );
+      await page.getByRole("button", { name: "Save changes", exact: true }).click();
+      expect((await rejected).status()).toBe(409);
+      expect((await page.request.delete(`/api/v1/libraries/${library.id}`)).ok()).toBeTruthy();
+      expect(
+        (await page.request.delete(`/api/v1/storage-connections/${connection.id}`)).ok(),
+      ).toBeTruthy();
+    } finally {
+      await rm(accountRoot, { recursive: true, force: true });
     }
   });
 });
