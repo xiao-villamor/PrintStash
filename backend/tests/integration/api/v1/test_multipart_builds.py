@@ -399,7 +399,7 @@ class TestMultipartBuilds:
 
 
 class TestManufacturingRecoveryAndValidation:
-    def test_list_filters_archives_and_composition(self, client, auth_headers, build):
+    def test_list_respects_history_filters(self, client, auth_headers, build):
         data, _ = build
         base = "/api/v1/multipart-builds"
         listed = client.get(
@@ -448,9 +448,7 @@ class TestManufacturingRecoveryAndValidation:
             client.get("/api/v1/multipart-builds", headers=user_headers()).json() == []
         )
 
-    def test_missing_build_and_foreign_part_are_not_found(
-        self, client, auth_headers, build
-    ):
+    def test_unknown_resources_are_not_found(self, client, auth_headers, build):
         data, revision = build
         assert (
             client.get(

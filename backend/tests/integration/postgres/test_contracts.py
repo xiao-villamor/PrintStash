@@ -439,3 +439,12 @@ class TestManufacturingPostgres:
 
         ids = seed_confirmation_race(postgres_engine)
         assert race_confirmations(postgres_engine, *ids, True) == [(200, 1), (200, 1)]
+
+
+class TestManufacturingQueuePostgres:
+    def test_parallel_queue_requests_reserve_each_unit_once(self, postgres_engine):
+        from tests.fakes.manufacturing import race_queues
+
+        outcomes, reserved = race_queues(postgres_engine)
+        assert outcomes == [(201, 1), (409, 0)]
+        assert reserved == 4

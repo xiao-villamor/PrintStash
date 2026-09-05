@@ -1,8 +1,8 @@
-"""snapshot multipart builds and physical print results
+"""snapshot multipart builds and physical output
 
 Revision ID: 0a6b1f868ae0
-Revises: 5f0f887bdd0b
-Create Date: 2026-09-05 18:18:15.376129
+Revises: 73644b08645c
+Create Date: 2026-09-05 20:06:45.406180
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '0a6b1f868ae0'
-down_revision: Union[str, Sequence[str], None] = '5f0f887bdd0b'
+down_revision: Union[str, Sequence[str], None] = '73644b08645c'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

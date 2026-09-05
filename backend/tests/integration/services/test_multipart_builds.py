@@ -55,3 +55,18 @@ class TestManufacturingConcurrency:
                 assert len(session.exec(select(MultipartBuildConfirmation)).all()) == 1
         finally:
             engine.dispose()
+
+
+class TestConcurrentReservations:
+    def test_parallel_queue_requests_reserve_each_unit_once(self, tmp_path):
+        from sqlmodel import create_engine
+
+        from tests.fakes.manufacturing import race_queues
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'queue.sqlite'}")
+        try:
+            outcomes, reserved = race_queues(engine)
+            assert outcomes == [(201, 1), (409, 0)]
+            assert reserved == 4
+        finally:
+            engine.dispose()
