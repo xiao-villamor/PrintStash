@@ -24,6 +24,7 @@ from testcontainers.core.wait_strategies import HttpWaitStrategy
 from tests.containers import (
     S3_ACCESS_KEY,
     S3_SECRET_KEY,
+    openssh_endpoint,
     s3_endpoint,
     shutdown_containers,
 )
@@ -35,7 +36,7 @@ SETUP_TOKEN = "image-contract-only-setup-token"
 
 TRANSPORT_PROBE = r"""
 import json
-from app.services.storage_opendal import OpenDALStorageBackend
+from app.services.remote_io_adapters import remote_io_for
 from app.services.storage_backend import StorageConfigurationError
 from app.services.storage_providers import TransportKind, TransportSpec, provider_catalogue
 
@@ -52,7 +53,7 @@ for kind in TransportKind:
     if kind is TransportKind.LOCAL:
         continue
     try:
-        backend = OpenDALStorageBackend(TransportSpec(
+        backend = remote_io_for(TransportSpec(
             kind=kind, provider=kind.value, namespace="image-contract", options=options,
         ))
     except StorageConfigurationError as exc:
@@ -134,6 +135,67 @@ class TestRuntimeImageBackup(unittest.TestCase):
         # Linux native runners expose the suite-owned service through Docker's
         # host gateway; no provider image/version is defined a second time here.
         remote_endpoint = f"http://host.docker.internal:{urlsplit(endpoint).port}"
+        try:
+            self._run_image(
+                {
+                    "kind": "s3",
+                    "configuration": {
+                        "provider": "s3_self_hosted",
+                        "bucket": bucket,
+                        "endpoint_url": remote_endpoint,
+                        "region": "us-east-1",
+                        "root": "off-site",
+                        "addressing_style": "path",
+                    },
+                    "secrets": {
+                        "access_key": S3_ACCESS_KEY,
+                        "secret_key": S3_SECRET_KEY,
+                    },
+                }
+            )
+        finally:
+            s3.close()
+
+    def test_restores_sftp_backup_from_shipped_image(self) -> None:
+        from app.services.storage_opendal import OpenDALStorageBackend
+        from app.services.storage_providers import SFTPProviderConfig, resolve_transport
+
+        host, port, host_key = openssh_endpoint()
+        root = f"image-sftp-{uuid4().hex}"
+        backend = OpenDALStorageBackend(
+            resolve_transport(
+                SFTPProviderConfig(
+                    provider="sftp",
+                    host=host,
+                    port=port,
+                    username="contract",
+                    password="contract-only",
+                    host_key=host_key,
+                    root=root,
+                )
+            )
+        )
+        backend.provision_root()
+        # Same server key, enrolled for the address used inside the final image.
+        key_fields = host_key.split()
+        image_host_key = (
+            f"[host.docker.internal]:{port} {key_fields[1]} {key_fields[2]}"
+        )
+        self._run_image(
+            {
+                "kind": "sftp",
+                "configuration": {
+                    "host": "host.docker.internal",
+                    "port": port,
+                    "username": "contract",
+                    "host_key": image_host_key,
+                    "root": root,
+                },
+                "secrets": {"password": "contract-only"},
+            }
+        )
+
+    def _run_image(self, profile: dict) -> None:
         container = (
             DockerContainer(IMAGE)
             .with_kwargs(extra_hosts={"host.docker.internal": "host-gateway"})
@@ -143,26 +205,22 @@ class TestRuntimeImageBackup(unittest.TestCase):
                 HttpWaitStrategy(8000, "/api/v1/setup/status").with_startup_timeout(120)
             )
         )
-        try:
-            with container:
-                base = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8000)}"
-                try:
-                    with httpx.Client(base_url=base, timeout=180) as api:
-                        self._recover(api, container, bucket, remote_endpoint)
-                except Exception:
-                    stdout, stderr = container.get_logs()
-                    print(stdout.decode(errors="replace"))
-                    print(stderr.decode(errors="replace"))
-                    raise
-        finally:
-            s3.close()
+        with container:
+            base = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(8000)}"
+            try:
+                with httpx.Client(base_url=base, timeout=180) as api:
+                    self._recover(api, container, profile)
+            except Exception:
+                stdout, stderr = container.get_logs()
+                print(stdout.decode(errors="replace"))
+                print(stderr.decode(errors="replace"))
+                raise
 
     def _recover(
         self,
         api: httpx.Client,
         container: DockerContainer,
-        bucket: str,
-        endpoint: str,
+        profile: dict,
     ) -> None:
         setup = api.post(
             "/api/v1/setup",
@@ -184,18 +242,9 @@ class TestRuntimeImageBackup(unittest.TestCase):
         connection = api.post(
             "/api/v1/storage-connections",
             json={
-                "name": "Image S3 recovery",
-                "kind": "s3",
+                "name": "Image recovery",
                 "purpose": "backup",
-                "configuration": {
-                    "provider": "s3_self_hosted",
-                    "bucket": bucket,
-                    "endpoint_url": endpoint,
-                    "region": "us-east-1",
-                    "root": "off-site",
-                    "addressing_style": "path",
-                },
-                "secrets": {"access_key": S3_ACCESS_KEY, "secret_key": S3_SECRET_KEY},
+                **profile,
             },
         )
         self.assertEqual(connection.status_code, 201, connection.text)
@@ -221,7 +270,7 @@ class TestRuntimeImageBackup(unittest.TestCase):
         created = api.post("/api/v1/backups")
         self.assertEqual(created.status_code, 202, created.text)
         meta = created.json()
-        self.assertEqual(meta["location"], "opendal:s3")
+        self.assertEqual(meta["location"], f"opendal:{profile['kind']}")
         listed = api.get("/api/v1/backups/sources").json()
         self.assertIn(meta["source_ref"], [row["source_ref"] for row in listed])
         removed = api.delete(f"/api/v1/models/{model['id']}")

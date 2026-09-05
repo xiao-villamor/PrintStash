@@ -208,11 +208,13 @@ class TestBackendDockerfile:
         for feature in (
             "services-memory",
             "services-webdav",
-            "services-sftp",
+            "services-s3",
             "services-gdrive",
         ):
             assert feature in feature_line
         assert 'opendal.Operator("gdrive"' in dockerfile
+        assert "import asyncssh" in dockerfile
+        assert "services-sftp" not in feature_line
 
     def test_runtime_images_use_unprivileged_users(self) -> None:
         """Neither runtime container may still be root when it serves traffic.

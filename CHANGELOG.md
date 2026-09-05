@@ -9,6 +9,11 @@
 
 ### Fixed
 
+- Remote Library sources and backup replicas use explicit streaming transport
+  contracts. Reader and directory handles close on early exit, and replica
+  publication no longer implies managed atomic creation. SFTP recovery is
+  exercised through the shipped image; native Local and S3 Vault paths remain.
+
 - Backup deletion refuses destinations without an exact owned-object deletion operation, including manually confirmed requests. Unsupported retention keeps replicas and ownership evidence intact without repeated provider-error warnings. Mutable S3 null versions use conditional ETags.
 - Verified OpenDAL S3 backup replicas can now witness GC when current target and failure-domain evidence proves independence. Approval and finalization remain bound to the exact owned archive and quarantine deadline.
 

@@ -1137,14 +1137,8 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
         try:
             remote_key = destination.key(archive_name)
             with get_session_factory().session() as remote_session:
-                remote_receipt = publish_file(
-                    remote_session,
-                    destination.backend,
-                    remote_key,
-                    archive_temp,
-                    object_kind="backup",
-                    sha256=archive_sha256,
-                    provider_ref=destination.provider_ref,
+                remote_receipt = destination.publish_file(
+                    remote_session, remote_key, archive_temp, sha256=archive_sha256
                 )
                 remote_session.commit()
             created_sources.append(
@@ -2110,8 +2104,11 @@ def _download_opendal_candidate(
     digest = hashlib.sha256()
     written = 0
     try:
-        with path.open("wb") as output:
-            for chunk in destination.backend.stream_chunks(key):
+        with (
+            path.open("wb") as output,
+            destination.backend.open_reader(key, expected=before) as reader,
+        ):
+            while chunk := reader.read(1024 * 1024):
                 output.write(chunk)
                 digest.update(chunk)
                 written += len(chunk)
@@ -2165,59 +2162,61 @@ def discover_unowned_opendal_backups() -> list[dict[str, object]]:
                     ).all()
                 }
             prefix_key = destination.key("")
-            for key in destination.backend.list_prefix(prefix_key):
-                name = key.rsplit("/", 1)[-1]
-                if (
-                    key in committed
-                    or not _is_direct_remote_backup_key(key, prefix_key)
-                    or not name.startswith(
-                        (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
-                    )
-                    or not name.endswith(".tar.gz")
-                ):
-                    continue
-                temp: Path | None = None
-                try:
-                    temp, digest, receipt = _download_opendal_candidate(
-                        destination, key
-                    )
-                    meta = _validate_archive_for_adoption(temp)
-                    meta.id = _backup_id_from_archive_name(name)
-                    source_ref = _source_ref(
-                        location=destination.location,
-                        namespace=destination.namespace,
-                        path=key,
-                        provider_ref=destination.provider_ref,
-                    )
-                    result.append(
-                        {
-                            "connection_id": destination.connection_id,
-                            "connection_name": destination.name,
-                            "provider": destination.provider,
-                            "key": key,
-                            "backup_id": meta.id,
-                            "created_at": meta.created_at,
-                            "size_bytes": receipt.size,
-                            "file_count": meta.file_count,
-                            "storage_backend": meta.storage_backend,
-                            "app_version": meta.app_version,
-                            "location": destination.location,
-                            "namespace": destination.namespace,
-                            "prefix": prefix_key,
-                            "archive_sha256": digest,
-                            "source_ref": source_ref,
-                            "provider_ref": destination.provider_ref,
-                            "candidate_kind": "unowned_archive",
-                        }
-                    )
-                except Exception:
-                    logger.info(
-                        "backup: unowned OpenDAL archive failed validation: %s",
-                        key,
-                    )
-                finally:
-                    if temp is not None:
-                        temp.unlink(missing_ok=True)
+            with destination.backend.iter_directory("printstash-backups") as entries:
+                for entry in entries:
+                    key = destination.backend.source_key(entry.key)
+                    name = key.rsplit("/", 1)[-1]
+                    if (
+                        key in committed
+                        or not _is_direct_remote_backup_key(key, prefix_key)
+                        or not name.startswith(
+                            (_BACKUP_NAME_PREFIX, _LEGACY_BACKUP_NAME_PREFIX)
+                        )
+                        or not name.endswith(".tar.gz")
+                    ):
+                        continue
+                    temp: Path | None = None
+                    try:
+                        temp, digest, receipt = _download_opendal_candidate(
+                            destination, key
+                        )
+                        meta = _validate_archive_for_adoption(temp)
+                        meta.id = _backup_id_from_archive_name(name)
+                        source_ref = _source_ref(
+                            location=destination.location,
+                            namespace=destination.namespace,
+                            path=key,
+                            provider_ref=destination.provider_ref,
+                        )
+                        result.append(
+                            {
+                                "connection_id": destination.connection_id,
+                                "connection_name": destination.name,
+                                "provider": destination.provider,
+                                "key": key,
+                                "backup_id": meta.id,
+                                "created_at": meta.created_at,
+                                "size_bytes": receipt.size,
+                                "file_count": meta.file_count,
+                                "storage_backend": meta.storage_backend,
+                                "app_version": meta.app_version,
+                                "location": destination.location,
+                                "namespace": destination.namespace,
+                                "prefix": prefix_key,
+                                "archive_sha256": digest,
+                                "source_ref": source_ref,
+                                "provider_ref": destination.provider_ref,
+                                "candidate_kind": "unowned_archive",
+                            }
+                        )
+                    except Exception:
+                        logger.info(
+                            "backup: unowned OpenDAL archive failed validation: %s",
+                            key,
+                        )
+                    finally:
+                        if temp is not None:
+                            temp.unlink(missing_ok=True)
         except Exception:
             logger.warning(
                 "backup: failed to discover OpenDAL backups from %s",

@@ -173,7 +173,7 @@
         {
           "runtime": "pytest",
           "path": "backend/tests/contract/services/storage_opendal/test_real_provider.py",
-          "node": "TestOpenDalLibrarySource::test_real_provider_content_is_materializable"
+          "node": "TestRemoteLibrarySource::test_real_provider_content_is_materializable"
         },
         {
           "runtime": "pytest",

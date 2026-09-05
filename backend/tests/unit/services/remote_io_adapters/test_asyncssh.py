@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import asyncssh
 import pytest
 
-from app.services import storage_opendal
+from app.services import remote_io_adapters as storage_opendal
 from app.services.storage_backend import (
     StorageCollisionError,
     StorageConfigurationError,

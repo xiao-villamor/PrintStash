@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import uuid
 from io import BytesIO
@@ -26,7 +27,8 @@ from PIL import Image
 from sqlmodel import Session
 
 from app.core.config import _overlay, settings
-from app.services.library_source import S3LibrarySource
+from app.db.models import LibrarySourceKind, StorageConnection
+from app.services.library_source import source_from_connection
 from app.services.storage_backend import (
     S3StorageBackend,
     StorageCollisionError,
@@ -130,22 +132,38 @@ class TestExists:
             s3_backend._client.head_object = original_head_object
 
 
-class TestS3LibrarySource:
+class TestProductionS3LibrarySource:
     def test_real_s3_compatible_object_is_materializable(
         self, s3_backend: S3StorageBackend
     ) -> None:
         key = "library-source/models/contract.gcode"
         payload = b"G1 X10 Y10\n"
         s3_backend._client.put_object(Bucket=s3_backend._bucket, Key=key, Body=payload)
-        source = S3LibrarySource(
-            {"bucket": s3_backend._bucket}, client=s3_backend._client
+        source = source_from_connection(
+            StorageConnection(
+                id=1,
+                name="Production S3",
+                kind=LibrarySourceKind.S3,
+                config_json=json.dumps(
+                    {
+                        "bucket": s3_backend._bucket,
+                        "root": "library-source",
+                        "endpoint_url": s3_endpoint(),
+                        "region": "us-east-1",
+                        "addressing_style": "path",
+                    }
+                ),
+                secret_json=json.dumps(
+                    {"access_key": S3_ACCESS_KEY, "secret_key": S3_SECRET_KEY}
+                ),
+            )
         )
 
-        page = source.list_page("library-source/models", cursor=None, limit=1000)
+        page = source.list_page("models", cursor=None, limit=1000)
 
-        assert [entry.key for entry in page.entries] == [key]
+        assert [entry.key for entry in page.entries] == ["models/contract.gcode"]
         assert page.complete is True
-        with source.materialize(key) as content:
+        with source.materialize("models/contract.gcode") as content:
             assert content.path.read_bytes() == payload
 
 

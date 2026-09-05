@@ -309,3 +309,22 @@ filesystem, protocol, auth mode and the release-validation checklist result.
 Backup recovery and backup deletion have separate requirements. An archive can remain listable and recoverable while its destination cannot safely delete its exact owned object. Such deletion requests return `409 backup_exact_delete_unsupported`, even when the administrator confirms storage risk. Bytes and ownership evidence remain intact.
 
 OpenDAL backup destinations require an immutable object version and compiled version-deletion support. Empty and S3 `null` versions are mutable and do not qualify. Native S3 backups continue to use an immutable version or a conditional ETag; they never substitute an unconditional delete. Automatic retention leaves unsupported replicas in place without repeating provider-error warnings. The backup operation explanation remains visible until the destination supports safe deletion.
+
+### Remote transport contracts
+
+Remote Library sources and backup replicas share typed streaming adapters:
+OpenDAL for S3, WebDAV and Google Drive, and AsyncSSH for SFTP. Closing a reader
+or directory iterator releases its acquired handles, including on early exit,
+cancellation and transport failure. Source reads preserve available metadata,
+reject incomplete content, and verify stability before indexing.
+
+Replica publication is distinct from managed create-only publication. WebDAV
+uses a staged no-overwrite MOVE; SFTP uses exclusive creation, which prevents a
+competing writer from replacing the winner but can expose the winning upload
+before completion. Google Drive remains a replica/source transport and does not
+promise atomic managed creation. Exact deletion remains a separate, narrowly
+advertised operation. These contracts do not promote provider maturity.
+
+The full image smoke tests recover remote-only S3 and SFTP backups through the
+API and compare restored Artifact bytes. The lite image reports unavailable
+optional transports while retaining native Local and S3 Vault adapters.

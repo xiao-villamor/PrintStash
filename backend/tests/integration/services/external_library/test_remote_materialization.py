@@ -12,7 +12,7 @@ from app.db.models import File, LibrarySourceKind, Model, OwnedStorageObject
 from app.services import external_library
 from app.services.library_source import (
     LibrarySourceError,
-    OpenDalLibrarySource,
+    RemoteLibrarySource,
     SourceEntry,
 )
 from app.services.storage_opendal import OpenDALStorageBackend
@@ -50,7 +50,7 @@ class TestIndexRemoteFile:
             root_identity=None,
         )
         payload = (FIXTURES_DIR / "sample.gcode").read_bytes()
-        source = OpenDalLibrarySource(
+        source = RemoteLibrarySource(
             OpenDALStorageBackend(
                 TransportSpec(
                     kind=TransportKind.WEBDAV,

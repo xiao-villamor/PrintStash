@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import asyncssh
 import pytest
 
-from app.services.storage_opendal import _AsyncSSHSFTPOperator
+from app.services.remote_io_adapters import _AsyncSSHSFTPOperator
 
 
 @dataclass
 class StreamResources:
+    observations: int = 0
     fail_at: str = ""
     acquired: set[str] = field(default_factory=set)
     closed: set[str] = field(default_factory=set)
@@ -49,6 +51,19 @@ class Client:
         self.resources.fail("open")
         self.resources.acquired.add("reader")
         return Reader(self.resources)
+
+    async def scandir(self, path):
+        self.resources.acquired.add("listing")
+        try:
+            for index in range(100_000):
+                self.resources.fail("listing")
+                self.resources.observations += 1
+                yield SimpleNamespace(
+                    filename=f"{index}.stl",
+                    attrs=SimpleNamespace(type=1, size=3, mtime=None),
+                )
+        finally:
+            self.resources.closed.add("listing")
 
     def exit(self) -> None:
         self.resources.closed.add("client")
@@ -226,5 +241,47 @@ class TestStreamChunks:
         with pytest.raises(OSError, match=f"stream fault: {stage}"):
             list(operator.stream_chunks("file", 1024))
 
+        assert resources.closed == resources.acquired
+        assert loop.is_closed()
+
+
+class TestDirectoryStream:
+    @pytest.mark.parametrize("exit_kind", ["early", "cancel", "failure"])
+    def test_incremental_listing_releases_every_acquired_resource(
+        self, stream_resources, exit_kind
+    ):
+        from app.services.remote_io_adapters import remote_io_for
+        from app.services.storage_backend import StorageConfigurationError
+        from app.services.storage_providers import TransportKind, TransportSpec
+
+        operator, resources, loop = stream_resources
+        remote = remote_io_for(
+            TransportSpec(
+                kind=TransportKind.SFTP, provider="sftp", namespace="vault", options={}
+            ),
+            operator=operator,
+        )
+
+        def consume():
+            with remote.iter_directory("models") as entries:
+                assert next(entries).key == "models/0.stl"
+                assert resources.observations == 1
+                if exit_kind == "cancel":
+                    raise asyncio.CancelledError()
+                if exit_kind == "failure":
+                    resources.fail_at = "listing"
+                    next(entries)
+
+        if exit_kind == "early":
+            consume()
+        elif exit_kind == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                consume()
+        else:
+            with pytest.raises(
+                StorageConfigurationError, match="remote_storage_list_failed"
+            ):
+                consume()
+        assert resources.observations == 1
         assert resources.closed == resources.acquired
         assert loop.is_closed()
