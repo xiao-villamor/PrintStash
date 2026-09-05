@@ -423,3 +423,54 @@ class TestFirstOwnerConcurrency:
         assert sorted(code for code, _ in results) == [201, 409], results
         with Session(postgres_engine) as session:
             assert len(session.exec(select(User).where(User.is_superuser)).all()) == 1
+
+
+class TestManufacturingPostgres:
+    def test_existing_parts_receive_quantity_one_after_upgrade(self, released_postgres):
+        config = _migration_config(released_postgres)
+        command.upgrade(config, "046685afd7ea")
+        with released_postgres.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO multipart_models (id, name, slug, created_at, updated_at) VALUES (1, 'Existing chair', 'existing-chair', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO multipart_parts (id, multipart_model_id, name, name_key, sort_order, created_at, updated_at) VALUES (1, 1, 'Leg', 'leg', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+        command.upgrade(config, "head")
+        with released_postgres.connect() as connection:
+            assert connection.execute(
+                text("SELECT name, quantity FROM multipart_parts WHERE id=1")
+            ).one() == ("Leg", 1)
+        assert {
+            "multipart_builds",
+            "multipart_build_parts",
+            "multipart_build_attempts",
+            "multipart_build_confirmations",
+        }.issubset(inspect(released_postgres).get_table_names())
+
+    def test_conflicting_results_have_one_winner(self, postgres_engine):
+        from tests.fakes.manufacturing import race_confirmations, seed_confirmation_race
+
+        ids = seed_confirmation_race(postgres_engine)
+        outcomes = race_confirmations(postgres_engine, *ids, False)
+        assert sorted(code for code, _ in outcomes) == [200, 409]
+        assert (200, 1) in outcomes
+
+    def test_duplicate_results_count_once(self, postgres_engine):
+        from tests.fakes.manufacturing import race_confirmations, seed_confirmation_race
+
+        ids = seed_confirmation_race(postgres_engine)
+        assert race_confirmations(postgres_engine, *ids, True) == [(200, 1), (200, 1)]
+
+
+class TestManufacturingQueuePostgres:
+    def test_parallel_queue_requests_reserve_each_unit_once(self, postgres_engine):
+        from tests.fakes.manufacturing import race_queues
+
+        outcomes, reserved = race_queues(postgres_engine)
+        assert outcomes == [(201, 1), (409, 0)]
+        assert reserved == 4

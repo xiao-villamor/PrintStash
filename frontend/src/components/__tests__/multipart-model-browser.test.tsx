@@ -410,7 +410,7 @@ describe("MultipartModelDetailPage", () => {
             description: "Everything needed for the organiser",
             part_count: 1,
             model_count: 1,
-            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+            parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
           }),
         ),
       },
@@ -434,7 +434,7 @@ describe("MultipartModelDetailPage", () => {
           aMultipart({
             part_count: 1,
             model_count: 1,
-            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+            parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
           }),
         ),
       },
@@ -521,8 +521,8 @@ describe("MultipartModelDetailPage", () => {
       part_count: 2,
       model_count: 2,
       parts: [
-        { id: 1, name: "Base", sort_order: 0, models: [model] },
-        { id: 2, name: "Lid", sort_order: 1, models: [alternative] },
+        { id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] },
+        { id: 2, name: "Lid", quantity: 1, sort_order: 1, models: [alternative] },
       ],
     });
     const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
@@ -634,7 +634,7 @@ describe("MultipartModelDetailPage", () => {
           aMultipart({
             part_count: 1,
             model_count: 1,
-            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+            parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
           }),
         ),
       },
@@ -680,7 +680,7 @@ describe("MultipartModelDetailPage", () => {
           aMultipart({
             part_count: 1,
             model_count: 1,
-            parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+            parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
           }),
         ),
         "GET /api/v1/multipart-models/7/candidates": json([model, alternative]),
@@ -703,7 +703,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart({
       part_count: 1,
       model_count: 1,
-      parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+      parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
     });
     const { requestsWithMethod } = renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -727,7 +727,7 @@ describe("MultipartModelDetailPage", () => {
       collection_id: null,
       cover_model_id: null,
       cover_image_url: null,
-      parts: [{ name: "Top", choices: [{ model_id: 12, choice_id: 101 }] }],
+      parts: [{ name: "Top", quantity: 1, choices: [{ model_id: 12, choice_id: 101 }] }],
     });
   });
 
@@ -784,7 +784,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart({
       part_count: 1,
       model_count: 2,
-      parts: [{ id: 1, name: "Base", sort_order: 0, models: [model, alternative] }],
+      parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model, alternative] }],
     });
     const coverImageUrl = "https://images.example.test/desk-organiser.webp";
     const saved = {
@@ -880,6 +880,7 @@ describe("MultipartModelDetailPage", () => {
               {
                 id: 1,
                 name: "Base",
+                quantity: 1,
                 sort_order: 0,
                 models: [
                   {
@@ -925,7 +926,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart({
       part_count: 1,
       model_count: 1,
-      parts: [{ id: 1, name: "Base", sort_order: 0, models: [model] }],
+      parts: [{ id: 1, name: "Base", quantity: 1, sort_order: 0, models: [model] }],
     });
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -957,6 +958,7 @@ describe("MultipartModelDetailPage", () => {
         {
           id: 1,
           name: "Base",
+          quantity: 1,
           sort_order: 0,
           models: [
             {
@@ -1035,6 +1037,7 @@ describe("MultipartModelDetailPage", () => {
         {
           id: 1,
           name: "Handle",
+          quantity: 1,
           sort_order: 0,
           models: [
             {

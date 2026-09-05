@@ -214,6 +214,7 @@ def _parts(
         MultipartPartRead(
             id=int(part.id),
             name=part.name,
+            quantity=part.quantity,
             sort_order=part.sort_order,
             models=by_part[int(part.id)],
         )
@@ -495,6 +496,8 @@ def _apply_parts(
     prepared: tuple[
         list[tuple[str, list[tuple[int, int | None]]]], dict[int, MultipartModelChoice]
     ],
+    *,
+    quantities: list[int],
 ) -> None:
     requested_rows, existing_by_id = prepared
     existing_parts = session.exec(
@@ -540,6 +543,7 @@ def _apply_parts(
             )
             session.add(part_row)
             session.flush()
+        part_row.quantity = quantities[part_order]
         part_row.name = name
         part_row.name_key = name.casefold()
         part_row.sort_order = part_order
@@ -600,7 +604,9 @@ def save(
         aggregate.cover_model_id = cover_model_id
     elif aggregate.cover_model_id not in requested_model_ids:
         aggregate.cover_model_id = None
-    _apply_parts(session, aggregate, prepared)
+    _apply_parts(
+        session, aggregate, prepared, quantities=[part.quantity for part in requested]
+    )
     aggregate.updated_by = user.id
     from app.core.time import utcnow
 

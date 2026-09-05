@@ -581,3 +581,21 @@ class TestSetupConfigurationFactory:
             db_session, setup_storage_pending=True, configured_at=utcnow()
         )
         assert config.setup_storage_pending is True
+
+
+class TestManufacturingFactories:
+    def test_part_quantity_defaults_to_one(self, db_session):
+        composition = factories.build_multipart_model(db_session)
+        part = factories.build_multipart_part(db_session, composition)
+        assert part.quantity == 1
+
+    def test_build_part_scales_required_units_by_object_quantity(self, db_session):
+        composition = factories.build_multipart_model(db_session)
+        build = factories.build_multipart_build(
+            db_session, composition, object_quantity=3
+        )
+        model = factories.build_model(db_session)
+        part = factories.build_multipart_build_part(
+            db_session, build, model, quantity=4
+        )
+        assert part.required_units == 12

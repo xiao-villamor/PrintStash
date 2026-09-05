@@ -3607,6 +3607,55 @@ class TestRestoreDatabase:
         with pytest.raises(RuntimeError, match="cannot restore to non-file database"):
             backup._restore_database(b"irrelevant")
 
+    def test_restore_recovers_manufacturing_results(self, backup_env: BackupEnv):
+        from app.db.models import (
+            MultipartBuild,
+            MultipartBuildAttempt,
+            MultipartBuildConfirmation,
+        )
+        from tests import factories
+
+        model_id, _ = seed_model_with_blob(
+            backup_env, name="Manufactured leg", content=b"solid leg\n"
+        )
+        with backup_env.new_session() as session:
+            model = session.get(Model, model_id)
+            revision = session.exec(select(File).where(File.model_id == model_id)).one()
+            composition = factories.build_multipart_model(session)
+            build = factories.build_multipart_build(session, composition)
+            part = factories.build_multipart_build_part(
+                session, build, model, quantity=4
+            )
+            job = factories.build_print_job(
+                session, revision, state=PrintJobState.FAILED
+            )
+            attempt = factories.build_multipart_build_attempt(
+                session, part, job, planned_units=4, valid_units=3, version=1
+            )
+            factories.build_multipart_build_confirmation(
+                session, attempt, valid_units=3
+            )
+            build_id, attempt_id = build.id, attempt.id
+        meta = backup.create_backup()
+        with backup_env.new_session() as session:
+            row = session.get(MultipartBuildAttempt, attempt_id)
+            row.valid_units = 0
+            session.add(row)
+            session.commit()
+        backup_env.engine.dispose()
+
+        backup.restore_backup(meta.id)
+
+        with backup_env.new_session() as session:
+            assert session.get(MultipartBuild, build_id).object_quantity == 1
+            assert session.get(MultipartBuildAttempt, attempt_id).valid_units == 3
+            receipt = session.exec(
+                select(MultipartBuildConfirmation).where(
+                    MultipartBuildConfirmation.attempt_id == attempt_id
+                )
+            ).one()
+            assert receipt.valid_units == 3
+
     def test_restore_recovers_database_rows(self, backup_env: BackupEnv):
         _, key = seed_model_with_blob(
             backup_env, name="Widget", content=b"solid widget\n"
