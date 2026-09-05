@@ -9,6 +9,7 @@ import os
 import posixpath
 import tempfile
 import uuid
+from contextlib import ExitStack
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
@@ -997,22 +998,26 @@ class _AsyncSSHSFTPOperator:
     def stream_chunks(self, relative: str, chunk_size: int) -> Iterator[bytes]:
         import asyncssh
 
-        loop = asyncio.new_event_loop()
-        connection = loop.run_until_complete(
-            asyncssh.connect(**self._connection_options())
-        )
-        client = loop.run_until_complete(connection.start_sftp_client())
-        reader = loop.run_until_complete(client.open(self._path(relative), "rb"))
-        try:
+        # Register each resource as soon as acquisition succeeds. ExitStack
+        # runs the remaining cleanups even if closing an inner resource fails.
+        # Acquisition failures and GeneratorExit own the loop just as EOF does.
+        with ExitStack() as resources:
+            loop = asyncio.new_event_loop()
+            resources.callback(loop.close)
+            connection = loop.run_until_complete(
+                asyncssh.connect(**self._connection_options())
+            )
+            resources.callback(
+                lambda: loop.run_until_complete(connection.wait_closed())
+            )
+            resources.callback(connection.close)
+            client = loop.run_until_complete(connection.start_sftp_client())
+            resources.callback(lambda: loop.run_until_complete(client.wait_closed()))
+            resources.callback(client.exit)
+            reader = loop.run_until_complete(client.open(self._path(relative), "rb"))
+            resources.callback(lambda: loop.run_until_complete(reader.close()))
             while chunk := loop.run_until_complete(reader.read(chunk_size)):
                 yield bytes(chunk)
-        finally:
-            loop.run_until_complete(reader.close())
-            client.exit()
-            loop.run_until_complete(client.wait_closed())
-            connection.close()
-            loop.run_until_complete(connection.wait_closed())
-            loop.close()
 
     def delete(self, relative: str) -> None:
         async def operation(client) -> None:

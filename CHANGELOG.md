@@ -7,6 +7,8 @@
 - The full container image includes the S3 transport used by remote Library
   sources and backup connections. Image checks now exercise remote-only S3
   recovery on both supported architectures.
+- SFTP streaming releases its connection, reader, and event loop when opening
+  fails, a read is cancelled, or cleanup itself encounters an error.
 
 ## 0.13.0
 
