@@ -234,14 +234,12 @@ docker compose up -d
 ```
 
 Open **[http://localhost:3000](http://localhost:3000)** (or
-`http://<server-ip>:3000` from another machine). Get the first-login setup token:
-
-```bash
-docker compose logs api | grep "setup token"
-```
-
-Paste it into the setup wizard to create your admin account. There is no default
-username or password. Restarting the API before setup generates a new token.
+`http://<server-ip>:3000` from another machine) on a trusted network. Create your
+local administrator account, check where uploads will be stored, then upload
+models or connect an existing folder. There is no default username or password
+and no credential to retrieve from a console in the Unreleased source build.
+Version 0.13.0 images retain the previous setup wizard until the next minor release. The first person to complete setup
+becomes the administrator; restrict access to the installation until then.
 
 The simple deployment uses the full prebuilt images, SQLite, and persistent
 Docker volumes. No `.env`, build step, PostgreSQL, or S3 service is needed.

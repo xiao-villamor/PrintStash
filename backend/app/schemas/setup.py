@@ -16,7 +16,8 @@ class SetupStatus(BaseModel):
     """
 
     configured: bool
-    setup_token_required: Optional[bool] = None
+    setup_available: bool = False
+    recovery_required: bool = False
     user_count: int = 0
     default_data_dir: Optional[str] = None
     default_thumb_dir: Optional[str] = None
@@ -35,15 +36,11 @@ class SetupStatus(BaseModel):
     configured_at: Optional[datetime] = None
 
 
-class SetupRequest(BaseModel):
+class SetupStorageRequest(BaseModel):
     """Payload for ``POST /api/v1/setup`` — only accepted while unconfigured."""
 
     model_config = ConfigDict(extra="forbid")
 
-    setup_token: str = Field(min_length=16, max_length=256)
-    username: str = Field(min_length=3, max_length=128)
-    password: str = Field(min_length=8, max_length=256)
-    email: Optional[str] = Field(default=None, max_length=255)
     storage_backend: Optional[str] = Field(default=None, max_length=64)
     storage_provider: Optional[str] = Field(default=None, max_length=64)
     storage_provider_config: Optional[dict[str, Any]] = None
@@ -62,6 +59,28 @@ class SetupRequest(BaseModel):
     backup_s3_secret_key: Optional[str] = Field(default=None, max_length=512)
 
 
+class SetupRequest(SetupStorageRequest):
+    username: str = Field(min_length=3, max_length=128)
+    password: str = Field(min_length=8, max_length=256)
+    email: Optional[str] = Field(default=None, max_length=255)
+
+
+class SetupSessionResponse(BaseModel):
+    csrf: str
+    expires_in: int = 3600
+
+
+class SetupStorageCheck(BaseModel):
+    code: str
+    free_bytes: Optional[int] = None
+
+
+class SetupCheckResponse(BaseModel):
+    ready: bool
+    storage_provider: str
+    checks: list[SetupStorageCheck]
+
+
 class SetupResponse(BaseModel):
     """Returned on successful first-run completion."""
 
@@ -74,3 +93,4 @@ class SetupResponse(BaseModel):
     thumb_dir: str
     access_token: str
     token_type: str = "bearer"
+    storage_ready: bool = True

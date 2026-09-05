@@ -14,7 +14,6 @@ const apiPort = Number(process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410);
 const API = `http://127.0.0.1:${apiPort}`;
 
 export const ADMIN = { username: "admin", password: "admin1234" };
-const SETUP_TOKEN = "playwright-setup-token-123";
 
 let cachedToken: string | null = null;
 let cachedUser: string | null = null;
@@ -26,8 +25,12 @@ async function ensureAuth(): Promise<{ token: string; user: string }> {
   try {
     const status = await (await ctx.get(`${API}/api/v1/setup/status`)).json();
     if (!status.configured) {
+      const preparation = await ctx.post(`${API}/api/v1/setup/session`, { headers: { Origin: API } });
+      if (!preparation.ok()) throw new Error(`Preparation failed: ${preparation.status()}`);
+      const { csrf } = await preparation.json();
       const res = await ctx.post(`${API}/api/v1/setup`, {
-        data: { ...ADMIN, setup_token: SETUP_TOKEN, storage_backend: "local" },
+        headers: { Origin: API, "X-PrintStash-Setup-CSRF": csrf },
+        data: { ...ADMIN, storage_backend: "local" },
       });
       if (!res.ok() && res.status() !== 409) {
         throw new Error(`setup failed: ${res.status()} ${await res.text()}`);

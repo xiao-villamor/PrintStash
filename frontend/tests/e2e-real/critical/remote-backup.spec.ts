@@ -8,13 +8,14 @@ const webdavPort = Number(process.env.PLAYWRIGHT_CRITICAL_BACKUP_WEBDAV_PORT ?? 
 test.describe("remote-only backup recovery", () => {
   test("@critical creates then restores a remote-only backup in the browser", async ({ page }) => {
     await page.goto("/setup");
-    await page.getByLabel("Setup token").fill("playwright-critical-backup-token");
     await page.getByLabel("Username").fill("backup-admin");
     await page.getByLabel("Password", { exact: true }).fill("playwright-password");
     await page.getByLabel("Confirm password").fill("playwright-password");
-    await page.getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Complete setup" }).click();
-    await expect(page).toHaveURL(/\/$/);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Check storage" }).click();
+    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await expect(page).toHaveURL(/\/getting-started$/);
+    await page.getByRole("button", { name: "I'll do this later" }).click();
 
     const destinationName = `WebDAV backup ${Date.now()}`;
     await page.goto("/settings?section=remote-storage");

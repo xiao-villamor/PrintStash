@@ -64,7 +64,6 @@ from app.services.runtime_config import (
     ensure_jwt_secret,
     is_configured,
 )
-from app.services.setup_token import current_setup_token
 from app.services.storage_backend import (
     LocalStorageBackend,
     S3StorageBackend,
@@ -290,10 +289,7 @@ async def lifespan(app: FastAPI):
     if stranded_dispatches:
         logger.warning("reconciled %d stranded fleet dispatch(es)", stranded_dispatches)
     if not configured:
-        logger.warning(
-            "vault is unconfigured — open the web UI and enter this setup token: %s",
-            current_setup_token(),
-        )
+        logger.info("vault is unconfigured; browser setup mode=%s", settings.setup_mode)
     logger.info(
         "backend=%s data_dir=%s thumb_dir=%s db=%s",
         settings.storage_backend,

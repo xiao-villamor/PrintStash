@@ -2,6 +2,8 @@ import { getJson, sendJson } from "@/lib/api/request";
 import {
   SetupRequest,
   SetupResponse,
+  SetupStorageRequest,
+  SetupStorageCheck,
   SetupStatus,
   VaultConfigRead,
   VaultConfigUpdate,
@@ -12,15 +14,32 @@ import {
 } from "@/types";
 
 export function getSetupStatus(): Promise<SetupStatus> {
-  return getJson<SetupStatus>("/api/v1/setup/status");
+  return getJson<SetupStatus>("/api/v1/setup/status", { fresh: true });
 }
 
 export function getStorageProviders(): Promise<StorageProvider[]> {
   return getJson<StorageProvider[]>("/api/v1/storage/providers");
 }
 
-export function completeSetup(body: SetupRequest): Promise<SetupResponse> {
-  return sendJson<SetupResponse>("/api/v1/setup", "POST", body);
+export function beginSetup(): Promise<{ csrf: string; expires_in: number }> {
+  return sendJson("/api/v1/setup/session", "POST", {});
+}
+
+export function checkSetupStorage(
+  body: SetupStorageRequest,
+  csrf: string,
+): Promise<SetupStorageCheck> {
+  return sendJson("/api/v1/setup/check-storage", "POST", body, { "X-PrintStash-Setup-CSRF": csrf });
+}
+
+export function prepareSetupStorage(): Promise<SetupStorageCheck> {
+  return sendJson("/api/v1/setup/prepare-storage", "POST", {});
+}
+
+export function completeSetup(body: SetupRequest, csrf: string): Promise<SetupResponse> {
+  return sendJson<SetupResponse>("/api/v1/setup", "POST", body, {
+    "X-PrintStash-Setup-CSRF": csrf,
+  });
 }
 
 export function getVaultConfig(): Promise<VaultConfigRead> {

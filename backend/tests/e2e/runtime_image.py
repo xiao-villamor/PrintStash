@@ -32,7 +32,6 @@ from tests.paths import FIXTURES_DIR
 
 IMAGE = ""
 VARIANT = ""
-SETUP_TOKEN = "image-contract-only-setup-token"
 
 TRANSPORT_PROBE = r"""
 import json
@@ -199,7 +198,7 @@ class TestRuntimeImageBackup(unittest.TestCase):
         container = (
             DockerContainer(IMAGE)
             .with_kwargs(extra_hosts={"host.docker.internal": "host-gateway"})
-            .with_env("VAULT_SETUP_TOKEN", SETUP_TOKEN)
+            .with_env("VAULT_SETUP_MODE", "trusted_network")
             .with_exposed_ports(8000)
             .waiting_for(
                 HttpWaitStrategy(8000, "/api/v1/setup/status").with_startup_timeout(120)
@@ -222,10 +221,13 @@ class TestRuntimeImageBackup(unittest.TestCase):
         container: DockerContainer,
         profile: dict,
     ) -> None:
+        api.headers["Origin"] = str(api.base_url).rstrip("/")
+        preparation = api.post("/api/v1/setup/session")
+        self.assertEqual(preparation.status_code, 200, preparation.text)
+        api.headers["X-PrintStash-Setup-CSRF"] = preparation.json()["csrf"]
         setup = api.post(
             "/api/v1/setup",
             json={
-                "setup_token": SETUP_TOKEN,
                 "username": "image-owner",
                 "password": "ImageContractPassword123",
                 "storage_backend": "local",

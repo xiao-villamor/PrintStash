@@ -15,6 +15,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  beginSetup,
+  checkSetupStorage,
+  prepareSetupStorage,
   completeSetup,
   enrollStorageRoot,
   getHealthDetails,
@@ -53,11 +56,13 @@ describe("completeSetup", () => {
   it("POSTs the first-run answers", async () => {
     respondWith({ access_token: "token" });
 
-    await completeSetup({
-      setup_token: "token",
-      username: "alice",
-      password: "Password123",
-    });
+    await completeSetup(
+      {
+        username: "alice",
+        password: "Password123",
+      },
+      "browser-csrf",
+    );
 
     expectRequest("/api/v1/setup", "POST");
     expect(lastBody()).toMatchObject({ username: "alice" });
@@ -136,5 +141,26 @@ describe("rebuildModelThumbnails", () => {
     await rebuildModelThumbnails();
 
     expectRequest("/api/v1/files/thumbnails/rebuild?force=true", "POST");
+  });
+});
+
+describe("browser preparation contracts", () => {
+  it("starts the preparation session without a manual credential", async () => {
+    respondWith({ csrf: "automatic-proof", expires_in: 3600 });
+    await beginSetup();
+    expectRequest("/api/v1/setup/session", "POST");
+    expect(lastBody()).toEqual({});
+  });
+  it("attaches the anti-CSRF proof to storage checks", async () => {
+    respondWith({ ready: true, checks: [] });
+    await checkSetupStorage({ storage_backend: "local" }, "automatic-proof");
+    expect(new Headers(lastCall().init.headers).get("X-PrintStash-Setup-CSRF")).toBe(
+      "automatic-proof",
+    );
+  });
+  it("uses the authenticated preparation recovery endpoint", async () => {
+    respondWith({ ready: true, checks: [] });
+    await prepareSetupStorage();
+    expectRequest("/api/v1/setup/prepare-storage", "POST");
   });
 });

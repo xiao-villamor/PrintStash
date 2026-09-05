@@ -25,7 +25,6 @@ from app.core.config import _overlay, settings
 from app.core.time import utcnow
 from app.db.models import BackgroundJob, InboxItem, InboxItemState, User
 from app.services.jobs import registry
-from app.services.setup_token import current_setup_token
 from tests.fixtures.three_mf_projects import build_3d_builder_component_project
 from tests.paths import FIXTURES_DIR
 
@@ -36,7 +35,6 @@ async def _setup_and_login(api, tmp_path) -> dict[str, str]:
     r = await api.post(
         "/api/v1/setup",
         json={
-            "setup_token": current_setup_token(),
             "username": "owner",
             "password": "Password123",
             "storage_backend": "local",

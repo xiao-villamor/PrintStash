@@ -573,3 +573,11 @@ class TestStorageOwnership:
         assert result["resources_blocked"] == 1
         assert db_session.get(File, artifact_id) is not None
         assert Path(key).read_bytes() == b"legacy-user-bytes"
+
+
+class TestSetupConfigurationFactory:
+    def test_system_config_factory_preserves_a_pending_first_run(self, db_session):
+        config = factories.build_system_config(
+            db_session, setup_storage_pending=True, configured_at=utcnow()
+        )
+        assert config.setup_storage_pending is True

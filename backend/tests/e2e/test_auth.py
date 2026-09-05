@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.setup_token import current_setup_token
 from tests.factories import build_user
 
 
@@ -29,7 +28,6 @@ class TestAuthFlow:
         r = await api.post(
             "/api/v1/setup",
             json={
-                "setup_token": current_setup_token(),
                 "username": "owner",
                 "password": "Password123",
                 "storage_backend": "local",
@@ -44,7 +42,6 @@ class TestAuthFlow:
         again = await api.post(
             "/api/v1/setup",
             json={
-                "setup_token": current_setup_token(),
                 "username": "owner2",
                 "password": "Password123",
             },

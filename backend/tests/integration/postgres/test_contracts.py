@@ -409,3 +409,17 @@ class TestRefresh:
 
         assert results.count(user_id) == 1
         assert results.count(None) == 1
+
+
+class TestFirstOwnerConcurrency:
+    def test_two_api_processes_create_exactly_one_first_owner(
+        self, postgres_engine, tmp_path
+    ):
+        from tests.fakes.setup_process import race_setup_workers
+
+        results = race_setup_workers(
+            postgres_engine.url.render_as_string(hide_password=False), tmp_path
+        )
+        assert sorted(code for code, _ in results) == [201, 409], results
+        with Session(postgres_engine) as session:
+            assert len(session.exec(select(User).where(User.is_superuser)).all()) == 1

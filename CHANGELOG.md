@@ -21,6 +21,12 @@
   Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
   benchmarks cover 1,000, 10,000 and 100,000 entries.
 
+- Browser-based first-owner registration on explicitly enabled trusted networks,
+  with a guided account, storage-check and first-model flow. Local Compose no
+  longer requires a setup credential from API logs. Database serialization
+  prevents competing API processes from creating multiple initial administrators;
+  authenticated recovery preserves an account when storage preparation is pending.
+
 - A minimal, standalone Compose file for local deployment, with optional settings
   and customization examples in a separate deployment guide.
 

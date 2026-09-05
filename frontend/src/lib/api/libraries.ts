@@ -40,3 +40,7 @@ export function scanExternalLibrary(id: number): Promise<IngestResponse> {
 export function scanExternalLibraryPath(id: number, path: string): Promise<IngestResponse> {
   return sendJson<IngestResponse>(`/api/v1/libraries/${id}/scan-path`, "POST", { path });
 }
+
+export function discoverLibraryLocations(): Promise<string[]> {
+  return getJson<string[]>("/api/v1/libraries/locations", { fresh: true });
+}
