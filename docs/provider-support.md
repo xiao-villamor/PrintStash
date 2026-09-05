@@ -328,3 +328,28 @@ advertised operation. These contracts do not promote provider maturity.
 The full image smoke tests recover remote-only S3 and SFTP backups through the
 API and compare restored Artifact bytes. The lite image reports unavailable
 optional transports while retaining native Local and S3 Vault adapters.
+
+### Bounded remote discovery
+
+Remote sources keep the 1,000-entry processing page, 2 GiB content slice,
+15-minute slice and configured pacing. Provider operations receive the remaining
+slice deadline. Setup probes inspect one source entry or an isolated Vault probe
+prefix instead of enumerating unrelated content.
+
+S3 uses native incremental continuation. WebDAV parses a streamed depth-one XML
+response, and SFTP uses AsyncSSH's incremental directory iterator. Observations
+are committed in bounded batches to a database inventory. Processing starts only
+after enumeration completes; subsequent pages read the inventory without opening
+the remote directory again. An interrupted incomplete directory restarts
+conservatively. Completed directories and committed processing pages survive a
+restart. Failed, cancelled or incomplete discovery never authorizes absence
+reconciliation. Inventories are released after completion; abandoned inventories
+expire after 30 days and their cursors fail closed.
+
+This is a discovery snapshot, not a provider-wide transaction. A metadata-poor
+transport cannot prove that equal-size bytes remained unchanged during a read.
+All available markers and exact lengths are checked; markerless sources are
+hashed on every scan. Connection pooling is not introduced.
+
+See [directory benchmark results](remote-discovery-benchmarks.md) for measured
+requests, connections, transferred bytes, temporary storage and memory.

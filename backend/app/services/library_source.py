@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from itertools import islice
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Protocol
 
@@ -20,7 +18,8 @@ from app.db.models import (
     StorageConnectionPurpose,
 )
 from app.db.session import get_session_factory
-from app.services.remote_io import RemoteEntry, RemoteIO
+from app.services.remote_deadline import paced_sleep, remote_budget
+from app.services.remote_io import RemoteIO
 from app.services.remote_io_adapters import remote_io_for
 from app.services.storage_backend import StorageConfigurationError
 from app.services.storage_connections import (
@@ -32,6 +31,8 @@ from app.services.storage_providers import resolve_transport
 
 class LibrarySourceError(RuntimeError):
     """A remote source could not provide a complete, stable observation."""
+
+    discovery_cursor: str | None = None
 
 
 @dataclass(frozen=True)
@@ -73,10 +74,14 @@ class SourcePage:
     next_cursor: str | None
     complete: bool
     metadata_ops: int
+    entry_cursors: tuple[str, ...] = ()
+    inventory_id: str | None = None
 
 
 class LibrarySource(Protocol):
     """The only interface discovery and ArtifactContent use for remote bytes."""
+
+    def probe(self) -> int: ...
 
     def list_page(
         self, prefix: str, *, cursor: str | None, limit: int
@@ -116,126 +121,79 @@ class RemoteLibrarySource:
         target_elapsed = operations / self.max_metadata_ops_per_second
         remaining = target_elapsed - (time.monotonic() - started)
         if remaining > 0:
-            time.sleep(remaining)
+            paced_sleep(remaining)
+
+    def probe(self) -> int:
+        with remote_budget(deadline=time.monotonic() + 30):
+            with self.backend.iter_directory("") as entries:
+                return int(next(entries, None) is not None)
 
     def list_page(self, prefix: str, *, cursor: str | None, limit: int) -> SourcePage:
-        if limit < 1:
-            raise ValueError("limit must be positive")
+        from app.services.remote_discovery import inventory_page
+
         started = time.monotonic()
-        if cursor:
-            try:
-                decoded = json.loads(cursor)
-                stack = [
-                    {"directory": str(frame["directory"]), "after": str(frame["after"])}
-                    for frame in decoded
-                ]
-            except (KeyError, TypeError, ValueError) as exc:
-                raise LibrarySourceError("library_source_cursor_invalid") from exc
-        else:
-            stack = [{"directory": prefix.strip("/"), "after": ""}]
-        if not stack:
-            return SourcePage((), None, True, metadata_ops=0)
-        entries_list: list[SourceEntry] = []
-        directory_cache: dict[str, list[RemoteEntry]] = {}
-        operations = 0
-        while stack and len(entries_list) < limit:
-            frame = stack[-1]
-            directory = frame["directory"]
-            if directory not in directory_cache:
-                try:
-                    with self.backend.iter_directory(directory) as observations:
-                        bounded = list(islice(observations, 10_001))
-                    if len(bounded) > 10_000:
-                        raise StorageConfigurationError("remote_directory_entry_limit")
-                    directory_cache[directory] = sorted(
-                        bounded, key=lambda entry: entry.key
-                    )
-                except StorageConfigurationError as exc:
-                    raise LibrarySourceError(str(exc)) from exc
-                operations += 1
-                self._pace_metadata(started, operations)
-            child = next(
-                (
-                    entry
-                    for entry in directory_cache[directory]
-                    if entry.key > frame["after"]
-                ),
-                None,
+        with remote_budget(deadline=started + 900):
+            return inventory_page(
+                self.backend,
+                prefix,
+                cursor=cursor,
+                limit=limit,
+                pace=lambda operations: self._pace_metadata(started, operations),
             )
-            if child is None:
-                stack.pop()
-                directory_cache.pop(directory, None)
-                continue
-            frame["after"] = child.key
-            if child.is_dir:
-                stack.append({"directory": child.key, "after": ""})
-                continue
-            entries_list.append(
-                SourceEntry(
-                    key=child.key,
-                    size=child.size,
-                    modified_at=child.modified_at,
-                    etag=child.etag,
-                    version_id=child.version_id,
-                )
-            )
-        complete = not stack
-        next_cursor = None if complete else json.dumps(stack, separators=(",", ":"))
-        if next_cursor is not None and len(next_cursor) > 2048:
-            raise LibrarySourceError("library_source_cursor_too_large")
-        return SourcePage(
-            tuple(entries_list),
-            next_cursor,
-            complete,
-            metadata_ops=operations,
-        )
 
     @contextmanager
     def materialize(
         self, key: str, *, expected: SourceEntry | None = None
     ) -> Iterator[SourceContent]:
-        safe_key = _safe_key(key)
-        provider_key = self.backend.source_key(safe_key)
-        before = self.backend.object_info(provider_key)
-        if before is None:
-            raise LibrarySourceError("library_source_missing")
-        observation = SourceEntry(
-            safe_key, before.size, before.modified_at, before.etag, before.version_id
-        )
-        _require_observation(expected, observation)
-        fd, raw = tempfile.mkstemp(suffix=Path(safe_key).suffix)
-        path = Path(raw)
-        written = 0
-        started = time.monotonic()
-        try:
-            with (
-                open(fd, "wb", closefd=True) as output,
-                self.backend.open_reader(provider_key, expected=before) as reader,
-            ):
-                while chunk := reader.read(min(1024 * 1024, before.size - written + 1)):
-                    written += len(chunk)
-                    if written > before.size:
-                        raise LibrarySourceError("library_source_size_mismatch")
-                    output.write(chunk)
-                    if self.max_bytes_per_second:
-                        target_elapsed = written / self.max_bytes_per_second
-                        remaining = target_elapsed - (time.monotonic() - started)
-                        if remaining > 0:
-                            time.sleep(remaining)
-            if written != before.size:
-                raise LibrarySourceError("library_source_size_mismatch")
-            after = self.backend.object_info(provider_key)
-            if (
-                after is None
-                or after.size != before.size
-                or after.etag != before.etag
-                or after.version_id != before.version_id
-                or timestamp(after.modified_at) != timestamp(before.modified_at)
-            ):
-                raise LibrarySourceError("library_source_changed")
-            yield SourceContent(path, observation)
-        finally:
-            path.unlink(missing_ok=True)
+        with remote_budget(deadline=time.monotonic() + 900):
+            safe_key = _safe_key(key)
+            provider_key = self.backend.source_key(safe_key)
+            before = self.backend.object_info(provider_key)
+            if before is None:
+                raise LibrarySourceError("library_source_missing")
+            observation = SourceEntry(
+                safe_key,
+                before.size,
+                before.modified_at,
+                before.etag,
+                before.version_id,
+            )
+            _require_observation(expected, observation)
+            fd, raw = tempfile.mkstemp(suffix=Path(safe_key).suffix)
+            path = Path(raw)
+            written = 0
+            started = time.monotonic()
+            try:
+                with (
+                    open(fd, "wb", closefd=True) as output,
+                    self.backend.open_reader(provider_key, expected=before) as reader,
+                ):
+                    while chunk := reader.read(
+                        min(1024 * 1024, before.size - written + 1)
+                    ):
+                        written += len(chunk)
+                        if written > before.size:
+                            raise LibrarySourceError("library_source_size_mismatch")
+                        output.write(chunk)
+                        if self.max_bytes_per_second:
+                            target_elapsed = written / self.max_bytes_per_second
+                            remaining = target_elapsed - (time.monotonic() - started)
+                            if remaining > 0:
+                                paced_sleep(remaining)
+                if written != before.size:
+                    raise LibrarySourceError("library_source_size_mismatch")
+                after = self.backend.object_info(provider_key)
+                if (
+                    after is None
+                    or after.size != before.size
+                    or after.etag != before.etag
+                    or after.version_id != before.version_id
+                    or timestamp(after.modified_at) != timestamp(before.modified_at)
+                ):
+                    raise LibrarySourceError("library_source_changed")
+                yield SourceContent(path, observation)
+            finally:
+                path.unlink(missing_ok=True)
 
 
 def source_from_connection(

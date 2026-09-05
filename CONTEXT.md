@@ -213,10 +213,20 @@ _Avoid_: "imported file" (that means a vault-owned copy).
 
 **Discovery epoch**:
 A complete, restart-safe reconciliation of one library source. Mounted sources
-use a descriptor-pinned filesystem snapshot. Remote sources page through a
-durable cursor in bounded slices; absence is interpreted only after the full
-epoch completes. Empty or unexpectedly large removal sets fail closed. A
-weekly rotating hash check catches changes that preserve size and mtime.
+use a descriptor-pinned filesystem snapshot. Remote sources stream directory
+observations into a database inventory, then process that completed inventory in
+bounded pages. A cursor identifies the inventory and the last committed entry.
+Interrupted incomplete directories restart; completed directories and processing
+pages survive a restart. Indexed observations replace whole-epoch JSON key sets.
+Absence is interpreted only after all inventory pages finish. Empty or unexpectedly
+large removal sets fail closed. A completed scan releases its inventory; abandoned
+inventories expire after 30 days. Unchanged usable markers retain the weekly hash
+sweep; sources without usable markers are hashed every scan.
+
+A remote inventory is a discovery snapshot, not a transaction across the provider.
+Metadata-poor transports cannot prove that a same-size replacement did not occur
+during a read. Exact length and available before/after markers are checked, and the
+next scan hashes markerless sources again.
 
 **Discovery tombstone**:
 A durable `(library, source_key)` suppression created when a linked Artifact is

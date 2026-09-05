@@ -282,7 +282,7 @@ class TestStorageConnections:
         ).json()
 
         source = SimpleNamespace(
-            list_page=lambda *_args, **_kwargs: SimpleNamespace(entries=(1, 2))
+            probe=lambda: 2
         )
         monkeypatch.setattr(
             storage_connections_api, "source_from_connection", lambda *_a, **_k: source

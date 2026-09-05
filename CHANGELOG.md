@@ -4,6 +4,12 @@
 
 ### Added
 
+- Remote Library discovery streams large directories into a durable inventory.
+  Completed pages resume without rereading the directory, interrupted discovery
+  cannot remove linked Artifacts, and transport deadlines bound stalled requests.
+  Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
+  benchmarks cover 1,000, 10,000 and 100,000 entries.
+
 - A minimal, standalone Compose file for local deployment, with optional settings
   and customization examples in a separate deployment guide.
 

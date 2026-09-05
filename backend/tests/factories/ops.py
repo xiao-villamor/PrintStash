@@ -24,11 +24,16 @@ from app.db.models import (
     Document,
     DocumentKind,
     ExternalLibrary,
+    ExternalLibraryCheckpoint,
+    ExternalLibraryObservation,
     FilamentProfile,
     LibrarySourceKind,
     Model,
     NotificationChannel,
     NotificationTarget,
+    RemoteDiscoveryDirectory,
+    RemoteDiscoveryEntry,
+    RemoteDiscoveryInventory,
     RestoreMarker,
     ShareLink,
     StorageConnection,
@@ -333,3 +338,73 @@ def build_notification_channel(
         "config_json", json.dumps({"url": "https://hooks.invalid/printstash"})
     )
     return save(session, NotificationChannel(target=target, **overrides))
+
+
+def build_discovery_inventory(
+    session: Session, *, prefix: str = "models", **overrides: Any
+) -> RemoteDiscoveryInventory:
+    return save(
+        session,
+        RemoteDiscoveryInventory(
+            id=unique_hash("inventory")[:32],
+            target_ref=unique_hash("target"),
+            prefix=prefix,
+            **overrides,
+        ),
+    )
+
+
+def build_discovery_directory(
+    session: Session,
+    inventory: RemoteDiscoveryInventory,
+    *,
+    path: str = "models",
+    **overrides: Any,
+) -> RemoteDiscoveryDirectory:
+    return save(
+        session,
+        RemoteDiscoveryDirectory(
+            inventory_id=inventory.id,
+            path=path,
+            path_hash=hashlib.sha256(path.encode()).hexdigest(),
+            **overrides,
+        ),
+    )
+
+
+def build_discovery_entry(
+    session: Session,
+    directory: RemoteDiscoveryDirectory,
+    *,
+    key: str = "models/part.gcode",
+    size: int = 6,
+    **overrides: Any,
+) -> RemoteDiscoveryEntry:
+    return save(
+        session,
+        RemoteDiscoveryEntry(
+            inventory_id=directory.inventory_id,
+            directory_id=directory.id,
+            source_key=key,
+            key_hash=hashlib.sha256(key.encode()).hexdigest(),
+            size=size,
+            **overrides,
+        ),
+    )
+
+
+def build_library_observation(
+    session: Session,
+    checkpoint: ExternalLibraryCheckpoint,
+    *,
+    key: str = "models/part.gcode",
+    **overrides: Any,
+) -> ExternalLibraryObservation:
+    return save(
+        session,
+        ExternalLibraryObservation(
+            checkpoint_id=checkpoint.id,
+            key_hash=hashlib.sha256(key.encode()).hexdigest(),
+            **overrides,
+        ),
+    )

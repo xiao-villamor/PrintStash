@@ -9,6 +9,7 @@ without requiring a remote service.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -68,6 +69,23 @@ def _backend(spec=None, *, operator=None):
             return SimpleNamespace(status_code=201)
 
         backend._webdav_request = request
+
+        @contextmanager
+        def listing(directory):
+            prefix = directory.rstrip("/") + "/" if directory else ""
+            yield (
+                RemoteEntry(
+                    entry.path,
+                    entry.metadata.content_length,
+                    entry.metadata.is_dir,
+                    getattr(entry.metadata, "last_modified", None),
+                    getattr(entry.metadata, "etag", None),
+                    getattr(entry.metadata, "version", None),
+                )
+                for entry in operator.list(prefix)
+            )
+
+        backend._webdav_listing = listing
     return backend
 
 
@@ -235,6 +253,20 @@ class _CheckFailureOperator(_MemoryOperator):
 
 
 class TestOpenDALStorageBackend:
+    def test_setup_listing_is_confined_to_its_unique_probe_prefix(self, monkeypatch):
+        backend = _backend(operator=_MemoryOperator())
+        prefixes = []
+        walk = backend.walk_keys
+
+        def bounded_walk(prefix=""):
+            prefixes.append(prefix)
+            assert "/.printstash-probe/" in prefix
+            yield from walk(prefix)
+
+        monkeypatch.setattr(backend, "walk_keys", bounded_walk)
+        backend.ensure_setup()
+        assert len(prefixes) == 1
+
     @pytest.mark.parametrize(
         ("capabilities", "version", "etag", "expected_options"),
         [
@@ -1033,7 +1065,7 @@ class TestOpenDALStorageBackend:
             backend, "read_bytes", lambda key: (probe_key.append(key), b"first")[1]
         )
         monkeypatch.setattr(backend, "stat_size", lambda _key: 5)
-        monkeypatch.setattr(backend, "walk_keys", lambda: iter(()))
+        monkeypatch.setattr(backend, "walk_keys", lambda _prefix: iter(()))
 
         with pytest.raises(StorageConfigurationError, match="unproven"):
             backend.ensure_setup()
@@ -1052,7 +1084,7 @@ class TestOpenDALStorageBackend:
             backend, "read_bytes", lambda key: (probe_key.append(key), b"first")[1]
         )
         monkeypatch.setattr(backend, "stat_size", lambda _key: 1)
-        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+        monkeypatch.setattr(backend, "walk_keys", lambda _prefix: iter(probe_key))
 
         with pytest.raises(StorageConfigurationError, match="unproven"):
             backend.ensure_setup()
@@ -1074,7 +1106,7 @@ class TestOpenDALStorageBackend:
             lambda key: (probe_key.append(key), b"x" * len(first))[1],
         )
         monkeypatch.setattr(backend, "stat_size", lambda _key: len(first))
-        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+        monkeypatch.setattr(backend, "walk_keys", lambda _prefix: iter(probe_key))
 
         backend.ensure_setup()
 
@@ -1095,7 +1127,7 @@ class TestOpenDALStorageBackend:
             backend, "read_bytes", lambda key: (probe_key.append(key), b"x")[1]
         )
         monkeypatch.setattr(backend, "stat_size", lambda _key: 1)
-        monkeypatch.setattr(backend, "walk_keys", lambda: iter(probe_key))
+        monkeypatch.setattr(backend, "walk_keys", lambda _prefix: iter(probe_key))
 
         backend.ensure_setup()
 
