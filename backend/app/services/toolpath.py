@@ -24,19 +24,21 @@ def _copy_input(file: File, target: Path) -> None:
     maximum = settings.toolpath_input_max_mb * 1024 * 1024
     if file.size_bytes > maximum:
         raise HTTPException(413, "toolpath_input_too_large")
-    chunks = resolve(file).stream()
-    try:
-        with target.open("wb") as output:
+    # Open the destination before acquiring a reader or a verified source copy.
+    # A failed destination must not leave an unstarted iterator owning resources.
+    with target.open("wb") as output:
+        chunks = resolve(file).stream()
+        try:
             total = 0
             for chunk in chunks:
                 total += len(chunk)
                 if total > maximum:
                     raise HTTPException(413, "toolpath_input_too_large")
                 output.write(chunk)
-    finally:
-        close = getattr(chunks, "close", None)
-        if close is not None:
-            close()
+        finally:
+            close = getattr(chunks, "close", None)
+            if close is not None:
+                close()
 
 
 def _read_output(path: Path) -> bytes:

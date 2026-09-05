@@ -276,6 +276,19 @@ class TestDocumentedCodecs:
 
 
 class TestToolpathValidation:
+    def test_failed_destination_never_acquires_source_resources(
+        self, constrained_artifact, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            toolpath,
+            "resolve",
+            lambda _file: pytest.fail("source acquired before destination"),
+        )
+        with pytest.raises(FileNotFoundError):
+            toolpath._copy_input(
+                constrained_artifact, tmp_path / "absent" / "input.bgcode"
+            )
+
     @pytest.mark.asyncio
     async def test_rejects_non_gcode_artifacts(self, make_model, make_file):
         from fastapi import HTTPException
