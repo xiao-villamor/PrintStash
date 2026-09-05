@@ -365,7 +365,7 @@ class TestOpenDalLibrarySourceAdapter:
     ) -> None:
         backend = _StableDirectoryBackend()
 
-        def broken_stream(_key: str):
+        def broken_stream(_key: str, **_kwargs):
             yield b"a"
             raise OSError("remote read failed")
 
@@ -391,7 +391,7 @@ class TestOpenDalLibrarySourceAdapter:
         payload: bytes,
     ) -> None:
         backend = _StableDirectoryBackend()
-        monkeypatch.setattr(backend, "stream_chunks", lambda _key: iter([payload]))
+        monkeypatch.setattr(backend, "stream_chunks", lambda _key, **_kwargs: iter([payload]))
         monkeypatch.setattr(library_source.tempfile, "tempdir", str(tmp_path))
         source = OpenDalLibrarySource(backend)  # type: ignore[arg-type]
 

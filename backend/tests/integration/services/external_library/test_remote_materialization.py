@@ -24,6 +24,9 @@ class TruncatedOperator:
     def __init__(self, payload: bytes) -> None:
         self.payload = payload
 
+    def capability(self) -> SimpleNamespace:
+        return SimpleNamespace()
+
     def exists(self, key: str) -> bool:
         return True
 
