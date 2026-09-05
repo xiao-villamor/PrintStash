@@ -421,7 +421,8 @@ class TestOpenDalLibrarySourceAdapter:
                 pytest.fail("an oversized source was exposed to indexing")
 
         assert list(tmp_path.iterdir()) == []
-    def test_listing_preserves_all_markers_and_unknown_timestamps(self) -> None:
+
+    def test_listing_preserves_nullable_remote_observations(self) -> None:
         modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
         class MetadataBackend:

@@ -231,7 +231,7 @@ class TestOpenDALStorageBackend:
             else expected_options
         )
 
-    def test_directory_and_stat_retain_transport_metadata(self) -> None:
+    def test_transport_metadata_survives_observation(self) -> None:
         modified = datetime(2026, 9, 1, tzinfo=timezone.utc)
         metadata = SimpleNamespace(
             content_length=3,
