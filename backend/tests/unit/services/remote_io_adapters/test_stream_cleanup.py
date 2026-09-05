@@ -84,6 +84,9 @@ class Connection:
     def close(self) -> None:
         self.resources.closed.add("connection")
 
+    def abort(self) -> None:
+        self.close()
+
     async def wait_closed(self) -> None:
         self.resources.fail("connection_close")
 

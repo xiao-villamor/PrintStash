@@ -541,6 +541,9 @@ class TestAsyncSSHSFTPOperator:
             def close(self) -> None:
                 self.closed = True
 
+            def abort(self) -> None:
+                self.close()
+
             async def wait_closed(self) -> None:
                 return None
 

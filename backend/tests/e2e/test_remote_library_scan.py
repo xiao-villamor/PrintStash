@@ -249,3 +249,89 @@ class TestRemoteLibraryScan:
         )
         assert downloaded.status_code == 200
         assert downloaded.content == after
+
+
+class TestDurableScanPages:
+    @pytest.mark.s3
+    @pytest.mark.asyncio
+    async def test_public_scans_resume_committed_inventory_until_completion(
+        self, api, superuser_headers, e2e_db, monkeypatch
+    ):
+        from app.db.models import ExternalLibraryCheckpoint, RemoteDiscoveryInventory
+        from app.services import external_library
+
+        monkeypatch.setattr(external_library, "_REMOTE_PAGE_LIMIT", 2)
+        provider = await asyncio.to_thread(_s3_provider)
+        payload = (FIXTURES_DIR / "sample.gcode").read_bytes()
+        for index in range(3):
+            await asyncio.to_thread(
+                provider.backend.create_bytes,
+                payload + f"\n; page {index}\n".encode(),
+                provider.backend.source_key(f"models/{index}.gcode"),
+            )
+        enabled = await api.put(
+            "/api/v1/config",
+            headers=superuser_headers,
+            json={"external_libraries_enabled": True},
+        )
+        assert enabled.status_code == 200
+        connection = await api.post(
+            "/api/v1/storage-connections",
+            headers=superuser_headers,
+            json={
+                "name": "paged-source",
+                "kind": "s3",
+                "configuration": provider.configuration,
+                "secrets": provider.secrets,
+            },
+        )
+        assert connection.status_code == 201, connection.text
+        library = await api.post(
+            "/api/v1/libraries",
+            headers=superuser_headers,
+            json={
+                "name": "Paged source",
+                "source_kind": "s3",
+                "connection_id": connection.json()["id"],
+                "source_prefix": "models",
+                "scan_schedule": "",
+            },
+        )
+        assert library.status_code == 201, library.text
+        library_id = library.json()["id"]
+        url = f"/api/v1/libraries/{library_id}/scan"
+        assert (await api.post(url, headers=superuser_headers)).status_code == 202
+        e2e_db.expire_all()
+        checkpoint = e2e_db.exec(
+            select(ExternalLibraryCheckpoint).where(
+                ExternalLibraryCheckpoint.library_id == library_id
+            )
+        ).one()
+        assert checkpoint.complete is False
+        assert checkpoint.cursor is not None
+        assert (
+            len(
+                e2e_db.exec(
+                    select(File).where(File.external_library_id == library_id)
+                ).all()
+            )
+            == 2
+        )
+        epoch = checkpoint.epoch
+        assert (await api.post(url, headers=superuser_headers)).status_code == 202
+        e2e_db.expire_all()
+        assert checkpoint.complete is True
+        assert checkpoint.epoch == epoch
+        rows = e2e_db.exec(
+            select(File).where(File.external_library_id == library_id)
+        ).all()
+        assert {row.source_key for row in rows} == {
+            f"models/{index}.gcode" for index in range(3)
+        }
+        assert e2e_db.exec(select(RemoteDiscoveryInventory)).all() == []
+        for row in rows:
+            downloaded = await api.get(
+                f"/api/v1/files/{row.id}/download", headers=superuser_headers
+            )
+            assert downloaded.status_code == 200
+            assert downloaded.content.startswith(payload)

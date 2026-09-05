@@ -75,6 +75,7 @@ class TestRemoteScanSafety:
         self, db_session, monkeypatch, make_external_library
     ):
         import asyncio
+
         from app.db.models import ExternalLibraryCheckpoint, ExternalLibraryScanStatus
 
         library = make_external_library("", source_kind=LibrarySourceKind.S3)

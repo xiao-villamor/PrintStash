@@ -1,11 +1,27 @@
 """Inventory tables are additive; old source locators and checkpoints survive."""
 
 import pytest
+from alembic.autogenerate import produce_migrations
+from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect, text
+from sqlmodel import SQLModel
 
 from alembic import command
 from app.db.migrate import _alembic_config
 from tests.factories.migration_rows import seed_schema_row
+
+
+def _assert_schema_parity(engine):
+    with engine.connect() as connection:
+        context = MigrationContext.configure(
+            connection,
+            opts={
+                "compare_type": True,
+                "compare_server_default": True,
+                "target_metadata": SQLModel.metadata,
+            },
+        )
+        assert produce_migrations(context, SQLModel.metadata).upgrade_ops.is_empty()
 
 
 class TestRemoteDiscoveryUpgrade:
@@ -128,7 +144,7 @@ class TestPostgresDiscoveryUpgrade:
                     complete=False,
                 )
             command.upgrade(config, "5f0f887bdd0b")
-            command.check(config)
+            _assert_schema_parity(engine)
             with engine.connect() as connection:
                 assert (
                     connection.execute(
@@ -175,7 +191,7 @@ class TestPostgresDiscoveryUpgrade:
                 )
             command.downgrade(config, "046685afd7ea")
             command.upgrade(config, "5f0f887bdd0b")
-            command.check(config)
+            _assert_schema_parity(engine)
         finally:
             with engine.begin() as connection:
                 connection.exec_driver_sql("DROP SCHEMA public CASCADE")

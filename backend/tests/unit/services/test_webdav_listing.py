@@ -70,3 +70,66 @@ class TestWebDAVEntry:
     def test_missing_href_refuses_the_listing(self):
         with pytest.raises(StorageConfigurationError, match="href_missing"):
             _entry(etree.fromstring('<d:response xmlns:d="DAV:"/>'), "/dav/library")
+
+
+class TestStreamingResponse:
+    @pytest.mark.parametrize(
+        "exit_mode", ["exhaust", "early", "consumer_error", "malformed", "http_error"]
+    )
+    def test_response_closes_on_every_consumer_exit(self, monkeypatch, exit_mode):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+
+        from app.services import webdav_listing
+
+        closed = []
+        payload = (
+            b'<d:multistatus xmlns:d="DAV:">'
+            + etree.tostring(_response(modified="Wed, 01 Jan 2025 00:00:00 GMT"))
+            + b"</d:multistatus>"
+        )
+        if exit_mode == "malformed":
+            payload = payload[:-10]
+
+        @contextmanager
+        def stream(*args, **kwargs):
+            assert kwargs["headers"]["Depth"] == "1"
+            assert kwargs["follow_redirects"] is False
+            try:
+                yield SimpleNamespace(
+                    status_code=403 if exit_mode == "http_error" else 207,
+                    iter_bytes=lambda **_: iter([payload]),
+                )
+            finally:
+                closed.append(True)
+
+        monkeypatch.setattr(webdav_listing.httpx, "stream", stream)
+
+        def consume():
+            with webdav_listing.iter_webdav_directory(
+                "https://unit.test/dav/library/models",
+                root_url="https://unit.test/dav/library",
+                username="user",
+                password="secret",
+            ) as entries:
+                if exit_mode == "early":
+                    assert next(entries).key == "models/a.gcode"
+                elif exit_mode == "consumer_error":
+                    next(entries)
+                    raise RuntimeError("consumer stopped")
+                else:
+                    values = list(entries)
+                    assert len(values) == 1
+                    assert values[0].modified_at.year == 2025
+
+        if exit_mode in {"consumer_error", "malformed", "http_error"}:
+            expected = {
+                "consumer_error": RuntimeError,
+                "malformed": etree.XMLSyntaxError,
+                "http_error": StorageConfigurationError,
+            }[exit_mode]
+            with pytest.raises(expected):
+                consume()
+        else:
+            consume()
+        assert closed == [True]

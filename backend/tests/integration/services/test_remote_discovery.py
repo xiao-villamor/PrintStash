@@ -133,3 +133,109 @@ class TestDurableDirectoryInventory:
             LibrarySourceError, match="library_source_directory_entry_invalid"
         ):
             _source(Recursive(0)).list_page("models", cursor=None, limit=1000)
+
+    def test_retiring_completed_inventory_releases_all_observations(self, db_session):
+        from sqlmodel import select
+
+        from app.db.models import (
+            RemoteDiscoveryDirectory,
+            RemoteDiscoveryEntry,
+            RemoteDiscoveryInventory,
+        )
+        from app.services.remote_discovery import retire_inventory
+
+        page = _source(_DirectoryOperator(10)).list_page(
+            "models", cursor=None, limit=1000
+        )
+        retire_inventory(page.inventory_id)
+        assert db_session.exec(select(RemoteDiscoveryEntry)).all() == []
+        assert db_session.exec(select(RemoteDiscoveryDirectory)).all() == []
+        assert db_session.exec(select(RemoteDiscoveryInventory)).all() == []
+
+    def test_expired_inventory_cannot_be_resumed(self, db_session):
+        from datetime import timedelta
+
+        import pytest
+
+        from app.core.time import utcnow
+        from app.db.models import RemoteDiscoveryInventory
+        from app.services.library_source import LibrarySourceError
+
+        source = _source(_DirectoryOperator(1001))
+        first = source.list_page("models", cursor=None, limit=1000)
+        inventory = db_session.get(RemoteDiscoveryInventory, first.inventory_id)
+        inventory.updated_at = utcnow() - timedelta(days=31)
+        db_session.add(inventory)
+        db_session.commit()
+        source.list_page("models", cursor=None, limit=1000)
+        with pytest.raises(LibrarySourceError, match="cursor_target_changed"):
+            source.list_page("models", cursor=first.next_cursor, limit=1000)
+
+    def test_completed_parent_survives_an_interrupted_child(self, db_session):
+        from contextlib import contextmanager
+
+        import pytest
+
+        from app.services.library_source import LibrarySourceError
+        from app.services.remote_io import RemoteEntry
+
+        calls = []
+        failed = False
+
+        @contextmanager
+        def listing(directory):
+            nonlocal failed
+            calls.append(directory)
+
+            def entries():
+                nonlocal failed
+                if directory == "models":
+                    yield RemoteEntry("models/child", 0, True)
+                    yield RemoteEntry("models/root.gcode", 6, False)
+                elif not failed:
+                    failed = True
+                    raise OSError("interrupted child")
+                else:
+                    yield RemoteEntry("models/child/a.gcode", 6, False)
+
+            yield entries()
+
+        backend = SimpleNamespace(backend_name="tree-inventory", iter_directory=listing)
+        source = RemoteLibrarySource(backend)
+        with pytest.raises(LibrarySourceError) as error:
+            source.list_page("models", cursor=None, limit=1000)
+        page = source.list_page(
+            "models", cursor=error.value.discovery_cursor, limit=1000
+        )
+        assert {entry.key for entry in page.entries} == {
+            "models/root.gcode",
+            "models/child/a.gcode",
+        }
+        assert calls == ["models", "models/child", "models/child"]
+        assert page.complete is True
+
+    def test_cursor_cannot_adopt_another_target(self, db_session):
+        import pytest
+
+        from app.services.library_source import LibrarySourceError
+
+        operator = _DirectoryOperator(1001)
+        first = _source(operator).list_page("models", cursor=None, limit=1000)
+        other = RemoteLibrarySource(SimpleNamespace(backend_name="different-target"))
+        with pytest.raises(LibrarySourceError, match="cursor_target_changed"):
+            other.list_page("models", cursor=first.next_cursor, limit=1000)
+        assert operator.requests == 1
+
+    def test_malformed_cursor_offsets_fail_before_listing(self, db_session):
+        import json
+
+        import pytest
+
+        from app.services.library_source import LibrarySourceError
+
+        operator = _DirectoryOperator(1)
+        for offset in (-1, True, "0", None):
+            cursor = json.dumps({"v": 1, "inventory": "missing", "after": offset})
+            with pytest.raises(LibrarySourceError, match="cursor_invalid"):
+                _source(operator).list_page("models", cursor=cursor, limit=1000)
+        assert operator.requests == 0

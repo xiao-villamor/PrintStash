@@ -231,3 +231,37 @@ class TestSFTPDirectoryInventory:
                     }
                 ),
             )
+
+    def test_stalled_sftp_directory_respects_the_remaining_slice(
+        self, db_session, discovery_disk
+    ):
+        from app.services.library_source import LibrarySourceError
+        from app.services.remote_deadline import remote_budget
+        from tests.fakes.discovery_sftp import sftp_directory_server
+
+        with sftp_directory_server(1, response_delay=5) as (port, known_host, metrics):
+            profile = build_storage_connection(
+                db_session, purpose=StorageConnectionPurpose.LIBRARY
+            )
+            profile.kind = LibrarySourceKind.SFTP
+            profile.config_json = json.dumps(
+                {
+                    "provider": "sftp",
+                    "host": "127.0.0.1",
+                    "port": port,
+                    "username": "printstash",
+                    "host_key": known_host,
+                    "root": "library",
+                }
+            )
+            profile.secret_json = json.dumps({"password": "contract"})
+            source = source_from_connection(profile)
+            started = time.monotonic()
+            with remote_budget(deadline=started + 0.5):
+                with pytest.raises(
+                    LibrarySourceError, match="remote_scan_slice_deadline"
+                ) as failure:
+                    source.list_page("models", cursor=None, limit=1000)
+            assert time.monotonic() - started < 2
+            assert failure.value.discovery_cursor is not None
+            assert metrics["connections"] == 1

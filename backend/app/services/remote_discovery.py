@@ -211,7 +211,7 @@ def inventory_page(backend, prefix: str, *, cursor: str | None, limit: int, pace
                 error = LibrarySourceError(str(exc))
                 error.discovery_cursor = _cursor(inventory.id, after)
                 raise error from exc
-            setattr(exc, "discovery_cursor", _cursor(inventory.id, after))
+            setattr(exc, "discovery_cursor", _cursor(inventory.id, after))  # noqa: B010 — exception metadata
             raise
         rows = session.exec(
             select(Entry)

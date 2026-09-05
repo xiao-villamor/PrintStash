@@ -929,15 +929,31 @@ class _AsyncSSHSFTPOperator:
         return bytes(self._run(operation))
 
     def _await(
-        self, loop: asyncio.AbstractEventLoop, operation: Awaitable[_Result]
+        self,
+        loop: asyncio.AbstractEventLoop,
+        operation: Awaitable[_Result],
+        connection=None,
     ) -> _Result:
         try:
             timeout = operation_timeout()
         except BaseException:
             if asyncio.iscoroutine(operation):
                 operation.close()
+            if connection is not None:
+                connection.abort()
             raise
-        return loop.run_until_complete(asyncio.wait_for(operation, timeout))
+        # AsyncSSH iterator cancellation can await a remote CLOSE response.
+        # Abort at the same deadline so cancellation cannot wait on that server.
+        abort_timer = (
+            loop.call_later(timeout, connection.abort)
+            if connection is not None
+            else None
+        )
+        try:
+            return loop.run_until_complete(asyncio.wait_for(operation, timeout))
+        finally:
+            if abort_timer is not None:
+                abort_timer.cancel()
 
     def stream_chunks(self, relative: str, chunk_size: int) -> Iterator[bytes]:
         import asyncssh
@@ -957,18 +973,20 @@ class _AsyncSSHSFTPOperator:
                 )
             )
             resources.callback(connection.close)
-            client = self._await(loop, connection.start_sftp_client())
+            client = self._await(loop, connection.start_sftp_client(), connection)
             resources.callback(
                 lambda: loop.run_until_complete(
                     asyncio.wait_for(client.wait_closed(), 5)
                 )
             )
             resources.callback(client.exit)
-            reader = self._await(loop, client.open(self._path(relative), "rb"))
+            reader = self._await(
+                loop, client.open(self._path(relative), "rb"), connection
+            )
             resources.callback(
                 lambda: loop.run_until_complete(asyncio.wait_for(reader.close(), 5))
             )
-            while chunk := self._await(loop, reader.read(chunk_size)):
+            while chunk := self._await(loop, reader.read(chunk_size), connection):
                 yield bytes(chunk)
 
     def delete(self, relative: str) -> None:
@@ -1029,7 +1047,7 @@ class _AsyncSSHSFTPOperator:
                 )
             )
             resources.callback(connection.close)
-            client = self._await(loop, connection.start_sftp_client())
+            client = self._await(loop, connection.start_sftp_client(), connection)
             resources.callback(
                 lambda: loop.run_until_complete(
                     asyncio.wait_for(client.wait_closed(), 5)
@@ -1046,7 +1064,7 @@ class _AsyncSSHSFTPOperator:
                 )
             while True:
                 try:
-                    entry = self._await(loop, anext(iterator))
+                    entry = self._await(loop, anext(iterator), connection)
                 except StopAsyncIteration:
                     break
                 name = str(entry.filename)
