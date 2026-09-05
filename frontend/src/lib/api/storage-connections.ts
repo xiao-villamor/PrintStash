@@ -29,6 +29,9 @@ export function probeStorageConnection(id: number): Promise<{ ok: boolean }> {
 export function updateStorageConnection(
   id: number,
   body: {
+    name?: string;
+    configuration?: StorageConnectionConfiguration;
+    secrets?: Record<string, string>;
     enabled?: boolean;
     purpose?: StorageConnectionPurpose;
     manual_backup_enabled?: boolean;

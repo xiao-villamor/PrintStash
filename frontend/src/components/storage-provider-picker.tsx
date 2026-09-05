@@ -4,7 +4,8 @@ import { Cloud, HardDrive, Network, Server } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { StorageProviderFields } from "@/components/storage-provider-fields";
+import { providerDefaults } from "@/lib/storage-provider-form";
 import { cn } from "@/lib/utils";
 import { useOptionalI18n } from "@/lib/i18n";
 import { storageOperationMessage } from "@/lib/storage-operations";
@@ -24,11 +25,7 @@ const CATEGORIES: Array<{
 export type ProviderValues = StorageProviderConfigValues;
 
 export function defaultProviderValues(provider: StorageProvider): ProviderValues {
-  return Object.fromEntries(
-    provider.fields
-      .filter((field) => field.default !== undefined && field.default !== null)
-      .map((field) => [field.name, field.default ?? ""]),
-  );
+  return providerDefaults(provider);
 }
 
 function tierLabel(tier: string): string {
@@ -180,47 +177,13 @@ export function StorageProviderPicker(props: {
             )}
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            {selected.fields.map((field) => {
-              const stored = field.secret && secretFieldsSet.has(field.name);
-              const value = props.values[field.name] ?? "";
-              return (
-                <div key={field.name} className="space-y-1.5">
-                  <label
-                    htmlFor={`storage-provider-${field.name}`}
-                    className="flex items-center justify-between gap-2 text-xs font-mono uppercase tracking-wider text-on-surface-variant"
-                  >
-                    <span>{field.label}</span>
-                    {!field.required && <span className="font-sans normal-case">Optional</span>}
-                  </label>
-                  <Input
-                    id={`storage-provider-${field.name}`}
-                    type={
-                      field.secret ? "password" : field.input_type === "number" ? "number" : "text"
-                    }
-                    value={String(value)}
-                    disabled={props.disabled}
-                    required={field.required && !stored}
-                    placeholder={stored ? "Stored — leave blank to keep" : undefined}
-                    autoComplete={field.secret ? "new-password" : "off"}
-                    className="bg-surface-container-lowest font-mono text-on-surface"
-                    onChange={(event) =>
-                      props.onValueChange(
-                        field.name,
-                        field.input_type === "number"
-                          ? Number(event.target.value)
-                          : event.target.value,
-                      )
-                    }
-                  />
-                  <p className="text-3xs text-on-surface-variant">
-                    {field.help}
-                    {stored ? " A value is currently stored." : ""}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+          <StorageProviderFields
+            provider={selected}
+            values={props.values}
+            onChange={props.onValueChange}
+            disabled={props.disabled}
+            storedSecrets={[...secretFieldsSet]}
+          />
         </section>
       )}
     </div>

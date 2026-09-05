@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from app.core.security import require_superuser
 from app.db.models import (
+    BackupDestinationResult,
     ExternalLibrary,
     LibrarySourceKind,
     OwnedStorageObject,
@@ -25,6 +26,7 @@ from app.services.library_source import LibrarySourceError, source_from_connecti
 from app.services.storage_backend import StorageConfigurationError
 from app.services.storage_connections import (
     StorageConnectionConfigError,
+    connection_target_signature,
     serialize_connection_config,
 )
 from app.services.storage_operations import (
@@ -33,6 +35,7 @@ from app.services.storage_operations import (
     source_operations,
     use_availability,
 )
+from app.services.storage_providers import provider_secret_fields
 
 router = APIRouter(
     prefix="/storage-connections",
@@ -68,18 +71,13 @@ class StorageConnectionRead(BaseModel):
 class StorageConnectionUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    configuration: dict[str, object] | None = None
+    secrets: dict[str, str] | None = None
     enabled: bool | None = None
     purpose: StorageConnectionPurpose | None = None
     manual_backup_enabled: bool | None = None
     automatic_backup_enabled: bool | None = None
-
-
-_SECRET_FIELDS = {
-    LibrarySourceKind.S3: {"access_key", "secret_key"},
-    LibrarySourceKind.WEBDAV: {"password"},
-    LibrarySourceKind.SFTP: {"password", "passphrase"},
-    LibrarySourceKind.GDRIVE: {"client_secret", "refresh_token"},
-}
 
 
 def _validated(
@@ -87,7 +85,7 @@ def _validated(
     configuration: dict[str, object],
     secrets: dict[str, str],
 ) -> tuple[dict[str, object], dict[str, str]]:
-    allowed_secrets = _SECRET_FIELDS.get(kind, set())
+    allowed_secrets = provider_secret_fields(kind.value)
     if set(secrets) - allowed_secrets or set(configuration) & allowed_secrets:
         raise HTTPException(status_code=400, detail="storage_connection_secret_invalid")
     try:
@@ -100,7 +98,11 @@ def _validated(
 
 def _read(row: StorageConnection) -> StorageConnectionRead:
     assert row.id is not None
-    configuration = json.loads(row.config_json or "{}")
+    configuration = {
+        key: value
+        for key, value in json.loads(row.config_json or "{}").items()
+        if key not in provider_secret_fields(row.kind.value)
+    }
     secret_fields = sorted(json.loads(row.secret_json or "{}"))
     return StorageConnectionRead(
         id=row.id,
@@ -192,6 +194,9 @@ def update_connection(
     if all(
         value is None
         for value in (
+            body.name,
+            body.configuration,
+            body.secrets,
             body.enabled,
             body.purpose,
             body.manual_backup_enabled,
@@ -199,6 +204,50 @@ def update_connection(
         )
     ):
         raise HTTPException(status_code=400, detail="storage_connection_update_empty")
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="storage_connection_invalid")
+        duplicate = session.exec(
+            select(StorageConnection.id).where(
+                StorageConnection.name == name, StorageConnection.id != row.id
+            )
+        ).first()
+        if duplicate is not None:
+            raise HTTPException(
+                status_code=409, detail="storage_connection_name_in_use"
+            )
+        row.name = name
+    if body.configuration is not None or body.secrets is not None:
+        old_configuration = {
+            key: value
+            for key, value in json.loads(row.config_json or "{}").items()
+            if key not in provider_secret_fields(row.kind.value)
+        }
+        old_secrets = json.loads(row.secret_json or "{}")
+        configuration, secrets = _validated(
+            row.kind,
+            {**old_configuration, **(body.configuration or {})},
+            {**old_secrets, **(body.secrets or {})},
+        )
+        try:
+            changed = connection_target_signature(
+                row.kind, old_configuration, old_secrets
+            ) != connection_target_signature(row.kind, configuration, secrets)
+        except (StorageConnectionConfigError, ValueError):
+            # An invalid historical profile cannot prove that an edit retains its
+            # target. It can still be repaired when no dependent data exists.
+            changed = True
+        if row.kind == LibrarySourceKind.GDRIVE and secrets != old_secrets:
+            # Refresh credentials can select another account. Until Drive account
+            # identity is proven, an existing dependency prevents that ambiguity.
+            changed = True
+        if changed and _has_target_dependencies(row, session):
+            raise HTTPException(
+                status_code=409, detail="storage_connection_target_in_use"
+            )
+        row.config_json = json.dumps(configuration, sort_keys=True)
+        row.secret_json = json.dumps(secrets, sort_keys=True)
     if body.purpose is not None and body.purpose != row.purpose:
         _assert_removed_uses_are_free(row, body.purpose, session)
         row.purpose = body.purpose
@@ -274,3 +323,35 @@ def _assert_removed_uses_are_free(
         and _has_backup_objects(row, session)
     ):
         raise HTTPException(status_code=409, detail="storage_connection_in_use")
+
+
+def _has_target_dependencies(row: StorageConnection, session: Session) -> bool:
+    if (
+        session.exec(
+            select(ExternalLibrary.id).where(ExternalLibrary.connection_id == row.id)
+        ).first()
+        is not None
+    ):
+        return True
+    if (
+        session.exec(
+            select(BackupDestinationResult.id).where(
+                BackupDestinationResult.connection_id == row.id
+            )
+        ).first()
+        is not None
+    ):
+        return True
+    try:
+        return _has_backup_objects(row, session)
+    except (BackupDestinationError, StorageConfigurationError, ValueError):
+        # Older receipts may predate run history, while an unavailable transport
+        # prevents resolving their locator. Retain the target conservatively.
+        return (
+            session.exec(
+                select(OwnedStorageObject.id).where(
+                    OwnedStorageObject.backend == f"backup-opendal-{row.kind.value}"
+                )
+            ).first()
+            is not None
+        )

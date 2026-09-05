@@ -24,6 +24,14 @@ manual and automatic replicas. Automatic backups are disabled by default. The
 local destination is independently selectable for each mode. At least one
 destination must be selected; remote-only backups do not retain a local archive.
 
+Connections can be edited under **Settings → Remote storage**. Blank stored
+credentials are retained; entering a replacement changes only that credential.
+Changing the endpoint, account, bucket or folder is blocked while a Library
+source, owned backup or saved backup result depends on the target. Create a
+separate connection for another location. Google Drive account credentials
+cannot be replaced while dependencies exist because account identity is not yet
+verifiable.
+
 Add those connections under **Settings → Remote storage** and allow **Backup
 replicas** (or both uses). Create, upload, retain, and restore archives under
 **Settings → Backup**. Backup archives use the reserved

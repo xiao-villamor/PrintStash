@@ -281,9 +281,7 @@ class TestStorageConnections:
             },
         ).json()
 
-        source = SimpleNamespace(
-            probe=lambda: 2
-        )
+        source = SimpleNamespace(probe=lambda: 2)
         monkeypatch.setattr(
             storage_connections_api, "source_from_connection", lambda *_a, **_k: source
         )
@@ -617,3 +615,240 @@ class TestStorageConnections:
         assert updated.status_code == 200, updated.text
         assert updated.json()["manual_backup_enabled"] is False
         assert updated.json()["automatic_backup_enabled"] is True
+
+
+class TestConnectionEditing:
+    @pytest.fixture
+    def editable(self, client, db_session):
+        from tests.factories import build_storage_connection
+
+        admin = build_user(db_session, "connection-editor", superuser=True)
+        profile = build_storage_connection(db_session)
+        return profile.id, _headers(admin)
+
+    def test_omitted_secrets_survive_a_configuration_edit(
+        self, client, db_session, editable
+    ):
+        import json
+
+        identifier, headers = editable
+        before = json.loads(db_session.get(StorageConnection, identifier).secret_json)
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"name": "Renamed offsite", "configuration": {"root": "new-root"}},
+        )
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        row = db_session.get(StorageConnection, identifier)
+        assert json.loads(row.secret_json) == before
+        assert json.loads(row.config_json)["root"] == "new-root"
+        assert row.name == "Renamed offsite"
+        assert all(value not in response.text for value in before.values())
+
+    def test_explicit_secret_replacement_preserves_omitted_credentials(
+        self, client, db_session, editable
+    ):
+        import json
+
+        identifier, headers = editable
+        before = json.loads(db_session.get(StorageConnection, identifier).secret_json)
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"secrets": {"secret_key": "replacement-secret-never-returned"}},
+        )
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        secrets = json.loads(db_session.get(StorageConnection, identifier).secret_json)
+        assert secrets["access_key"] == before["access_key"]
+        assert secrets["secret_key"] == "replacement-secret-never-returned"
+        assert secrets["secret_key"] not in response.text
+
+    def test_linked_source_blocks_target_edits(self, client, db_session, editable):
+        import json
+
+        from app.db.models import LibrarySourceKind
+        from tests.factories import build_external_library
+
+        identifier, headers = editable
+        build_external_library(
+            db_session,
+            root="source://connection",
+            source_kind=LibrarySourceKind.S3,
+            connection_id=identifier,
+        )
+        before = db_session.get(StorageConnection, identifier).config_json
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"configuration": {"bucket": "different-bucket"}},
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_connection_target_in_use"
+        db_session.expire_all()
+        assert json.loads(
+            db_session.get(StorageConnection, identifier).config_json
+        ) == json.loads(before)
+
+    def test_completed_backup_blocks_target_edits(self, client, db_session, editable):
+        from tests.factories import build_backup_destination_result, build_backup_run
+
+        identifier, headers = editable
+        run = build_backup_run(db_session)
+        build_backup_destination_result(
+            db_session,
+            run,
+            connection_id=identifier,
+            kind="connection",
+            outcome="completed",
+        )
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"configuration": {"root": "different-root"}},
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_connection_target_in_use"
+
+    def test_clear_required_secret_is_rejected_without_state_change(
+        self, client, db_session, editable
+    ):
+        identifier, headers = editable
+        before = db_session.get(StorageConnection, identifier).secret_json
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"secrets": {"secret_key": ""}},
+        )
+        assert response.status_code == 400, response.text
+        db_session.expire_all()
+        assert db_session.get(StorageConnection, identifier).secret_json == before
+
+    def test_linked_source_allows_credential_rotation(
+        self, client, db_session, editable
+    ):
+        import json
+
+        from app.db.models import LibrarySourceKind
+        from tests.factories import build_external_library
+
+        identifier, headers = editable
+        build_external_library(
+            db_session,
+            root="source://saved",
+            source_kind=LibrarySourceKind.S3,
+            connection_id=identifier,
+        )
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"secrets": {"secret_key": "rotated-credential"}},
+        )
+        assert response.status_code == 200, response.text
+        db_session.expire_all()
+        assert (
+            json.loads(db_session.get(StorageConnection, identifier).secret_json)[
+                "secret_key"
+            ]
+            == "rotated-credential"
+        )
+        assert "rotated-credential" not in response.text
+
+    @pytest.mark.parametrize(
+        "configuration,secrets",
+        [({"secret_key": "misplaced"}, {}), ({}, {"unknown_secret": "unknown"})],
+    )
+    def test_edit_rejects_misplaced_credentials(
+        self, client, editable, configuration, secrets
+    ):
+        identifier, headers = editable
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"configuration": configuration, "secrets": secrets},
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "storage_connection_secret_invalid"
+
+    def test_historical_owned_receipt_blocks_target_edits(
+        self, client, db_session, editable
+    ):
+        from app.services.backup_destination import destination_from_connection
+        from tests.factories import build_owned_storage_object
+
+        identifier, headers = editable
+        destination = destination_from_connection(
+            db_session.get(StorageConnection, identifier)
+        )
+        build_owned_storage_object(
+            db_session,
+            backend=destination.backend.backend_name,
+            namespace=destination.namespace,
+            key=destination.key("historical.tar.gz"),
+            object_kind="backup",
+            provider_ref=destination.provider_ref,
+        )
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"configuration": {"root": "another-prefix"}},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "storage_connection_target_in_use"
+
+    def test_drive_credentials_cannot_select_another_dependent_account(
+        self, client, db_session, editable
+    ):
+        import json
+
+        from app.db.models import LibrarySourceKind
+        from tests.factories import build_external_library
+
+        identifier, headers = editable
+        row = db_session.get(StorageConnection, identifier)
+        row.kind = LibrarySourceKind.GDRIVE
+        row.config_json = json.dumps(
+            {"provider": "gdrive", "client_id": "client", "root": "PrintStash"}
+        )
+        row.secret_json = json.dumps(
+            {
+                "client_secret": "client-secret",
+                "refresh_token": "original-account-token",
+            }
+        )
+        db_session.add(row)
+        db_session.commit()
+        build_external_library(
+            db_session,
+            root="source://drive",
+            source_kind=LibrarySourceKind.GDRIVE,
+            connection_id=identifier,
+        )
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=headers,
+            json={"secrets": {"refresh_token": "another-account-token"}},
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == "storage_connection_target_in_use"
+        db_session.expire_all()
+        assert (
+            json.loads(db_session.get(StorageConnection, identifier).secret_json)[
+                "refresh_token"
+            ]
+            == "original-account-token"
+        )
+
+    def test_non_admin_cannot_replace_credentials(self, client, db_session, editable):
+        identifier, _ = editable
+        user = build_user(db_session, "non-admin-editor")
+        before = db_session.get(StorageConnection, identifier).secret_json
+        response = client.patch(
+            f"/api/v1/storage-connections/{identifier}",
+            headers=_headers(user),
+            json={"secrets": {"secret_key": "unauthorized"}},
+        )
+        assert response.status_code == 403
+        db_session.expire_all()
+        assert db_session.get(StorageConnection, identifier).secret_json == before

@@ -26,6 +26,7 @@ import {
   UserPlus,
 } from "lucide-react";
 
+import { providerFormError } from "@/lib/storage-provider-form";
 import { completeSetup, getSetupStatus, getStorageProviders } from "@/lib/api";
 import {
   defaultProviderValues,
@@ -191,15 +192,8 @@ export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }
   function validateStep2(): string | null {
     const provider = providers.find((item) => item.id === storageProvider);
     if (!provider?.selectable) return provider?.disabled_reason ?? "Choose an available provider.";
-    const missing = provider.fields.find(
-      (field) =>
-        field.required &&
-        !field.secret &&
-        String(providerValues[field.name] ?? "").trim().length === 0,
-    );
-    if (missing) {
-      return `${missing.label} is required.`;
-    }
+    const invalid = providerFormError(provider, providerValues);
+    if (invalid) return invalid;
     if (!Number.isFinite(backupDays) || backupDays < 0) {
       return "Backup retention must be 0 or more days.";
     }

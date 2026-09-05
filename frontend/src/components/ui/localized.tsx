@@ -4,6 +4,12 @@ import { Children, cloneElement, isValidElement, useEffect, useRef, type ReactNo
 import { useI18n, useOptionalI18n, type Locale } from "@/lib/i18n";
 
 const ES_PHRASES: ReadonlyArray<readonly [string, string]> = [
+  ["Cancel editing", "Cancelar edición"],
+  [
+    "Leave stored credentials blank to keep them. Target changes are blocked while Library sources or backups depend on this connection.",
+    "Deja las credenciales guardadas en blanco para conservarlas. No se puede cambiar el destino mientras haya bibliotecas o copias de seguridad que dependan de esta conexión.",
+  ],
+  ["Credential will be cleared", "Se borrará la credencial"],
   ["Support:", "Compatibilidad:"],
   ["Restore captured value", "Restaurar valor capturado"],
   ["Restore captured value?", "¿Restaurar el valor capturado?"],

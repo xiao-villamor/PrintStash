@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from enum import Enum
-from importlib.util import find_spec
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, get_args
+from typing import Annotated, Any, Literal, get_args
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -29,6 +28,13 @@ class TransportKind(str, Enum):
     GDRIVE = "gdrive"
 
 
+class _FieldMetadata(BaseModel):
+    secret: bool = False
+    input_type: Literal["text", "password", "url", "number", "path"] = "text"
+    visible_for: list[str] = Field(default_factory=list)
+    required_for: list[str] = Field(default_factory=list)
+
+
 class StorageFieldDescriptor(BaseModel):
     name: str
     label: str
@@ -37,6 +43,7 @@ class StorageFieldDescriptor(BaseModel):
     required: bool = True
     secret: bool = False
     default: str | int | None = None
+    options: list[str] = Field(default_factory=list)
 
 
 class StorageProvider(BaseModel):
@@ -56,13 +63,43 @@ class StorageProvider(BaseModel):
     support_level: Literal["stable", "beta"] = "stable"
     disabled_reason: str | None = None
     fields: list[StorageFieldDescriptor]
+    fields_by_use: dict[str, list[StorageFieldDescriptor]] = Field(default_factory=dict)
+    requirements: list[dict[str, object]] = Field(default_factory=list)
+    transport: str = ""
     uses: dict[str, UseAvailability] = Field(default_factory=dict)
+
+
+def _config_field(
+    label,
+    help_text,
+    *,
+    default: Any = ...,
+    secret=False,
+    input_type="text",
+    visible_for=(),
+    required_for=(),
+    **constraints,
+):
+    return Field(
+        default=default,
+        title=label,
+        description=help_text,
+        json_schema_extra={
+            "secret": secret,
+            "input_type": "password" if secret else input_type,
+            "visible_for": list(visible_for),
+            "required_for": list(required_for),
+        },
+        **constraints,
+    )
 
 
 class _ProviderConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    root: str = "vault-data"
+    root: str = _config_field(
+        "Root", "Dedicated folder or prefix", default="vault-data", input_type="path"
+    )
 
     @model_validator(mode="after")
     def validate_root(self):
@@ -72,41 +109,98 @@ class _ProviderConfig(BaseModel):
 
 class LocalProviderConfig(_ProviderConfig):
     provider: Literal["local"]
-    data_dir: str
-    thumb_dir: str
+    data_dir: str = _config_field(
+        "Models directory", "Directory for model files", input_type="path"
+    )
+    thumb_dir: str = _config_field(
+        "Thumbnail directory", "Directory for generated images", input_type="path"
+    )
 
 
 class S3ProviderConfig(_ProviderConfig):
     provider: Literal["s3", "cloudflare_r2", "backblaze_b2", "wasabi", "s3_self_hosted"]
-    bucket: str = Field(min_length=1)
-    region: str = "auto"
-    addressing_style: Literal["auto", "path", "virtual"] = "auto"
-    endpoint_url: str = ""
-    account_id: str = ""
-    access_key: str = Field(min_length=1, json_schema_extra={"secret": True})
-    secret_key: str = Field(min_length=1, json_schema_extra={"secret": True})
+    bucket: str = _config_field("Bucket", "Existing bucket name", min_length=1)
+    region: str = _config_field(
+        "Region",
+        "Provider region; required for Backblaze B2 and Wasabi",
+        default="auto",
+    )
+    addressing_style: Literal["auto", "path", "virtual"] = _config_field(
+        "Addressing style", "Auto uses the provider preset", default="auto"
+    )
+    endpoint_url: str = _config_field(
+        "Endpoint",
+        "S3-compatible server URL",
+        default="",
+        input_type="url",
+        visible_for=("s3", "s3_self_hosted"),
+        required_for=("s3_self_hosted",),
+    )
+    account_id: str = _config_field(
+        "Account ID",
+        "Cloudflare account ID",
+        default="",
+        visible_for=("cloudflare_r2",),
+        required_for=("cloudflare_r2",),
+    )
+    access_key: str = _config_field(
+        "Access key", "Object-storage access key", secret=True, min_length=1
+    )
+    secret_key: str = _config_field(
+        "Secret key", "Object-storage secret key", secret=True, min_length=1
+    )
 
 
 class WebDAVProviderConfig(_ProviderConfig):
     provider: Literal["nextcloud", "webdav"]
-    endpoint_url: str = Field(min_length=1)
-    username: str = Field(min_length=1)
-    password: str = Field(min_length=1, json_schema_extra={"secret": True})
+    endpoint_url: str = _config_field(
+        "Server URL",
+        "Nextcloud base URL or full WebDAV endpoint",
+        input_type="url",
+        min_length=1,
+    )
+    username: str = _config_field("Username", "Remote account username", min_length=1)
+    password: str = _config_field(
+        "Password", "Remote account password", secret=True, min_length=1
+    )
 
 
 class SFTPProviderConfig(_ProviderConfig):
     provider: Literal["sftp"]
-    host: str = Field(min_length=1)
-    port: int = Field(default=22, ge=1, le=65535)
-    username: str = Field(min_length=1)
+    host: str = _config_field("Host", "SFTP hostname", min_length=1)
+    port: int = _config_field(
+        "Port", "SFTP port", default=22, input_type="number", ge=1, le=65535
+    )
+    username: str = _config_field("Username", "SFTP account username", min_length=1)
     # Either a mounted known_hosts file path or one OpenSSH known-host entry.
     # Empty is accepted only so pre-host-key rows remain readable and can be
     # edited. ``resolve_transport`` is the activation boundary and rejects it,
     # so no SFTP connection can fall back to trust-on-first-use.
-    host_key: str = ""
-    password: str = Field(default="", json_schema_extra={"secret": True})
-    private_key_path: str = ""
-    passphrase: str = Field(default="", json_schema_extra={"secret": True})
+    host_key: str = _config_field(
+        "Host key",
+        "OpenSSH known-hosts path or entry",
+        default="",
+        input_type="path",
+        required_for=("sftp",),
+    )
+    password: str = _config_field(
+        "Password",
+        "Use either a password or a mounted private-key path",
+        default="",
+        secret=True,
+    )
+    private_key_path: str = _config_field(
+        "Private key path",
+        "Mounted service-key path; inline key material is forbidden",
+        default="",
+        input_type="path",
+    )
+    passphrase: str = _config_field(
+        "Key passphrase",
+        "Optional passphrase for the mounted private key",
+        default="",
+        secret=True,
+    )
 
     @model_validator(mode="after")
     def validate_auth(self):
@@ -126,9 +220,18 @@ class SFTPProviderConfig(_ProviderConfig):
 
 class GoogleDriveProviderConfig(_ProviderConfig):
     provider: Literal["gdrive"]
-    client_id: str = Field(min_length=1)
-    client_secret: str = Field(min_length=1, json_schema_extra={"secret": True})
-    refresh_token: str = Field(min_length=1, json_schema_extra={"secret": True})
+    client_id: str = _config_field(
+        "OAuth client ID", "Google OAuth application client ID", min_length=1
+    )
+    client_secret: str = _config_field(
+        "OAuth client secret",
+        "Google OAuth application client secret",
+        secret=True,
+        min_length=1,
+    )
+    refresh_token: str = _config_field(
+        "Refresh token", "OAuth refresh token", secret=True, min_length=1
+    )
 
 
 _PROVIDER_CONFIG_MODELS = (
@@ -176,6 +279,11 @@ def _secret_field_names(
     return names
 
 
+def provider_secret_fields(provider: str) -> set[str]:
+    model = _provider_model(provider)
+    return _secret_field_names(model) if model is not None else set()
+
+
 def _provider_model(provider: object) -> type[_ProviderConfig] | None:
     for model in _PROVIDER_CONFIG_MODELS:
         if provider in get_args(model.model_fields["provider"].annotation):
@@ -202,11 +310,11 @@ def split_provider_config(
 ) -> tuple[dict[str, object], dict[str, str]]:
     raw = value.model_dump(mode="json")
     secret_fields = _secret_field_names(value)
-    secrets = {
-        name: str(raw.pop(name))
-        for name in tuple(raw)
-        if name in secret_fields and raw[name] not in (None, "")
-    }
+    secrets = {}
+    for name in secret_fields:
+        value = raw.pop(name, None)
+        if value not in (None, ""):
+            secrets[name] = str(value)
     return raw, secrets
 
 
@@ -259,6 +367,8 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
         endpoint = config.endpoint_url.strip()
         region = config.region.strip() or "auto"
         addressing_style = config.addressing_style
+        if config.provider == "s3_self_hosted" and not endpoint:
+            raise ValueError("s3_endpoint_required")
         if addressing_style == "auto" and config.provider == "s3_self_hosted":
             addressing_style = "path"
         path_style = addressing_style == "path"
@@ -344,300 +454,238 @@ def resolve_transport(config: StorageProviderConfig) -> TransportSpec:
     )
 
 
-def _field(
-    name: str,
-    label: str,
-    help_text: str,
-    *,
-    input_type: Literal["text", "password", "url", "number", "path"] = "text",
-    required: bool = True,
-    secret: bool = False,
-    default: str | int | None = None,
-) -> StorageFieldDescriptor:
-    return StorageFieldDescriptor(
-        name=name,
-        label=label,
-        help=help_text,
-        input_type=input_type,
-        required=required,
-        secret=secret,
-        default=default,
-    )
+_PROVIDER_PRESENTATION = [
+    {
+        "id": "local",
+        "label": "This machine",
+        "category": "this_machine",
+        "description": "Local filesystem directories.",
+        "expected_tier": "verified",
+        "expected_tier_note": "Verified on local filesystems with working hardlinks.",
+        "consequences": [],
+        "documentation_url": "/docs/storage-providers.md#local",
+        "support_level": "stable",
+    },
+    {
+        "id": "s3",
+        "label": "Amazon S3 or compatible",
+        "category": "s3_compatible",
+        "description": "Native S3-compatible object storage.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Verified when bucket versioning is enabled; otherwise "
+        "Guarded.",
+        "consequences": ["Automated purge requires a Verified probe."],
+        "documentation_url": "/docs/storage-providers.md#s3",
+        "support_level": "stable",
+    },
+    {
+        "id": "cloudflare_r2",
+        "label": "Cloudflare R2",
+        "category": "s3_compatible",
+        "description": "Native S3-compatible object storage.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Verified when bucket versioning is enabled; otherwise "
+        "Guarded.",
+        "consequences": ["Automated purge requires a Verified probe."],
+        "documentation_url": "/docs/storage-providers.md#cloudflare_r2",
+        "support_level": "beta",
+    },
+    {
+        "id": "backblaze_b2",
+        "label": "Backblaze B2",
+        "category": "s3_compatible",
+        "description": "Native S3-compatible object storage.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Verified when bucket versioning is enabled; otherwise "
+        "Guarded.",
+        "consequences": ["Automated purge requires a Verified probe."],
+        "documentation_url": "/docs/storage-providers.md#backblaze_b2",
+        "support_level": "beta",
+    },
+    {
+        "id": "wasabi",
+        "label": "Wasabi",
+        "category": "s3_compatible",
+        "description": "Native S3-compatible object storage.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Verified when bucket versioning is enabled; otherwise "
+        "Guarded.",
+        "consequences": ["Automated purge requires a Verified probe."],
+        "documentation_url": "/docs/storage-providers.md#wasabi",
+        "support_level": "beta",
+    },
+    {
+        "id": "s3_self_hosted",
+        "label": "Self-hosted S3",
+        "category": "s3_compatible",
+        "description": "Native S3-compatible object storage.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Verified when bucket versioning is enabled; otherwise "
+        "Guarded.",
+        "consequences": ["Automated purge requires a Verified probe."],
+        "documentation_url": "/docs/storage-providers.md#s3_self_hosted",
+        "support_level": "beta",
+    },
+    {
+        "id": "nextcloud",
+        "label": "Nextcloud",
+        "category": "nextcloud_webdav",
+        "description": "Remote storage over WebDAV.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Confirmed catalog removal retains stored bytes; exact "
+        "physical deletion is unavailable.",
+        "consequences": [
+            "Confirmed catalog removal retains stored bytes.",
+            "Automatic physical deletion is unavailable.",
+        ],
+        "documentation_url": "/docs/storage-providers.md#nextcloud",
+        "support_level": "beta",
+    },
+    {
+        "id": "webdav",
+        "label": "WebDAV",
+        "category": "nextcloud_webdav",
+        "description": "Remote storage over WebDAV.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Confirmed catalog removal retains stored bytes; exact "
+        "physical deletion is unavailable.",
+        "consequences": [
+            "Confirmed catalog removal retains stored bytes.",
+            "Automatic physical deletion is unavailable.",
+        ],
+        "documentation_url": "/docs/storage-providers.md#webdav",
+        "support_level": "beta",
+    },
+    {
+        "id": "sftp",
+        "label": "SFTP",
+        "category": "nas_sftp",
+        "description": "NAS storage over SSH File Transfer Protocol.",
+        "expected_tier": "guarded",
+        "expected_tier_note": "Publish uses SSH exclusive create (`x` mode); `host_key` is "
+        "required and confirmed catalog purge retains stored bytes.",
+        "consequences": [
+            "Confirmed catalog removal retains stored bytes.",
+            "Automatic physical deletion is unavailable.",
+        ],
+        "documentation_url": "/docs/storage-providers.md#sftp",
+        "support_level": "beta",
+    },
+    {
+        "id": "gdrive",
+        "label": "Google Drive",
+        "category": "consumer_cloud",
+        "description": "Consumer cloud storage through Apache OpenDAL.",
+        "expected_tier": "unguarded",
+        "expected_tier_note": "Available for read-only Library sources and off-site backup "
+        "replicas; not selectable as managed Vault storage.",
+        "consequences": [
+            "Remote backup retention is manual because conditional delete is "
+            "unavailable.",
+            "Google Drive replicas do not authorize automatic Vault garbage "
+            "collection.",
+        ],
+        "documentation_url": "/docs/storage-providers.md#gdrive",
+        "support_level": "beta",
+    },
+]
+
+
+def provider_fields(
+    provider: str, *, use: str = "vault"
+) -> list[StorageFieldDescriptor]:
+    model = _provider_model(provider)
+    if model is None or use not in {"vault", "library", "backup"}:
+        raise ValueError("storage_provider_unknown")
+    fields = []
+    for name, field in model.model_fields.items():
+        if name == "provider":
+            continue
+        extra = _FieldMetadata.model_validate(field.json_schema_extra or {})
+        visible = extra.visible_for
+        if visible and provider not in visible:
+            continue
+        default = None if field.is_required() else field.default
+        required = field.is_required() or provider in extra.required_for
+        label = field.title or name
+        if name == "root":
+            required = True
+            if use != "vault":
+                label, default = "Base folder", "PrintStash"
+            elif provider == "gdrive":
+                label, default = "Folder", "PrintStash"
+        fields.append(
+            StorageFieldDescriptor(
+                name=name,
+                label=label,
+                help=field.description or "",
+                input_type=extra.input_type,
+                required=required,
+                secret=extra.secret,
+                default=default,
+                options=list(get_args(field.annotation))
+                if getattr(field.annotation, "__origin__", None) is Literal
+                else [],
+            )
+        )
+    return fields
 
 
 def provider_catalogue() -> list[StorageProvider]:
-    remote_available = find_spec("opendal") is not None
-    remote_reason = None if remote_available else "Requires the full image"
-    common_s3 = [
-        _field("bucket", "Bucket", "Existing bucket name"),
-        _field("region", "Region", "Provider region", default="auto"),
-        _field(
-            "addressing_style",
-            "Addressing style",
-            "auto, path, or virtual (path is typical for self-hosted S3)",
-            default="auto",
-        ),
-        _field("root", "Root", "Non-empty managed prefix", default="vault-data"),
-        _field("access_key", "Access key", "Object-storage access key", secret=True),
-        _field(
-            "secret_key",
-            "Secret key",
-            "Object-storage secret key",
-            input_type="password",
-            secret=True,
-        ),
-    ]
-    entries: list[StorageProvider] = [
-        StorageProvider(
-            id="local",
-            label="This machine",
-            category=ProviderCategory.THIS_MACHINE,
-            description="Local filesystem directories.",
-            expected_tier="verified",
-            expected_tier_note="Verified on local filesystems with working hardlinks.",
-            consequences=[],
-            documentation_url="/docs/storage-providers.md#local",
-            available=True,
-            selectable=True,
-            support_level="stable",
-            fields=[
-                _field(
-                    "data_dir",
-                    "Models directory",
-                    "Directory for model files",
-                    input_type="path",
-                ),
-                _field(
-                    "thumb_dir",
-                    "Thumbnail directory",
-                    "Directory for generated images",
-                    input_type="path",
-                ),
-                _field("root", "Root", "Ownership namespace", default="vault-data"),
-            ],
-        )
-    ]
-    for provider_id, label, extras in (
-        (
-            "s3",
-            "Amazon S3 or compatible",
-            [
-                _field(
-                    "endpoint_url",
-                    "Endpoint",
-                    "Optional S3-compatible endpoint",
-                    input_type="url",
-                    required=False,
-                )
-            ],
-        ),
-        (
-            "cloudflare_r2",
-            "Cloudflare R2",
-            [_field("account_id", "Account ID", "Cloudflare account ID")],
-        ),
-        ("backblaze_b2", "Backblaze B2", []),
-        ("wasabi", "Wasabi", []),
-        (
-            "s3_self_hosted",
-            "Self-hosted S3",
-            [
-                _field(
-                    "endpoint_url",
-                    "Endpoint",
-                    "MinIO, Garage, or SeaweedFS endpoint",
-                    input_type="url",
-                )
-            ],
-        ),
-    ):
-        entries.append(
-            StorageProvider(
-                id=provider_id,
-                label=label,
-                category=ProviderCategory.S3_COMPATIBLE,
-                description="Native S3-compatible object storage.",
-                expected_tier="guarded",
-                expected_tier_note="Verified when bucket versioning is enabled; otherwise Guarded.",
-                consequences=["Automated purge requires a Verified probe."],
-                documentation_url=f"/docs/storage-providers.md#{provider_id}",
-                available=True,
-                selectable=True,
-                support_level="stable" if provider_id == "s3" else "beta",
-                fields=[*common_s3, *extras],
-            )
-        )
-    remote_common = [
-        _field("endpoint_url", "Server URL", "HTTPS server endpoint", input_type="url"),
-        _field("username", "Username", "Remote account username"),
-        _field(
-            "password",
-            "Password",
-            "Remote account password",
-            input_type="password",
-            secret=True,
-        ),
-        _field("root", "Root", "Non-empty managed folder", default="vault-data"),
-    ]
-    for provider_id, label in (("nextcloud", "Nextcloud"), ("webdav", "WebDAV")):
-        entries.append(
-            StorageProvider(
-                id=provider_id,
-                label=label,
-                category=ProviderCategory.WEBDAV,
-                description="Remote storage over WebDAV.",
-                expected_tier="guarded",
-                expected_tier_note=(
-                    "Confirmed catalog removal retains stored bytes; exact physical "
-                    "deletion is unavailable."
-                ),
-                consequences=[
-                    "Confirmed catalog removal retains stored bytes.",
-                    "Automatic physical deletion is unavailable.",
-                ],
-                documentation_url=f"/docs/storage-providers.md#{provider_id}",
-                available=remote_available,
-                selectable=remote_available,
-                support_level="beta",
-                disabled_reason=remote_reason,
-                fields=remote_common,
-            )
-        )
-    sftp_available = find_spec("asyncssh") is not None
-    sftp_reason = (
-        None
-        if sftp_available
-        else "Requires the full image"
-        if not remote_available
-        else "SFTP transport is unavailable in this full image"
-    )
-    entries.append(
-        StorageProvider(
-            id="sftp",
-            label="SFTP",
-            category=ProviderCategory.SFTP,
-            description="NAS storage over SSH File Transfer Protocol.",
-            expected_tier="guarded",
-            expected_tier_note=(
-                "Publish uses SSH exclusive create (`x` mode); `host_key` is required "
-                "and purge is manual and confirmed only."
-            ),
-            consequences=[
-                "Confirmed catalog removal retains stored bytes.",
-                "Automatic physical deletion is unavailable.",
-            ],
-            documentation_url="/docs/storage-providers.md#sftp",
-            available=sftp_available,
-            selectable=sftp_available,
-            support_level="beta",
-            disabled_reason=sftp_reason,
-            fields=[
-                _field("host", "Host", "SFTP hostname"),
-                _field(
-                    "host_key",
-                    "Host key",
-                    "OpenSSH known-hosts file path or entry; required for verification",
-                    input_type="path",
-                ),
-                _field("port", "Port", "SFTP port", input_type="number", default=22),
-                _field("username", "Username", "SFTP account username"),
-                _field(
-                    "password",
-                    "Password",
-                    "Use either a password or a mounted private-key path",
-                    input_type="password",
-                    required=False,
-                    secret=True,
-                ),
-                _field(
-                    "private_key_path",
-                    "Private key path",
-                    "Mounted service-key path; inline key material is forbidden",
-                    input_type="path",
-                    required=False,
-                ),
-                _field(
-                    "passphrase",
-                    "Key passphrase",
-                    "Optional passphrase for the mounted private key",
-                    input_type="password",
-                    required=False,
-                    secret=True,
-                ),
-                _field(
-                    "root", "Root", "Non-empty managed folder", default="vault-data"
-                ),
-            ],
-        )
-    )
-    entries.append(
-        StorageProvider(
-            id="gdrive",
-            label="Google Drive",
-            category=ProviderCategory.CONSUMER_CLOUD,
-            description="Consumer cloud storage through Apache OpenDAL.",
-            expected_tier="unguarded",
-            expected_tier_note=(
-                "Available for read-only Library sources and off-site backup replicas; "
-                "not selectable as managed Vault storage."
-            ),
-            consequences=[
-                "Remote backup retention is manual because conditional delete is unavailable.",
-                "Google Drive replicas do not authorize automatic Vault garbage collection.",
-            ],
-            documentation_url="/docs/storage-providers.md#gdrive",
-            available=remote_available,
-            selectable=False,
-            support_level="beta",
-            disabled_reason=(
-                "Use a Library or backup connection"
-                if remote_available
-                else remote_reason
-            ),
-            fields=[
-                _field(
-                    "client_id", "OAuth client ID", "Google OAuth application client ID"
-                ),
-                _field(
-                    "client_secret",
-                    "OAuth client secret",
-                    "Google OAuth application client secret",
-                    input_type="password",
-                    secret=True,
-                ),
-                _field(
-                    "refresh_token",
-                    "Refresh token",
-                    "Offline-access refresh token for the selected Google account",
-                    input_type="password",
-                    secret=True,
-                ),
-                _field(
-                    "root",
-                    "Folder",
-                    "Dedicated Google Drive folder",
-                    default="PrintStash",
-                ),
-            ],
-        )
-    )
-    for entry in entries:
+    entries = []
+    for presentation in _PROVIDER_PRESENTATION:
+        provider_id = presentation["id"]
+        model = _provider_model(provider_id)
         transport = (
             "s3"
-            if entry.category == ProviderCategory.S3_COMPATIBLE
+            if model is S3ProviderConfig
             else "webdav"
-            if entry.category == ProviderCategory.WEBDAV
-            else entry.id
+            if model is WebDAVProviderConfig
+            else provider_id
         )
-        entry.uses = {
+        uses = {
             use: use_availability(transport, use)
             for use in ("vault", "library", "backup")
         }
-        vault = entry.uses["vault"]
-        entry.available = vault.dependency_installed and vault.service_compiled
-        entry.selectable = vault.available
-        if not vault.available:
-            entry.disabled_reason = vault.reason
+        vault = uses["vault"]
+        requirements = []
+        if model is SFTPProviderConfig:
+            requirements = [
+                {
+                    "kind": "exactly_one",
+                    "fields": ["password", "private_key_path"],
+                    "message": "Use either a password or a private key path.",
+                },
+                {
+                    "kind": "requires",
+                    "fields": ["passphrase", "private_key_path"],
+                    "message": "A key passphrase requires a private key path.",
+                },
+            ]
+        if provider_id in {"backblaze_b2", "wasabi"}:
+            requirements = [
+                {
+                    "kind": "not_value",
+                    "fields": ["region"],
+                    "value": "auto",
+                    "message": "Enter the provider region.",
+                }
+            ]
+        entries.append(
+            StorageProvider(
+                **presentation,
+                transport=transport,
+                available=vault.dependency_installed and vault.service_compiled,
+                selectable=vault.available,
+                disabled_reason=None if vault.available else vault.reason,
+                uses=uses,
+                fields=provider_fields(provider_id),
+                fields_by_use={
+                    use: provider_fields(provider_id, use=use) for use in uses
+                },
+                requirements=requirements,
+            )
+        )
     return entries
 
 

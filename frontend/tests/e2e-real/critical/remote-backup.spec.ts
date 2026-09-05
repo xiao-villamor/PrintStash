@@ -27,7 +27,7 @@ test.describe("remote-only backup recovery", () => {
       .locator("select")
       .selectOption("backup");
     await page.getByLabel("Base folder").fill(`backup-data-${Date.now()}`);
-    await page.getByLabel("WebDAV endpoint").fill(`http://127.0.0.1:${webdavPort}`);
+    await page.getByLabel("Server URL").fill(`http://127.0.0.1:${webdavPort}`);
     await page.getByLabel("Username").fill("backup-user");
     await page.getByLabel("Password").fill("backup-password");
     await page.getByRole("button", { name: "Save connection" }).click();

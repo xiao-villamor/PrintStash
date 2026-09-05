@@ -12,6 +12,7 @@ from app.services.storage_providers import (
     SFTPProviderConfig,
     StorageProviderConfig,
     WebDAVProviderConfig,
+    resolve_transport,
     split_provider_config,
 )
 
@@ -62,6 +63,10 @@ def serialize_connection_config(
     secrets: Mapping[str, str],
 ) -> tuple[dict[str, object], dict[str, str]]:
     parsed = parse_connection_config(kind, configuration, secrets)
+    try:
+        resolve_transport(parsed)
+    except ValueError as exc:
+        raise StorageConnectionConfigError("storage_connection_invalid") from exc
     return split_provider_config(parsed)
 
 
@@ -74,3 +79,23 @@ def load_connection_config(connection: StorageConnection) -> StorageProviderConf
             for key, value in _json_object(connection.secret_json).items()
         },
     )
+
+
+def connection_target_signature(kind, configuration, secrets) -> dict[str, object]:
+    """Credential-free resolved locator used only to guard profile edits.
+
+    Unlike failure-domain identity, this includes the namespace and account name:
+    another prefix or login must not redirect already linked source objects.
+    """
+    from app.services.storage_providers import _secret_field_names, resolve_transport
+
+    parsed = parse_connection_config(kind, configuration, secrets)
+    spec = resolve_transport(parsed)
+    ignored = _secret_field_names(parsed) | {"host_key", "private_key_path"}
+    return {
+        "transport": spec.kind.value,
+        "namespace": spec.namespace,
+        "options": {
+            key: value for key, value in spec.options.items() if key not in ignored
+        },
+    }
