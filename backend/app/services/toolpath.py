@@ -10,7 +10,6 @@ import tempfile
 import threading
 from pathlib import Path
 
-import anyio
 from fastapi import HTTPException
 
 from app.core.config import settings
@@ -64,13 +63,13 @@ async def render(file: File) -> bytes:
             # Cancellation waits for the bounded storage read before deleting its
             # directory, so no abandoned writer can recreate temporary content.
             copying = asyncio.create_task(
-                anyio.to_thread.run_sync(_copy_input, file, incoming)
+                asyncio.to_thread(_copy_input, file, incoming)
             )
             try:
                 await asyncio.shield(copying)
             except asyncio.CancelledError:
-                # A plain asyncio cancellation must not abandon the writer;
-                # AnyIO's default shielding only governs AnyIO cancel scopes.
+                # Cancellation must not abandon the writer before temporary
+                # resources can be safely removed.
                 while not copying.done():
                     try:
                         await asyncio.shield(copying)
@@ -87,7 +86,7 @@ async def render(file: File) -> bytes:
             if not binary:
                 if file.original_filename.lower().endswith((".bgcode", ".bgc")):
                     raise HTTPException(422, "toolpath_invalid_bgcode")
-                return await anyio.to_thread.run_sync(_read_output, incoming)
+                return await asyncio.to_thread(_read_output, incoming)
             if len(header) != 10 or struct.unpack_from("<I", header, 4)[0] != 1:
                 raise HTTPException(422, "toolpath_unsupported_bgcode_version")
             executable = shutil.which(settings.bgcode_executable)
@@ -124,7 +123,7 @@ async def render(file: File) -> bytes:
                 ):
                     raise HTTPException(413, "toolpath_output_too_large")
                 raise HTTPException(422, "toolpath_invalid_bgcode")
-            return await anyio.to_thread.run_sync(_read_output, output)
+            return await asyncio.to_thread(_read_output, output)
     except ArtifactContentError as error:
         raise HTTPException(410, "file_blob_unavailable") from error
     finally:
