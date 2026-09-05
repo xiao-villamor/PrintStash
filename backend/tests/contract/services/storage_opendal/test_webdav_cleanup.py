@@ -133,7 +133,9 @@ class TestWebDAVCleanupEvidence:
                 ).is_success
             assert client.put(key, content=b"replaced").is_success
 
-    def test_same_content_replacement_exposes_identity_limit(self, cleanup_endpoint):
+    def test_same_content_replacement_follows_validator_equality(
+        self, cleanup_endpoint
+    ):
         provider, root, auth, set_mtime = cleanup_endpoint
         with httpx.Client(auth=auth, timeout=30) as client:
             key = root + "/object"
@@ -145,10 +147,17 @@ class TestWebDAVCleanupEvidence:
             replacement = client.head(key).headers["etag"]
             print(provider, "identity-reuse", original, replacement)
             assert client.get(key).content == b"original"
-            if provider == "nextcloud":
-                assert original != replacement
-            else:
+            if provider == "wsgidav":
                 assert original == replacement
+            # Nextcloud may reuse an ETag for identical content. The actual
+            # precondition protects the validator, not publication ownership.
+            deleted = client.delete(key, headers={"If-Match": original})
+            if original == replacement:
+                assert deleted.status_code == 204
+                assert client.get(key).status_code == 404
+            else:
+                assert deleted.status_code == 412
+                assert client.get(key).content == b"original"
 
     def test_production_cleanup_retains_replacement(self, cleanup_endpoint):
         provider, root, auth, set_mtime = cleanup_endpoint
@@ -215,10 +224,9 @@ class TestWebDAVCleanupEvidence:
             assert lock.is_success
             from xml.etree import ElementTree
 
-            assert (
-                ElementTree.fromstring(lock.content).findtext(".//{DAV:}timeout")
-                in ("Second-0", "Second-1")
-            )
+            assert ElementTree.fromstring(lock.content).findtext(
+                ".//{DAV:}timeout"
+            ) in ("Second-0", "Second-1")
             token = lock.headers["lock-token"].strip("<>")
         # The owner disappears without UNLOCK; a later recovery cannot use the
         # expired lease to authorize removal of a new writer's object.

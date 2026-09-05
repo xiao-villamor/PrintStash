@@ -33,6 +33,7 @@ Run from `backend/` with Docker available:
 | Wrong UNLOCK token | Lock unavailable | Refused |
 | Expired lock used for DELETE after replacement | Lock unavailable | 412; replacement retained |
 | Equal-size replacement with colliding ETag | No collision observed in these cases | Conditional DELETE removed the replacement; conditional MOVE moved it |
+| Same-content overwrite validator | May repeat; both changed and repeated values observed | Repeats with the same timestamp second |
 | Production rollback / unverified reclaim after replacement | Refused; replacement retained | Refused; replacement retained |
 
 The initial rapid HTTP writes exposed the WsgiDAV ETag collision without altering
@@ -41,7 +42,9 @@ time and size. The regression cases hold filesystem timestamps at the same secon
 to reproduce that boundary deterministically on slow runners. A second case uses
 different timestamps to distinguish a validator collision from ignoring
 `If-Match`. Same-content overwrites also retain that validator on WsgiDAV;
-Nextcloud changed its ETag in the observed case.
+Nextcloud changed its ETag in a local run and reused it in CI. The conditional
+request tests assert the actual validator comparison in either case; neither
+outcome supplies a durable publication ownership token.
 
 ## Why deletion remains disabled
 
