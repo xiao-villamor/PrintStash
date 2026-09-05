@@ -112,7 +112,7 @@ class TestOperations:
         "create,delete,replace",
         [(True, True, True), (True, False, False), (False, False, False)],
     )
-    def test_vault_catalog_purge_and_physical_delete_have_separate_guarantees(
+    def test_vault_operations_report_their_own_guarantees(
         self, create, delete, replace
     ) -> None:
         caps = StorageCapabilities(

@@ -14,7 +14,7 @@ import { aStorageConnection } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
 describe("RemoteStorageConnections", () => {
-  it("disables an uncompiled transport and explains the selected use", async () => {
+  it("explains disabled transport selection", async () => {
     const view = renderApp(<RemoteStorageConnections />, {
       routes: {
         "GET /api/v1/storage-connections": json([]),

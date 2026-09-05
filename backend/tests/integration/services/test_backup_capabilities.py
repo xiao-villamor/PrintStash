@@ -37,7 +37,7 @@ class TestBackupOperations:
             ("v1", True, True),
         ],
     )
-    def test_remote_deletion_requires_a_real_version_and_transport_support(
+    def test_remote_deletion_requires_immutable_identity_support(
         self, db_session, monkeypatch, version, supported, allowed
     ):
         build_owned_storage_object(
