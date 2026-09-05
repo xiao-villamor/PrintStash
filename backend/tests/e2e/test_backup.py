@@ -17,29 +17,10 @@ import pytest
 from sqlmodel import delete
 
 from app.db.models import File, Metadata, Model
-from app.services.setup_token import current_setup_token
+from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
-
-
-async def _setup_and_login(api, tmp_path) -> dict[str, str]:
-    r = await api.post(
-        "/api/v1/setup",
-        json={
-            "setup_token": current_setup_token(),
-            "username": "owner",
-            "password": "Password123",
-            "storage_backend": "local",
-            "data_dir": str(tmp_path / "files"),
-            "thumb_dir": str(tmp_path / "thumbs"),
-        },
-    )
-    assert r.status_code == 201, r.text
-    from app.services.storage_backend import init_backend
-
-    init_backend()
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
 async def _upload_and_wait(api, headers, *, model_name: str) -> dict:

@@ -15,7 +15,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.core.logging import get_logger
 from app.core.security import require_superuser
@@ -57,13 +57,16 @@ def create_backup(
                 detail=detail,
             ) from exc
         if detail == "backup_all_destinations_failed":
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=detail,
-            ) from exc
+                content={"detail": detail, "run_id": getattr(exc, "run_id", None)},
+            )
         raise
     background_tasks.add_task(backup.purge_old_backups)
     return {
+        "run_id": meta.run_id,
+        "outcome": meta.outcome,
+        "destination_results": meta.destination_results,
         "backup_id": meta.id,
         "created_at": meta.created_at,
         "size_bytes": meta.size_bytes,
@@ -76,6 +79,53 @@ def create_backup(
         "provider_ref": meta.provider_ref,
         "namespace": meta.namespace,
     }
+
+
+@router.get(
+    "/runs",
+    dependencies=[Depends(require_superuser)],
+    summary="List backup execution results",
+)
+def list_backup_runs(
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)
+) -> list[dict]:
+    from app.services.backup_runs import list_runs
+
+    return list_runs(limit=limit, offset=offset)
+
+
+@router.get(
+    "/runs/{run_id}",
+    dependencies=[Depends(require_superuser)],
+    summary="Inspect one backup execution",
+)
+def get_backup_run(run_id: str) -> dict:
+    from app.services.backup_runs import reconcile_interrupted_runs, run_detail
+
+    reconcile_interrupted_runs()
+    try:
+        return run_detail(run_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="backup_run_not_found") from exc
+
+
+@router.post(
+    "/runs/destinations/{result_id}/retry",
+    dependencies=[Depends(require_superuser)],
+    summary="Retry one exact failed backup destination",
+)
+def retry_backup_destination(result_id: str) -> dict:
+    from app.services.backup_replica_retry import RetryRefused
+    from app.services.backup_runs import retry_destination
+
+    try:
+        return retry_destination(result_id)
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404, detail="backup_destination_result_not_found"
+        ) from exc
+    except RetryRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post(

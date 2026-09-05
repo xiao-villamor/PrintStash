@@ -173,6 +173,19 @@ const ERROR_MESSAGES = {
   backup_destination_required: "Select at least one available destination for this backup.",
   backup_all_destinations_failed:
     "The backup couldn't be saved to any selected destination. Check each destination and try again.",
+  backup_retry_new_backup_required: "No verified backup copy survives. Create a new backup.",
+  backup_retry_target_changed:
+    "The destination changed. Restore its original configuration or create a new backup.",
+  backup_retry_target_unverified:
+    "The original destination cannot be verified. Create a new backup.",
+  backup_retry_target_unavailable:
+    "The original destination is unavailable. Check its connection settings.",
+  backup_retry_publication_conflict:
+    "A copy already exists at this location and could not be verified. Create a new backup.",
+  backup_retry_publication_failed:
+    "The backup copy could not be published. Check the destination and try again.",
+  backup_retry_not_failed: "This destination no longer needs a retry. Refresh the backup runs.",
+  backup_retry_in_progress: "A retry is already in progress for this destination.",
   backup_remote_delete_unverified:
     "This remote backup changed or couldn't be verified, so it was not deleted.",
   // General

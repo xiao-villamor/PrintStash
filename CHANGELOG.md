@@ -4,6 +4,12 @@
 
 ### Added
 
+- Backup run history records every selected destination, including invalid
+  connections and partial failures. Administrators can retry an exact failed
+  replica from a verified surviving archive; successful copies remain available.
+  Publication, verification and retry history are reported separately in Settings
+  and operational health.
+
 - Remote Library discovery streams large directories into a durable inventory.
   Completed pages resume without rereading the directory, interrupted discovery
   cannot remove linked Artifacts, and transport deadlines bound stalled requests.

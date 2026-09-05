@@ -3,12 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import shutil
-import socket
-import subprocess
-import time
 from pathlib import Path
-from urllib.request import urlopen
 
 import pytest
 from sqlmodel import select
@@ -21,51 +16,6 @@ pytestmark = pytest.mark.e2e
 FIXTURE = (
     Path(__file__).resolve().parents[1] / "fixtures" / "real_orca_ender3_benchy.gcode"
 )
-
-
-def _free_port() -> int:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
-
-
-@pytest.fixture
-def webdav_endpoint(tmp_path: Path):
-    executable = shutil.which("wsgidav")
-    if executable is None:
-        pytest.fail("WsgiDAV E2E dependency is not installed; install the dev extra")
-    port = _free_port()
-    remote_root = tmp_path / "webdav"
-    remote_root.mkdir()
-    process = subprocess.Popen(
-        [
-            executable,
-            "--host=127.0.0.1",
-            f"--port={port}",
-            f"--root={remote_root}",
-            "--auth=anonymous",
-            "--no-config",
-            "--quiet",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    endpoint = f"http://127.0.0.1:{port}"
-    try:
-        for _ in range(100):
-            if process.poll() is not None:
-                pytest.fail("WsgiDAV contract server exited during startup")
-            try:
-                urlopen(endpoint, timeout=0.2).close()  # noqa: S310
-                break
-            except Exception:
-                time.sleep(0.05)
-        else:
-            pytest.fail("WsgiDAV contract server did not become ready")
-        yield endpoint
-    finally:
-        process.terminate()
-        process.wait(timeout=5)
 
 
 async def _await_job(api, headers: dict[str, str], job_id: str) -> dict:

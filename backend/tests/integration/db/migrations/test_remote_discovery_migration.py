@@ -143,7 +143,7 @@ class TestPostgresDiscoveryUpgrade:
                     observed_keys_json='["models/old.gcode"]',
                     complete=False,
                 )
-            command.upgrade(config, "5f0f887bdd0b")
+            command.upgrade(config, "head")
             _assert_schema_parity(engine)
             with engine.connect() as connection:
                 assert (
@@ -190,7 +190,7 @@ class TestPostgresDiscoveryUpgrade:
                     == 0
                 )
             command.downgrade(config, "046685afd7ea")
-            command.upgrade(config, "5f0f887bdd0b")
+            command.upgrade(config, "head")
             _assert_schema_parity(engine)
         finally:
             with engine.begin() as connection:

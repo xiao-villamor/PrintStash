@@ -88,3 +88,84 @@ test.describe("remote-only backup recovery", () => {
     expect(await download.body()).toEqual(expectedBytes);
   });
 });
+
+test.describe("partial backup recovery", () => {
+  test("@critical retries the exact failed copy from partial backup success", async ({ page }) => {
+    const { mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { dirname, resolve } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { createHash } = await import("node:crypto");
+    await page.goto("/login");
+    await page.getByLabel("Username").fill("backup-admin");
+    await page.getByLabel("Password", { exact: true }).fill("playwright-password");
+    await page.getByRole("button", { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/$/);
+
+    const root = `blocked-replica-${Date.now()}`;
+    const directory = resolve(dirname(fileURLToPath(import.meta.url)), "../.storage-data/webdav");
+    await mkdir(directory, { recursive: true });
+    const obstruction = resolve(directory, root);
+    await writeFile(obstruction, "this file prevents creating the replica directory");
+    try {
+      const connection = await page.request.post("/api/v1/storage-connections", {
+        data: {
+          name: root,
+          kind: "webdav",
+          purpose: "backup",
+          configuration: {
+            provider: "webdav",
+            endpoint_url: `http://127.0.0.1:${webdavPort}`,
+            username: "backup-user",
+            root,
+          },
+          secrets: { password: "backup-password" },
+        },
+      });
+      expect(connection.status()).toBe(201);
+      const selected = await page.request.put("/api/v1/config", {
+        data: { manual_local_backup_enabled: true },
+      });
+      expect(selected.ok()).toBeTruthy();
+      await page.goto("/settings?section=backup");
+      const created = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/backups") && response.request().method() === "POST",
+      );
+      await page.getByRole("button", { name: "Backup now" }).click();
+      const response = await created;
+      expect(response.status()).toBe(202);
+      const meta = await response.json();
+      expect(meta.outcome).toBe("partial");
+      const failed = meta.destination_results.find(
+        (result: { name: string }) => result.name === root,
+      );
+      expect(failed.outcome).toBe("failed");
+      const article = page.getByRole("article", { name: `${meta.backup_id}: Partially completed` });
+      await expect(article.getByText(`${root} · Failed`)).toBeVisible();
+      await expect(article.getByText("Local backup · Published")).toBeVisible();
+
+      await rm(obstruction);
+      const retried = page.waitForResponse(
+        (candidate) =>
+          candidate.url().endsWith(`/runs/destinations/${failed.id}/retry`) &&
+          candidate.request().method() === "POST",
+      );
+      await article.getByRole("button", { name: "Retry this destination" }).click();
+      expect((await retried).status()).toBe(200);
+      const completed = page.getByRole("article", { name: `${meta.backup_id}: Completed` });
+      await expect(completed.getByText(`${root} · Published`)).toBeVisible();
+      await expect(completed.getByText(/Last verified:/)).toBeVisible();
+      const remote = await page.request.get(
+        `http://127.0.0.1:${webdavPort}/${failed.key.replace(/^webdav\//, "")}`,
+      );
+      expect(remote.ok()).toBeTruthy();
+      expect(
+        createHash("sha256")
+          .update(await remote.body())
+          .digest("hex"),
+      ).toBe(meta.archive_sha256);
+    } finally {
+      await rm(obstruction, { force: true, recursive: true });
+    }
+  });
+});

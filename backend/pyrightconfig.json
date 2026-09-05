@@ -14,7 +14,11 @@
     "app/services/remote_io_adapters.py",
     "app/services/remote_discovery.py",
     "app/services/remote_deadline.py",
-    "app/services/webdav_listing.py"
+    "app/services/webdav_listing.py",
+    "app/services/backup_runs.py",
+    "app/services/backup_replication.py",
+    "app/services/backup_replica_retry.py",
+    "app/services/backup_catalogue.py"
   ],
   "pythonVersion": "3.11",
   "venvPath": ".",

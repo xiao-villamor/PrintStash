@@ -79,8 +79,12 @@ def _backup_probe() -> dict:
                 *backup_dir.glob("nexus3d-backup-*.tar.gz"),
             ]
         )
+        from app.services.backup_runs import execution_health
+
+        execution = execution_health()
         return {
-            "ok": backup_dir.exists() and backup_dir.is_dir(),
+            "ok": backup_dir.exists() and backup_dir.is_dir() and execution["ok"],
+            "execution": execution,
             "path": str(backup_dir),
             "local_count": len(backups),
             "latest": backups[-1].name if backups else None,

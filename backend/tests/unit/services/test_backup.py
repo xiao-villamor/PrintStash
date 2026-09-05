@@ -2081,7 +2081,12 @@ class TestListBackupsSafety:
             backup.BackupIdentityConflictError, match="identity_conflict"
         ):
             backup.get_backup("same-id")
-        assert backup.get_backup("same-id", source_ref="right-ref") == right
+        selected = backup.get_backup("same-id", source_ref="right-ref")
+        assert selected is not None
+        assert selected.source_ref == right.source_ref
+        assert selected.path == right.path
+        assert selected.archive_sha256 == right.archive_sha256
+        assert selected.canonical is False
 
     def test_returns_none_when_cloud_client_initialization_fails(
         self, monkeypatch: pytest.MonkeyPatch

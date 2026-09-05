@@ -48,13 +48,16 @@ from app.db.models import (
 )
 from app.db.session import get_engine, get_session_factory
 from app.services import audit, storage
+from app.services.backup_catalogue import BackupCatalogue
+from app.services.backup_catalogue import (
+    BackupIdentityConflictError as BackupIdentityConflictError,
+)
 from app.services.backup_destination import (
     BackupDestinationError,
     BackupTrigger,
     RemoteBackupDestination,
     configured_destinations,
     destination_for_ownership,
-    local_destination_enabled,
 )
 from app.services.jobs import registry
 from app.services.storage_backend import (
@@ -112,10 +115,6 @@ class BackupDeleteUnsupportedError(BackupOwnershipError):
 
 class _BackupConfigUnstableError(RuntimeError):
     """Settings changed during a target snapshot; retry the next operation."""
-
-
-class BackupIdentityConflictError(RuntimeError):
-    """More than one different archive claims the requested backup id."""
 
 
 @dataclass(frozen=True)
@@ -339,6 +338,9 @@ class BackupMeta:
     # ``source_ref`` remains the sole authorization for an operation.
     canonical: bool = False
     precedence: int = 0
+    run_id: str | None = None
+    outcome: str | None = None
+    destination_results: list[dict] | None = None
 
 
 @dataclass
@@ -902,26 +904,56 @@ def _validate_created_archive_payload(archive_path: Path) -> None:
 
 @_exclusive_backup_operation
 def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMeta:
-    """Create a full vault backup: DB + all stored files as a tar.gz.
+    """Build one archive and durably account for every selected destination."""
+    from app.services import backup_runs
 
-    The archive is staged locally while it is built, then published only to
-    the destinations selected for this trigger. At least one publication must
-    succeed; a remote-only backup never leaves a registered local copy.
-    """
     _require_database_backup_support()
-    keep_local = local_destination_enabled(trigger)
-    remote_destinations = configured_destinations(trigger)
-    target = _get_backup_s3_target()
-    if not keep_local and target is None and not remote_destinations:
-        raise RuntimeError("backup_destination_required")
     backup_id = uuid.uuid4().hex[:12]
     timestamp = utcnow()
-    ts = timestamp.isoformat()
-
     archive_name = (
         f"{_BACKUP_NAME_PREFIX}{timestamp.strftime('%Y%m%d-%H%M%S')}-{backup_id}.tar.gz"
     )
-    archive_path = settings.backup_dir / archive_name
+    selected = backup_runs.begin_run(
+        backup_id=backup_id,
+        archive_name=archive_name,
+        trigger=trigger,
+        created_at=timestamp,
+    )
+    if not selected.selected:
+        backup_runs.finish_run(
+            selected.run_id, error_code="backup_destination_required"
+        )
+        raise backup_runs.BackupRunError("backup_destination_required", selected.run_id)
+    try:
+        meta = _create_selected_backup(
+            selected,
+            backup_id=backup_id,
+            timestamp=timestamp,
+            archive_name=archive_name,
+            trigger=trigger,
+        )
+    except BaseException as exc:
+        reason = (
+            "backup_all_destinations_failed"
+            if str(exc) == "backup_all_destinations_failed"
+            else "backup_archive_build_failed"
+        )
+        backup_runs.finish_run(selected.run_id, error_code=reason)
+        if isinstance(exc, Exception) and reason == "backup_all_destinations_failed":
+            raise backup_runs.BackupRunError(reason, selected.run_id) from exc
+        raise
+    meta.run_id = selected.run_id
+    meta.outcome = backup_runs.finish_run(selected.run_id)
+    meta.destination_results = backup_runs.run_detail(selected.run_id)["destinations"]
+    return meta
+
+
+def _create_selected_backup(selected, *, backup_id, timestamp, archive_name, trigger):
+    from app.services.backup_replication import prepare_destinations
+
+    target, remote_destinations = prepare_destinations(selected)
+    ts = timestamp.isoformat()
+    archive_path = Path(selected.local_directory) / archive_name
     backend_name = settings.storage_backend
 
     written_files = 0
@@ -993,187 +1025,32 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
 
     final_size = archive_temp.stat().st_size
     archive_sha256 = _sha256_path(archive_temp)
-    created_sources: list[BackupMeta] = []
+    from app.services import backup_replication, backup_runs
 
-    if keep_local:
-        try:
-            local_backend = LocalStorageBackend()
-            local_namespace = local_backend.namespace_for(str(archive_path))
-            local_provider_ref = provider_ref_for_backend(
-                local_backend, namespace=local_namespace
-            )
-            with get_session_factory().session() as publish_session:
-                local_receipt = publish_file(
-                    publish_session,
-                    local_backend,
-                    str(archive_path),
-                    archive_temp,
-                    object_kind="backup",
-                )
-                publish_session.commit()
-            created_sources.append(
-                BackupMeta(
-                    id=backup_id,
-                    created_at=ts,
-                    size_bytes=local_receipt.size,
-                    storage_backend=backend_name,
-                    file_count=len(file_entries),
-                    app_version=settings.app_version,
-                    path=str(archive_path),
-                    location="local",
-                    archive_sha256=archive_sha256,
-                    provider_ref=local_provider_ref,
-                    namespace=local_namespace,
-                    source_ref=_source_ref(
-                        location="local",
-                        namespace=local_namespace,
-                        path=str(archive_path),
-                        provider_ref=local_provider_ref,
-                    ),
-                )
-            )
-            logger.info(
-                "backup %s created locally: %d files, %.1f MiB",
-                backup_id,
-                written_files,
-                final_size / (1024 * 1024),
-            )
-        except Exception:
-            logger.warning(
-                "backup %s: local publication failed", backup_id, exc_info=True
-            )
-
-    # Upload to S3 if configured
-    if target:
-        s3 = target.client
-        bucket = target.bucket
-        try:
-            s3_key = _backup_s3_key(archive_name)
-            namespace = f"{bucket}/{_BACKUP_S3_PREFIX}"
-            token = uuid.uuid4().hex
-            with get_session_factory().session() as reservation_session:
-                reservation = OwnedStorageObject(
-                    backend="backup-s3",
-                    namespace=namespace,
-                    key=s3_key,
-                    object_kind="backup",
-                    provider_ref=target.provider_ref,
-                    state=StorageObjectState.PENDING,
-                    size_bytes=final_size,
-                    sha256=archive_sha256,
-                    token=token,
-                )
-                reservation_session.add(reservation)
-                reservation_session.commit()
-            with archive_temp.open("rb") as source:
-                s3.put_object(
-                    Bucket=bucket,
-                    Key=s3_key,
-                    Body=source,
-                    IfNoneMatch="*",
-                    Metadata={"printstash-create-token": token},
-                )
-            # A PUT response is not a portable proof (notably, many S3
-            # compatible services omit VersionId or return a non-content
-            # ETag). Capture the object identity from HEAD before committing
-            # the ledger row, and ensure the create token/size still match.
-            response = s3.head_object(Bucket=bucket, Key=s3_key)
-            _require_remote_identity(response)
-            if (
-                int(response.get("ContentLength", -1)) != final_size
-                or response.get("Metadata", {}).get("printstash-create-token") != token
-            ):
-                raise RuntimeError("backup_publication_evidence_mismatch")
-            s3_receipt = CreationReceipt(
-                key=s3_key,
-                size=final_size,
-                token=token,
-                backend="backup-s3",
-                namespace=namespace,
-                etag=str(response.get("ETag")) if response.get("ETag") else None,
-                version_id=(
-                    str(response.get("VersionId"))
-                    if response.get("VersionId")
-                    else None
-                ),
-            )
-            with get_session_factory().session() as commit_session:
-                record_creation(
-                    commit_session,
-                    s3_receipt,
-                    object_kind="backup",
-                    provider_ref=target.provider_ref,
-                )
-                commit_session.commit()
-            created_sources.append(
-                BackupMeta(
-                    id=backup_id,
-                    created_at=ts,
-                    size_bytes=final_size,
-                    storage_backend=backend_name,
-                    file_count=len(file_entries),
-                    app_version=settings.app_version,
-                    path=s3_key,
-                    location="s3",
-                    archive_sha256=archive_sha256,
-                    provider_ref=target.provider_ref,
-                    namespace=namespace,
-                    source_ref=_source_ref(
-                        location="s3",
-                        namespace=namespace,
-                        path=s3_key,
-                        provider_ref=target.provider_ref,
-                    ),
-                )
-            )
-            logger.info("backup %s uploaded to S3: %s", backup_id, s3_key)
-        except Exception:
-            logger.warning("backup %s: S3 upload failed", backup_id, exc_info=True)
-
-    # Purpose-scoped connections are separate replicas. A failed remote
-    # destination never invalidates the already committed local archive, and a
-    # failure at one provider does not prevent the remaining replicas.
-    for destination in remote_destinations:
-        try:
-            remote_key = destination.key(archive_name)
-            with get_session_factory().session() as remote_session:
-                remote_receipt = destination.publish_file(
-                    remote_session, remote_key, archive_temp, sha256=archive_sha256
-                )
-                remote_session.commit()
-            created_sources.append(
-                BackupMeta(
-                    id=backup_id,
-                    created_at=ts,
-                    size_bytes=remote_receipt.size,
-                    storage_backend=backend_name,
-                    file_count=len(file_entries),
-                    app_version=settings.app_version,
-                    path=remote_key,
-                    location=destination.location,
-                    archive_sha256=archive_sha256,
-                    provider_ref=destination.provider_ref,
-                    namespace=destination.namespace,
-                    source_ref=_source_ref(
-                        location=destination.location,
-                        namespace=destination.namespace,
-                        path=remote_key,
-                        provider_ref=destination.provider_ref,
-                    ),
-                )
-            )
-            logger.info(
-                "backup %s replicated through OpenDAL provider %s",
-                backup_id,
-                destination.provider,
-            )
-        except Exception:
-            logger.warning(
-                "backup %s: OpenDAL replica %s failed",
-                backup_id,
-                destination.name,
-                exc_info=True,
-            )
+    backup_runs.archive_ready(
+        selected.run_id,
+        digest=archive_sha256,
+        size=final_size,
+        file_count=len(file_entries),
+    )
+    try:
+        created_sources = backup_replication.publish_archive(
+            selected,
+            archive_temp=archive_temp,
+            archive_path=archive_path,
+            archive_name=archive_name,
+            backup_id=backup_id,
+            ts=ts,
+            backend_name=backend_name,
+            file_count=len(file_entries),
+            written_files=written_files,
+            final_size=final_size,
+            archive_sha256=archive_sha256,
+            target=target,
+            remote_destinations=remote_destinations,
+        )
+    finally:
+        archive_temp.unlink(missing_ok=True)
 
     archive_temp.unlink(missing_ok=True)
     if not created_sources:
@@ -1204,7 +1081,10 @@ def create_backup(*, trigger: BackupTrigger = BackupTrigger.MANUAL) -> BackupMet
 # ---------------------------------------------------------------------------
 
 
-def reconcile_backup_publications(limit: int = 100) -> int:
+@_exclusive_backup_operation
+def reconcile_backup_publications(
+    limit: int = 100, *, ownership_id: int | None = None
+) -> int:
     """Finish or block backup reservations left across a publication crash."""
     # Cache projections have a separate lifecycle from remote backup
     # publications.  Reconcile them before touching backup rows so an absent
@@ -1212,14 +1092,14 @@ def reconcile_backup_publications(limit: int = 100) -> int:
     reconcile_backup_caches(limit=limit)
     reconciled = 0
     with get_session_factory().session() as session:
+        statement = select(OwnedStorageObject).where(
+            OwnedStorageObject.object_kind == "backup",
+            OwnedStorageObject.state == StorageObjectState.PENDING,
+        )
+        if ownership_id is not None:
+            statement = statement.where(OwnedStorageObject.id == ownership_id)
         pending = session.exec(
-            select(OwnedStorageObject)
-            .where(
-                OwnedStorageObject.object_kind == "backup",
-                OwnedStorageObject.state == StorageObjectState.PENDING,
-            )
-            .order_by(OwnedStorageObject.id.asc())  # type: ignore[attr-defined]
-            .limit(limit)
+            statement.order_by(OwnedStorageObject.id.asc()).limit(limit)
         ).all()
         target = _get_backup_s3_target()
         s3 = target.client if target else None
@@ -1768,59 +1648,17 @@ def _list_opendal_backups() -> list[BackupMeta]:
 
 
 def list_backups() -> list[BackupMeta]:
-    """List all backups: local + S3, sorted by date descending."""
-    reconcile_backup_publications()
-    sources = list_backup_sources(reconcile=False)
-    grouped: dict[str, list[BackupMeta]] = {}
-    for item in sources:
-        grouped.setdefault(item.id, []).append(item)
-    merged: list[BackupMeta] = []
-    for candidates in grouped.values():
-        hashes = {m.archive_sha256 for m in candidates}
-        if len(candidates) > 1 and (None in hashes or len(hashes) != 1):
-            # Preserve visibility of an ambiguous id.  ``get_backup`` still
-            # fails closed until the caller supplies the exact source_ref.
-            merged.extend(candidates)
-        else:
-            merged.append(min(candidates, key=_backup_precedence))
-    merged.sort(key=lambda m: m.created_at, reverse=True)
-    return merged
+    """List logical archives, retaining visibility of ambiguous identities."""
+    return BackupCatalogue(list_backup_sources()).backups()
 
 
 def list_backup_sources(*, reconcile: bool = True) -> list[BackupMeta]:
-    """Return every owned source, including identical replicas.
-
-    This is the restart-stable source contract.  ``canonical`` is merely the
-    display winner under local > current S3 > legacy S3 precedence; operations
-    must always use the opaque ``source_ref``.
-    """
+    """Return every owned source; canonical display never authorizes a target."""
     if reconcile:
         reconcile_backup_publications()
-    sources = [*_list_local_backups(), *_list_s3_backups(), *_list_opendal_backups()]
-    grouped: dict[str, list[BackupMeta]] = {}
-    for item in sources:
-        grouped.setdefault(item.id, []).append(item)
-    for candidates in grouped.values():
-        ordered = sorted(candidates, key=_backup_precedence)
-        hashes = {item.archive_sha256 for item in candidates}
-        safe_canonical = len(candidates) == 1 or (
-            None not in hashes and len(hashes) == 1
-        )
-        for rank, item in enumerate(ordered):
-            item.precedence = rank
-            item.canonical = safe_canonical and rank == 0
-    sources.sort(key=lambda m: m.created_at, reverse=True)
-    return sources
-
-
-def _backup_precedence(meta: BackupMeta) -> tuple[int, str]:
-    if meta.location == "local":
-        return (0, meta.path)
-    if meta.path.startswith(_BACKUP_S3_PREFIX):
-        return (1, meta.path)
-    if meta.location.startswith("opendal:"):
-        return (2, f"{meta.location}:{meta.path}")
-    return (3, meta.path)
+    return BackupCatalogue(
+        [*_list_local_backups(), *_list_s3_backups(), *_list_opendal_backups()]
+    ).sources()
 
 
 def _read_manifest(archive_path: Path) -> BackupMeta | None:
@@ -2582,18 +2420,9 @@ def discover_unowned_local_backups() -> list[dict[str, object]]:
 
 
 def get_backup(backup_id: str, *, source_ref: str | None = None) -> BackupMeta | None:
-    matches = [meta for meta in list_backup_sources() if meta.id == backup_id]
-    if source_ref is not None:
-        for meta in matches:
-            if meta.source_ref == source_ref:
-                return meta
-        return None
-    hashes = {meta.archive_sha256 for meta in matches}
-    if len(matches) > 1 and (None in hashes or len(hashes) != 1):
-        raise BackupIdentityConflictError("backup_identity_conflict")
-    if matches:
-        return min(matches, key=_backup_precedence)
-    return None
+    return BackupCatalogue(list_backup_sources()).select(
+        backup_id, source_ref=source_ref
+    )
 
 
 def get_backup_archive_path(backup_id: str, *, source_ref: str | None = None) -> Path:
@@ -2982,6 +2811,15 @@ def verify_backup(
         findings=findings,
     )
     if not explicit_archive:
+        if result.valid and result.app_compatible:
+            from app.services.backup_runs import record_verification
+
+            record_verification(
+                backup_id=backup_id,
+                source_ref=source_ref,
+                archive_path=archive,
+                digest=_sha256_path(archive),
+            )
         cleanup_backup_cache(archive)
     if record_audit:
         with get_session_factory().session() as session:
